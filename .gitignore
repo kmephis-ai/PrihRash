@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# Private R0 discovery / provider exports must never enter the public repository.
+private/
+*.private.json
+*.private.csv
+*.private.xlsx

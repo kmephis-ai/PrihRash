@@ -1,0 +1,22 @@
+{
+  "name": "prihrash",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "npm run build --silent && node --test tests/domain/*.test.mjs tests/reference/*.test.mjs tests/source-normalizer/*.test.mjs tests/migration-simulation/*.test.mjs",
+    "test:domain": "npm run build --silent && node --test tests/domain/*.test.mjs",
+    "test:source-normalizer": "npm run build --silent && node --test tests/source-normalizer/*.test.mjs",
+    "test:migration-simulation": "npm run build --silent && node --test tests/migration-simulation/*.test.mjs",
+    "privacy": "node scripts/privacy-smoke.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  }
+}
