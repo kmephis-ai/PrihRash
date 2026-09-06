@@ -14,6 +14,7 @@ import {
   COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES,
   PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT,
   PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
+  assessAtomicPromotionWrites,
   promoteAtomicDelta,
 } from '../../dist/migration/atomicPromotion.js';
 import {
@@ -124,6 +125,36 @@ test('ordinary delta and COMMITTED marker execute in one transaction with marker
   assert.equal(executed.at(-1).parameters.id.value, RUN_ID);
   assert.equal(executed.at(-1).parameters.state.value, 'COMMITTED');
   assert.equal(executed.at(-1).parameters.expected_state.value, 'VALIDATED');
+});
+
+test('pure preflight assessment reports exact sizing reason without opening a transaction', () => {
+  const eligible = assessAtomicPromotionWrites([deltaWrite('ACTIVE', 128)]);
+  assert.deepEqual(eligible, {
+    eligible: true,
+    reason: null,
+    totalEstimatedParameterBytes: COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES + 128,
+  });
+  assert.equal(Object.isFrozen(eligible), true);
+
+  const parameterTooLarge = assessAtomicPromotionWrites([
+    deltaWrite(
+      'ACTIVE',
+      PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT - COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES + 1,
+    ),
+  ]);
+  assert.equal(parameterTooLarge.eligible, false);
+  assert.equal(parameterTooLarge.reason, 'PARAMETER_LIMIT_EXCEEDED');
+  assert.equal(parameterTooLarge.totalEstimatedParameterBytes > PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT, true);
+
+  const queryTooLarge = assessAtomicPromotionWrites([{
+    statement: writeStatement('X'.repeat(PRELIVE_PROMOTION_QUERY_BYTES_LIMIT + 1)),
+    estimatedParameterBytes: 0,
+  }]);
+  assert.deepEqual(queryTooLarge, {
+    eligible: false,
+    reason: 'QUERY_LIMIT_EXCEEDED',
+    totalEstimatedParameterBytes: COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES,
+  });
 });
 
 test('calibrated ordinary promotion parameter cap is 512 KiB', () => {
