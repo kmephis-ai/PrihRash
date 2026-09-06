@@ -1,0 +1,44 @@
+name: R1 canonical doc sync
+
+on:
+  push:
+    branches:
+      - docs/r1-finance-profile-initial-schema
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply verified one-line canonical patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=REBOOT_BLUEPRINT.md
+          before=$(git hash-object "$file")
+          if grep -Fxq -- '- `finance_profiles`;' "$file"; then
+            echo "Patch already present; nothing to do."
+            exit 0
+          fi
+          test "$before" = "0f7966806459730abb60651995881f4e4c7c8cf8"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("REBOOT_BLUEPRINT.md")
+          text = p.read_text(encoding="utf-8")
+          old = "- `family_members`;\n- `source_records`;"
+          new = "- `family_members`;\n- `finance_profiles`;\n- `source_records`;"
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          after=$(git hash-object "$file")
+          test "$after" = "9f406fdfa7aaafcb6aa1c56527b9bdf215a29af1"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$file"
+          git commit -m "docs: include FinanceProfile in initial YDB foundation"
+          git push
