@@ -7,6 +7,8 @@ import { prepareInitialSourceLineageWrites } from '../../dist/migration/initialS
 const SNAPSHOT_ID = '00000000-0000-0000-0000-000000000701';
 const RUN_ID = '00000000-0000-0000-0000-000000000702';
 const SOURCE_ID = '00000000-0000-0000-0000-000000000703';
+const S = (value) => ({ kind: 'STRING', value });
+const N = (value) => ({ kind: 'NUMBER', value });
 
 const envelope = buildInitialBootstrapCandidate({
   snapshotId: SNAPSHOT_ID,
@@ -20,13 +22,13 @@ const envelope = buildInitialBootstrapCandidate({
 const projection = buildInitialSourceLineageProjection(envelope, [{
   sourceRecordId: SOURCE_ID,
   payload: {
-    adapter_schema_version: 1,
-    date: '2026-01-01',
-    operation_type: 'Расход',
-    expense_account: 'Synthetic Account',
-    expense_category: 'Synthetic Category',
-    description: 'Synthetic description',
-    expense_amount: '123.45',
+    adapter_schema_version: 2,
+    date: N('45292.5'),
+    operation_type: S('Расход'),
+    expense_account: S('Synthetic Account'),
+    expense_category: S('Synthetic Category'),
+    description: S('Synthetic description'),
+    expense_amount: N('123.45'),
     income_account: null,
     income_category: null,
     income_amount: null,
