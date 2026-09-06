@@ -55,11 +55,23 @@ export interface RejectedPromotionResult {
 
 export type AtomicPromotionResult = CommittedPromotionResult | RejectedPromotionResult;
 
+export type AtomicPromotionPreflightReason =
+  | 'QUERY_LIMIT_EXCEEDED'
+  | 'PARAMETER_LIMIT_EXCEEDED';
+
+export interface AtomicPromotionPreflightAssessment {
+  readonly eligible: boolean;
+  readonly reason: AtomicPromotionPreflightReason | null;
+  readonly totalEstimatedParameterBytes: number;
+}
+
 function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function validateWrites(writes: readonly PromotionWrite[]): boolean {
+export function assessAtomicPromotionWrites(
+  writes: readonly PromotionWrite[],
+): Readonly<AtomicPromotionPreflightAssessment> {
   let totalEstimatedParameterBytes = COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES;
 
   for (const write of writes) {
@@ -70,15 +82,27 @@ function validateWrites(writes: readonly PromotionWrite[]): boolean {
       throw new AtomicPromotionError('INVALID_PROMOTION_ESTIMATE');
     }
     if (utf8ByteLength(write.statement.text) > PRELIVE_PROMOTION_QUERY_BYTES_LIMIT) {
-      return false;
+      return Object.freeze({
+        eligible: false,
+        reason: 'QUERY_LIMIT_EXCEEDED' as const,
+        totalEstimatedParameterBytes,
+      });
     }
     totalEstimatedParameterBytes += write.estimatedParameterBytes;
     if (totalEstimatedParameterBytes > PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT) {
-      return false;
+      return Object.freeze({
+        eligible: false,
+        reason: 'PARAMETER_LIMIT_EXCEEDED' as const,
+        totalEstimatedParameterBytes,
+      });
     }
   }
 
-  return true;
+  return Object.freeze({
+    eligible: true,
+    reason: null,
+    totalEstimatedParameterBytes,
+  });
 }
 
 function commitMarkerStatement(run: MigrationRun, finishedAt: string): YdbStatement {
@@ -105,7 +129,7 @@ export async function promoteAtomicDelta(
     throw new AtomicPromotionError('RUN_NOT_VALIDATED');
   }
 
-  if (!validateWrites(writes)) {
+  if (!assessAtomicPromotionWrites(writes).eligible) {
     return Object.freeze({
       status: 'FAILED_PRECHECK' as const,
       errorCode: 'PROMOTION_TOO_LARGE' as const,
