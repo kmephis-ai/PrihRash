@@ -13,14 +13,16 @@ const SOURCE_ID_1 = '00000000-0000-0000-0000-000000000303';
 const SOURCE_ID_2 = '00000000-0000-0000-0000-000000000304';
 
 function payload(description) {
+  const S = (value) => ({ kind: 'STRING', value });
+  const N = (value) => ({ kind: 'NUMBER', value });
   return {
-    adapter_schema_version: 1,
-    date: '2026-01-01',
-    operation_type: 'Расход',
-    expense_account: 'Synthetic Account',
-    expense_category: 'Synthetic Category',
-    description,
-    expense_amount: '123.45',
+    adapter_schema_version: 2,
+    date: N('45292.5'),
+    operation_type: S('Расход'),
+    expense_account: S('Synthetic Account'),
+    expense_category: S('Synthetic Category'),
+    description: S(description),
+    expense_amount: N('123.45'),
     income_account: null,
     income_category: null,
     income_amount: null,
@@ -93,18 +95,18 @@ test('projection records only proven first-sight facts and leaves undecided sema
   assert.equal(revision.changeClass, null);
 });
 
-test('raw payload v1 serialization has canonical fixed key order', () => {
+test('raw payload v2 serialization has canonical fixed key order', () => {
   const projection = buildInitialSourceLineageProjection(envelope(), observations());
   assert.equal(
     projection.revisions[0].rawPayload,
     JSON.stringify({
-      adapter_schema_version: 1,
-      date: '2026-01-01',
-      operation_type: 'Расход',
-      expense_account: 'Synthetic Account',
-      expense_category: 'Synthetic Category',
-      description: 'Synthetic A',
-      expense_amount: '123.45',
+      adapter_schema_version: 2,
+      date: { kind: 'NUMBER', value: '45292.5' },
+      operation_type: { kind: 'STRING', value: 'Расход' },
+      expense_account: { kind: 'STRING', value: 'Synthetic Account' },
+      expense_category: { kind: 'STRING', value: 'Synthetic Category' },
+      description: { kind: 'STRING', value: 'Synthetic A' },
+      expense_amount: { kind: 'NUMBER', value: '123.45' },
       income_account: null,
       income_category: null,
       income_amount: null,
@@ -115,10 +117,10 @@ test('raw payload v1 serialization has canonical fixed key order', () => {
 });
 
 for (const [name, mutate, code] of [
-  ['wrong payload schema', (items) => { items[0].payload.adapter_schema_version = 2; }, 'INVALID_PAYLOAD_SCHEMA'],
+  ['wrong payload schema', (items) => { items[0].payload.adapter_schema_version = 1; }, 'INVALID_PAYLOAD_SCHEMA'],
   ['extra payload key', (items) => { items[0].payload.extra = 'x'; }, 'INVALID_PAYLOAD_KEYS'],
   ['missing payload key', (items) => { delete items[0].payload.note; }, 'INVALID_PAYLOAD_KEYS'],
-  ['non-string payload value', (items) => { items[0].payload.expense_amount = 123.45; }, 'INVALID_PAYLOAD_VALUE'],
+  ['noncanonical numeric payload value', (items) => { items[0].payload.expense_amount = { kind: 'NUMBER', value: '1.230' }; }, 'INVALID_PAYLOAD_VALUE'],
   ['unknown source id', (items) => { items[1].sourceRecordId = '00000000-0000-0000-0000-000000000399'; }, 'UNKNOWN_PAYLOAD_SOURCE_ID'],
   ['duplicate source id', (items) => { items[1].sourceRecordId = SOURCE_ID_1; }, 'DUPLICATE_PAYLOAD_SOURCE_ID'],
 ]) {
