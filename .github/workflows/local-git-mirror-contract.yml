@@ -1,0 +1,46 @@
+name: local-git-mirror-contract
+
+on:
+  pull_request:
+    paths:
+      - 'tools/local-git-mirror/**'
+      - 'tests/local-git-mirror.test.py'
+      - '.github/workflows/local-git-mirror-contract.yml'
+  push:
+    branches:
+      - dev/local-git-mirror-32
+    paths:
+      - 'tools/local-git-mirror/**'
+      - 'tests/local-git-mirror.test.py'
+      - '.github/workflows/local-git-mirror-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  local-git-mirror-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run fail-closed Local Git Mirror regression
+        run: python tests/local-git-mirror.test.py -v
+      - name: Assert development-only surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          base='17e3cf572fe488da0de42b80665f6f4ce7d208ee'
+          allowed={'tools/local-git-mirror/README.md','tools/local-git-mirror/materialize_bundle.py','tools/local-git-mirror/bootstrap-workflow.yml.template','tools/local-git-mirror/bootstrap-workflow-fallback.yml.template','tests/local-git-mirror.test.py','.github/workflows/local-git-mirror-contract.yml'}
+          subprocess.run(['git','cat-file','-e',base+'^{commit}'],check=True)
+          changed=set(subprocess.run(['git','diff','--name-only',base,'HEAD'],check=True,text=True,stdout=subprocess.PIPE).stdout.splitlines())
+          extra=sorted(changed-allowed); missing=sorted(allowed-changed)
+          if extra: raise SystemExit('out-of-scope paths: '+', '.join(extra))
+          if missing: raise SystemExit('expected paths absent: '+', '.join(missing))
+          print('PrihRash Local Git Mirror dev-only surface PASS')
+          PY
