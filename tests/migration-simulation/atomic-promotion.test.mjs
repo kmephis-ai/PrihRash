@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   YdbAdapter,
   YdbCommitOutcomeUnknownError,
+  YdbTransportCommitOutcomeUnknownError,
   readStatement,
   writeStatement,
 } from '../../dist/integration/ydb/adapter.js';
@@ -42,20 +43,6 @@ function validatedRun() {
 
 function createFakeTransport(options = {}) {
   const events = [];
-  const handle = {
-    async execute(statement) {
-      events.push(['execute', statement]);
-      if (options.executeError) throw options.executeError;
-      return { rows: [] };
-    },
-    async commit() {
-      events.push(['commit']);
-      if (options.commitError) throw options.commitError;
-    },
-    async rollback() {
-      events.push(['rollback']);
-    },
-  };
   return {
     events,
     transport: {
@@ -63,9 +50,27 @@ function createFakeTransport(options = {}) {
         events.push(['read', statement]);
         return { rows: [] };
       },
-      async beginSerializableReadWrite() {
+      async serializableReadWrite(work) {
         events.push(['begin']);
-        return handle;
+        const transaction = Object.freeze({
+          async execute(statement) {
+            events.push(['execute', statement]);
+            if (options.executeError) throw options.executeError;
+            return { rows: [] };
+          },
+        });
+        let value;
+        try {
+          value = await work(transaction);
+        } catch (error) {
+          events.push(['rollback']);
+          throw error;
+        }
+        events.push(['commit']);
+        if (options.commitError) {
+          throw new YdbTransportCommitOutcomeUnknownError(options.commitError);
+        }
+        return value;
       },
     },
   };
