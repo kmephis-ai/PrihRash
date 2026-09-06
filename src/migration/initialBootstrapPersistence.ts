@@ -12,7 +12,10 @@ import {
 } from '../integration/ydb/adapter.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 
+export type BootstrapMetadataWriteRole = 'SNAPSHOT_EVIDENCE' | 'RUN_STAGING';
+
 export interface PreparedBootstrapMetadataWrite {
+  readonly role: BootstrapMetadataWriteRole;
   readonly statement: YdbStatement;
   readonly estimatedParameterBytes: number;
 }
@@ -48,8 +51,12 @@ function estimateParameterBytes(parameters: Readonly<Record<string, YdbParameter
   );
 }
 
-function preparedWrite(statement: YdbStatement): Readonly<PreparedBootstrapMetadataWrite> {
+function preparedWrite(
+  statement: YdbStatement,
+  role: BootstrapMetadataWriteRole,
+): Readonly<PreparedBootstrapMetadataWrite> {
   return Object.freeze({
+    role,
     statement,
     estimatedParameterBytes: estimateParameterBytes(statement.parameters),
   });
@@ -126,7 +133,7 @@ export function prepareInitialBootstrapMetadataWrites(
   validateEnvelope(candidate);
 
   return Object.freeze([
-    preparedWrite(sourceSnapshotStatement(candidate)),
-    preparedWrite(migrationRunStatement(candidate)),
+    preparedWrite(sourceSnapshotStatement(candidate), 'SNAPSHOT_EVIDENCE'),
+    preparedWrite(migrationRunStatement(candidate), 'RUN_STAGING'),
   ]);
 }
