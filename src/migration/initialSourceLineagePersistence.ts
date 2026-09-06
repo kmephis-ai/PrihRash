@@ -13,7 +13,10 @@ import {
 } from '../integration/ydb/adapter.js';
 import type { InitialSourceLineageProjection } from './initialSourceLineage.js';
 
+export type InitialSourceLineageWriteRole = 'VERIFIED_CURRENT' | 'STAGING_EVIDENCE';
+
 export interface PreparedInitialSourceLineageWrite {
+  readonly role: InitialSourceLineageWriteRole;
   readonly statement: YdbStatement;
   readonly estimatedParameterBytes: number;
 }
@@ -48,8 +51,12 @@ function estimateParameterBytes(parameters: Readonly<Record<string, YdbParameter
   );
 }
 
-function preparedWrite(statement: YdbStatement): Readonly<PreparedInitialSourceLineageWrite> {
+function preparedWrite(
+  statement: YdbStatement,
+  role: InitialSourceLineageWriteRole,
+): Readonly<PreparedInitialSourceLineageWrite> {
   return Object.freeze({
+    role,
     statement,
     estimatedParameterBytes: estimateParameterBytes(statement.parameters),
   });
@@ -135,8 +142,8 @@ export function prepareInitialSourceLineageWrites(
     if (revision === undefined) {
       throw new InitialSourceLineagePersistenceError('LINEAGE_LENGTH_MISMATCH');
     }
-    writes.push(preparedWrite(sourceRecordStatement(record)));
-    writes.push(preparedWrite(sourceRevisionStatement(revision)));
+    writes.push(preparedWrite(sourceRecordStatement(record), 'VERIFIED_CURRENT'));
+    writes.push(preparedWrite(sourceRevisionStatement(revision), 'STAGING_EVIDENCE'));
   }
   return Object.freeze(writes);
 }
