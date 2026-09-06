@@ -160,18 +160,78 @@ Legacy `Вика=Да` маппится на стабильный `FamilyMember(
 - реальные суммы/описания/notes;
 - private source snapshots.
 
-## 10. R0 live refinement — zero/service close markers
+## 10. R0 proven physical predicate — zero/service close markers
 
 Read-only probe 2026-09-06 подтвердил: exact A–K schema и documented operation/account/Vika vocabulary совпадают с live source.
 
-Для legacy zero/service rows обнаружено, что conceptual close labels не образуют достаточный exact physical predicate сами по себе: physical `description` имеет spelling variants, а literal `Итоги по месяцу` не подтверждён как обязательный A–K marker текущего authoritative source.
+Conceptual close labels сами по себе недостаточны: physical `description` имеет spelling variants, а literal `Итоги по месяцу` не подтверждён как обязательный A–K marker текущего authoritative source. Поэтому R0 проверил полный private source и зафиксировал следующий deterministic predicate.
 
-Следовательно:
+### 10.1. Exact marker vocabulary
 
-- `amount=0` никогда не становится normal Transaction;
-- category не используется как close-marker identity;
-- description-like conceptual label сам по себе не доказывает `LEGACY_PERIOD_CLOSE`;
-- R0 обязан доказать deterministic cluster/context predicate на private data и перенести правило в synthetic fixtures;
-- до этого unproven zero/service rows → `NON_FINANCIAL` / `AMBIGUOUS`, fail-closed.
+Только следующие **exact observed** `description` values имеют structural marker meaning:
 
-Public evidence может содержать только безопасный список vocabulary/status; реальные rows, amounts, notes, row snapshots и private digests не публикуются.
+```text
+POSITIVE:
+  Плюсовые позиции
+
+CREDIT:
+  Кредитки
+  Кредитка
+  Кредитки 2
+
+NEGATIVE:
+  Минусовые позиции
+
+VIKA:
+  Вика Красное
+  Вика красное
+
+LOAN:
+  Возврат займа
+
+BALANCE:
+  Текущий баланс
+  Текущий баланс счета
+```
+
+Это explicit source vocabulary, а не fuzzy aliases. Case-folding, spelling correction и похожие варианты не принимаются автоматически.
+
+### 10.2. Marker-row shape
+
+Row становится marker candidate только если одновременно:
+
+```text
+operation_type   = Расход
+expense_account  = Карта Visa
+expense_amount   = 0
+source_day       = known
+marker_kind      = exact vocabulary above
+```
+
+`source_day` — calendar day из технически нормализованного physical `date` текущего snapshot; это не `captured_at` и не Transaction period membership.
+
+`expense_category` в predicate **не входит**: private evidence показывает, что category менялась между historical close rows и не является identity.
+
+Description-like label при positive amount не является close marker и продолжает обычную financial classification.
+
+### 10.3. Cluster predicate
+
+Marker candidates группируются внутри одного `source_day` и текущей snapshot sequence. Если разница между соседними candidate ordinals больше `2`, начинается новый cluster. То есть допускается максимум одна посторонняя source row между соседними markers; ordinal используется только как sequence context, никогда как SourceRecord identity.
+
+Cluster считается доказанным `LEGACY_PERIOD_CLOSE`, только если содержит:
+
+```text
+BALANCE
+NEGATIVE
+VIKA
+и хотя бы один из:
+  POSITIVE | CREDIT
+```
+
+`LOAN` optional. Exact duplicate marker kind допустим и сам по себе не создаёт новый close.
+
+Только exact marker rows внутри доказанного cluster получают `LEGACY_PERIOD_CLOSE`. Посторонняя zero row внутри того же day/window не повышается до close marker. Known marker row вне доказанного cluster → fail-closed `AMBIGUOUS`/`REVIEW_REQUIRED`.
+
+### 10.4. Private full-source evidence
+
+Полный read-only source probe подтвердил predicate на всей доступной истории: все повторяемые close clusters проходят rule, а изолированные known service markers остаются ambiguous вместо ложного close. Public repository хранит только этот structural rule, synthetic fixtures и безопасный aggregate status; реальные rows, dates, amounts, notes, row hints/snapshots и private digests не публикуются.

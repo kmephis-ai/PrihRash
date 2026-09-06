@@ -22,8 +22,17 @@ Private read-only probe доказал отдельный contiguous bootstrap b
 
 Public implementation использует parameterized initial-snapshot evidence, а не magic date/content heuristic. Новые/unanchored records не наследуют historical cutoff и остаются `UNKNOWN` до доказательства.
 
-## Open blocker: legacy close marker physical predicate
+## Legacy close marker physical predicate — PROVEN
 
-Live source подтверждает zero/service rows с close-like description vocabulary, но literal `Итоги по месяцу` не является надёжным exact physical predicate; также наблюдаются безопасные spelling variants conceptual marker labels. Поэтому `LEGACY_PERIOD_CLOSE` classifier пока не должен угадывать close event только по description.
+Private full-source probe подтвердил deterministic cluster rule без fuzzy matching и без зависимости от category:
 
-Нужно доказать deterministic cluster/context predicate и перенести его в synthetic tests. До этого соответствующий work unit fail-closed; ordinary positive EXPENSE/INCOME normalizers этим не блокируются.
+- exact zero-row shape: `Расход` + `Карта Visa` + amount `0` + known source day;
+- exact observed marker vocabulary перечислен в `SOURCE_ADAPTER_CONTRACT`;
+- candidates должны принадлежать одному source day и tight snapshot sequence (gap между соседними marker candidates ≤ 2);
+- required marker kinds: `BALANCE + NEGATIVE + VIKA + (POSITIVE | CREDIT)`;
+- `LOAN` optional; duplicate marker kind допустим;
+- description alone никогда не даёт `LEGACY_PERIOD_CLOSE`;
+- unrelated zero row не повышается вместе с cluster;
+- partial/isolated known markers fail-closed → `AMBIGUOUS`.
+
+На full private source rule детерминированно выделил **21** close cluster; **2** isolated known markers остались `AMBIGUOUS`. Реальные dates/rows/amounts/notes и boundary details в public evidence не публикуются. Synthetic tests воспроизводят complete, historical partial, duplicate/variant, unrelated-row и malformed cases.
