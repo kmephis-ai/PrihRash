@@ -1,8 +1,6 @@
-diff --git a/docs/MIGRATION_CONTRACT.md b/docs/MIGRATION_CONTRACT.md
-index 2c9b110..77e97ad 100644
 --- a/docs/MIGRATION_CONTRACT.md
 +++ b/docs/MIGRATION_CONTRACT.md
-@@ -67,19 +67,21 @@ raw_payload
+@@ -67,19 +67,21 @@
  
  Revision создаётся только при first sight или digest change. Обычный повторный sync без изменений не плодит историю.
  
@@ -33,7 +31,7 @@ index 2c9b110..77e97ad 100644
    "income_account": null,
    "income_category": null,
    "income_amount": null,
-@@ -92,18 +94,30 @@ Revision создаётся только при first sight или digest change
+@@ -92,18 +94,30 @@
  
  - `row_hint` хранится отдельно и не дублируется как identity;
  - blank → `null`;
