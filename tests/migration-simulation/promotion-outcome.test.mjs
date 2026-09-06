@@ -39,7 +39,7 @@ function createReadTransport(rows, options = {}) {
       if (options.readError) throw options.readError;
       return { rows };
     },
-    async beginSerializableReadWrite() {
+    async serializableReadWrite() {
       throw new Error('write transaction must not be opened by outcome resolver');
     },
   };

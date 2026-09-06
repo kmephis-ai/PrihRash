@@ -12,15 +12,13 @@ export interface YdbQueryResult<Row = Readonly<Record<string, unknown>>> {
   readonly rows: readonly Row[];
 }
 
-export interface YdbTransactionHandle {
+export interface YdbTransportTransaction {
   execute<Row = Readonly<Record<string, unknown>>>(statement: YdbStatement): Promise<YdbQueryResult<Row>>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
 }
 
 export interface YdbTransport {
   executeRead<Row = Readonly<Record<string, unknown>>>(statement: YdbStatement): Promise<YdbQueryResult<Row>>;
-  beginSerializableReadWrite(): Promise<YdbTransactionHandle>;
+  serializableReadWrite<T>(work: (transaction: YdbTransportTransaction) => Promise<T>): Promise<T>;
 }
 
 export interface YdbTransaction {
@@ -36,6 +34,17 @@ export class YdbAdapterError extends Error {
     super(code);
     this.name = 'YdbAdapterError';
     this.code = code;
+  }
+}
+
+export class YdbTransportCommitOutcomeUnknownError extends Error {
+  readonly code = 'TRANSPORT_COMMIT_OUTCOME_UNKNOWN' as const;
+  override readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super('TRANSPORT_COMMIT_OUTCOME_UNKNOWN');
+    this.name = 'YdbTransportCommitOutcomeUnknownError';
+    this.cause = cause;
   }
 }
 
@@ -81,28 +90,20 @@ export class YdbAdapter {
   }
 
   async serializableReadWrite<T>(work: (transaction: YdbTransaction) => Promise<T>): Promise<T> {
-    const handle = await this.#transport.beginSerializableReadWrite();
-    const transaction = Object.freeze({
-      execute: <Row = Readonly<Record<string, unknown>>>(statement: YdbStatement) => handle.execute<Row>(statement),
-    });
-
-    let result: T;
     try {
-      result = await work(transaction);
+      return await this.#transport.serializableReadWrite(async (transportTransaction) => {
+        const transaction = Object.freeze({
+          execute: <Row = Readonly<Record<string, unknown>>>(statement: YdbStatement) => (
+            transportTransaction.execute<Row>(statement)
+          ),
+        });
+        return work(transaction);
+      });
     } catch (error) {
-      try {
-        await handle.rollback();
-      } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'YDB_TRANSACTION_ROLLBACK_FAILED');
+      if (error instanceof YdbTransportCommitOutcomeUnknownError) {
+        throw new YdbCommitOutcomeUnknownError(error.cause);
       }
       throw error;
     }
-
-    try {
-      await handle.commit();
-    } catch (error) {
-      throw new YdbCommitOutcomeUnknownError(error);
-    }
-    return result;
   }
 }
