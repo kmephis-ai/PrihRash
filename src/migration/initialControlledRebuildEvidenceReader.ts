@@ -32,6 +32,8 @@ const CLASSIFICATIONS: readonly SourceRowClassification[] = Object.freeze([
   'FINANCIAL_RECORD', 'LEGACY_PERIOD_CLOSE', 'NON_FINANCIAL', 'INVALID', 'AMBIGUOUS',
 ]);
 
+type EvidenceScope = 'STAGING' | 'CURRENT';
+
 interface SourceAggregateRow {
   readonly classification?: unknown;
   readonly state?: unknown;
@@ -48,7 +50,15 @@ interface DimensionAggregateRow extends TransactionAggregateRow {
   readonly dimension_id?: unknown;
 }
 
-function quotedPath(path: string, expectedLeaf: 'transactions' | 'source_records'): string {
+function quotedPath(
+  path: string,
+  expectedLeaf: 'transactions' | 'source_records',
+  scope: EvidenceScope,
+): string {
+  if (scope === 'CURRENT') {
+    if (path !== expectedLeaf) throw new ControlledRebuildEvidenceReaderError('INVALID_STAGING_TABLE_PATH');
+    return `\`${path}\``;
+  }
   const match = STAGING_PATH_PATTERN.exec(path);
   if (match === null || match[1] !== expectedLeaf) {
     throw new ControlledRebuildEvidenceReaderError('INVALID_STAGING_TABLE_PATH');
@@ -178,9 +188,10 @@ function parseDimensionRows(
 async function readSnapshot(
   transaction: YdbTransaction,
   tables: Readonly<ControlledInitialRebuildTablePaths>,
+  scope: EvidenceScope,
 ): Promise<Readonly<InitialControlledRebuildReconciliationSnapshot>> {
-  const sourceTable = quotedPath(tables.sourceRecords, 'source_records');
-  const transactionTable = quotedPath(tables.transactions, 'transactions');
+  const sourceTable = quotedPath(tables.sourceRecords, 'source_records', scope);
+  const transactionTable = quotedPath(tables.transactions, 'transactions', scope);
 
   const source = await transaction.execute<SourceAggregateRow>(readStatement(
     `SELECT classification, state, COUNT(*) AS row_count FROM ${sourceTable} GROUP BY classification, state`,
@@ -217,5 +228,14 @@ export async function readControlledRebuildStagingEvidence(
   adapter: YdbAdapter,
   tables: Readonly<ControlledInitialRebuildTablePaths>,
 ): Promise<Readonly<InitialControlledRebuildReconciliationSnapshot>> {
-  return adapter.serializableReadWrite((transaction) => readSnapshot(transaction, tables));
+  return adapter.serializableReadWrite((transaction) => readSnapshot(transaction, tables, 'STAGING'));
+}
+
+export async function readControlledRebuildCurrentEvidence(
+  adapter: YdbAdapter,
+): Promise<Readonly<InitialControlledRebuildReconciliationSnapshot>> {
+  return adapter.serializableReadWrite((transaction) => readSnapshot(transaction, {
+    transactions: 'transactions',
+    sourceRecords: 'source_records',
+  }, 'CURRENT'));
 }
