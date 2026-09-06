@@ -41,7 +41,9 @@ export type RawPayloadDecodeResult =
   | Readonly<{ ok: true; value: Readonly<DecodedLegacyFinancialFields> }>
   | RawPayloadDecodeFailure;
 
-type DecodeFieldResult<T> = Readonly<{ ok: true; value: T }> | RawPayloadDecodeFailure;
+export type RawPayloadFieldDecodeResult<T> =
+  | Readonly<{ ok: true; value: T }>
+  | RawPayloadDecodeFailure;
 
 const CANONICAL_DECIMAL = /^(-?)(0|[1-9]\d*)(?:\.(\d+))?$/;
 const MAX_SHEETS_SERIAL_DAY = 2_958_465n;
@@ -59,13 +61,18 @@ function success<T>(value: T): Readonly<{ ok: true; value: T }> {
   return Object.freeze({ ok: true as const, value });
 }
 
-function decodeText(cell: SourceCellPayloadV2, field: AdapterKey): DecodeFieldResult<string | null> {
+export function decodeRawPayloadTextCell(
+  cell: SourceCellPayloadV2,
+  field: AdapterKey,
+): RawPayloadFieldDecodeResult<string | null> {
   if (cell === null) return success(null);
   if (cell.kind !== 'STRING') return failure('INVALID_TEXT_CELL', field);
   return success(cell.value);
 }
 
-function decodeOccurredOn(cell: SourceCellPayloadV2): DecodeFieldResult<string> {
+export function decodeRawPayloadOccurredOn(
+  cell: SourceCellPayloadV2,
+): RawPayloadFieldDecodeResult<string> {
   if (cell === null || cell.kind !== 'NUMBER') return failure('INVALID_DATE_CELL', 'date');
   if (!isCanonicalGoogleNumberText(cell.value)) return failure('INVALID_DATE_SERIAL', 'date');
   const match = CANONICAL_DECIMAL.exec(cell.value);
@@ -80,10 +87,10 @@ function decodeOccurredOn(cell: SourceCellPayloadV2): DecodeFieldResult<string> 
   return success(date.toISOString().slice(0, 10));
 }
 
-function decodeAmountMinor(
+export function decodeRawPayloadAmountMinor(
   cell: SourceCellPayloadV2,
   field: 'expense_amount' | 'income_amount',
-): DecodeFieldResult<number> {
+): RawPayloadFieldDecodeResult<number> {
   if (cell === null || cell.kind !== 'NUMBER') return failure('INVALID_AMOUNT_CELL', field);
   if (!isCanonicalGoogleNumberText(cell.value)) return failure('INVALID_AMOUNT_DECIMAL', field);
   const match = CANONICAL_DECIMAL.exec(cell.value);
@@ -108,30 +115,30 @@ export function decodeLegacyFinancialRawPayload(payload: RawPayloadV2): RawPaylo
     return failure('INVALID_PAYLOAD_SCHEMA', 'adapter_schema_version');
   }
 
-  const operation = decodeText(payload.operation_type, 'operation_type');
+  const operation = decodeRawPayloadTextCell(payload.operation_type, 'operation_type');
   if (!operation.ok) return operation;
   if (operation.value !== 'Расход' && operation.value !== 'Доход') {
     return failure('UNRECOGNIZED_FINANCIAL_OPERATION_TYPE', 'operation_type');
   }
 
-  const occurredOn = decodeOccurredOn(payload.date);
+  const occurredOn = decodeRawPayloadOccurredOn(payload.date);
   if (!occurredOn.ok) return occurredOn;
 
   const amountField = operation.value === 'Расход' ? 'expense_amount' : 'income_amount';
-  const amountMinor = decodeAmountMinor(payload[amountField], amountField);
+  const amountMinor = decodeRawPayloadAmountMinor(payload[amountField], amountField);
   if (!amountMinor.ok) return amountMinor;
 
   const accountField = operation.value === 'Расход' ? 'expense_account' : 'income_account';
   const categoryField = operation.value === 'Расход' ? 'expense_category' : 'income_category';
-  const accountLabel = decodeText(payload[accountField], accountField);
+  const accountLabel = decodeRawPayloadTextCell(payload[accountField], accountField);
   if (!accountLabel.ok) return accountLabel;
-  const categoryLabel = decodeText(payload[categoryField], categoryField);
+  const categoryLabel = decodeRawPayloadTextCell(payload[categoryField], categoryField);
   if (!categoryLabel.ok) return categoryLabel;
-  const description = decodeText(payload.description, 'description');
+  const description = decodeRawPayloadTextCell(payload.description, 'description');
   if (!description.ok) return description;
-  const note = decodeText(payload.note, 'note');
+  const note = decodeRawPayloadTextCell(payload.note, 'note');
   if (!note.ok) return note;
-  const vikaFlag = decodeText(payload.vika_flag, 'vika_flag');
+  const vikaFlag = decodeRawPayloadTextCell(payload.vika_flag, 'vika_flag');
   if (!vikaFlag.ok) return vikaFlag;
 
   return Object.freeze({
