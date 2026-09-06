@@ -104,8 +104,8 @@ test('prepared refinement is conditional on exact previous STAGING evidence', ()
   assert.equal(prepared.statement.kind, 'WRITE');
   assert.equal(prepared.statement.text.startsWith('UPDATE migration_runs SET rows_ambiguous = $rows_ambiguous '), true);
   assert.equal(prepared.statement.parameters.expected_state.value, 'STAGING');
-  assert.equal(prepared.statement.parameters.expected_rows_ambiguous.value, 0);
-  assert.equal(prepared.statement.parameters.rows_ambiguous.value, 2);
+  assert.equal(prepared.statement.parameters.expected_rows_ambiguous.value, 0n);
+  assert.equal(prepared.statement.parameters.rows_ambiguous.value, 2n);
   assert.equal(prepared.estimatedParameterBytes > 0, true);
 });
 
