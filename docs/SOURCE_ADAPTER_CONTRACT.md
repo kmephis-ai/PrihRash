@@ -39,6 +39,25 @@ Reference sheets не участвуют в создании Transactions.
 
 Перед чтением payload adapter проверяет ожидаемое число/порядок колонок и нормализованные header labels. Неожиданное schema drift → fail-closed `SOURCE_SCHEMA_MISMATCH`.
 
+### 2.1. Typed cell representation
+
+Read-only provider verification 2026-09-06 подтверждает spreadsheet metadata `locale=ru_RU`, `timeZone=Europe/Moscow`. Locale **не используется** для угадывания numeric strings: adapter читает Google cell type напрямую.
+
+Для canonical A–K adapter сохраняет `ExtendedValue` kind до normalization/persistence:
+
+```text
+blank       → null
+stringValue → STRING
+numberValue → NUMBER
+formulaValue / boolValue / errorValue → fail-closed
+```
+
+`NUMBER` сериализуется как canonical plain decimal из provider `numberValue`; `STRING` получает только технически безопасную NFC + line-ending normalization. Строка, внешне похожая на число, остаётся `STRING` и никогда автоматически не становится amount/date.
+
+Private full-source probe текущего authoritative sheet подтвердил безопасный bootstrap predicate без публикации payload: у всех распознанных `Расход`/`Доход` source date и **operation-active** amount имеют numeric cell type; formula в A–K не обнаружены. Неприменимый к operation type второй amount column не используется для финансового decode и может содержать legacy non-active values.
+
+Google Sheets date/datetime хранится как serial number spreadsheet civil time. Для текущего source timezone — `Europe/Moscow`; importer сохраняет raw serial с fractional component, а canonical `occurred_on` получает calendar day из whole serial day. Он не превращает source serial во guessed `captured_at`.
+
 ## 3. Operation type recognition
 
 Для normal financial rows тип определяется **только** явным `operation_type`:
