@@ -10,12 +10,15 @@ export type SourceRowClassification =
 export interface SourceRowClassificationInput {
   operationType: string | null;
   sourceDate: string | null;
+  sourceDatePresent?: boolean;
   expenseAccount: string | null;
   expenseCategory: string | null;
   expenseAmountMinor: number | null;
+  expenseAmountPresent?: boolean;
   incomeAccount: string | null;
   incomeCategory: string | null;
   incomeAmountMinor: number | null;
+  incomeAmountPresent?: boolean;
   vikaFlag: string | null;
   description: string | null;
   note: string | null;
@@ -26,13 +29,17 @@ function isBlank(value: string | null): boolean {
   return value === null || value.trim() === '';
 }
 
+function isPresent(explicitPresence: boolean | undefined, fallbackPresent: boolean): boolean {
+  return explicitPresence ?? fallbackPresent;
+}
+
 function hasFinancialStructure(input: SourceRowClassificationInput): boolean {
   return !isBlank(input.expenseAccount)
     || !isBlank(input.expenseCategory)
-    || input.expenseAmountMinor !== null
+    || isPresent(input.expenseAmountPresent, input.expenseAmountMinor !== null)
     || !isBlank(input.incomeAccount)
     || !isBlank(input.incomeCategory)
-    || input.incomeAmountMinor !== null
+    || isPresent(input.incomeAmountPresent, input.incomeAmountMinor !== null)
     || !isBlank(input.vikaFlag);
 }
 
@@ -55,8 +62,6 @@ export function classifyMeaningfulSourceRow(
       return 'LEGACY_PERIOD_CLOSE';
     }
 
-    // A zero expense can be a legacy service/control row. Without a proven
-    // close cluster it must not be promoted to a Transaction or silently dropped.
     return 'AMBIGUOUS';
   }
 
@@ -69,11 +74,9 @@ export function classifyMeaningfulSourceRow(
 
   if (operationType !== '') return 'AMBIGUOUS';
 
-  // A note-only legacy row with no date/description/financial fields is safe to
-  // classify as non-financial. Any financial-looking structure without an
-  // operation type remains ambiguous instead of inferring EXPENSE/INCOME.
+  const sourceDatePresent = isPresent(input.sourceDatePresent, !isBlank(input.sourceDate));
   if (
-    isBlank(input.sourceDate)
+    !sourceDatePresent
     && isBlank(input.description)
     && !hasFinancialStructure(input)
     && !isBlank(input.note)
