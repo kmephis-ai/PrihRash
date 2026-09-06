@@ -51,13 +51,15 @@ Roadmap намеренно короткий. Он не является мног
 2. YDB adapter tests.
 3. MigrationRun state machine.
 4. Atomic promotion spike + safe delta limit.
-5. Initial full bootstrap.
+5. Initial full bootstrap: candidate/evidence persistence + validated promotion route; ordinary atomic promotion используется только если calibrated preflight проходит.
 6. Incremental candidate/delta sync.
-7. Controlled large rebuild/staging path or explicit fail-closed procedure.
+7. Controlled large rebuild/staging path or explicit fail-closed procedure; если work unit 5 возвращает `CONTROLLED_REBUILD_REQUIRED`, этот work unit является обязательной dependency для verified initial bootstrap promotion.
 8. Private reconciliation + resolution actions.
 9. Scheduled sync runtime.
 10. Pre-close snapshot protection.
 11. Cost/latency/cap measurements.
+
+Rolling-wave dependency: candidate/evidence части initial bootstrap могут завершаться до work unit 7, но verified promotion нельзя считать завершённым, пока выбранный calibrated route не доказан. Нельзя расширять ordinary atomic cap для обхода `CONTROLLED_REBUILD_REQUIRED`.
 
 ### Exit criteria
 
