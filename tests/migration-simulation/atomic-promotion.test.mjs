@@ -126,7 +126,11 @@ test('ordinary delta and COMMITTED marker execute in one transaction with marker
   assert.equal(executed.at(-1).parameters.expected_state.value, 'VALIDATED');
 });
 
-test('aggregate parameter estimate above 2 MiB fails before transaction begin', async () => {
+test('calibrated ordinary promotion parameter cap is 512 KiB', () => {
+  assert.equal(PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT, 512 * 1024);
+});
+
+test('aggregate parameter estimate above calibrated cap fails before transaction begin', async () => {
   const run = validatedRun();
   const fake = createFakeTransport();
   const adapter = new YdbAdapter(fake.transport);

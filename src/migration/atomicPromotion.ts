@@ -14,7 +14,11 @@ import {
   markMigrationRunFailed,
 } from './migrationRunState.js';
 
-export const PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT = 2 * 1024 * 1024;
+// Live TEST_PRIVATE calibration on 2026-09-06 showed a clear latency step above 512 KiB:
+// 512 KiB p50/p95 ~= 333/498 ms; 1 MiB ~= 720/823 ms; 1.5 MiB ~= 1018/1110 ms.
+// Keep the ordinary atomic-promotion path conservatively below that step; larger rebuilds
+// must use the separate controlled staging/rebuild path instead of widening this guard.
+export const PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT = 512 * 1024;
 export const PRELIVE_PROMOTION_QUERY_BYTES_LIMIT = 8 * 1024;
 export const COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES = 256;
 
