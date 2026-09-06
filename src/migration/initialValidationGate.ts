@@ -61,6 +61,14 @@ function projectionClassificationTotal(projection: Readonly<InitialSnapshotProje
     + counters.ambiguous;
 }
 
+function allProjectionCountersAreNonNegativeSafeIntegers(
+  projection: Readonly<InitialSnapshotProjection>,
+): boolean {
+  return Object.values(projection.counters).every(
+    (value) => Number.isSafeInteger(value) && value >= 0,
+  );
+}
+
 export function evaluateInitialValidation(
   run: MigrationRun,
   projection: Readonly<InitialSnapshotProjection>,
@@ -82,14 +90,9 @@ export function evaluateInitialValidation(
 
   const counters = projection.counters;
   if (
-    !Number.isSafeInteger(counters.rowsSeen)
-    || counters.rowsSeen < 0
+    !allProjectionCountersAreNonNegativeSafeIntegers(projection)
     || projection.outcomes.length !== counters.rowsSeen
     || projectionClassificationTotal(projection) !== counters.rowsSeen
-    || counters.transactionCandidates < 0
-    || counters.projectionFailures < 0
-    || !Number.isSafeInteger(counters.transactionCandidates)
-    || !Number.isSafeInteger(counters.projectionFailures)
   ) {
     blockers.push(blocker('PROJECTION_COUNTERS_INCONSISTENT'));
   }
