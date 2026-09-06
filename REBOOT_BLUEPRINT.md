@@ -623,6 +623,7 @@ Performance — часть Product Ready.
 - `accounts`;
 - `categories`;
 - `family_members`;
+- `finance_profiles`;
 - `source_records`;
 - `source_record_revisions`;
 - `source_snapshots`;
