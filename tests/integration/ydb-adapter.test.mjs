@@ -5,6 +5,7 @@ import {
   YdbAdapter,
   YdbAdapterError,
   YdbCommitOutcomeUnknownError,
+  YdbTransportCommitOutcomeUnknownError,
   readStatement,
   writeStatement,
 } from '../../dist/integration/ydb/adapter.js';
@@ -26,29 +27,37 @@ const VALID_UUID = '123e4567-e89b-42d3-a456-426614174000';
 function createFakeTransport(options = {}) {
   const events = [];
   const result = { rows: [{ ok: true }] };
-  const handle = {
-    async execute(statement) {
-      events.push(['execute', statement]);
-      if (options.executeError) throw options.executeError;
-      return result;
-    },
-    async commit() {
-      events.push(['commit']);
-      if (options.commitError) throw options.commitError;
-    },
-    async rollback() {
-      events.push(['rollback']);
-      if (options.rollbackError) throw options.rollbackError;
-    },
-  };
   const transport = {
     async executeRead(statement) {
       events.push(['read', statement]);
       return result;
     },
-    async beginSerializableReadWrite() {
+    async serializableReadWrite(work) {
       events.push(['begin']);
-      return handle;
+      const transaction = Object.freeze({
+        async execute(statement) {
+          events.push(['execute', statement]);
+          if (options.executeError) throw options.executeError;
+          return result;
+        },
+      });
+
+      let value;
+      try {
+        value = await work(transaction);
+      } catch (error) {
+        events.push(['rollback']);
+        if (options.rollbackError) {
+          throw new AggregateError([error, options.rollbackError], 'YDB_TRANSACTION_ROLLBACK_FAILED');
+        }
+        throw error;
+      }
+
+      events.push(['commit']);
+      if (options.commitError) {
+        throw new YdbTransportCommitOutcomeUnknownError(options.commitError);
+      }
+      return value;
     },
   };
   return { events, result, transport };
