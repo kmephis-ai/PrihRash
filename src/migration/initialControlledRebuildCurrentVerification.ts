@@ -3,14 +3,14 @@ import { readControlledRebuildCurrentEvidence } from './initialControlledRebuild
 import {
   buildExpectedControlledRebuildReconciliation,
   compareControlledRebuildStagingReconciliation,
-  type InitialControlledRebuildReconciliation,
 } from './initialControlledRebuildReconciliation.js';
+import type { InitialReconciliationEvidence } from './initialValidationGate.js';
 import type { InitialVerifiedCurrentPlan } from './initialVerifiedCurrentPlan.js';
 
 export async function verifyControlledInitialCurrentState(
   adapter: YdbAdapter,
   verifiedPlan: Readonly<InitialVerifiedCurrentPlan>,
-): Promise<Readonly<InitialControlledRebuildReconciliation>> {
+): Promise<Readonly<InitialReconciliationEvidence>> {
   const expected = buildExpectedControlledRebuildReconciliation(verifiedPlan);
   const observed = await readControlledRebuildCurrentEvidence(adapter);
   return compareControlledRebuildStagingReconciliation(expected, observed);
