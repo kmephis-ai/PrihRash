@@ -13,14 +13,16 @@ const SOURCE_ID_1 = '00000000-0000-0000-0000-000000000403';
 const SOURCE_ID_2 = '00000000-0000-0000-0000-000000000404';
 
 function payload(description) {
+  const S = (value) => ({ kind: 'STRING', value });
+  const N = (value) => ({ kind: 'NUMBER', value });
   return {
-    adapter_schema_version: 1,
-    date: '2026-01-01',
-    operation_type: 'Расход',
-    expense_account: 'Synthetic Account',
-    expense_category: 'Synthetic Category',
-    description,
-    expense_amount: '123.45',
+    adapter_schema_version: 2,
+    date: N('45292.5'),
+    operation_type: S('Расход'),
+    expense_account: S('Synthetic Account'),
+    expense_category: S('Synthetic Category'),
+    description: S(description),
+    expense_amount: N('123.45'),
     income_account: null,
     income_category: null,
     income_amount: null,
@@ -52,8 +54,12 @@ test('prepares one source record and one revision write per independent lineage 
 
   assert.equal(writes.length, 4);
   assert.equal(writes.every((write) => write.statement.kind === 'WRITE'), true);
+  assert.equal(writes[0].role, 'VERIFIED_CURRENT');
+  assert.equal(writes[1].role, 'STAGING_EVIDENCE');
   assert.equal(writes[0].statement.text.startsWith('UPSERT INTO source_records '), true);
   assert.equal(writes[1].statement.text.startsWith('UPSERT INTO source_record_revisions '), true);
+  assert.equal(writes[2].role, 'VERIFIED_CURRENT');
+  assert.equal(writes[3].role, 'STAGING_EVIDENCE');
   assert.equal(writes[2].statement.parameters.id.value, SOURCE_ID_2);
   assert.equal(writes[3].statement.parameters.source_record_id.value, SOURCE_ID_2);
   assert.equal(writes.every((write) => write.estimatedParameterBytes > 0), true);
@@ -74,7 +80,7 @@ test('uses schema-aligned typed parameters and preserves undecided semantics as 
   assert.equal(revisionWrite.statement.parameters.revision.type, 'Uint64');
   assert.equal(revisionWrite.statement.parameters.raw_payload.type, 'JsonDocument');
   assert.equal(revisionWrite.statement.parameters.change_class.value, null);
-  assert.equal(JSON.parse(revisionWrite.statement.parameters.raw_payload.value).description, 'Synthetic A');
+  assert.deepEqual(JSON.parse(revisionWrite.statement.parameters.raw_payload.value).description, { kind: 'STRING', value: 'Synthetic A' });
 });
 
 test('fails closed when record and revision arrays lose positional lineage consistency', () => {
