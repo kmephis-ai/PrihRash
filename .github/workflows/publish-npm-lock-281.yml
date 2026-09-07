@@ -20,30 +20,20 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
-      - name: Regenerate and publish only exact local tree
+      - name: Regenerate and publish exact lockfile tree
         shell: bash
         run: |
           set -euo pipefail
           EXPECTED_HEAD='241e2d49276b6caed8e01e80459498bd78765d61'
-          EXPECTED_TREE='26e1b5852732dc6695138cfd45dbfff7201a4916'
+          EXPECTED_TREE='2f40dbbb9130e5d75801c0d7a34fd9bbdd01f942'
           test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
           npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('.github/workflows/ci.yml')
-          text = path.read_text(encoding='utf-8')
-          old = '      - run: npm install --ignore-scripts --no-audit --no-fund\n'
-          new = '      - run: npm ci --ignore-scripts --no-audit --no-fund\n'
-          if text.count(old) != 1:
-              raise SystemExit('unexpected CI install command')
-          path.write_text(text.replace(old, new), encoding='utf-8')
-          PY
-          git add package-lock.json .github/workflows/ci.yml
+          git add package-lock.json
           git diff --cached --check
           test "$(git write-tree)" = "${EXPECTED_TREE}"
           npm ci --ignore-scripts --no-audit --no-fund
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'tooling: lock npm dependency graph for reproducible CI'
+          git commit -m 'tooling: add reproducible npm lockfile'
           test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
           git push origin HEAD:fix/tooling-reproducible-npm-lock
