@@ -8,7 +8,7 @@ import {
 } from './consistentIncrementalCurrentEvidence.js';
 import type { IncrementalCurrentReconciliationPlan } from './incrementalCurrentReconciliation.js';
 import {
-  executePreparedScheduledIncrementalCandidate,
+  executePreparedScheduledIncrementalCandidateWithClock,
   type ScheduledIncrementalExecutionResult,
 } from './scheduledIncrementalExecution.js';
 import {
@@ -16,6 +16,7 @@ import {
   type IncrementalSourceIdentityAllocator,
   type IncrementalTransactionIdentityAllocator,
 } from './scheduledIncrementalCandidatePreparation.js';
+import type { ScheduledIncrementalLifecycleClock } from './scheduledIncrementalLifecycle.js';
 import type { MigrationRun } from './migrationRunState.js';
 import { evaluateScheduledSyncAdmission } from './scheduledSyncAdmission.js';
 import type {
@@ -31,8 +32,6 @@ export interface ScheduledIncrementalObservationProjection {
 export interface ScheduledIncrementalRunContext {
   readonly runId: string;
   readonly startedAt: string;
-  readonly promotedAt: string;
-  readonly finishedAt: string;
 }
 
 export interface ScheduledIncrementalReconciliationRequest<TSnapshot> {
@@ -48,6 +47,7 @@ export interface ScheduledIncrementalApplicationDependencies<TSnapshot> {
     observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>,
   ) => Readonly<ScheduledIncrementalObservationProjection>;
   readonly createRunContext: () => Readonly<ScheduledIncrementalRunContext>;
+  readonly lifecycleClock: Readonly<ScheduledIncrementalLifecycleClock>;
   readonly readReconciliationEvidence: (
     request: Readonly<ScheduledIncrementalReconciliationRequest<TSnapshot>>,
   ) => Promise<Readonly<InitialReconciliationEvidence>>;
@@ -131,12 +131,11 @@ export class ScheduledIncrementalApplicationRunner<TSnapshot>
       verifiedCurrentEvidence: evidence,
     }));
 
-    this.#lastResult = await executePreparedScheduledIncrementalCandidate(this.#adapter, {
+    this.#lastResult = await executePreparedScheduledIncrementalCandidateWithClock(this.#adapter, {
       baselineRun,
       prepared,
       reconciliationEvidence,
-      promotedAt: context.promotedAt,
-      finishedAt: context.finishedAt,
+      clock: this.#dependencies.lifecycleClock,
     });
   }
 }
