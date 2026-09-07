@@ -8,10 +8,8 @@ import {
   buildIncrementalCurrentCandidatePreparation,
   type IncrementalCurrentCandidatePreparationPlan,
 } from './incrementalCurrentCandidatePreparation.js';
-import {
-  buildIncrementalCurrentObservationInputs,
-  type IncrementalCurrentObservationHandoff,
-} from './incrementalCurrentObservationHandoff.js';
+import { buildIncrementalCurrentObservationInputs } from './incrementalCurrentObservationHandoff.js';
+import type { IncrementalCurrentObservationInput } from './incrementalCurrentObservationSemantics.js';
 import {
   buildExpectedIncrementalCurrentReconciliation,
   type IncrementalCurrentReconciliationPlan,
@@ -79,7 +77,7 @@ export interface ScheduledIncrementalCandidatePreparationPlan {
   readonly sourceAssignments: readonly Readonly<IncrementalNewSourceRecordAssignment>[];
   readonly run: Readonly<MigrationRun>;
   readonly structural: Readonly<IncrementalStructuralPreparationPlan>;
-  readonly currentObservations: Readonly<IncrementalCurrentObservationHandoff>;
+  readonly currentObservations: readonly Readonly<IncrementalCurrentObservationInput>[];
   readonly semantic: Readonly<IncrementalSemanticPreparationPlan>;
   readonly transactionAssignmentRequests: readonly Readonly<IncrementalTransactionIdentityAssignmentRequest>[];
   readonly transactionAssignments: readonly Readonly<IncrementalNewTransactionIdentityAssignment>[];
@@ -168,7 +166,7 @@ export async function prepareScheduledIncrementalCandidate(
   const currentObservations = buildIncrementalCurrentObservationInputs(input.projection);
   const semantic = buildIncrementalSemanticPreparation({
     structural,
-    currentObservations: currentObservations.currentObservations,
+    currentObservations,
     previousSourceCurrent: input.sourceEvidence.sourceCurrent,
     previousTransactions: input.previousTransactions,
     refs: input.refs,
