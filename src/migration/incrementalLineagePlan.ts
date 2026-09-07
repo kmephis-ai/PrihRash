@@ -11,6 +11,11 @@ export interface IncrementalNewSourceRecordAssignment {
   readonly sourceRecordId: string;
 }
 
+export interface IncrementalSourceRecordAssignmentRequest {
+  readonly currentRowHint: number;
+  readonly digest: string;
+}
+
 export type IncrementalLineageOutcome =
   | Readonly<Extract<SequenceDiffOperation, { kind: 'UNCHANGED' }>>
   | Readonly<Extract<SequenceDiffOperation, { kind: 'MISSING' }>>
@@ -111,6 +116,40 @@ function validateCurrent(
   }));
 }
 
+interface PreparedLineageDiff {
+  readonly previous: readonly Readonly<PreviousSequenceRow>[];
+  readonly current: readonly Readonly<CurrentSequenceRow>[];
+  readonly previousIds: ReadonlySet<string>;
+  readonly diff: readonly Readonly<SequenceDiffOperation>[];
+}
+
+function prepareLineageDiff(
+  previousInput: readonly Readonly<PreviousSequenceRow>[],
+  currentInput: readonly Readonly<CurrentSequenceRow>[],
+): Readonly<PreparedLineageDiff> {
+  const previous = validatePrevious(previousInput);
+  const current = validateCurrent(currentInput);
+  return Object.freeze({
+    previous,
+    current,
+    previousIds: new Set(previous.map((row) => row.sourceRecordId)),
+    diff: diffSequences(previous, current),
+  });
+}
+
+export function buildIncrementalSourceRecordAssignmentRequests(
+  previousInput: readonly Readonly<PreviousSequenceRow>[],
+  currentInput: readonly Readonly<CurrentSequenceRow>[],
+): readonly Readonly<IncrementalSourceRecordAssignmentRequest>[] {
+  const prepared = prepareLineageDiff(previousInput, currentInput);
+  return Object.freeze(prepared.diff
+    .filter((operation): operation is Extract<SequenceDiffOperation, { kind: 'INSERTED' }> => operation.kind === 'INSERTED')
+    .map((operation) => Object.freeze({
+      currentRowHint: operation.currentRowHint,
+      digest: operation.digest,
+    })));
+}
+
 function validateAssignments(
   assignments: readonly Readonly<IncrementalNewSourceRecordAssignment>[],
   previousIds: ReadonlySet<string>,
@@ -174,13 +213,10 @@ export function buildIncrementalLineagePlan(
   currentInput: readonly Readonly<CurrentSequenceRow>[],
   assignments: readonly Readonly<IncrementalNewSourceRecordAssignment>[],
 ): Readonly<IncrementalLineagePlan> {
-  const previous = validatePrevious(previousInput);
-  const current = validateCurrent(currentInput);
-  const previousIds = new Set(previous.map((row) => row.sourceRecordId));
-  const assignmentByRowHint = validateAssignments(assignments, previousIds);
-  const diff = diffSequences(previous, current);
+  const prepared = prepareLineageDiff(previousInput, currentInput);
+  const assignmentByRowHint = validateAssignments(assignments, prepared.previousIds);
   const insertedHints = new Set(
-    diff.filter((operation) => operation.kind === 'INSERTED').map((operation) => operation.currentRowHint),
+    prepared.diff.filter((operation) => operation.kind === 'INSERTED').map((operation) => operation.currentRowHint),
   );
 
   for (const rowHint of assignmentByRowHint.keys()) {
@@ -189,7 +225,7 @@ export function buildIncrementalLineagePlan(
     }
   }
 
-  const outcomes = Object.freeze(diff.map((operation) => freezeDiffOutcome(operation, assignmentByRowHint)));
+  const outcomes = Object.freeze(prepared.diff.map((operation) => freezeDiffOutcome(operation, assignmentByRowHint)));
   const rowsNew = outcomes.filter((outcome) => outcome.kind === 'INSERTED').length;
   const rowsChanged = outcomes.filter((outcome) => outcome.kind === 'REVISED').length;
   const rowsMissing = outcomes.filter((outcome) => outcome.kind === 'MISSING').length;
@@ -201,7 +237,7 @@ export function buildIncrementalLineagePlan(
   return Object.freeze({
     outcomes,
     counters: Object.freeze({
-      rowsSeen: current.length,
+      rowsSeen: prepared.current.length,
       rowsNew,
       rowsChanged,
       rowsMissing,
