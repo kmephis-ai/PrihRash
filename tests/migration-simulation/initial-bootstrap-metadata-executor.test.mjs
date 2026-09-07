@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { buildInitialBootstrapCandidate } from '../../dist/migration/initialBootstrapCandidate.js';
+import {
+  buildInitialBootstrapIdentityManifest,
+  prepareInitialBootstrapIdentityManifestWrite,
+} from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { prepareInitialBootstrapMetadataWrites } from '../../dist/migration/initialBootstrapPersistence.js';
 import {
   InitialBootstrapMetadataExecutorError,
@@ -24,6 +28,26 @@ function candidate() {
   });
 }
 
+function projection() {
+  return {
+    outcomes: [{
+      sourceRecordId: SOURCE_ID,
+      sourceOrdinal: 0,
+      classification: 'NON_FINANCIAL',
+      legacyPeriodCloseClassification: null,
+      transaction: null,
+      projectionError: null,
+    }],
+    counters: {},
+  };
+}
+
+function identityWrite(input = candidate()) {
+  return prepareInitialBootstrapIdentityManifestWrite(
+    buildInitialBootstrapIdentityManifest(input, projection(), []),
+  );
+}
+
 function admissionRun(input, overrides = {}) {
   return {
     id: input.run.id,
@@ -41,7 +65,7 @@ function admissionRun(input, overrides = {}) {
   };
 }
 
-function expectedRows(input) {
+function expectedRows(input, manifestWrite) {
   return {
     snapshot: {
       captured_at: input.snapshot.capturedAt,
@@ -61,11 +85,21 @@ function expectedRows(input) {
       rows_ambiguous: 0n,
       error_code: null,
     },
+    manifest: {
+      source_snapshot_id: input.snapshot.id,
+      source_snapshot_digest: input.snapshot.snapshotDigest,
+      binding_count: BigInt(input.snapshot.rowCount),
+      bindings: JSON.parse(manifestWrite.statement.parameters.bindings.value),
+      run_state: 'STAGING',
+      run_snapshot_digest: input.run.sourceSnapshotDigest,
+      snapshot_digest: input.snapshot.snapshotDigest,
+      snapshot_row_count: BigInt(input.snapshot.rowCount),
+    },
     admission: admissionRun(input),
   };
 }
 
-function fakeTransport({ admissionBefore = [], snapshot = [], run = [], admissionAfter = [] }) {
+function fakeTransport({ admissionBefore = [], snapshot = [], run = [], manifest = [], admissionAfter = [] }) {
   const events = [];
   let admissionReads = 0;
   return {
@@ -88,6 +122,7 @@ function fakeTransport({ admissionBefore = [], snapshot = [], run = [], admissio
             }
             events.push('readback');
             if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: snapshot };
+            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: manifest };
             return { rows: run };
           },
         };
@@ -111,27 +146,50 @@ function expectExecutorError(code, work) {
   );
 }
 
-test('atomically claims an empty bootstrap state and verifies the sole STAGING claimant', async () => {
+test('atomically claims empty bootstrap state together with immutable identity manifest', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
-  const expected = expectedRows(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
   const fake = fakeTransport({
     admissionBefore: [],
     snapshot: [expected.snapshot],
     run: [expected.run],
+    manifest: [expected.manifest],
     admissionAfter: [expected.admission],
   });
 
-  await executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes);
+  await executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite);
   assert.deepEqual(
     fake.events,
-    ['begin', 'admission', 'write', 'write', 'readback', 'readback', 'admission', 'commit'],
+    ['begin', 'admission', 'write', 'write', 'write', 'readback', 'readback', 'readback', 'admission', 'commit'],
   );
 });
 
-test('existing STAGING or VALIDATED run blocks the initial claim before metadata writes', async () => {
+test('manifest not matching the exact candidate fails before transaction begin', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
+  const prepared = identityWrite(input);
+  const foreignManifestWrite = {
+    ...prepared,
+    manifest: {
+      ...prepared.manifest,
+      sourceSnapshotId: '00000000-0000-0000-0000-000000000888',
+    },
+  };
+  const fake = fakeTransport({});
+
+  await expectExecutorError(
+    'IDENTITY_MANIFEST_WRITE_INVALID',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, foreignManifestWrite),
+  );
+  assert.deepEqual(fake.events, []);
+});
+
+test('existing STAGING or VALIDATED run blocks claim before snapshot/run/identity writes', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
 
   for (const state of ['STAGING', 'VALIDATED']) {
     const existing = admissionRun(input, { id: OTHER_RUN_ID, state });
@@ -139,7 +197,7 @@ test('existing STAGING or VALIDATED run blocks the initial claim before metadata
 
     await expectExecutorError(
       'IN_FLIGHT_RUN_EXISTS',
-      () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
+      () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
     );
     assert.deepEqual(fake.events, ['begin', 'admission', 'rollback']);
   }
@@ -148,6 +206,7 @@ test('existing STAGING or VALIDATED run blocks the initial claim before metadata
 test('existing COMMITTED baseline blocks a second initial bootstrap claim', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
   const committed = admissionRun(input, {
     id: OTHER_RUN_ID,
     state: 'COMMITTED',
@@ -157,63 +216,68 @@ test('existing COMMITTED baseline blocks a second initial bootstrap claim', asyn
 
   await expectExecutorError(
     'COMMITTED_BASELINE_EXISTS',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.deepEqual(fake.events, ['begin', 'admission', 'rollback']);
+});
+
+test('identity manifest read-back mismatch rolls back the complete claim', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [{ ...expected.manifest, binding_count: 2n }],
+    admissionAfter: [expected.admission],
+  });
+
+  await expectExecutorError(
+    'IDENTITY_MANIFEST_READBACK_MISMATCH',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
 });
 
 test('concurrent or stale post-admission evidence rolls back instead of accepting a second claimant', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
-  const expected = expectedRows(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
   const concurrent = admissionRun(input, { id: OTHER_RUN_ID, started_at: '2026-09-06T20:10:02Z' });
   const fake = fakeTransport({
     admissionBefore: [],
     snapshot: [expected.snapshot],
     run: [expected.run],
+    manifest: [expected.manifest],
     admissionAfter: [concurrent, expected.admission],
   });
 
   await expectExecutorError(
     'CLAIM_READBACK_MISMATCH',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');
 });
 
-test('post-admission evidence for a different sole claimant rolls back', async () => {
+test('snapshot read-back mismatch rolls back all three claim writes', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
-  const expected = expectedRows(input);
-  const different = admissionRun(input, { id: OTHER_RUN_ID });
-  const fake = fakeTransport({
-    admissionBefore: [],
-    snapshot: [expected.snapshot],
-    run: [expected.run],
-    admissionAfter: [different],
-  });
-
-  await expectExecutorError(
-    'CLAIM_READBACK_MISMATCH',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
-  );
-  assert.equal(fake.events.at(-1), 'rollback');
-});
-
-test('snapshot read-back mismatch rolls back both metadata writes', async () => {
-  const input = candidate();
-  const writes = prepareInitialBootstrapMetadataWrites(input);
-  const expected = expectedRows(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
   const fake = fakeTransport({
     admissionBefore: [],
     snapshot: [{ ...expected.snapshot, row_count: 2n }],
     run: [expected.run],
+    manifest: [expected.manifest],
     admissionAfter: [expected.admission],
   });
 
   await expectExecutorError(
     'SNAPSHOT_READBACK_MISMATCH',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');
 });
@@ -221,17 +285,19 @@ test('snapshot read-back mismatch rolls back both metadata writes', async () => 
 test('run read-back mismatch rolls back instead of accepting non-STAGING metadata', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
-  const expected = expectedRows(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
   const fake = fakeTransport({
     admissionBefore: [],
     snapshot: [expected.snapshot],
     run: [{ ...expected.run, state: 'VALIDATED' }],
+    manifest: [expected.manifest],
     admissionAfter: [expected.admission],
   });
 
   await expectExecutorError(
     'RUN_READBACK_MISMATCH',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes),
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');
 });
@@ -239,11 +305,17 @@ test('run read-back mismatch rolls back instead of accepting non-STAGING metadat
 test('invalid metadata write role/order fails before transaction begin', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
   const fake = fakeTransport({});
 
   await expectExecutorError(
     'METADATA_WRITE_SET_INVALID',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, [writes[1], writes[0]]),
+    () => executeInitialBootstrapMetadataWrites(
+      new YdbAdapter(fake.transport),
+      input,
+      [writes[1], writes[0]],
+      manifestWrite,
+    ),
   );
   assert.deepEqual(fake.events, []);
 });
