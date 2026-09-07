@@ -64,18 +64,49 @@ Claim не добавляет lock table или новый lifecycle state: seri
 
 Ordinary incremental runtime не materializes отдельные staging tables для будущего post-change current state.
 
-После atomic run claim:
+После admission тот же authoritative observation проходит existing lineage/semantic/candidate pipeline относительно exact last `COMMITTED` baseline. До claim runtime уже имеет:
 
-1. тот же authoritative observation проходит existing lineage/semantic/candidate pipeline относительно exact last `COMMITTED` baseline;
-2. pre-promotion validation использует independent reconciliation evidence и exact verified current evidence; самосравнение candidate с самим собой не считается proof;
-3. expected post-change candidate **не** сравнивается с pre-promotion YDB current rows как будто delta уже materialized;
+- full post-change candidate и его expected reconciliation snapshot;
+- exact verified baseline current evidence (`SourceRecord` + canonical Transaction rows), прочитанное согласованно с baseline `MigrationRun`;
+- prepared source/transaction delta intents с optimistic preconditions относительно того же baseline.
+
+### Independent pre-promotion evidence
+
+Pre-promotion reconciliation использует **две разные construction paths**:
+
+1. **Expected path** — aggregate snapshot строится из full post-change candidate.
+2. **Roll-forward path** — отдельный механический projector начинает с exact verified baseline provider rows и применяет только prepared delta intents по stable identity и explicit optimistic preconditions. Он не читает full candidate arrays и не делает новый Google/source normalization pass.
+
+Roll-forward path обязан:
+
+- сохранить baseline row без изменения, если для её identity нет delta intent;
+- для `CREATE_*` добавить ровно candidate payload из соответствующего intent;
+- для `UPDATE_SOURCE_RECORD` заменить только exact baseline SourceRecord при совпадении expected revision/digest/state/link/resolution guards;
+- для `REPLACE_TRANSACTION` заменить только exact baseline Transaction при совпадении expected version;
+- fail-closed при missing/duplicate target, predicate mismatch, duplicate intent, unsupported delete/operation или malformed row;
+- после mechanical replay посчитать тот же reconciliation vocabulary: SourceRecord count, transaction/type counts, totals by type/category/account, classification counts, legacy-close count и INVALID/AMBIGUOUS/MISSING counts.
+
+Затем expected candidate aggregates сравниваются с independently constructed roll-forward aggregates. `MATCHED` означает exact equality соответствующего check. Любой `MISMATCH`, `NOT_CHECKED` либо construction error блокирует `VALIDATED`; никакой check нельзя заполнять hardcoded `MATCHED`.
+
+Это independent **construction evidence**, но не новая financial authority: финансовый смысл по-прежнему происходит из leased authoritative Google observation и canonical normalizer. Цель roll-forward — независимо доказать, что prepared delta действительно преобразует exact verified baseline в тот post-change aggregate state, который заявляет candidate, и поймать omission/extra/divergence между candidate и write intent без второго semantics engine.
+
+Source-observation coverage, unresolved lineage и candidate/delta invariants остаются отдельными fail-closed guards и не считаются заменёнными этим aggregate comparison.
+
+Operational reconciliation result наружу содержит только check statuses и безопасный mismatch count. Amounts, descriptions, raw source payload и private aggregate values не публикуются в GitHub/log evidence.
+
+### Lifecycle после reconciliation
+
+1. expected + roll-forward comparison рассчитывается до claim из immutable candidate/delta и exact verified baseline evidence; successful comparison сам по себе ещё не означает lifecycle success;
+2. atomic claim повторно проверяет provider run history/baseline и только затем создаёт exact candidate run как `STAGING`;
+3. validation gate на уже claimed `STAGING` run проверяет run/counters, candidate/delta guards, unresolved lineage и переданное reconciliation evidence; любой blocker запрещает `VALIDATED`;
 4. при отсутствии blockers `STAGING → VALIDATED` означает только разрешение на atomic promotion;
-5. exact previous provider state повторно защищается optimistic predicates внутри одной atomic promotion transaction, которая применяет delta и commit marker;
-6. `VALIDATED` сам по себе не является verified shadow state; verified baseline по-прежнему только последний `COMMITTED` run;
-7. post-commit current-state read-back/reconciliation — отдельная verification/recovery boundary; mismatch требует recovery/incident handling и не разрешает считать сомнительный/failed state частично verified.
+5. exact previous provider state защищается optimistic predicates внутри одной atomic promotion transaction, которая применяет delta и commit marker;
+6. expected post-change candidate **не** сравнивается с pre-promotion YDB current rows как будто delta уже materialized;
+7. `VALIDATED` сам по себе не является verified shadow state; verified baseline по-прежнему только последний `COMMITTED` run;
+8. post-commit current-state read-back/reconciliation — отдельная verification/recovery boundary; mismatch требует recovery/incident handling и не разрешает считать сомнительный state частично verified.
 
 Controlled bootstrap/rebuild остаётся другим механизмом: там candidate может быть materialized в staging и reconciliation выполняется против staging evidence до явного promotion. Эти staging semantics не переносятся автоматически на ordinary incremental sync.
 
 ## Следующая runtime boundary
 
-После синхронизации reconciliation lifecycle следующий S-unit должен собрать thin application runner вокруг уже доказанных admission/claim, single-observation handoff, verified YDB evidence, lineage/semantic/delta/validation/promotion компонентов. Таймер/cron не содержит financial semantics: scheduler только инициирует одну runtime invocation, policy остаётся в application layer.
+После реализации roll-forward reconciliation evidence следующий S-unit должен подключить его к thin application composition вместе с concrete reference resolver, identity allocation, Google/YDB bindings и уже доказанными admission/claim/validation/promotion components. Таймер/cron не содержит financial semantics: scheduler только инициирует одну runtime invocation, policy остаётся в application layer.
