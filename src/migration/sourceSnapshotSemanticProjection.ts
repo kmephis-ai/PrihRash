@@ -1,11 +1,5 @@
-import {
-  classifyLegacyPeriodCloseRows,
-  type LegacyPeriodCloseClassification,
-} from '../classification/legacyPeriodClose.js';
-import {
-  classifyMeaningfulSourceRow,
-  type SourceRowClassification,
-} from '../classification/sourceRow.js';
+import type { LegacyPeriodCloseClassification } from '../classification/legacyPeriodClose.js';
+import type { SourceRowClassification } from '../classification/sourceRow.js';
 import type { CanonicalTransaction } from '../domain/transaction.js';
 import type { InitialSnapshotGranularityEvidence } from '../normalization/historicalGranularity.js';
 import type { ReferenceResolver } from '../normalization/types.js';
@@ -13,15 +7,11 @@ import {
   projectInitialFinancialTransaction,
   type InitialFinancialProjectionErrorCode,
 } from './initialFinancialProjection.js';
+import type { RawPayloadDecodeErrorCode, RawPayloadV2 } from './rawPayloadDecoder.js';
 import {
-  decodeRawPayloadForSourceClassification,
-  toLegacyPeriodCloseSourceRow,
-  toSourceRowClassificationInput,
-} from './rawPayloadClassificationAdapter.js';
-import type {
-  RawPayloadDecodeErrorCode,
-  RawPayloadV2,
-} from './rawPayloadDecoder.js';
+  classifySourceSnapshot,
+  SourceSnapshotClassificationStructuralError,
+} from './sourceSnapshotClassification.js';
 
 export interface SourceSnapshotSemanticRowInput {
   readonly sourceOrdinal: number;
@@ -77,19 +67,6 @@ export class SourceSnapshotSemanticProjectionStructuralError extends Error {
   }
 }
 
-function validateRows(rows: readonly SourceSnapshotSemanticRowInput[]): void {
-  const ordinals = new Set<number>();
-  for (const row of rows) {
-    if (!Number.isSafeInteger(row.sourceOrdinal) || row.sourceOrdinal < 0) {
-      throw new SourceSnapshotSemanticProjectionStructuralError('INVALID_SOURCE_ORDINAL');
-    }
-    if (ordinals.has(row.sourceOrdinal)) {
-      throw new SourceSnapshotSemanticProjectionStructuralError('DUPLICATE_SOURCE_ORDINAL');
-    }
-    ordinals.add(row.sourceOrdinal);
-  }
-}
-
 function buildCounters(
   outcomes: readonly Readonly<SourceSnapshotSemanticOutcome>[],
 ): Readonly<SourceSnapshotSemanticCounters> {
@@ -111,51 +88,48 @@ export function projectSourceSnapshotSemantics(
   rows: readonly SourceSnapshotSemanticRowInput[],
   context: SourceSnapshotSemanticProjectionContext,
 ): Readonly<SourceSnapshotSemanticProjection> {
-  validateRows(rows);
-
-  const decodedByOrdinal = new Map<number, ReturnType<typeof decodeRawPayloadForSourceClassification>>();
-  const closeInputs = [];
-
-  for (const row of rows) {
-    const decoded = decodeRawPayloadForSourceClassification(row.rawPayload);
-    decodedByOrdinal.set(row.sourceOrdinal, decoded);
-    if (decoded.ok) closeInputs.push(toLegacyPeriodCloseSourceRow(row.sourceOrdinal, decoded.value));
+  let classification;
+  try {
+    classification = classifySourceSnapshot(rows.map((row) => ({
+      sourceOrdinal: row.sourceOrdinal,
+      rawPayload: row.rawPayload,
+    })));
+  } catch (error) {
+    if (error instanceof SourceSnapshotClassificationStructuralError) {
+      throw new SourceSnapshotSemanticProjectionStructuralError(error.code);
+    }
+    throw error;
   }
 
-  const closeByOrdinal = new Map(
-    classifyLegacyPeriodCloseRows(closeInputs).map((result) => [result.snapshotOrdinal, result] as const),
-  );
-
-  const outcomes = rows.map((row): Readonly<SourceSnapshotSemanticOutcome> => {
-    const decoded = decodedByOrdinal.get(row.sourceOrdinal);
-    if (decoded === undefined || !decoded.ok) {
+  const rowByOrdinal = new Map(rows.map((row) => [row.sourceOrdinal, row] as const));
+  const outcomes = classification.outcomes.map((classified): Readonly<SourceSnapshotSemanticOutcome> => {
+    if (classified.decodeErrorCode !== null) {
       return Object.freeze({
-        sourceOrdinal: row.sourceOrdinal,
-        classification: 'INVALID' as const,
-        legacyPeriodCloseClassification: null,
+        sourceOrdinal: classified.sourceOrdinal,
+        classification: classified.classification,
+        legacyPeriodCloseClassification: classified.legacyPeriodCloseClassification,
         transaction: null,
         projectionError: Object.freeze({
           stage: 'DECODE' as const,
-          errorCode: decoded?.errorCode ?? 'INVALID_PAYLOAD_SCHEMA',
+          errorCode: classified.decodeErrorCode,
         }),
       });
     }
 
-    const closeClassification = closeByOrdinal.get(row.sourceOrdinal)?.classification ?? 'NOT_APPLICABLE';
-    const classification = classifyMeaningfulSourceRow(
-      toSourceRowClassificationInput(decoded.value, closeClassification),
-    );
-
-    if (classification !== 'FINANCIAL_RECORD') {
+    if (classified.classification !== 'FINANCIAL_RECORD') {
       return Object.freeze({
-        sourceOrdinal: row.sourceOrdinal,
-        classification,
-        legacyPeriodCloseClassification: closeClassification,
+        sourceOrdinal: classified.sourceOrdinal,
+        classification: classified.classification,
+        legacyPeriodCloseClassification: classified.legacyPeriodCloseClassification,
         transaction: null,
         projectionError: null,
       });
     }
 
+    const row = rowByOrdinal.get(classified.sourceOrdinal);
+    if (row === undefined) {
+      throw new SourceSnapshotSemanticProjectionStructuralError('INVALID_SOURCE_ORDINAL');
+    }
     const projected = projectInitialFinancialTransaction({
       rawPayload: row.rawPayload,
       initialSourceOrdinal: row.sourceOrdinal,
@@ -164,9 +138,9 @@ export function projectSourceSnapshotSemantics(
 
     if (!projected.ok) {
       return Object.freeze({
-        sourceOrdinal: row.sourceOrdinal,
-        classification,
-        legacyPeriodCloseClassification: closeClassification,
+        sourceOrdinal: classified.sourceOrdinal,
+        classification: classified.classification,
+        legacyPeriodCloseClassification: classified.legacyPeriodCloseClassification,
         transaction: null,
         projectionError: Object.freeze({
           stage: projected.stage,
@@ -176,9 +150,9 @@ export function projectSourceSnapshotSemantics(
     }
 
     return Object.freeze({
-      sourceOrdinal: row.sourceOrdinal,
-      classification,
-      legacyPeriodCloseClassification: closeClassification,
+      sourceOrdinal: classified.sourceOrdinal,
+      classification: classified.classification,
+      legacyPeriodCloseClassification: classified.legacyPeriodCloseClassification,
       transaction: projected.transaction,
       projectionError: null,
     });
