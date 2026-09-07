@@ -171,6 +171,9 @@ function parseSnapshotResponse(
   const title = asString(properties.title);
   const locale = asString(properties.locale);
   const timeZone = asString(properties.timeZone);
+  if (title === null || locale === null || timeZone === null) {
+    throw new GoogleSheetsFullSnapshotReaderError('GOOGLE_SHEETS_RESPONSE_INVALID');
+  }
   if (
     title !== EXPECTED_SPREADSHEET_TITLE
     || locale !== EXPECTED_SOURCE_LOCALE
