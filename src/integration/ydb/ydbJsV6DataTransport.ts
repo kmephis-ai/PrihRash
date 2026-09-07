@@ -1,3 +1,4 @@
+import type { CredentialsProvider } from '@ydbjs/auth';
 import {
   YdbTransportCommitOutcomeUnknownError,
   type YdbQueryResult,
@@ -9,7 +10,13 @@ import type { YdbParameter } from './parameters.js';
 const TIMESTAMP_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/;
 const textEncoder = new TextEncoder();
 
+export const YANDEX_CLOUD_METADATA_AUTH = Object.freeze({
+  endpoint: 'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token',
+  flavor: 'Google',
+});
+
 export const YDB_JS_DATA_SDK_VERSIONS = Object.freeze({
+  '@ydbjs/auth': '6.3.1',
   '@ydbjs/auth-yandex-cloud': '0.2.0',
   '@ydbjs/core': '6.3.1',
   '@ydbjs/query': '6.3.0',
@@ -51,11 +58,16 @@ export interface YdbSqlClient extends YdbSqlExecutor {
   ): Promise<T>;
 }
 
-export interface YdbJsDataClientConfig {
+interface YdbJsCommonDataClientConfig {
   readonly connectionString: string;
-  readonly credentialFile: string;
   readonly poolMaxSize?: number;
 }
+
+export interface YdbJsDataClientConfig extends YdbJsCommonDataClientConfig {
+  readonly credentialFile: string;
+}
+
+export interface YdbJsMetadataDataClientConfig extends YdbJsCommonDataClientConfig {}
 
 export interface YdbJsDataClient {
   readonly transport: YdbTransport;
@@ -198,34 +210,39 @@ export function createYdbJsV6DataTransport(
   });
 }
 
-function validateClientConfig(config: Readonly<YdbJsDataClientConfig>): void {
+function validateCommonClientConfig(config: Readonly<YdbJsCommonDataClientConfig>): void {
   if (
     typeof config.connectionString !== 'string'
     || config.connectionString.length === 0
     || config.connectionString !== config.connectionString.trim()
-    || typeof config.credentialFile !== 'string'
-    || config.credentialFile.length === 0
-    || config.credentialFile !== config.credentialFile.trim()
     || (config.poolMaxSize !== undefined && (!Number.isSafeInteger(config.poolMaxSize) || config.poolMaxSize <= 0))
   ) {
     fail('CLIENT_CONFIG_INVALID');
   }
 }
 
-export async function createYdbJsV6DataClient(
-  config: Readonly<YdbJsDataClientConfig>,
+function validateClientConfig(config: Readonly<YdbJsDataClientConfig>): void {
+  validateCommonClientConfig(config);
+  if (
+    typeof config.credentialFile !== 'string'
+    || config.credentialFile.length === 0
+    || config.credentialFile !== config.credentialFile.trim()
+  ) {
+    fail('CLIENT_CONFIG_INVALID');
+  }
+}
+
+async function createDataClientWithCredentials(
+  config: Readonly<YdbJsCommonDataClientConfig>,
+  credentialsProvider: CredentialsProvider,
 ): Promise<Readonly<YdbJsDataClient>> {
-  validateClientConfig(config);
-  const [core, queryModule, primitive, optional, authYandexCloud] = await Promise.all([
+  const [core, queryModule, primitive, optional] = await Promise.all([
     import('@ydbjs/core'),
     import('@ydbjs/query'),
     import('@ydbjs/value/primitive'),
     import('@ydbjs/value/optional'),
-    import('@ydbjs/auth-yandex-cloud'),
   ]);
 
-  const AuthProvider = authYandexCloud.ServiceAccountCredentialsProvider;
-  const credentialsProvider = AuthProvider.fromFile(config.credentialFile);
   const driver = new core.Driver(config.connectionString, { credentialsProvider });
   await driver.ready();
   const rawSql = queryModule.query(driver, { poolOptions: { maxSize: config.poolMaxSize ?? 4 } });
@@ -242,4 +259,24 @@ export async function createYdbJsV6DataClient(
       driver.close();
     },
   });
+}
+
+export async function createYdbJsV6DataClient(
+  config: Readonly<YdbJsDataClientConfig>,
+): Promise<Readonly<YdbJsDataClient>> {
+  validateClientConfig(config);
+  const authYandexCloud = await import('@ydbjs/auth-yandex-cloud');
+  const credentialsProvider = authYandexCloud.ServiceAccountCredentialsProvider.fromFile(
+    config.credentialFile,
+  );
+  return createDataClientWithCredentials(config, credentialsProvider);
+}
+
+export async function createYdbJsV6MetadataDataClient(
+  config: Readonly<YdbJsMetadataDataClientConfig>,
+): Promise<Readonly<YdbJsDataClient>> {
+  validateCommonClientConfig(config);
+  const { MetadataCredentialsProvider } = await import('@ydbjs/auth/metadata');
+  const credentialsProvider = new MetadataCredentialsProvider(YANDEX_CLOUD_METADATA_AUTH);
+  return createDataClientWithCredentials(config, credentialsProvider);
 }
