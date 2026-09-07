@@ -5,6 +5,7 @@ import { buildReferenceResolverSnapshot, ReferenceResolverSnapshotError } from '
 import {
   YdbReferenceEvidenceReaderError,
   readYdbReferenceMappingEvidence,
+  readYdbReferenceResolverSnapshot,
 } from '../../dist/reference/ydbReferenceEvidenceReader.js';
 
 const ACCOUNT_A = '00000000-0000-0000-0000-000000006001';
@@ -29,6 +30,29 @@ function makeAdapter(accountRows, categoryRows) {
   return { adapter, observed };
 }
 
+function makeSnapshotAdapter(accountRows, categoryRows, memberRows) {
+  const observed = { outsideReads: 0, transactionCount: 0, calls: [] };
+  const adapter = new YdbAdapter({
+    async executeRead() {
+      observed.outsideReads += 1;
+      throw new Error('OUTSIDE_TRANSACTION_READ_FORBIDDEN');
+    },
+    async serializableReadWrite(work) {
+      observed.transactionCount += 1;
+      return work({
+        async execute(statement) {
+          observed.calls.push(statement);
+          if (/FROM accounts/.test(statement.text)) return { rows: accountRows };
+          if (/FROM categories/.test(statement.text)) return { rows: categoryRows };
+          if (/FROM family_members/.test(statement.text)) return { rows: memberRows };
+          throw new Error(`UNEXPECTED_STATEMENT: ${statement.text}`);
+        },
+      });
+    },
+  });
+  return { adapter, observed };
+}
+
 function validAccounts() {
   return [
     { id: ACCOUNT_B.toUpperCase(), normalized_source_label: 'Наличка', currency: 'RUB' },
@@ -41,6 +65,10 @@ function validCategories() {
     { id: CATEGORY_INCOME, kind: 'INCOME', normalized_source_label: 'Synthetic Shared' },
     { id: CATEGORY_EXPENSE, kind: 'EXPENSE', normalized_source_label: 'Synthetic Shared' },
   ];
+}
+
+function validMember() {
+  return [{ id: MEMBER.toUpperCase(), name: 'Вика', status: 'ACTIVE' }];
 }
 
 test('reads exactly two dedicated source-label projections and feeds exact resolver snapshot', async () => {
@@ -75,6 +103,46 @@ test('reads exactly two dedicated source-label projections and feeds exact resol
   assert.equal(resolver.resolveCategoryId('EXPENSE', 'Synthetic Shared'), CATEGORY_EXPENSE);
   assert.equal(resolver.resolveCategoryId('INCOME', 'Synthetic Shared'), CATEGORY_INCOME);
 });
+
+test('builds immutable resolver from one consistent YDB transaction including exact active Vika member', async () => {
+  const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
+  const resolver = await readYdbReferenceResolverSnapshot(adapter);
+
+  assert.equal(observed.outsideReads, 0);
+  assert.equal(observed.transactionCount, 1);
+  assert.equal(observed.calls.length, 3);
+  assert.deepEqual(observed.calls.map((statement) => statement.kind), ['READ', 'READ', 'READ']);
+  assert.match(observed.calls[2].text, /FROM family_members WHERE name = \$name AND status = \$status/);
+  assert.deepEqual(observed.calls[2].parameters, {
+    name: { type: 'Utf8', value: 'Вика' },
+    status: { type: 'Utf8', value: 'ACTIVE' },
+  });
+
+  assert.equal(resolver.vikaMemberId, MEMBER);
+  assert.equal(resolver.resolveAccountId('Карта Visa'), ACCOUNT_A);
+  assert.equal(resolver.resolveCategoryId('EXPENSE', 'Synthetic Shared'), CATEGORY_EXPENSE);
+  assert.equal(resolver.resolveCategoryId('INCOME', 'Synthetic Shared'), CATEGORY_INCOME);
+  assert.equal(Object.isFrozen(resolver), true);
+});
+
+for (const [name, memberRows, code] of [
+  ['missing active Vika member', [], 'VIKA_MEMBER_NOT_FOUND'],
+  ['duplicate active Vika member', [
+    { id: MEMBER, name: 'Вика', status: 'ACTIVE' },
+    { id: '00000000-0000-0000-0000-000000006202', name: 'Вика', status: 'ACTIVE' },
+  ], 'DUPLICATE_VIKA_MEMBER_EVIDENCE'],
+  ['malformed Vika UUID', [{ id: 'bad', name: 'Вика', status: 'ACTIVE' }], 'MALFORMED_VIKA_MEMBER_EVIDENCE'],
+  ['unexpected Vika name', [{ id: MEMBER, name: 'Synthetic Other', status: 'ACTIVE' }], 'MALFORMED_VIKA_MEMBER_EVIDENCE'],
+  ['unexpected Vika status', [{ id: MEMBER, name: 'Вика', status: 'ARCHIVED' }], 'MALFORMED_VIKA_MEMBER_EVIDENCE'],
+]) {
+  test(`consistent resolver fails closed for ${name}`, async () => {
+    const { adapter } = makeSnapshotAdapter(validAccounts(), validCategories(), memberRows);
+    await assert.rejects(
+      () => readYdbReferenceResolverSnapshot(adapter),
+      (error) => error instanceof YdbReferenceEvidenceReaderError && error.code === code,
+    );
+  });
+}
 
 for (const [name, accountRows, categoryRows, code] of [
   ['invalid account UUID', [{ id: 'bad', normalized_source_label: 'Карта Visa', currency: 'RUB' }], validCategories(), 'MALFORMED_ACCOUNT_REFERENCE_EVIDENCE'],
