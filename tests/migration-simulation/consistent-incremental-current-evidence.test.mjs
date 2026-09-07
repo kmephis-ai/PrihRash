@@ -76,6 +76,7 @@ function makeAdapter({ revisionRows = [revisionRow()] } = {}) {
         async execute(statement) {
           observed.statements.push(statement);
           if (statement.kind !== 'READ') throw new Error('UNEXPECTED_WRITE');
+          if (statement.text.includes('FROM migration_runs WHERE state IN')) return { rows: [] };
           if (statement.text.includes('FROM source_records WHERE')) return { rows: [sourceRow()] };
           if (statement.text.includes('FROM source_record_revisions AS r')) return { rows: revisionRows };
           if (statement.text.includes('FROM transactions')) return { rows: [] };
@@ -87,15 +88,17 @@ function makeAdapter({ revisionRows = [revisionRow()] } = {}) {
   return { adapter, observed };
 }
 
-test('reads source, matching current revision and transactions in one YDB transaction', async () => {
+test('reads admission, source, matching current revision and transactions in one YDB transaction', async () => {
   const { adapter, observed } = makeAdapter();
 
   const snapshot = await readConsistentIncrementalCurrentEvidence(adapter);
 
   assert.equal(observed.outsideReadCount, 0);
   assert.equal(observed.transactionCount, 1);
-  assert.equal(observed.statements.length, 3);
-  assert.deepEqual(observed.statements.map((statement) => statement.kind), ['READ', 'READ', 'READ']);
+  assert.equal(observed.statements.length, 4);
+  assert.deepEqual(observed.statements.map((statement) => statement.kind), ['READ', 'READ', 'READ', 'READ']);
+  assert.equal(snapshot.admissionEvidence.committedBaselineRun, null);
+  assert.deepEqual(snapshot.admissionEvidence.incompleteRuns, []);
   assert.equal(snapshot.sourceEvidence.sourceCurrent.length, 1);
   assert.equal(snapshot.sourceEvidence.sourceCurrent[0].id, SOURCE_ID);
   assert.equal(snapshot.revisionEvidence.currentRevisionPayloads.length, 1);
@@ -103,6 +106,7 @@ test('reads source, matching current revision and transactions in one YDB transa
   assert.equal(snapshot.revisionEvidence.currentRevisionPayloads[0].rowDigest, 'source-digest');
   assert.deepEqual(snapshot.previousTransactions, []);
   assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(snapshot.admissionEvidence.incompleteRuns), true);
   assert.equal(Object.isFrozen(snapshot.sourceEvidence.sourceCurrent), true);
   assert.equal(Object.isFrozen(snapshot.revisionEvidence.currentRevisionPayloads), true);
   assert.equal(Object.isFrozen(snapshot.previousTransactions), true);
@@ -119,7 +123,7 @@ test('preserves existing fail-closed missing revision evidence error inside the 
 
   assert.equal(observed.outsideReadCount, 0);
   assert.equal(observed.transactionCount, 1);
-  assert.equal(observed.statements.length, 2);
+  assert.equal(observed.statements.length, 3);
 });
 
 test('transaction read scope rejects WRITE statements before transport execution', async () => {
