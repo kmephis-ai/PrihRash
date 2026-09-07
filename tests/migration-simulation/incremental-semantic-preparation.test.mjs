@@ -21,7 +21,7 @@ function payload(description, amount = '100') {
     adapter_schema_version: 2,
     date: { kind: 'NUMBER', value: '45500' },
     operation_type: { kind: 'STRING', value: 'Расход' },
-    expense_account: { kind: 'STRING', value: 'Synthetic Account' },
+    expense_account: { kind: 'STRING', value: 'Карта Visa' },
     expense_category: { kind: 'STRING', value: 'Synthetic Category' },
     description: { kind: 'STRING', value: description },
     expense_amount: { kind: 'NUMBER', value: amount },
@@ -104,7 +104,7 @@ function structural() {
 
 const refs = Object.freeze({
   resolveAccountId(label) {
-    return label === 'Synthetic Account' ? ACCOUNT : null;
+    return label === 'Карта Visa' ? ACCOUNT : null;
   },
   resolveCategoryId(kind, label) {
     return kind === 'EXPENSE' && label === 'Synthetic Category' ? CATEGORY : null;
