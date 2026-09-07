@@ -57,6 +57,9 @@ function createFakeTransport(options = {}) {
           async execute(statement) {
             events.push(['execute', statement]);
             if (options.executeError) throw options.executeError;
+            if (statement.text.startsWith('UPDATE migration_runs SET state = $state')) {
+              return { rows: [{ id: RUN_ID }] };
+            }
             return { rows: [] };
           },
         });
@@ -121,10 +124,17 @@ test('ordinary delta and COMMITTED marker execute in one transaction with marker
   ]);
 
   const executed = fake.events.filter(([name]) => name === 'execute').map(([, statement]) => statement);
-  assert.equal(executed.at(-1).text.startsWith('UPDATE migration_runs SET state = $state'), true);
-  assert.equal(executed.at(-1).parameters.id.value, RUN_ID);
-  assert.equal(executed.at(-1).parameters.state.value, 'COMMITTED');
-  assert.equal(executed.at(-1).parameters.expected_state.value, 'VALIDATED');
+  const marker = executed.at(-1);
+  assert.equal(marker.text.startsWith('UPDATE migration_runs SET state = $state'), true);
+  assert.match(marker.text, /source_snapshot_digest = \$source_snapshot_digest/);
+  assert.match(marker.text, /rows_seen = \$rows_seen/);
+  assert.match(marker.text, /finished_at IS NULL AND error_code IS NULL RETURNING id$/);
+  assert.equal(marker.parameters.id.value, RUN_ID);
+  assert.equal(marker.parameters.state.value, 'COMMITTED');
+  assert.equal(marker.parameters.expected_state.value, 'VALIDATED');
+  assert.equal(marker.parameters.source_snapshot_digest.value, run.sourceSnapshotDigest);
+  assert.equal(marker.parameters.rows_seen.value, BigInt(run.rowsSeen));
+  assert.equal(marker.parameters.rows_changed.value, BigInt(run.rowsChanged));
 });
 
 test('pure preflight assessment reports exact sizing reason without opening a transaction', () => {

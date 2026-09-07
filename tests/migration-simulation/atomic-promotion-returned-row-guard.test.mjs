@@ -40,8 +40,9 @@ function transportForRows(rows) {
         try {
           const result = await work({
             async execute(statement) {
-              events.push(statement.text.startsWith('UPDATE migration_runs ') ? 'marker' : 'guarded-write');
-              return statement.text.startsWith('UPDATE migration_runs ') ? { rows: [] } : { rows };
+              const isMarker = statement.text.startsWith('UPDATE migration_runs ');
+              events.push(isMarker ? 'marker' : 'guarded-write');
+              return isMarker ? { rows: [{ id: RUN_ID }] } : { rows };
             },
           });
           events.push('commit');

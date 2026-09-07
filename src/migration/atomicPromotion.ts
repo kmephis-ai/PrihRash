@@ -4,7 +4,9 @@ import {
   writeStatement,
 } from '../integration/ydb/adapter.js';
 import {
+  stringParameter,
   timestampParameter,
+  uint64Parameter,
   utf8Parameter,
   uuidParameter,
 } from '../integration/ydb/parameters.js';
@@ -20,7 +22,9 @@ import {
 // must use the separate controlled staging/rebuild path instead of widening this guard.
 export const PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT = 512 * 1024;
 export const PRELIVE_PROMOTION_QUERY_BYTES_LIMIT = 8 * 1024;
-export const COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES = 256;
+// Reserve conservatively for exact run evidence + marker values. This is intentionally
+// larger than the earlier 256-byte estimate and therefore only narrows the ordinary cap.
+export const COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES = 512;
 
 export interface PromotionWrite {
   readonly statement: YdbStatement;
@@ -33,7 +37,8 @@ export type AtomicPromotionErrorCode =
   | 'INVALID_PROMOTION_STATEMENT'
   | 'INVALID_PROMOTION_ESTIMATE'
   | 'INVALID_RETURNED_ROW_GUARD'
-  | 'PROMOTION_WRITE_PRECONDITION_FAILED';
+  | 'PROMOTION_WRITE_PRECONDITION_FAILED'
+  | 'COMMIT_MARKER_PRECONDITION_FAILED';
 
 export class AtomicPromotionError extends Error {
   readonly code: AtomicPromotionErrorCode;
@@ -121,13 +126,23 @@ export function assessAtomicPromotionWrites(
 function commitMarkerStatement(run: MigrationRun, finishedAt: string): YdbStatement {
   return writeStatement(
     'UPDATE migration_runs SET state = $state, finished_at = $finished_at, error_code = $error_code '
-      + 'WHERE id = $id AND state = $expected_state',
+      + 'WHERE id = $id AND state = $expected_state '
+      + 'AND source_snapshot_digest = $source_snapshot_digest '
+      + 'AND rows_seen = $rows_seen AND rows_new = $rows_new AND rows_changed = $rows_changed '
+      + 'AND rows_missing = $rows_missing AND rows_ambiguous = $rows_ambiguous '
+      + 'AND finished_at IS NULL AND error_code IS NULL RETURNING id',
     {
       id: uuidParameter(run.id),
       state: utf8Parameter('COMMITTED'),
       expected_state: utf8Parameter('VALIDATED'),
       finished_at: timestampParameter(finishedAt),
       error_code: utf8Parameter(null),
+      source_snapshot_digest: stringParameter(run.sourceSnapshotDigest),
+      rows_seen: uint64Parameter(run.rowsSeen),
+      rows_new: uint64Parameter(run.rowsNew),
+      rows_changed: uint64Parameter(run.rowsChanged),
+      rows_missing: uint64Parameter(run.rowsMissing),
+      rows_ambiguous: uint64Parameter(run.rowsAmbiguous),
     },
   );
 }
@@ -161,7 +176,10 @@ export async function promoteAtomicDelta(
         throw new AtomicPromotionError('PROMOTION_WRITE_PRECONDITION_FAILED');
       }
     }
-    await transaction.execute(marker);
+    const markerResult = await transaction.execute(marker);
+    if (markerResult.rows.length !== 1) {
+      throw new AtomicPromotionError('COMMIT_MARKER_PRECONDITION_FAILED');
+    }
   });
 
   return Object.freeze({
