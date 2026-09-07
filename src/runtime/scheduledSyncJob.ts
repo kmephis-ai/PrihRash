@@ -127,7 +127,10 @@ const productionObservationClock: Readonly<ScheduledSyncObservationClock> = Obje
 
 const productionRuntime: Readonly<ScheduledSyncJobRuntime> = Object.freeze({
   createDigest: createCanonicalSourceDigest,
-  createSource(config, digest) {
+  createSource(
+    config: Readonly<ScheduledSyncJobConfig>,
+    digest: Readonly<CanonicalSourceDigest>,
+  ): AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot> {
     const accessTokenProvider = createGoogleServiceAccountSheetsAccessTokenProvider({
       clientEmail: config.googleServiceAccountEmail,
       privateKey: config.googleServiceAccountPrivateKey,
@@ -139,7 +142,9 @@ const productionRuntime: Readonly<ScheduledSyncJobRuntime> = Object.freeze({
       digest,
     });
   },
-  createYdbClient(config): Promise<Readonly<YdbJsDataClient>> {
+  createYdbClient(
+    config: Readonly<ScheduledSyncJobConfig>,
+  ): Promise<Readonly<YdbJsDataClient>> {
     return createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
