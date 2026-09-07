@@ -37,7 +37,7 @@ export interface ScheduledIncrementalApplicationDependencies<TSnapshot> {
   ) => Readonly<ScheduledIncrementalObservationProjection>;
   readonly createRunContext: () => Readonly<ScheduledIncrementalRunContext>;
   readonly lifecycleClock: Readonly<ScheduledIncrementalLifecycleClock>;
-  readonly refs: ReferenceResolver;
+  readonly readReferenceResolver: () => Promise<Readonly<ReferenceResolver>>;
   readonly sourceIdentityAllocator: IncrementalSourceIdentityAllocator;
   readonly transactionIdentityAllocator: IncrementalTransactionIdentityAllocator;
 }
@@ -93,6 +93,7 @@ export class ScheduledIncrementalApplicationRunner<TSnapshot>
       throw new ScheduledIncrementalApplicationRunnerError('MISSING_COMMITTED_BASELINE');
     }
 
+    const refs = await this.#dependencies.readReferenceResolver();
     const projected = this.#dependencies.projectObservation(observation);
     const context = this.#dependencies.createRunContext();
     const prepared = await prepareScheduledIncrementalCandidate({
@@ -105,7 +106,7 @@ export class ScheduledIncrementalApplicationRunner<TSnapshot>
       runId: context.runId,
       startedAt: context.startedAt,
       observedAt: projected.observedAt,
-      refs: this.#dependencies.refs,
+      refs,
       sourceIdentityAllocator: this.#dependencies.sourceIdentityAllocator,
       transactionIdentityAllocator: this.#dependencies.transactionIdentityAllocator,
     });
