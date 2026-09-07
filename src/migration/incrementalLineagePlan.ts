@@ -15,7 +15,12 @@ export type IncrementalLineageOutcome =
   | Readonly<Extract<SequenceDiffOperation, { kind: 'UNCHANGED' }>>
   | Readonly<Extract<SequenceDiffOperation, { kind: 'MISSING' }>>
   | Readonly<Extract<SequenceDiffOperation, { kind: 'REVISED' }>>
-  | Readonly<Extract<SequenceDiffOperation, { kind: 'AMBIGUOUS_BLOCK' }>>
+  | Readonly<{
+      kind: 'AMBIGUOUS_BLOCK';
+      previousSourceRecordIds: readonly string[];
+      previousRowHints: readonly number[];
+      currentRowHints: readonly number[];
+    }>
   | Readonly<{
       kind: 'INSERTED';
       sourceRecordId: string;
