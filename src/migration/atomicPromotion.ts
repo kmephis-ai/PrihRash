@@ -25,12 +25,15 @@ export const COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES = 256;
 export interface PromotionWrite {
   readonly statement: YdbStatement;
   readonly estimatedParameterBytes: number;
+  readonly expectedReturnedRowCount?: number;
 }
 
 export type AtomicPromotionErrorCode =
   | 'RUN_NOT_VALIDATED'
   | 'INVALID_PROMOTION_STATEMENT'
-  | 'INVALID_PROMOTION_ESTIMATE';
+  | 'INVALID_PROMOTION_ESTIMATE'
+  | 'INVALID_RETURNED_ROW_GUARD'
+  | 'PROMOTION_WRITE_PRECONDITION_FAILED';
 
 export class AtomicPromotionError extends Error {
   readonly code: AtomicPromotionErrorCode;
@@ -69,6 +72,15 @@ function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+function assertReturnedRowGuard(write: PromotionWrite): void {
+  if (
+    write.expectedReturnedRowCount !== undefined
+    && (!Number.isSafeInteger(write.expectedReturnedRowCount) || write.expectedReturnedRowCount < 0)
+  ) {
+    throw new AtomicPromotionError('INVALID_RETURNED_ROW_GUARD');
+  }
+}
+
 export function assessAtomicPromotionWrites(
   writes: readonly PromotionWrite[],
 ): Readonly<AtomicPromotionPreflightAssessment> {
@@ -81,6 +93,7 @@ export function assessAtomicPromotionWrites(
     if (!Number.isSafeInteger(write.estimatedParameterBytes) || write.estimatedParameterBytes < 0) {
       throw new AtomicPromotionError('INVALID_PROMOTION_ESTIMATE');
     }
+    assertReturnedRowGuard(write);
     if (utf8ByteLength(write.statement.text) > PRELIVE_PROMOTION_QUERY_BYTES_LIMIT) {
       return Object.freeze({
         eligible: false,
@@ -140,7 +153,13 @@ export async function promoteAtomicDelta(
   const marker = commitMarkerStatement(run, finishedAt);
   await adapter.serializableReadWrite(async (transaction) => {
     for (const write of writes) {
-      await transaction.execute(write.statement);
+      const result = await transaction.execute(write.statement);
+      if (
+        write.expectedReturnedRowCount !== undefined
+        && result.rows.length !== write.expectedReturnedRowCount
+      ) {
+        throw new AtomicPromotionError('PROMOTION_WRITE_PRECONDITION_FAILED');
+      }
     }
     await transaction.execute(marker);
   });
