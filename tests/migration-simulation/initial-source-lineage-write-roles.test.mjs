@@ -42,5 +42,5 @@ test('marks source record as verified-current and revision as staging evidence',
   assert.equal(recordWrite.role, 'VERIFIED_CURRENT');
   assert.equal(revisionWrite.role, 'STAGING_EVIDENCE');
   assert.equal(recordWrite.statement.text.startsWith('UPSERT INTO source_records '), true);
-  assert.equal(revisionWrite.statement.text.startsWith('UPSERT INTO source_record_revisions '), true);
+  assert.equal(revisionWrite.statement.text.startsWith('INSERT INTO source_record_revisions '), true);
 });

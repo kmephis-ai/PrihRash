@@ -5,6 +5,7 @@ import { buildInitialSourceLineageProjection } from '../../dist/migration/initia
 import {
   InitialSourceLineagePersistenceError,
   prepareInitialSourceLineageWrites,
+  prepareInitialSourceRevisionWrites,
 } from '../../dist/migration/initialSourceLineagePersistence.js';
 
 const SNAPSHOT_ID = '00000000-0000-0000-0000-000000000401';
@@ -49,7 +50,7 @@ function projection() {
   ]);
 }
 
-test('prepares one source record and one revision write per independent lineage row', () => {
+test('prepares one source record and one append-only revision write per independent lineage row', () => {
   const writes = prepareInitialSourceLineageWrites(projection());
 
   assert.equal(writes.length, 4);
@@ -57,7 +58,7 @@ test('prepares one source record and one revision write per independent lineage 
   assert.equal(writes[0].role, 'VERIFIED_CURRENT');
   assert.equal(writes[1].role, 'STAGING_EVIDENCE');
   assert.equal(writes[0].statement.text.startsWith('UPSERT INTO source_records '), true);
-  assert.equal(writes[1].statement.text.startsWith('UPSERT INTO source_record_revisions '), true);
+  assert.equal(writes[1].statement.text.startsWith('INSERT INTO source_record_revisions '), true);
   assert.equal(writes[2].role, 'VERIFIED_CURRENT');
   assert.equal(writes[3].role, 'STAGING_EVIDENCE');
   assert.equal(writes[2].statement.parameters.id.value, SOURCE_ID_2);
@@ -65,6 +66,14 @@ test('prepares one source record and one revision write per independent lineage 
   assert.equal(writes.every((write) => write.estimatedParameterBytes > 0), true);
   assert.equal(Object.isFrozen(writes), true);
   assert.equal(writes.every(Object.isFrozen), true);
+});
+
+test('dedicated revision preparation never falls back to overwrite semantics', () => {
+  const revisions = projection().revisions;
+  const writes = prepareInitialSourceRevisionWrites(revisions);
+  assert.equal(writes.length, 2);
+  assert.equal(writes.every((write) => write.role === 'STAGING_EVIDENCE'), true);
+  assert.equal(writes.every((write) => write.statement.text.startsWith('INSERT INTO source_record_revisions ')), true);
 });
 
 test('uses schema-aligned typed parameters and preserves undecided semantics as null', () => {
@@ -106,5 +115,22 @@ test('fails closed when initial revision invariant is not one', () => {
     () => prepareInitialSourceLineageWrites(invalid),
     (error) => error instanceof InitialSourceLineagePersistenceError
       && error.code === 'INVALID_INITIAL_REVISION',
+  );
+});
+
+test('dedicated revision preparation rejects duplicate source identities and mixed runs', () => {
+  const source = projection();
+  assert.throws(
+    () => prepareInitialSourceRevisionWrites([source.revisions[0], source.revisions[0]]),
+    (error) => error instanceof InitialSourceLineagePersistenceError
+      && error.code === 'DUPLICATE_REVISION_SOURCE_ID',
+  );
+  assert.throws(
+    () => prepareInitialSourceRevisionWrites([
+      source.revisions[0],
+      { ...source.revisions[1], migrationRunId: '00000000-0000-0000-0000-000000000499' },
+    ]),
+    (error) => error instanceof InitialSourceLineagePersistenceError
+      && error.code === 'MIXED_REVISION_RUN',
   );
 });
