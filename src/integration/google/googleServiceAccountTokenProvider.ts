@@ -9,7 +9,7 @@ export interface GoogleServiceAccountCredentials {
 }
 
 export interface GoogleAccessTokenClient {
-  getAccessToken(): Promise<string | null>;
+  getAccessToken(): Promise<unknown>;
 }
 
 export type GoogleServiceAccountTokenProviderErrorCode =
@@ -45,18 +45,26 @@ function validateCredentials(credentials: Readonly<GoogleServiceAccountCredentia
   }
 }
 
+function tokenValue(response: unknown): string | null {
+  if (typeof response === 'string') return response;
+  if (response === null || typeof response !== 'object' || Array.isArray(response)) return null;
+  const token = Reflect.get(response, 'token');
+  return typeof token === 'string' ? token : null;
+}
+
 export function createGoogleSheetsAccessTokenProviderFromClient(
   client: Readonly<GoogleAccessTokenClient>,
 ): Readonly<GoogleSheetsAccessTokenProvider> {
   return Object.freeze({
     async getAccessToken(): Promise<string> {
-      let token: string | null;
+      let response: unknown;
       try {
-        token = await client.getAccessToken();
+        response = await client.getAccessToken();
       } catch {
         throw new GoogleServiceAccountTokenProviderError('TOKEN_ACQUISITION_FAILED');
       }
-      if (typeof token !== 'string' || token.trim().length === 0) {
+      const token = tokenValue(response);
+      if (token === null || token.trim().length === 0) {
         throw new GoogleServiceAccountTokenProviderError('INVALID_ACCESS_TOKEN');
       }
       return token.trim();
