@@ -4,7 +4,11 @@ import {
   StatusIds_StatusCode,
   type Operation,
 } from '@ydbjs/api/operation';
-import { SchemeServiceDefinition } from '@ydbjs/api/scheme';
+import {
+  Entry_Type,
+  ListDirectoryResultSchema,
+  SchemeServiceDefinition,
+} from '@ydbjs/api/scheme';
 import {
   CreateSessionResultSchema,
   TableServiceDefinition,
@@ -12,6 +16,8 @@ import {
 import type { Driver } from '@ydbjs/core';
 import {
   YdbSchemeTransportOutcomeUnknownError,
+  type YdbSchemeDirectoryListing,
+  type YdbSchemeEntryKind,
   type YdbSchemeTransport,
   type YdbTableCopyItem,
   type YdbTableRenameItem,
@@ -20,6 +26,7 @@ import {
 export type YdbJsV6SchemeProviderErrorCode =
   | 'SCHEME_PROVIDER_REJECTED'
   | 'SCHEME_PROVIDER_PROTOCOL_ERROR'
+  | 'SCHEME_PROVIDER_READ_FAILED'
   | 'TABLE_SESSION_CREATE_FAILED';
 
 export class YdbJsV6SchemeProviderError extends Error {
@@ -41,7 +48,7 @@ function databasePath(database: string, relativePath: string): string {
   if (!root.startsWith('/') || root.length < 2) {
     throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_PROTOCOL_ERROR');
   }
-  return `${root}/${relativePath}`;
+  return relativePath.length === 0 ? root : `${root}/${relativePath}`;
 }
 
 function isUnknownStatus(status: StatusIds_StatusCode): boolean {
@@ -61,6 +68,23 @@ function requireMutationSuccess(operation: Operation | undefined): void {
     );
   }
   throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_REJECTED', operation.status);
+}
+
+function requireReadSuccess(operation: Operation | undefined): Operation {
+  if (operation === undefined || operation.ready !== true || operation.status !== StatusIds_StatusCode.SUCCESS) {
+    throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_READ_FAILED', operation?.status ?? null);
+  }
+  if (operation.result === undefined) {
+    throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_PROTOCOL_ERROR');
+  }
+  return operation;
+}
+
+function entryKind(type: Entry_Type): YdbSchemeEntryKind {
+  if (type === Entry_Type.DATABASE) return 'DATABASE';
+  if (type === Entry_Type.DIRECTORY) return 'DIRECTORY';
+  if (type === Entry_Type.TABLE) return 'TABLE';
+  return 'OTHER';
 }
 
 function requireSessionSuccess(operation: Operation | undefined): string {
@@ -97,6 +121,31 @@ export class YdbJsV6SchemeTransport implements YdbSchemeTransport {
     } catch (error) {
       if (error instanceof YdbJsV6SchemeProviderError || error instanceof YdbSchemeTransportOutcomeUnknownError) throw error;
       throw new YdbSchemeTransportOutcomeUnknownError(error);
+    }
+  }
+
+  async listDirectory(path: string): Promise<Readonly<YdbSchemeDirectoryListing>> {
+    const client = this.#driver.createClient(SchemeServiceDefinition);
+    try {
+      const response = await client.listDirectory({
+        operationParams: { operationMode: OperationParams_OperationMode.SYNC },
+        path: databasePath(this.#driver.database, path),
+      });
+      const operation = requireReadSuccess(response.operation);
+      const result = anyUnpack(operation.result!, ListDirectoryResultSchema);
+      if (result === undefined || result.self === undefined) {
+        throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_PROTOCOL_ERROR');
+      }
+      return Object.freeze({
+        selfKind: entryKind(result.self.type),
+        children: Object.freeze(result.children.map((child: { readonly name: string; readonly type: Entry_Type }) => Object.freeze({
+          name: child.name,
+          kind: entryKind(child.type),
+        }))),
+      });
+    } catch (error) {
+      if (error instanceof YdbJsV6SchemeProviderError) throw error;
+      throw new YdbJsV6SchemeProviderError('SCHEME_PROVIDER_READ_FAILED', null, error);
     }
   }
 

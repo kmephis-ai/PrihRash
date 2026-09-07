@@ -428,6 +428,22 @@ Initial bootstrap до любых verified-current mutations обязан сна
 7. существующая exact revision-1 не переписывается `UPSERT`-ом и не заменяется новым `SourceRecord.id`, digest или payload решением; extra/duplicate/contradictory revision evidence fail-closed;
 8. durable identity manifest является operational resume evidence, а не второй financial authority: Google observation остаётся authoritative, а Reader по-прежнему видит verified shadow только через `COMMITTED` current state.
 
+### Controlled rebuild scheme outcome recovery
+
+`copyTables`/`renameTables` в controlled initial rebuild являются отдельными provider scheme mutations. Timeout, `UNDETERMINED` или RPC ambiguity после отправки mutation **не** означают ни success, ни failure и не разрешают blind retry.
+
+После `SCHEME_OPERATION_OUTCOME_UNKNOWN` runtime использует только read-only evidence и возвращает один из verdict:
+
+- `APPLIED` — exact ожидаемый post-mutation state доказан;
+- `NOT_APPLIED` — exact pre-mutation state доказан;
+- `RECOVERY_REQUIRED` — evidence mixed/partial/foreign, content не совпадает, read itself не доказан или outcome иначе неоднозначен.
+
+Для initial copy discriminator обязан проверить exact canonical `transactions` + `source_records`, exact run-scoped staging directory/table pair и privacy-safe current/staging reconciliation evidence. Поскольку initial copy создаёт staging из доказанно пустого canonical current state, обе staging tables с table-kind и exact empty evidence доказывают `APPLIED`; обе доказанно отсутствуют при неизменном empty current — `NOT_APPLIED`. Одна таблица, wrong kind, foreign child либо non-empty/divergent evidence → `RECOVERY_REQUIRED`.
+
+Для atomic rename discriminator использует тот же exact run-scoped pair. `APPLIED` допустим только если staging pair доказанно исчез и canonical current exact-сверен с validated candidate. `NOT_APPLIED` допустим только если canonical current всё ещё exact pre-swap empty state, staging pair полностью существует и staging reconciliation exact-сверена с тем же candidate. Любой mixed pair/content mismatch → `RECOVERY_REQUIRED`.
+
+Scheme existence evidence получается через read-only directory/path inspection; provider read error никогда не трактуется как доказательство отсутствия объекта. Recovery path не вызывает `copyTables`, `renameTables` или другую scheme mutation. COMMITTED-marker visibility после доказанного swap является отдельной boundary и здесь не определяется.
+
 Протокол ordinary incremental promotion:
 
 1. full source snapshot читается и candidate canonical projection строится **до** mutation current state;

@@ -14,6 +14,10 @@ function fakeTransport(overrides = {}) {
       async ensureDirectory(path) { calls.push(['mkdir', path]); },
       async copyTables(items) { calls.push(['copy', items]); },
       async renameTables(items) { calls.push(['rename', items]); },
+      async listDirectory(path) {
+        calls.push(['list', path]);
+        return { selfKind: 'DIRECTORY', children: [] };
+      },
       ...overrides,
     },
   };
@@ -113,4 +117,36 @@ test('does not rewrite ordinary provider failures into outcome-unknown errors', 
     () => adapter.copyTables([{ source: 'transactions', destination: 'rebuild/r_a/transactions', omitIndexes: false }]),
     (error) => error === providerError,
   );
+});
+
+
+test('allows exact root/directory read evidence and freezes provider listing', async () => {
+  const fake = fakeTransport({
+    async listDirectory(path) {
+      fake.calls.push(['list', path]);
+      return {
+        selfKind: path === '' ? 'DATABASE' : 'DIRECTORY',
+        children: [{ name: 'transactions', kind: 'TABLE' }, { name: 'rebuild', kind: 'DIRECTORY' }],
+      };
+    },
+  });
+  const adapter = new YdbSchemeAdapter(fake.transport);
+  const root = await adapter.listDirectory('');
+  const nested = await adapter.listDirectory('rebuild/r_safe');
+  assert.deepEqual(fake.calls.map(([, path]) => path), ['', 'rebuild/r_safe']);
+  assert.equal(root.children[0].name, 'transactions');
+  assert.equal(Object.isFrozen(root), true);
+  assert.equal(Object.isFrozen(root.children), true);
+  assert.equal(Object.isFrozen(nested), true);
+});
+
+test('fails closed on malformed or arbitrary read evidence paths', async () => {
+  const fake = fakeTransport({
+    async listDirectory() {
+      return { selfKind: 'DIRECTORY', children: [{ name: 'same', kind: 'TABLE' }, { name: 'same', kind: 'TABLE' }] };
+    },
+  });
+  const adapter = new YdbSchemeAdapter(fake.transport);
+  await expectCode('INVALID_SCHEME_PATH', () => adapter.listDirectory('../rebuild'));
+  await expectCode('MALFORMED_SCHEME_READ_EVIDENCE', () => adapter.listDirectory('rebuild'));
 });
