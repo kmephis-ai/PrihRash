@@ -116,6 +116,7 @@ function dependencies(calls) {
   return Object.freeze({
     projectObservation(received) {
       calls.project += 1;
+      calls.order.push('project');
       assert.equal(received, calls.expectedObservation);
       return Object.freeze({
         projection: Object.freeze({
@@ -126,6 +127,7 @@ function dependencies(calls) {
     },
     createRunContext() {
       calls.context += 1;
+      calls.order.push('context');
       return Object.freeze({
         runId: RUN_ID,
         startedAt: STARTED_AT,
@@ -133,8 +135,20 @@ function dependencies(calls) {
         finishedAt: FINISHED_AT,
       });
     },
-    async readReconciliationEvidence() {
+    async readReconciliationEvidence(request) {
       calls.reconciliation += 1;
+      calls.order.push('reconciliation');
+      assert.equal(calls.sourceAllocate, 1);
+      assert.equal(calls.transactionAllocate, 1);
+      assert.equal(request.observation, calls.expectedObservation);
+      assert.equal(request.baselineRun.id, BASELINE_RUN);
+      assert.equal(request.candidateRun.id, RUN_ID);
+      assert.equal(request.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
+      assert.equal(request.reconciliationPlan.expected.sourceRecordCount, 1);
+      assert.equal(request.reconciliationPlan.expected.transactionCount, 1);
+      assert.equal(request.reconciliationPlan.promotionBlocker, null);
+      assert.equal(request.verifiedCurrentEvidence.sourceEvidence.sourceCurrent.length, 0);
+      assert.equal(request.verifiedCurrentEvidence.previousTransactions.length, 0);
       return matchedEvidence();
     },
     refs: Object.freeze({
@@ -149,6 +163,7 @@ function dependencies(calls) {
     sourceIdentityAllocator: Object.freeze({
       async allocate(requests) {
         calls.sourceAllocate += 1;
+        calls.order.push('source-allocate');
         return Object.freeze(requests.map((request) => Object.freeze({
           currentRowHint: request.currentRowHint,
           sourceRecordId: SOURCE_ID,
@@ -158,6 +173,7 @@ function dependencies(calls) {
     transactionIdentityAllocator: Object.freeze({
       async allocate(requests) {
         calls.transactionAllocate += 1;
+        calls.order.push('transaction-allocate');
         return Object.freeze(requests.map((request) => Object.freeze({
           sourceRecordId: request.sourceRecordId,
           transactionId: TX_ID,
@@ -165,6 +181,18 @@ function dependencies(calls) {
       },
     }),
   });
+}
+
+function newCalls() {
+  return {
+    project: 0,
+    context: 0,
+    reconciliation: 0,
+    sourceAllocate: 0,
+    transactionAllocate: 0,
+    order: [],
+    expectedObservation: observation(),
+  };
 }
 
 function emptyCurrentEvidence(statement) {
@@ -175,14 +203,7 @@ function emptyCurrentEvidence(statement) {
 }
 
 test('changed admission fails closed before projection, allocators, reconciliation or lifecycle writes', async () => {
-  const calls = {
-    project: 0,
-    context: 0,
-    reconciliation: 0,
-    sourceAllocate: 0,
-    transactionAllocate: 0,
-    expectedObservation: observation(),
-  };
+  const calls = newCalls();
   let transactionCount = 0;
   let writeCount = 0;
   const inFlight = Object.freeze({
@@ -227,23 +248,12 @@ test('changed admission fails closed before projection, allocators, reconciliati
 
   assert.equal(transactionCount, 1);
   assert.equal(writeCount, 0);
-  assert.equal(calls.project, 0);
-  assert.equal(calls.context, 0);
-  assert.equal(calls.reconciliation, 0);
-  assert.equal(calls.sourceAllocate, 0);
-  assert.equal(calls.transactionAllocate, 0);
+  assert.deepEqual(calls.order, []);
   assert.equal(runner.lastResult, null);
 });
 
-test('happy path reuses the leased observation, consistent current evidence and existing lifecycle', async () => {
-  const calls = {
-    project: 0,
-    context: 0,
-    reconciliation: 0,
-    sourceAllocate: 0,
-    transactionAllocate: 0,
-    expectedObservation: observation(),
-  };
+test('happy path binds independent reconciliation request to the already prepared exact candidate', async () => {
+  const calls = newCalls();
   const observed = { transactionCount: 0, statements: [] };
   const adapter = new YdbAdapter({
     async executeRead() {
@@ -305,11 +315,14 @@ test('happy path reuses the leased observation, consistent current evidence and 
 
   await runner.runIncremental(calls.expectedObservation);
 
-  assert.equal(calls.project, 1);
-  assert.equal(calls.context, 1);
+  assert.deepEqual(calls.order, [
+    'project',
+    'context',
+    'source-allocate',
+    'transaction-allocate',
+    'reconciliation',
+  ]);
   assert.equal(calls.reconciliation, 1);
-  assert.equal(calls.sourceAllocate, 1);
-  assert.equal(calls.transactionAllocate, 1);
   assert.equal(runner.lastResult?.lifecycle.status, 'COMMITTED');
   assert.equal(runner.lastResult?.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
   assert.equal(observed.transactionCount, 4);
