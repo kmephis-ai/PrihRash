@@ -139,7 +139,7 @@ test('transaction read scope rejects WRITE statements before transport execution
   });
 
   await adapter.serializableReadWrite(async (transaction) => {
-    await assert.rejects(
+    assert.throws(
       () => transaction.read(writeStatement('UPDATE synthetic SET value = 1')),
       (error) => error instanceof YdbAdapterError && error.code === 'WRITE_REQUIRES_TRANSACTION',
     );
