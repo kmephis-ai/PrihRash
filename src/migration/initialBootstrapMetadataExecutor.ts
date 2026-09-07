@@ -1,6 +1,12 @@
 import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
+import {
+  initialBootstrapIdentityManifestReadStatement,
+  initialBootstrapIdentityManifestsEqual,
+  parseInitialBootstrapIdentityManifestRows,
+  type PreparedInitialBootstrapIdentityManifestWrite,
+} from './initialBootstrapIdentityManifest.js';
 import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
 import type { MigrationRun } from './migrationRunState.js';
 import {
@@ -29,12 +35,25 @@ interface RunReadRow {
   readonly error_code?: unknown;
 }
 
+interface IdentityManifestReadRow {
+  readonly source_snapshot_id?: unknown;
+  readonly source_snapshot_digest?: unknown;
+  readonly binding_count?: unknown;
+  readonly bindings?: unknown;
+  readonly run_state?: unknown;
+  readonly run_snapshot_digest?: unknown;
+  readonly snapshot_digest?: unknown;
+  readonly snapshot_row_count?: unknown;
+}
+
 export type InitialBootstrapMetadataExecutorErrorCode =
   | 'METADATA_WRITE_SET_INVALID'
+  | 'IDENTITY_MANIFEST_WRITE_INVALID'
   | 'IN_FLIGHT_RUN_EXISTS'
   | 'COMMITTED_BASELINE_EXISTS'
   | 'SNAPSHOT_READBACK_MISMATCH'
   | 'RUN_READBACK_MISMATCH'
+  | 'IDENTITY_MANIFEST_READBACK_MISMATCH'
   | 'CLAIM_READBACK_MISMATCH';
 
 export class InitialBootstrapMetadataExecutorError extends Error {
@@ -60,6 +79,29 @@ function validateWriteSet(writes: readonly PreparedBootstrapMetadataWrite[]): vo
   ) {
     throw new InitialBootstrapMetadataExecutorError('METADATA_WRITE_SET_INVALID');
   }
+}
+
+function identityManifestMatchesCandidate(
+  candidate: Readonly<InitialBootstrapCandidateEnvelope>,
+  write: Readonly<PreparedInitialBootstrapIdentityManifestWrite>,
+): boolean {
+  const manifest = write.manifest;
+  if (
+    write.role !== 'IDENTITY_MANIFEST'
+    || manifest.migrationRunId !== candidate.run.id
+    || manifest.sourceSnapshotId !== candidate.snapshot.id
+    || manifest.sourceSnapshotDigest !== candidate.snapshot.snapshotDigest
+    || manifest.bindings.length !== candidate.plan.candidates.length
+  ) return false;
+
+  return manifest.bindings.every((binding, index) => {
+    const source = candidate.plan.candidates[index];
+    return source !== undefined
+      && binding.sourceOrdinal === source.sourceOrdinal
+      && binding.rowHint === source.rowHint
+      && binding.rowDigest === source.digest
+      && binding.sourceRecordId === source.sourceRecordId;
+  });
 }
 
 function snapshotMatches(row: SnapshotReadRow, candidate: InitialBootstrapCandidateEnvelope): boolean {
@@ -105,8 +147,12 @@ export async function executeInitialBootstrapMetadataWrites(
   adapter: YdbAdapter,
   candidate: InitialBootstrapCandidateEnvelope,
   writes: readonly PreparedBootstrapMetadataWrite[],
+  identityManifestWrite: Readonly<PreparedInitialBootstrapIdentityManifestWrite>,
 ): Promise<void> {
   validateWriteSet(writes);
+  if (!identityManifestMatchesCandidate(candidate, identityManifestWrite)) {
+    throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_WRITE_INVALID');
+  }
   const snapshotWrite = writes[0];
   const runWrite = writes[1];
   if (snapshotWrite === undefined || runWrite === undefined) {
@@ -125,6 +171,7 @@ export async function executeInitialBootstrapMetadataWrites(
       + 'FROM migration_runs WHERE id = $id',
     { id: uuidParameter(candidate.run.id) },
   );
+  const identityManifestRead = initialBootstrapIdentityManifestReadStatement(candidate.run.id);
 
   await adapter.serializableReadWrite(async (transaction) => {
     const preAdmission = parseScheduledSyncAdmissionEvidence(
@@ -139,6 +186,7 @@ export async function executeInitialBootstrapMetadataWrites(
 
     await transaction.execute(snapshotWrite.statement);
     await transaction.execute(runWrite.statement);
+    await transaction.execute(identityManifestWrite.statement);
 
     const snapshotResult = await transaction.execute<SnapshotReadRow>(snapshotRead);
     if (snapshotResult.rows.length !== 1 || !snapshotMatches(snapshotResult.rows[0] ?? {}, candidate)) {
@@ -148,6 +196,25 @@ export async function executeInitialBootstrapMetadataWrites(
     const runResult = await transaction.execute<RunReadRow>(runRead);
     if (runResult.rows.length !== 1 || !runMatches(runResult.rows[0] ?? {}, candidate)) {
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
+    }
+
+    try {
+      const identityReadback = parseInitialBootstrapIdentityManifestRows(
+        candidate.run.id,
+        (await transaction.execute<IdentityManifestReadRow>(identityManifestRead)).rows,
+      );
+      if (
+        identityReadback.runState !== 'STAGING'
+        || identityReadback.runSnapshotDigest !== candidate.run.sourceSnapshotDigest
+        || identityReadback.snapshotDigest !== candidate.snapshot.snapshotDigest
+        || identityReadback.snapshotRowCount !== candidate.snapshot.rowCount
+        || !initialBootstrapIdentityManifestsEqual(identityReadback.manifest, identityManifestWrite.manifest)
+      ) {
+        throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READBACK_MISMATCH');
+      }
+    } catch (error) {
+      if (error instanceof InitialBootstrapMetadataExecutorError) throw error;
+      throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READBACK_MISMATCH');
     }
 
     const postAdmission = parseScheduledSyncAdmissionEvidence(
