@@ -12,6 +12,7 @@ const RUN_ID = '00000000-0000-0000-0000-000000001901';
 const ID_A = '00000000-0000-0000-0000-000000001902';
 const ID_B = '00000000-0000-0000-0000-000000001903';
 const ID_NEW = '00000000-0000-0000-0000-000000001904';
+const ID_C = '00000000-0000-0000-0000-000000001905';
 const OBSERVED_AT = '2026-09-07T05:10:00.000Z';
 
 function payload(description) {
@@ -52,15 +53,17 @@ function stagingRun(counters = {}) {
 function mixedLineage() {
   return buildIncrementalLineagePlan(
     [
-      { sourceRecordId: ID_A, rowHint: 2, digest: 'a' },
-      { sourceRecordId: ID_B, rowHint: 4, digest: 'b' },
+      { sourceRecordId: ID_B, rowHint: 2, digest: 'anchor-left' },
+      { sourceRecordId: ID_A, rowHint: 3, digest: 'a' },
+      { sourceRecordId: ID_C, rowHint: 4, digest: 'anchor-right' },
     ],
     [
-      { rowHint: 2, digest: 'a2' },
-      { rowHint: 3, digest: 'new' },
-      { rowHint: 4, digest: 'b' },
+      { rowHint: 2, digest: 'anchor-left' },
+      { rowHint: 3, digest: 'a2' },
+      { rowHint: 4, digest: 'anchor-right' },
+      { rowHint: 5, digest: 'new' },
     ],
-    [{ currentRowHint: 3, sourceRecordId: ID_NEW }],
+    [{ currentRowHint: 5, sourceRecordId: ID_NEW }],
   );
 }
 
@@ -71,8 +74,8 @@ test('plans first-sight and revised evidence only, preserving deterministic revi
     lineage,
     OBSERVED_AT,
     [
-      { currentRowHint: 2, payload: payload('Synthetic revised') },
-      { currentRowHint: 3, payload: payload('Synthetic inserted') },
+      { currentRowHint: 3, payload: payload('Synthetic revised') },
+      { currentRowHint: 5, payload: payload('Synthetic inserted') },
     ],
     [{ sourceRecordId: ID_A.toUpperCase(), currentRevision: 5 }],
     [{ sourceRecordId: ID_A, changeClass: 'OWNER_CORRECTION' }],
@@ -88,14 +91,14 @@ test('plans first-sight and revised evidence only, preserving deterministic revi
     {
       sourceRecordId: ID_A,
       revision: 6,
-      rowHint: 2,
+      rowHint: 3,
       rowDigest: 'a2',
       changeClass: 'OWNER_CORRECTION',
     },
     {
       sourceRecordId: ID_NEW,
       revision: 1,
-      rowHint: 3,
+      rowHint: 5,
       rowDigest: 'new',
       changeClass: null,
     },
@@ -187,7 +190,7 @@ test('payload observations must exactly cover INSERTED and REVISED current row h
       stagingRun(lineage.counters),
       lineage,
       OBSERVED_AT,
-      [{ currentRowHint: 2, payload: payload('only revised') }],
+      [{ currentRowHint: 3, payload: payload('only revised') }],
       [{ sourceRecordId: ID_A, currentRevision: 1 }],
       [{ sourceRecordId: ID_A, changeClass: 'OWNER_CORRECTION' }],
     ),
@@ -201,8 +204,8 @@ test('payload observations must exactly cover INSERTED and REVISED current row h
       lineage,
       OBSERVED_AT,
       [
-        { currentRowHint: 2, payload: payload('revised') },
-        { currentRowHint: 3, payload: payload('inserted') },
+        { currentRowHint: 3, payload: payload('revised') },
+        { currentRowHint: 5, payload: payload('inserted') },
         { currentRowHint: 4, payload: payload('extra unchanged') },
       ],
       [{ sourceRecordId: ID_A, currentRevision: 1 }],
@@ -218,9 +221,9 @@ test('payload observations must exactly cover INSERTED and REVISED current row h
       lineage,
       OBSERVED_AT,
       [
-        { currentRowHint: 2, payload: payload('one') },
-        { currentRowHint: 2, payload: payload('duplicate') },
-        { currentRowHint: 3, payload: payload('inserted') },
+        { currentRowHint: 3, payload: payload('one') },
+        { currentRowHint: 3, payload: payload('duplicate') },
+        { currentRowHint: 5, payload: payload('inserted') },
       ],
       [{ sourceRecordId: ID_A, currentRevision: 1 }],
       [{ sourceRecordId: ID_A, changeClass: 'OWNER_CORRECTION' }],
