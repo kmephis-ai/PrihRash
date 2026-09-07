@@ -96,6 +96,7 @@ export type IncrementalSemanticTransitionErrorCode =
   | 'UNRESOLVED_OBSERVATION_MISMATCH'
   | 'DUPLICATE_REVISION_SOURCE_ID'
   | 'MISSING_REVISED_CHANGE_CLASS'
+  | 'INVALID_REVISED_CHANGE_CLASS'
   | 'REVISION_INTENT_MISMATCH';
 
 export class IncrementalSemanticTransitionError extends Error {
@@ -111,6 +112,9 @@ export class IncrementalSemanticTransitionError extends Error {
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const CLASSIFICATIONS: readonly SourceRowClassification[] = [
   'FINANCIAL_RECORD', 'LEGACY_PERIOD_CLOSE', 'NON_FINANCIAL', 'INVALID', 'AMBIGUOUS',
+];
+const REVISED_CHANGE_CLASSES: readonly Exclude<SourceChangeClass, 'NO_CHANGE'>[] = [
+  'WORKFLOW_TRANSFORM', 'OWNER_CORRECTION', 'AMBIGUOUS_CHANGE',
 ];
 
 function normalizedId(value: string): string {
@@ -129,6 +133,7 @@ function previousEvidenceMap(
 ): ReadonlyMap<string, Readonly<IncrementalPreviousSemanticEvidence>> {
   const required = requiredPreviousIds(deltaPlan);
   const byId = new Map<string, Readonly<IncrementalPreviousSemanticEvidence>>();
+
   for (const item of evidence) {
     if (!UUID_PATTERN.test(item.sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('INVALID_PREVIOUS_SOURCE_ID');
@@ -136,6 +141,7 @@ function previousEvidenceMap(
     if (!CLASSIFICATIONS.includes(item.classification)) {
       throw new IncrementalSemanticTransitionError('INVALID_PREVIOUS_CLASSIFICATION');
     }
+
     const sourceRecordId = normalizedId(item.sourceRecordId);
     if (byId.has(sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('DUPLICATE_PREVIOUS_SOURCE_ID');
@@ -143,6 +149,7 @@ function previousEvidenceMap(
     if (!required.has(sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('EXTRA_PREVIOUS_SEMANTIC_EVIDENCE');
     }
+
     if (item.transactionId === null) {
       if (item.transactionVersion !== null) {
         throw new IncrementalSemanticTransitionError('INVALID_PREVIOUS_TRANSACTION_LINK');
@@ -154,12 +161,14 @@ function previousEvidenceMap(
     ) {
       throw new IncrementalSemanticTransitionError('INVALID_PREVIOUS_TRANSACTION_LINK');
     }
+
     byId.set(sourceRecordId, Object.freeze({
       ...item,
       sourceRecordId,
       transactionId: item.transactionId?.toLowerCase() ?? null,
     }));
   }
+
   for (const sourceRecordId of required) {
     if (!byId.has(sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('MISSING_PREVIOUS_SEMANTIC_EVIDENCE');
@@ -174,6 +183,7 @@ function observationMaps(plan: Readonly<IncrementalCurrentObservationSemanticPla
 } {
   const byRowHint = new Map<number, Readonly<IncrementalCurrentObservationSemanticOutcome>>();
   const unresolved: Readonly<IncrementalCurrentObservationSemanticOutcome>[] = [];
+
   for (const outcome of plan.outcomes) {
     if (byRowHint.has(outcome.currentRowHint)) {
       throw new IncrementalSemanticTransitionError('DUPLICATE_OBSERVATION_ROW_HINT');
@@ -207,6 +217,7 @@ function revisionChangeMap(
     .filter((intent): intent is Extract<IncrementalSourceDeltaIntent, { kind: 'REVISE' }> => intent.kind === 'REVISE')
     .map((intent) => [normalizedId(intent.sourceRecordId), intent] as const));
   const byId = new Map<string, Exclude<SourceChangeClass, 'NO_CHANGE'>>();
+
   for (const revision of revisionPlan.revisions) {
     const sourceRecordId = normalizedId(revision.sourceRecordId);
     const reviseIntent = expected.get(sourceRecordId);
@@ -214,9 +225,11 @@ function revisionChangeMap(
     if (byId.has(sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('DUPLICATE_REVISION_SOURCE_ID');
     }
+    if (revision.changeClass === null || !REVISED_CHANGE_CLASSES.includes(revision.changeClass)) {
+      throw new IncrementalSemanticTransitionError('INVALID_REVISED_CHANGE_CLASS');
+    }
     if (
-      revision.changeClass === null
-      || revision.revision !== reviseIntent.currentRevision
+      revision.revision !== reviseIntent.currentRevision
       || revision.rowHint !== reviseIntent.currentRowHint
       || revision.rowDigest !== reviseIntent.currentDigest
     ) {
@@ -224,6 +237,7 @@ function revisionChangeMap(
     }
     byId.set(sourceRecordId, revision.changeClass);
   }
+
   for (const sourceRecordId of expected.keys()) {
     if (!byId.has(sourceRecordId)) {
       throw new IncrementalSemanticTransitionError('MISSING_REVISED_CHANGE_CLASS');
@@ -243,21 +257,21 @@ function blockedDecision(
       reason: 'INVALID_CURRENT_OBSERVATION' as const,
     });
   }
-  if (outcome.classification === 'FINANCIAL_RECORD') {
-    if (outcome.financialProjection.status === 'FAILED') {
-      return Object.freeze({
-        kind: 'BLOCK_VALIDATION' as const,
-        sourceRecordId,
-        reason: 'FINANCIAL_PROJECTION_FAILED' as const,
-      });
-    }
-    if (outcome.financialProjection.status === 'BLOCKED') {
-      return Object.freeze({
-        kind: 'BLOCK_VALIDATION' as const,
-        sourceRecordId,
-        reason: 'FINANCIAL_PROJECTION_BLOCKED' as const,
-      });
-    }
+  if (outcome.classification !== 'FINANCIAL_RECORD') return null;
+
+  if (outcome.financialProjection.status === 'FAILED') {
+    return Object.freeze({
+      kind: 'BLOCK_VALIDATION' as const,
+      sourceRecordId,
+      reason: 'FINANCIAL_PROJECTION_FAILED' as const,
+    });
+  }
+  if (outcome.financialProjection.status === 'BLOCKED') {
+    return Object.freeze({
+      kind: 'BLOCK_VALIDATION' as const,
+      sourceRecordId,
+      reason: 'FINANCIAL_PROJECTION_BLOCKED' as const,
+    });
   }
   return null;
 }
@@ -294,6 +308,7 @@ export function buildIncrementalSemanticTransitionPlan(
 
   for (const intent of deltaPlan.intents) {
     const sourceRecordId = normalizedId(intent.sourceRecordId);
+
     if (intent.kind === 'MARK_MISSING') {
       const previous = previousById.get(sourceRecordId);
       if (previous === undefined) {
@@ -351,6 +366,7 @@ export function buildIncrementalSemanticTransitionPlan(
     if (previous === undefined) {
       throw new IncrementalSemanticTransitionError('MISSING_PREVIOUS_SEMANTIC_EVIDENCE');
     }
+
     if (intent.kind === 'TOUCH') {
       decisions.push(
         outcome.classification === previous.classification
@@ -374,12 +390,18 @@ export function buildIncrementalSemanticTransitionPlan(
     if (changeClass === undefined) {
       throw new IncrementalSemanticTransitionError('MISSING_REVISED_CHANGE_CLASS');
     }
+
     if (changeClass === 'AMBIGUOUS_CHANGE') {
       decisions.push(reviewPreserve(
-        sourceRecordId, 'AMBIGUOUS_CHANGE', previous, outcome.classification, changeClass,
+        sourceRecordId,
+        'AMBIGUOUS_CHANGE',
+        previous,
+        outcome.classification,
+        changeClass,
       ));
       continue;
     }
+
     if (changeClass === 'WORKFLOW_TRANSFORM') {
       if (
         previous.classification === 'FINANCIAL_RECORD'
@@ -393,7 +415,11 @@ export function buildIncrementalSemanticTransitionPlan(
         }));
       } else {
         decisions.push(reviewPreserve(
-          sourceRecordId, 'SEMANTIC_TRANSITION', previous, outcome.classification, changeClass,
+          sourceRecordId,
+          'SEMANTIC_TRANSITION',
+          previous,
+          outcome.classification,
+          changeClass,
         ));
       }
       continue;
@@ -415,13 +441,18 @@ export function buildIncrementalSemanticTransitionPlan(
       }));
     } else {
       decisions.push(reviewPreserve(
-        sourceRecordId, 'SEMANTIC_TRANSITION', previous, outcome.classification, changeClass,
+        sourceRecordId,
+        'SEMANTIC_TRANSITION',
+        previous,
+        outcome.classification,
+        changeClass,
       ));
     }
   }
 
   const expectedUnresolvedRows = new Set(deltaPlan.unresolvedBlocks.flatMap((block) => block.currentRowHints));
   const unresolvedObservations: Readonly<IncrementalUnresolvedSemanticObservation>[] = [];
+
   for (const outcome of observations.unresolved) {
     if (!expectedUnresolvedRows.has(outcome.currentRowHint)) {
       throw new IncrementalSemanticTransitionError('UNRESOLVED_OBSERVATION_MISMATCH');
@@ -434,6 +465,7 @@ export function buildIncrementalSemanticTransitionPlan(
       blocksValidation: outcome.classification === 'INVALID',
     }));
   }
+
   if (unresolvedObservations.length !== expectedUnresolvedRows.size) {
     throw new IncrementalSemanticTransitionError('UNRESOLVED_OBSERVATION_MISMATCH');
   }
