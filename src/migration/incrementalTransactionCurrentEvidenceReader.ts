@@ -9,7 +9,7 @@ import {
   type TransactionType,
   validateTransaction,
 } from '../domain/transaction.js';
-import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import type { IncrementalPreviousTransactionCurrentEvidence } from './incrementalTransactionCurrentCandidate.js';
 
 interface TransactionCurrentEvidenceRow {
@@ -135,14 +135,14 @@ function parseRow(row: Readonly<TransactionCurrentEvidenceRow>): Readonly<Increm
 }
 
 export async function readIncrementalTransactionCurrentEvidence(
-  adapter: YdbAdapter,
+  reader: YdbReadScope,
 ): Promise<readonly Readonly<IncrementalPreviousTransactionCurrentEvidence>[]> {
   const statement = readStatement(
     'SELECT id, type, occurred_on, record_granularity, date_precision, aggregate_period_month, financial_period_id, '
       + 'period_assignment_quality, amount_minor, currency, from_account_id, to_account_id, category_id, '
       + 'paid_by_member_id, description, note, status, analytics_state, flow_kind, version FROM transactions',
   );
-  const result = await adapter.read<TransactionCurrentEvidenceRow>(statement);
+  const result = await reader.read<TransactionCurrentEvidenceRow>(statement);
 
   const seen = new Set<string>();
   const evidence: Readonly<IncrementalPreviousTransactionCurrentEvidence>[] = [];
