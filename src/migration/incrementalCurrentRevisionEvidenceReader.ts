@@ -1,5 +1,5 @@
 import { SOURCE_SHEET_NAME } from '../integration/google/sourceSchema.js';
-import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { utf8Parameter } from '../integration/ydb/parameters.js';
 import type { RawPayloadV2 } from './rawPayloadDecoder.js';
 import { normalizeRawPayloadV2 } from './rawPayloadProvenance.js';
@@ -136,7 +136,7 @@ function parseRow(row: Readonly<CurrentRevisionEvidenceRow>): Readonly<Increment
 }
 
 export async function readIncrementalCurrentRevisionEvidence(
-  adapter: YdbAdapter,
+  reader: YdbReadScope,
   sources: readonly Readonly<IncrementalPreviousSourceCurrentEvidence>[],
 ): Promise<Readonly<IncrementalCurrentRevisionEvidenceSnapshot>> {
   const expectedById = sourceMap(sources);
@@ -151,7 +151,7 @@ export async function readIncrementalCurrentRevisionEvidence(
       source_sheet: utf8Parameter(SOURCE_SHEET_NAME),
     },
   );
-  const result = await adapter.read<CurrentRevisionEvidenceRow>(statement);
+  const result = await reader.read<CurrentRevisionEvidenceRow>(statement);
 
   const byId = new Map<string, Readonly<IncrementalCurrentRevisionPayloadEvidence>>();
   for (const row of result.rows) {
