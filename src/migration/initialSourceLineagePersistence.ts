@@ -11,7 +11,10 @@ import {
   type YdbStatement,
   writeStatement,
 } from '../integration/ydb/adapter.js';
-import type { InitialSourceLineageProjection } from './initialSourceLineage.js';
+import type {
+  InitialSourceLineageProjection,
+  InitialSourceRecordRevisionProjection,
+} from './initialSourceLineage.js';
 
 export type InitialSourceLineageWriteRole = 'VERIFIED_CURRENT' | 'STAGING_EVIDENCE';
 
@@ -24,7 +27,9 @@ export interface PreparedInitialSourceLineageWrite {
 export type InitialSourceLineagePersistenceErrorCode =
   | 'LINEAGE_LENGTH_MISMATCH'
   | 'REVISION_RECORD_MISMATCH'
-  | 'INVALID_INITIAL_REVISION';
+  | 'INVALID_INITIAL_REVISION'
+  | 'DUPLICATE_REVISION_SOURCE_ID'
+  | 'MIXED_REVISION_RUN';
 
 export class InitialSourceLineagePersistenceError extends Error {
   readonly code: InitialSourceLineagePersistenceErrorCode;
@@ -78,6 +83,25 @@ function validateProjection(projection: InitialSourceLineageProjection): void {
   }
 }
 
+function validateRevisions(revisions: readonly InitialSourceRecordRevisionProjection[]): void {
+  const sourceIds = new Set<string>();
+  let runId: string | null = null;
+  for (const revision of revisions) {
+    if (revision.revision !== 1) {
+      throw new InitialSourceLineagePersistenceError('INVALID_INITIAL_REVISION');
+    }
+    const sourceId = revision.sourceRecordId.toLowerCase();
+    if (sourceIds.has(sourceId)) {
+      throw new InitialSourceLineagePersistenceError('DUPLICATE_REVISION_SOURCE_ID');
+    }
+    sourceIds.add(sourceId);
+    if (runId === null) runId = revision.migrationRunId.toLowerCase();
+    else if (runId !== revision.migrationRunId.toLowerCase()) {
+      throw new InitialSourceLineagePersistenceError('MIXED_REVISION_RUN');
+    }
+  }
+}
+
 function sourceRecordStatement(record: InitialSourceLineageProjection['records'][number]): YdbStatement {
   const parameters = {
     id: uuidParameter(record.id),
@@ -109,7 +133,7 @@ function sourceRecordStatement(record: InitialSourceLineageProjection['records']
 }
 
 function sourceRevisionStatement(
-  revision: InitialSourceLineageProjection['revisions'][number],
+  revision: InitialSourceRecordRevisionProjection,
 ): YdbStatement {
   const parameters = {
     source_record_id: uuidParameter(revision.sourceRecordId),
@@ -123,12 +147,22 @@ function sourceRevisionStatement(
   };
 
   return writeStatement(
-    'UPSERT INTO source_record_revisions '
+    'INSERT INTO source_record_revisions '
       + '(source_record_id, revision, migration_run_id, observed_at, row_hint, row_digest, change_class, raw_payload) '
       + 'VALUES ($source_record_id, $revision, $migration_run_id, $observed_at, $row_hint, $row_digest, '
       + '$change_class, $raw_payload)',
     parameters,
   );
+}
+
+export function prepareInitialSourceRevisionWrites(
+  revisions: readonly InitialSourceRecordRevisionProjection[],
+): readonly Readonly<PreparedInitialSourceLineageWrite>[] {
+  validateRevisions(revisions);
+  return Object.freeze(revisions.map((revision) => preparedWrite(
+    sourceRevisionStatement(revision),
+    'STAGING_EVIDENCE',
+  )));
 }
 
 export function prepareInitialSourceLineageWrites(
