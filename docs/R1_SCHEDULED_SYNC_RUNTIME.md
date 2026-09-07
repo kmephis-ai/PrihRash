@@ -40,6 +40,26 @@
 
 Это устраняет TOCTOU между admission и incremental processing, не превращая raw financial payload в operational evidence.
 
+## Google read boundary
+
+Concrete Google Sheets reader запрашивает только canonical `Ответы на форму (11)` range `A:K`, использует `userEnteredValue`, проверяет exact spreadsheet/sheet metadata и source schema fail-closed, затем строит immutable observation. Typed A–K rows преобразуются одним canonical projection в `RawPayloadV2 + row digest`, поэтому sequence lineage и revision evidence используют один и тот же source fact.
+
+## Atomic run claim
+
+Read-only admission не является distributed lock. Два scheduler invocation могут одновременно получить `START_INCREMENTAL`, поэтому STAGING run нельзя просто записывать после preflight без повторной проверки provider state.
+
+Перед первой metadata mutation runtime обязан иметь уже рассчитанный candidate `MigrationRun` с финальными immutable counters и затем выполнить atomic claim:
+
+1. открыть `YdbAdapter.serializableReadWrite`;
+2. внутри этой transaction повторно прочитать relevant `COMMITTED/STAGING/VALIDATED` run evidence;
+3. fail-closed, если существует любой `STAGING/VALIDATED` run;
+4. exact latest `COMMITTED` baseline должен совпасть с baseline, использованным для candidate computation;
+5. только после этого выполнить `INSERT INTO migration_runs` нового `STAGING` run — не `UPSERT`;
+6. read-back того же run внутри transaction должен точно совпасть с candidate;
+7. serialization conflict / commit-outcome-unknown не превращается в success и уходит в существующий recovery boundary.
+
+Claim не добавляет lock table или новый lifecycle state: serializable transaction связывает recheck baseline и единственный STAGING insert. Financial current-state promotion по-прежнему происходит только после candidate validation через существующий atomic promotion path.
+
 ## Следующая runtime boundary
 
-Следующий S-unit должен добавить concrete Google Sheets read adapter для immutable full-snapshot observation и связать его с существующим incremental pipeline. Таймер/cron не должен содержать financial semantics: scheduler только инициирует одну runtime invocation, а policy остаётся в application layer.
+Следующий S-unit должен материализовать verified current YDB evidence, нужный существующему incremental candidate pipeline, а затем собрать thin application runner вокруг уже доказанных lineage/semantic/delta/validation/promotion компонентов. Таймер/cron не содержит financial semantics: scheduler только инициирует одну runtime invocation, policy остаётся в application layer.

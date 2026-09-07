@@ -1,4 +1,4 @@
-import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { readStatement, type YdbStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import type { MigrationRun, MigrationRunState } from './migrationRunState.js';
 
 export interface ScheduledSyncAdmissionEvidence {
@@ -6,7 +6,7 @@ export interface ScheduledSyncAdmissionEvidence {
   readonly incompleteRuns: readonly Readonly<MigrationRun>[];
 }
 
-interface MigrationRunEvidenceRow {
+export interface MigrationRunEvidenceRow {
   readonly id?: unknown;
   readonly started_at?: unknown;
   readonly finished_at?: unknown;
@@ -110,20 +110,21 @@ function compareCommitted(left: Readonly<MigrationRun>, right: Readonly<Migratio
   return left.id.localeCompare(right.id);
 }
 
-export async function readScheduledSyncAdmissionEvidence(
-  adapter: YdbAdapter,
-): Promise<Readonly<ScheduledSyncAdmissionEvidence>> {
-  const statement = readStatement(
+export function scheduledSyncAdmissionEvidenceStatement(): Readonly<YdbStatement> {
+  return readStatement(
     "SELECT id, started_at, finished_at, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, "
       + "state, rows_seen, rows_new, rows_changed, rows_missing, rows_ambiguous, error_code "
       + "FROM migration_runs WHERE state IN ('COMMITTED', 'STAGING', 'VALIDATED')",
   );
-  const result = await adapter.read<MigrationRunEvidenceRow>(statement);
+}
 
+export function parseScheduledSyncAdmissionEvidence(
+  rows: readonly Readonly<MigrationRunEvidenceRow>[],
+): Readonly<ScheduledSyncAdmissionEvidence> {
   const seen = new Set<string>();
   const committed: Readonly<MigrationRun>[] = [];
   const incomplete: Readonly<MigrationRun>[] = [];
-  for (const row of result.rows) {
+  for (const row of rows) {
     const run = parseRow(row);
     if (seen.has(run.id)) {
       throw new ScheduledSyncAdmissionEvidenceError('DUPLICATE_RUN_EVIDENCE');
@@ -140,4 +141,11 @@ export async function readScheduledSyncAdmissionEvidence(
     committedBaselineRun: committed.at(-1) ?? null,
     incompleteRuns: Object.freeze(incomplete),
   });
+}
+
+export async function readScheduledSyncAdmissionEvidence(
+  adapter: YdbAdapter,
+): Promise<Readonly<ScheduledSyncAdmissionEvidence>> {
+  const result = await adapter.read<MigrationRunEvidenceRow>(scheduledSyncAdmissionEvidenceStatement());
+  return parseScheduledSyncAdmissionEvidence(result.rows);
 }
