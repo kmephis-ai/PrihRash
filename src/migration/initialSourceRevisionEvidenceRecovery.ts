@@ -57,8 +57,13 @@ function positiveInteger(value: unknown): number {
   return value;
 }
 
-function nonEmptyString(value: unknown): string {
+function canonicalString(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
+  return value;
+}
+
+function digestString(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) malformed();
   return value;
 }
 
@@ -119,9 +124,9 @@ function existingMatches(
 ): boolean {
   return positiveInteger(row.revision) === 1
     && uuid(row.migration_run_id) === expected.migrationRunId.toLowerCase()
-    && nonEmptyString(row.observed_at) === expected.observedAt
+    && canonicalString(row.observed_at) === expected.observedAt
     && positiveInteger(row.row_hint) === expected.rowHint
-    && nonEmptyString(row.row_digest) === expected.rowDigest
+    && digestString(row.row_digest) === expected.rowDigest
     && row.change_class === null
     && canonicalRawPayload(row.raw_payload) === expected.rawPayload;
 }
