@@ -49,7 +49,7 @@ export class IncrementalTransactionCurrentEvidenceReaderError extends Error {
   }
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const DATE_PATTERN = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/;
 
 function malformed(): never {
@@ -66,10 +66,18 @@ function optionalUuid(value: unknown): string | null {
   return requiredUuid(value);
 }
 
-function date(value: unknown, nullable = false): string | null {
-  if (value === null && nullable) return null;
-  if (typeof value !== 'string' || !DATE_PATTERN.test(value) || !Number.isFinite(Date.parse(`${value}T00:00:00.000Z`))) malformed();
+function calendarDate(value: unknown): string {
+  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) malformed();
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) malformed();
   return value;
+}
+
+function optionalAggregateMonth(value: unknown): string | null {
+  if (value === null) return null;
+  const parsed = calendarDate(value);
+  if (!parsed.endsWith('-01')) malformed();
+  return parsed;
 }
 
 function enumValue<T extends string>(value: unknown, allowed: readonly T[]): T {
@@ -96,10 +104,10 @@ function parseRow(row: Readonly<TransactionCurrentEvidenceRow>): Readonly<Increm
   const id = requiredUuid(row.id);
   const transaction: CanonicalTransaction = {
     type: enumValue<TransactionType>(row.type, ['EXPENSE', 'INCOME', 'TRANSFER']),
-    occurredOn: date(row.occurred_on) as string,
+    occurredOn: calendarDate(row.occurred_on),
     recordGranularity: enumValue<RecordGranularity>(row.record_granularity, ['TRANSACTION', 'PERIOD_AGGREGATE', 'UNKNOWN']),
     datePrecision: enumValue<DatePrecision>(row.date_precision, ['DAY', 'MONTH', 'UNKNOWN']),
-    aggregatePeriodMonth: date(row.aggregate_period_month, true),
+    aggregatePeriodMonth: optionalAggregateMonth(row.aggregate_period_month),
     financialPeriodId: optionalUuid(row.financial_period_id),
     periodAssignmentQuality: enumValue<PeriodAssignmentQuality>(row.period_assignment_quality, ['EXPLICIT', 'DERIVED', 'LEGACY_AMBIGUOUS', 'UNASSIGNED']),
     amountMinor: positiveInteger(row.amount_minor),
@@ -112,7 +120,9 @@ function parseRow(row: Readonly<TransactionCurrentEvidenceRow>): Readonly<Increm
     note: nullableText(row.note),
     status: enumValue<TransactionStatus>(row.status, ['POSTED', 'VOIDED']),
     analyticsState: enumValue<AnalyticsState>(row.analytics_state, ['INCLUDED', 'EXCLUDED']),
-    flowKind: row.flow_kind === null ? null : enumValue<FlowKind>(row.flow_kind, ['OWN_FUNDS_TRANSFER', 'CREDIT_DRAW', 'CREDIT_REPAYMENT']),
+    flowKind: row.flow_kind === null
+      ? null
+      : enumValue<FlowKind>(row.flow_kind, ['OWN_FUNDS_TRANSFER', 'CREDIT_DRAW', 'CREDIT_REPAYMENT']),
   };
 
   if (validateTransaction(transaction, { categoryKind: null }).length !== 0) malformed();
