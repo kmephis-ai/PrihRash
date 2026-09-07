@@ -86,19 +86,21 @@ function revisions() {
   });
 }
 
-test('compiles guarded transaction writes before source current writes and reuses staged revisions', () => {
+test('compiles transactions, immutable revisions, then source current writes into one atomic preflight', () => {
   const result = prepareIncrementalCurrentWrites(validatedRun(), deltaPlan(), revisions(), PROMOTED_AT);
 
   assert.equal(result.preflight.eligible, true);
   assert.deepEqual(result.writes.map((write) => [write.role, write.entityId]), [
     ['TRANSACTION', id(102)],
     ['TRANSACTION', id(104)],
+    ['SOURCE_REVISION', id(2)],
+    ['SOURCE_REVISION', id(4)],
     ['SOURCE_RECORD', id(2)],
     ['SOURCE_RECORD', id(3)],
     ['SOURCE_RECORD', id(4)],
   ]);
   assert.equal(result.writes.every((write) => write.expectedReturnedRowCount === 1), true);
-  assert.equal(result.writes.some((write) => write.statement.text.includes('source_record_revisions')), false);
+  assert.equal(result.writes.filter((write) => write.statement.text.includes('source_record_revisions')).length, 2);
 
   const replace = result.writes[0];
   assert.match(replace.statement.text, /^UPDATE transactions SET /);
@@ -114,7 +116,25 @@ test('compiles guarded transaction writes before source current writes and reuse
   assert.deepEqual(createTx.statement.parameters.created_at, { type: 'Timestamp', value: PROMOTED_AT });
   assert.deepEqual(createTx.statement.parameters.updated_at, { type: 'Timestamp', value: PROMOTED_AT });
 
-  const revisedSource = result.writes[2];
+  const revisedRevision = result.writes[2];
+  assert.match(revisedRevision.statement.text, /^INSERT INTO source_record_revisions /);
+  assert.match(revisedRevision.statement.text, /RETURNING source_record_id$/);
+  assert.deepEqual(revisedRevision.statement.parameters.source_record_id, { type: 'Uuid', value: id(2) });
+  assert.deepEqual(revisedRevision.statement.parameters.revision, { type: 'Uint64', value: 3n });
+  assert.deepEqual(revisedRevision.statement.parameters.migration_run_id, { type: 'Uuid', value: RUN_ID });
+  assert.deepEqual(revisedRevision.statement.parameters.observed_at, { type: 'Timestamp', value: PROMOTED_AT });
+  assert.deepEqual(revisedRevision.statement.parameters.row_hint, { type: 'Uint64', value: 21n });
+  assert.deepEqual(revisedRevision.statement.parameters.row_digest, { type: 'String', value: 'new-2' });
+  assert.deepEqual(revisedRevision.statement.parameters.change_class, { type: 'Utf8', value: 'OWNER_CORRECTION' });
+  assert.deepEqual(revisedRevision.statement.parameters.raw_payload, { type: 'JsonDocument', value: '{"v":2}' });
+
+  const insertedRevision = result.writes[3];
+  assert.deepEqual(insertedRevision.statement.parameters.source_record_id, { type: 'Uuid', value: id(4) });
+  assert.deepEqual(insertedRevision.statement.parameters.revision, { type: 'Uint64', value: 1n });
+  assert.deepEqual(insertedRevision.statement.parameters.change_class, { type: 'Utf8', value: null });
+  assert.deepEqual(insertedRevision.statement.parameters.raw_payload, { type: 'JsonDocument', value: '{"v":4}' });
+
+  const revisedSource = result.writes[4];
   assert.match(revisedSource.statement.text, /^UPDATE source_records SET /);
   assert.match(revisedSource.statement.text, /current_revision = \$expected_current_revision/);
   assert.match(revisedSource.statement.text, /current_digest = \$expected_current_digest/);
@@ -124,11 +144,11 @@ test('compiles guarded transaction writes before source current writes and reuse
   assert.deepEqual(revisedSource.statement.parameters.expected_current_revision, { type: 'Uint64', value: 2n });
   assert.deepEqual(revisedSource.statement.parameters.expected_transaction_id, { type: 'Uuid', value: id(102) });
 
-  const missingSource = result.writes[3];
+  const missingSource = result.writes[5];
   assert.deepEqual(missingSource.statement.parameters.current_revision, { type: 'Uint64', value: 3n });
   assert.deepEqual(missingSource.statement.parameters.state, { type: 'Utf8', value: 'MISSING' });
 
-  const createSource = result.writes[4];
+  const createSource = result.writes[6];
   assert.match(createSource.statement.text, /^INSERT INTO source_records /);
   assert.match(createSource.statement.text, /RETURNING id$/);
   assert.equal(Object.isFrozen(result), true);
@@ -155,5 +175,15 @@ test('revision coverage is exact and promotion blockers fail closed', () => {
   assert.throws(
     () => prepareIncrementalCurrentWrites(run, { ...delta, promotionBlocker: 'UNRESOLVED_LINEAGE' }, revisions(), PROMOTED_AT),
     (error) => error instanceof IncrementalCurrentPersistenceError && error.code === 'PROMOTION_BLOCKED',
+  );
+});
+
+test('malformed staged revision payload cannot enter the atomic write set', () => {
+  const invalid = revisions().revisions.map((revision) => (
+    revision.sourceRecordId === id(2) ? { ...revision, rawPayload: '{bad json' } : revision
+  ));
+  assert.throws(
+    () => prepareIncrementalCurrentWrites(validatedRun(), deltaPlan(), { revisions: invalid }, PROMOTED_AT),
+    (error) => error?.code === 'INVALID_JSON_DOCUMENT',
   );
 });
