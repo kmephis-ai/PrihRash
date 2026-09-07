@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import type { IncrementalSourceRecordAssignmentRequest } from './incrementalLineagePlan.js';
+import type { IncrementalTransactionIdentityAssignmentRequest } from './incrementalTransactionIdentityRequests.js';
 import type {
   IncrementalSourceIdentityAllocator,
   IncrementalTransactionIdentityAllocator,
@@ -80,7 +82,7 @@ export function createScheduledIncrementalRuntimePrimitives(
   }
 
   const sourceIdentityAllocator: IncrementalSourceIdentityAllocator = Object.freeze({
-    async allocate(requests) {
+    async allocate(requests: readonly Readonly<IncrementalSourceRecordAssignmentRequest>[]) {
       return Object.freeze(requests.map((request) => Object.freeze({
         currentRowHint: request.currentRowHint,
         sourceRecordId: nextUuid(),
@@ -89,7 +91,7 @@ export function createScheduledIncrementalRuntimePrimitives(
   });
 
   const transactionIdentityAllocator: IncrementalTransactionIdentityAllocator = Object.freeze({
-    async allocate(requests) {
+    async allocate(requests: readonly Readonly<IncrementalTransactionIdentityAssignmentRequest>[]) {
       return Object.freeze(requests.map((request) => Object.freeze({
         sourceRecordId: request.sourceRecordId,
         transactionId: nextUuid(),
