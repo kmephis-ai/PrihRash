@@ -1,12 +1,12 @@
 import type { CanonicalTransaction } from '../domain/transaction.js';
-import { type YdbParameter, dateParameter, int64Parameter, jsonDocumentParameter, stringParameter, timestampParameter, uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import { type YdbParameter, dateParameter, int64Parameter, stringParameter, timestampParameter, uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import { type YdbStatement, writeStatement } from '../integration/ydb/adapter.js';
 import { assessAtomicPromotionWrites, type AtomicPromotionPreflightAssessment, type PromotionWrite } from './atomicPromotion.js';
 import type { IncrementalCurrentDeltaPlan, IncrementalSourceCurrentDeltaIntent, IncrementalTransactionCurrentDeltaIntent } from './incrementalCurrentDelta.js';
 import type { IncrementalRevisionEvidencePlan, IncrementalSourceRecordRevisionProjection } from './incrementalRevisionEvidence.js';
 import type { MigrationRun } from './migrationRunState.js';
 
-export type IncrementalPromotionWriteRole = 'SOURCE_REVISION' | 'TRANSACTION' | 'SOURCE_RECORD';
+export type IncrementalPromotionWriteRole = 'TRANSACTION' | 'SOURCE_RECORD';
 
 export interface PreparedIncrementalPromotionWrite extends PromotionWrite {
   readonly role: IncrementalPromotionWriteRole;
@@ -131,12 +131,8 @@ function sourceUpdateStatement(intent: Extract<IncrementalSourceCurrentDeltaInte
     expected_current_digest: stringParameter(intent.expectedCurrentDigest),
   };
   const statePredicate = nullablePredicate('state', 'expected_state', intent.expectedState, parameters, utf8Parameter);
-  const transactionPredicate = nullablePredicate(
-    'transaction_id', 'expected_transaction_id', intent.expectedTransactionId, parameters, uuidParameter,
-  );
-  const resolutionPredicate = nullablePredicate(
-    'resolution_code', 'expected_resolution_code', intent.expectedResolutionCode, parameters, utf8Parameter,
-  );
+  const transactionPredicate = nullablePredicate('transaction_id', 'expected_transaction_id', intent.expectedTransactionId, parameters, uuidParameter);
+  const resolutionPredicate = nullablePredicate('resolution_code', 'expected_resolution_code', intent.expectedResolutionCode, parameters, utf8Parameter);
   return writeStatement(
     'UPDATE source_records SET '
       + 'last_seen_at = $last_seen_at, last_row_hint = $last_row_hint, current_digest = $current_digest, '
@@ -150,10 +146,7 @@ function sourceUpdateStatement(intent: Extract<IncrementalSourceCurrentDeltaInte
   );
 }
 
-function transactionParameters(
-  id: string,
-  tx: Readonly<CanonicalTransaction>,
-): Record<string, YdbParameter> {
+function transactionParameters(id: string, tx: Readonly<CanonicalTransaction>): Record<string, YdbParameter> {
   return {
     id: uuidParameter(id),
     type: utf8Parameter(tx.type),
@@ -227,26 +220,6 @@ function transactionReplaceStatement(
   );
 }
 
-function revisionStatement(revision: Readonly<IncrementalSourceRecordRevisionProjection>): YdbStatement {
-  const parameters = {
-    source_record_id: uuidParameter(revision.sourceRecordId),
-    revision: uint64Parameter(revision.revision),
-    migration_run_id: uuidParameter(revision.migrationRunId),
-    observed_at: timestampParameter(revision.observedAt),
-    row_hint: uint64Parameter(revision.rowHint),
-    row_digest: stringParameter(revision.rowDigest),
-    change_class: utf8Parameter(revision.changeClass),
-    raw_payload: jsonDocumentParameter(revision.rawPayload),
-  };
-  return writeStatement(
-    'INSERT INTO source_record_revisions '
-      + '(source_record_id, revision, migration_run_id, observed_at, row_hint, row_digest, change_class, raw_payload) '
-      + 'VALUES ($source_record_id, $revision, $migration_run_id, $observed_at, $row_hint, $row_digest, '
-      + '$change_class, $raw_payload) RETURNING source_record_id',
-    parameters,
-  );
-}
-
 function requiredRevisionSources(
   delta: Readonly<IncrementalCurrentDeltaPlan>,
 ): ReadonlyMap<string, { readonly revision: number; readonly rowHint: number; readonly digest: string; readonly create: boolean }> {
@@ -254,15 +227,8 @@ function requiredRevisionSources(
   for (const intent of delta.sourceIntents) {
     const candidate = intent.candidate;
     if (intent.kind === 'CREATE_SOURCE_RECORD') {
-      if (candidate.currentRevision !== 1) {
-        throw new IncrementalCurrentPersistenceError('INVALID_SOURCE_REVISION_STEP');
-      }
-      required.set(candidate.id.toLowerCase(), Object.freeze({
-        revision: 1,
-        rowHint: candidate.lastRowHint,
-        digest: candidate.currentDigest,
-        create: true,
-      }));
+      if (candidate.currentRevision !== 1) throw new IncrementalCurrentPersistenceError('INVALID_SOURCE_REVISION_STEP');
+      required.set(candidate.id.toLowerCase(), Object.freeze({ revision: 1, rowHint: candidate.lastRowHint, digest: candidate.currentDigest, create: true }));
       continue;
     }
     if (candidate.currentRevision === intent.expectedCurrentRevision) continue;
@@ -279,11 +245,11 @@ function requiredRevisionSources(
   return required;
 }
 
-function revisionMap(
+function assertRevisionCoverage(
   run: Readonly<MigrationRun>,
   delta: Readonly<IncrementalCurrentDeltaPlan>,
   revisionPlan: Readonly<IncrementalRevisionEvidencePlan>,
-): ReadonlyMap<string, Readonly<IncrementalSourceRecordRevisionProjection>> {
+): void {
   const required = requiredRevisionSources(delta);
   const bySource = new Map<string, Readonly<IncrementalSourceRecordRevisionProjection>>();
   for (const revision of revisionPlan.revisions) {
@@ -294,11 +260,7 @@ function revisionMap(
     if (revision.migrationRunId.toLowerCase() !== run.id.toLowerCase()) {
       throw new IncrementalCurrentPersistenceError('REVISION_RUN_MISMATCH');
     }
-    if (
-      revision.revision !== expected.revision
-      || revision.rowHint !== expected.rowHint
-      || revision.rowDigest !== expected.digest
-    ) {
+    if (revision.revision !== expected.revision || revision.rowHint !== expected.rowHint || revision.rowDigest !== expected.digest) {
       throw new IncrementalCurrentPersistenceError('REVISION_CURRENT_STATE_MISMATCH');
     }
     if (expected.create && revision.changeClass !== null) {
@@ -312,7 +274,6 @@ function revisionMap(
   for (const id of required.keys()) {
     if (!bySource.has(id)) throw new IncrementalCurrentPersistenceError('MISSING_REVISION_EVIDENCE');
   }
-  return bySource;
 }
 
 export function prepareIncrementalCurrentWrites(
@@ -324,21 +285,15 @@ export function prepareIncrementalCurrentWrites(
   if (run.state !== 'VALIDATED' || run.finishedAt !== null || run.errorCode !== null) {
     throw new IncrementalCurrentPersistenceError('RUN_NOT_VALIDATED');
   }
-  if (delta.promotionBlocker !== null) {
-    throw new IncrementalCurrentPersistenceError('PROMOTION_BLOCKED');
-  }
+  if (delta.promotionBlocker !== null) throw new IncrementalCurrentPersistenceError('PROMOTION_BLOCKED');
   try {
     timestampParameter(promotedAt);
   } catch {
     throw new IncrementalCurrentPersistenceError('INVALID_PROMOTED_AT');
   }
 
-  const revisions = revisionMap(run, delta, revisionPlan);
+  assertRevisionCoverage(run, delta, revisionPlan);
   const writes: Readonly<PreparedIncrementalPromotionWrite>[] = [];
-
-  for (const revision of [...revisions.values()].sort((left, right) => left.sourceRecordId.localeCompare(right.sourceRecordId))) {
-    writes.push(prepared('SOURCE_REVISION', revision.sourceRecordId, revisionStatement(revision)));
-  }
 
   for (const intent of [...delta.transactionIntents].sort((left, right) => left.candidate.id.localeCompare(right.candidate.id))) {
     const statement = intent.kind === 'CREATE_TRANSACTION'
@@ -354,8 +309,5 @@ export function prepareIncrementalCurrentWrites(
     writes.push(prepared('SOURCE_RECORD', intent.candidate.id, statement));
   }
 
-  return Object.freeze({
-    writes: Object.freeze(writes),
-    preflight: assessAtomicPromotionWrites(writes),
-  });
+  return Object.freeze({ writes: Object.freeze(writes), preflight: assessAtomicPromotionWrites(writes) });
 }
