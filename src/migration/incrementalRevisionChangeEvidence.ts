@@ -5,11 +5,8 @@ import {
 } from './changeClassification.js';
 import type { IncrementalCurrentRevisionPayloadEvidence } from './incrementalCurrentRevisionEvidenceReader.js';
 import type { IncrementalSourceObservationRow } from './googleSnapshotProjection.js';
+import type { IncrementalLineageOutcome, IncrementalLineagePlan } from './incrementalLineagePlan.js';
 import type { IncrementalRevisionChangeEvidence } from './incrementalRevisionEvidence.js';
-import type {
-  IncrementalSourceDeltaIntent,
-  IncrementalSourceDeltaIntentPlan,
-} from './incrementalSourceDeltaIntent.js';
 import { projectSourceFinancialRevision } from './sourceFinancialRevisionProjection.js';
 
 export interface IncrementalLegacyCloseContextEvidence {
@@ -32,8 +29,8 @@ export type IncrementalRevisionChangeEvidenceErrorCode =
   | 'EXTRA_PREVIOUS_REVISION_EVIDENCE'
   | 'MISSING_CURRENT_ROW_EVIDENCE'
   | 'EXTRA_CURRENT_ROW_EVIDENCE'
-  | 'PREVIOUS_REVISION_INTENT_MISMATCH'
-  | 'CURRENT_ROW_INTENT_MISMATCH'
+  | 'PREVIOUS_REVISION_LINEAGE_MISMATCH'
+  | 'CURRENT_ROW_LINEAGE_MISMATCH'
   | 'MISSING_CONTEXTUAL_CHANGE_EVIDENCE'
   | 'EXTRA_CONTEXTUAL_CHANGE_EVIDENCE'
   | 'REVISED_FINANCIAL_FIELDS_NO_CHANGE';
@@ -69,11 +66,11 @@ function normalizedId(value: string): string {
   return value.toLowerCase();
 }
 
-function revisedIntents(
-  deltaPlan: Readonly<IncrementalSourceDeltaIntentPlan>,
-): readonly Readonly<Extract<IncrementalSourceDeltaIntent, { kind: 'REVISE' }>>[] {
-  return deltaPlan.intents.filter(
-    (intent): intent is Extract<IncrementalSourceDeltaIntent, { kind: 'REVISE' }> => intent.kind === 'REVISE',
+function revisedOutcomes(
+  lineage: Readonly<IncrementalLineagePlan>,
+): readonly Readonly<Extract<IncrementalLineageOutcome, { kind: 'REVISED' }>>[] {
+  return lineage.outcomes.filter(
+    (outcome): outcome is Extract<IncrementalLineageOutcome, { kind: 'REVISED' }> => outcome.kind === 'REVISED',
   );
 }
 
@@ -133,17 +130,17 @@ function contextMap(
 }
 
 export function buildIncrementalRevisionChangeEvidence(
-  deltaPlan: Readonly<IncrementalSourceDeltaIntentPlan>,
+  lineage: Readonly<IncrementalLineagePlan>,
   previousRevisionPayloads: readonly Readonly<IncrementalCurrentRevisionPayloadEvidence>[],
   currentRows: readonly Readonly<IncrementalSourceObservationRow>[],
   contextEvidence: readonly Readonly<IncrementalLegacyCloseContextEvidence>[] = [],
 ): Readonly<IncrementalRevisionChangeEvidencePlan> {
-  const intents = revisedIntents(deltaPlan);
+  const outcomes = revisedOutcomes(lineage);
   const previousById = previousMap(previousRevisionPayloads);
   const currentByHint = currentMap(currentRows);
   const contextById = contextMap(contextEvidence);
-  const requiredPreviousIds = new Set(intents.map((intent) => normalizedId(intent.sourceRecordId)));
-  const requiredCurrentHints = new Set(intents.map((intent) => intent.currentRowHint));
+  const requiredPreviousIds = new Set(outcomes.map((outcome) => normalizedId(outcome.sourceRecordId)));
+  const requiredCurrentHints = new Set(outcomes.map((outcome) => outcome.currentRowHint));
   const usedContexts = new Set<string>();
   const contextDependentSourceRecordIds: string[] = [];
   const changeEvidence: Readonly<IncrementalRevisionChangeEvidence>[] = [];
@@ -159,26 +156,22 @@ export function buildIncrementalRevisionChangeEvidence(
     }
   }
 
-  for (const intent of intents) {
-    const sourceRecordId = normalizedId(intent.sourceRecordId);
+  for (const outcome of outcomes) {
+    const sourceRecordId = normalizedId(outcome.sourceRecordId);
     const previous = previousById.get(sourceRecordId);
     if (previous === undefined) {
       throw new IncrementalRevisionChangeEvidenceError('MISSING_PREVIOUS_REVISION_EVIDENCE');
     }
-    if (
-      previous.revision !== intent.expectedPreviousRevision
-      || previous.rowHint !== intent.previousRowHint
-      || previous.rowDigest !== intent.expectedPreviousDigest
-    ) {
-      throw new IncrementalRevisionChangeEvidenceError('PREVIOUS_REVISION_INTENT_MISMATCH');
+    if (previous.rowHint !== outcome.previousRowHint || previous.rowDigest !== outcome.previousDigest) {
+      throw new IncrementalRevisionChangeEvidenceError('PREVIOUS_REVISION_LINEAGE_MISMATCH');
     }
 
-    const current = currentByHint.get(intent.currentRowHint);
+    const current = currentByHint.get(outcome.currentRowHint);
     if (current === undefined) {
       throw new IncrementalRevisionChangeEvidenceError('MISSING_CURRENT_ROW_EVIDENCE');
     }
-    if (current.rowHint !== intent.currentRowHint || current.digest !== intent.currentDigest) {
-      throw new IncrementalRevisionChangeEvidenceError('CURRENT_ROW_INTENT_MISMATCH');
+    if (current.rowHint !== outcome.currentRowHint || current.digest !== outcome.currentDigest) {
+      throw new IncrementalRevisionChangeEvidenceError('CURRENT_ROW_LINEAGE_MISMATCH');
     }
 
     const previousFinancial = projectSourceFinancialRevision(previous.rawPayload);
@@ -201,10 +194,7 @@ export function buildIncrementalRevisionChangeEvidence(
     if (classification.changeClass === 'NO_CHANGE') {
       throw new IncrementalRevisionChangeEvidenceError('REVISED_FINANCIAL_FIELDS_NO_CHANGE');
     }
-    changeEvidence.push(Object.freeze({
-      sourceRecordId,
-      changeClass: classification.changeClass,
-    }));
+    changeEvidence.push(Object.freeze({ sourceRecordId, changeClass: classification.changeClass }));
   }
 
   for (const sourceRecordId of contextById.keys()) {
