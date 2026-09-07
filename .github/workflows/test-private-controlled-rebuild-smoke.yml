@@ -2,6 +2,7 @@ name: TEST_PRIVATE controlled rebuild smoke
 
 # Owner-authorized R1.7 provider evidence rerun trigger: 2026-09-07.
 # Owner confirmed TEST_PRIVATE connection + service-account JSON secrets configured; rerun trigger 2.
+# Owner corrected TEST_PRIVATE service-account JSON secret; rerun trigger 3.
 on:
   workflow_dispatch:
   push:
