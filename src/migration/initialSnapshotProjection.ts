@@ -1,27 +1,11 @@
-import {
-  classifyLegacyPeriodCloseRows,
-  type LegacyPeriodCloseClassification,
-} from '../classification/legacyPeriodClose.js';
-import {
-  classifyMeaningfulSourceRow,
-  type SourceRowClassification,
-} from '../classification/sourceRow.js';
+import type { LegacyPeriodCloseClassification } from '../classification/legacyPeriodClose.js';
+import type { SourceRowClassification } from '../classification/sourceRow.js';
 import type { CanonicalTransaction } from '../domain/transaction.js';
 import type { InitialSnapshotGranularityEvidence } from '../normalization/historicalGranularity.js';
 import type { ReferenceResolver } from '../normalization/types.js';
-import {
-  projectInitialFinancialTransaction,
-  type InitialFinancialProjectionErrorCode,
-} from './initialFinancialProjection.js';
-import {
-  decodeRawPayloadForSourceClassification,
-  toLegacyPeriodCloseSourceRow,
-  toSourceRowClassificationInput,
-} from './rawPayloadClassificationAdapter.js';
-import type {
-  RawPayloadDecodeErrorCode,
-  RawPayloadV2,
-} from './rawPayloadDecoder.js';
+import type { InitialFinancialProjectionErrorCode } from './initialFinancialProjection.js';
+import type { RawPayloadDecodeErrorCode, RawPayloadV2 } from './rawPayloadDecoder.js';
+import { projectSourceSnapshotSemantics } from './sourceSnapshotSemanticProjection.js';
 
 export interface InitialSnapshotProjectionRowInput {
   readonly sourceRecordId: string;
@@ -100,107 +84,38 @@ function validateRows(rows: readonly InitialSnapshotProjectionRowInput[]): void 
   }
 }
 
-function buildCounters(
-  outcomes: readonly Readonly<InitialSnapshotProjectionOutcome>[],
-): Readonly<InitialSnapshotProjectionCounters> {
-  const count = (classification: SourceRowClassification) => outcomes
-    .filter((outcome) => outcome.classification === classification).length;
-  return Object.freeze({
-    rowsSeen: outcomes.length,
-    financialRecords: count('FINANCIAL_RECORD'),
-    legacyPeriodClose: count('LEGACY_PERIOD_CLOSE'),
-    nonFinancial: count('NON_FINANCIAL'),
-    invalid: count('INVALID'),
-    ambiguous: count('AMBIGUOUS'),
-    transactionCandidates: outcomes.filter((outcome) => outcome.transaction !== null).length,
-    projectionFailures: outcomes.filter((outcome) => outcome.projectionError !== null).length,
-  });
-}
-
 export function projectInitialSnapshot(
   rows: readonly InitialSnapshotProjectionRowInput[],
   context: InitialSnapshotProjectionContext,
 ): Readonly<InitialSnapshotProjection> {
   validateRows(rows);
 
-  const decodedByOrdinal = new Map<number, ReturnType<typeof decodeRawPayloadForSourceClassification>>();
-  const closeInputs = [];
-
-  for (const row of rows) {
-    const decoded = decodeRawPayloadForSourceClassification(row.rawPayload);
-    decodedByOrdinal.set(row.sourceOrdinal, decoded);
-    if (decoded.ok) closeInputs.push(toLegacyPeriodCloseSourceRow(row.sourceOrdinal, decoded.value));
-  }
-
-  const closeByOrdinal = new Map(
-    classifyLegacyPeriodCloseRows(closeInputs).map((result) => [result.snapshotOrdinal, result] as const),
+  const semantic = projectSourceSnapshotSemantics(
+    rows.map((row) => ({
+      sourceOrdinal: row.sourceOrdinal,
+      rawPayload: row.rawPayload,
+      aggregatePeriodMonth: row.aggregatePeriodMonth,
+    })),
+    context,
   );
 
-  const outcomes = rows.map((row): Readonly<InitialSnapshotProjectionOutcome> => {
-    const decoded = decodedByOrdinal.get(row.sourceOrdinal);
-    if (decoded === undefined || !decoded.ok) {
-      return Object.freeze({
-        sourceRecordId: row.sourceRecordId.toLowerCase(),
-        sourceOrdinal: row.sourceOrdinal,
-        classification: 'INVALID' as const,
-        legacyPeriodCloseClassification: null,
-        transaction: null,
-        projectionError: Object.freeze({
-          stage: 'DECODE' as const,
-          errorCode: decoded?.errorCode ?? 'INVALID_PAYLOAD_SCHEMA',
-        }),
-      });
+  const outcomes = semantic.outcomes.map((outcome, index): Readonly<InitialSnapshotProjectionOutcome> => {
+    const row = rows[index];
+    if (row === undefined || row.sourceOrdinal !== outcome.sourceOrdinal) {
+      throw new InitialSnapshotProjectionStructuralError('INVALID_SOURCE_ORDINAL');
     }
-
-    const closeClassification = closeByOrdinal.get(row.sourceOrdinal)?.classification ?? 'NOT_APPLICABLE';
-    const classification = classifyMeaningfulSourceRow(
-      toSourceRowClassificationInput(decoded.value, closeClassification),
-    );
-
-    if (classification !== 'FINANCIAL_RECORD') {
-      return Object.freeze({
-        sourceRecordId: row.sourceRecordId.toLowerCase(),
-        sourceOrdinal: row.sourceOrdinal,
-        classification,
-        legacyPeriodCloseClassification: closeClassification,
-        transaction: null,
-        projectionError: null,
-      });
-    }
-
-    const projected = projectInitialFinancialTransaction({
-      rawPayload: row.rawPayload,
-      initialSourceOrdinal: row.sourceOrdinal,
-      aggregatePeriodMonth: row.aggregatePeriodMonth,
-    }, context);
-
-    if (!projected.ok) {
-      return Object.freeze({
-        sourceRecordId: row.sourceRecordId.toLowerCase(),
-        sourceOrdinal: row.sourceOrdinal,
-        classification,
-        legacyPeriodCloseClassification: closeClassification,
-        transaction: null,
-        projectionError: Object.freeze({
-          stage: projected.stage,
-          errorCode: projected.errorCode,
-        }),
-      });
-    }
-
     return Object.freeze({
       sourceRecordId: row.sourceRecordId.toLowerCase(),
-      sourceOrdinal: row.sourceOrdinal,
-      classification,
-      legacyPeriodCloseClassification: closeClassification,
-      transaction: projected.transaction,
-      projectionError: null,
+      sourceOrdinal: outcome.sourceOrdinal,
+      classification: outcome.classification,
+      legacyPeriodCloseClassification: outcome.legacyPeriodCloseClassification,
+      transaction: outcome.transaction,
+      projectionError: outcome.projectionError,
     });
   });
 
-  const frozenOutcomes = Object.freeze(outcomes);
   return Object.freeze({
-    outcomes: frozenOutcomes,
-    counters: buildCounters(frozenOutcomes),
+    outcomes: Object.freeze(outcomes),
+    counters: semantic.counters,
   });
 }
