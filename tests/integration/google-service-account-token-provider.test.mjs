@@ -24,12 +24,12 @@ test('read-only scope is exact and does not grant write access', () => {
   assert.equal(GOOGLE_SHEETS_READONLY_SCOPE.includes('drive'), false);
 });
 
-test('client adapter returns a trimmed nonblank token', async () => {
+test('client adapter unwraps the Google JWT token response and trims the token', async () => {
   let calls = 0;
   const provider = createGoogleSheetsAccessTokenProviderFromClient({
     async getAccessToken() {
       calls += 1;
-      return '  synthetic-access-token  ';
+      return { token: '  synthetic-access-token  ', res: null };
     },
   });
 
@@ -37,11 +37,30 @@ test('client adapter returns a trimmed nonblank token', async () => {
   assert.equal(calls, 1);
 });
 
-test('client adapter fails closed for null or blank token', async () => {
-  for (const token of [null, '', '   ']) {
+test('client adapter also accepts a direct string token for narrow test/provider compatibility', async () => {
+  const provider = createGoogleSheetsAccessTokenProviderFromClient({
+    async getAccessToken() {
+      return 'synthetic-direct-token';
+    },
+  });
+  assert.equal(await provider.getAccessToken(), 'synthetic-direct-token');
+});
+
+test('client adapter fails closed for malformed, null or blank token response', async () => {
+  const responses = [
+    null,
+    '',
+    '   ',
+    {},
+    { token: null },
+    { token: '' },
+    { token: '   ' },
+    { token: 123 },
+  ];
+  for (const response of responses) {
     const provider = createGoogleSheetsAccessTokenProviderFromClient({
       async getAccessToken() {
-        return token;
+        return response;
       },
     });
 
