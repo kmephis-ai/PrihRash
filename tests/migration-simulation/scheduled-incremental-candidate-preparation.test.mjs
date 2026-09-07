@@ -18,7 +18,7 @@ const rawPayload = Object.freeze({
   adapter_schema_version: 2,
   date: { kind: 'NUMBER', value: '45500' },
   operation_type: { kind: 'STRING', value: 'Расход' },
-  expense_account: { kind: 'STRING', value: 'Synthetic Account' },
+  expense_account: { kind: 'STRING', value: 'Карта Visa' },
   expense_category: { kind: 'STRING', value: 'Synthetic Category' },
   description: { kind: 'STRING', value: 'Synthetic Description' },
   expense_amount: { kind: 'NUMBER', value: '123.45' },
@@ -62,7 +62,7 @@ const revisionEvidence = Object.freeze({
 const refs = Object.freeze({
   vikaMemberId: MEMBER_ID,
   resolveAccountId(label) {
-    return label === 'Synthetic Account' ? ACCOUNT_ID : null;
+    return label === 'Карта Visa' ? ACCOUNT_ID : null;
   },
   resolveCategoryId(kind, label) {
     return kind === 'EXPENSE' && label === 'Synthetic Category' ? CATEGORY_ID : null;
@@ -113,7 +113,10 @@ test('composes one exact inserted financial observation into a prepared immutabl
     transactionIdentityAllocator: Object.freeze({
       async allocate(requests) {
         observed.transactionRequests = requests;
-        return Object.freeze([{ sourceRecordId: SOURCE_ID, transactionId: TX_ID }]);
+        return Object.freeze(requests.map((request) => Object.freeze({
+          sourceRecordId: request.sourceRecordId,
+          transactionId: TX_ID,
+        })));
       },
     }),
   });
@@ -138,7 +141,7 @@ test('composes one exact inserted financial observation into a prepared immutabl
     rowsMissing: 0,
     rowsAmbiguous: 0,
   });
-  assert.deepEqual(plan.currentObservations.currentObservations.map((item) => ({
+  assert.deepEqual(plan.currentObservations.map((item) => ({
     currentRowHint: item.currentRowHint,
     sourceOrdinal: item.sourceOrdinal,
   })), [{ currentRowHint: 2, sourceOrdinal: 0 }]);
