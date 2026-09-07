@@ -26,6 +26,20 @@
 - admission не пишет в YDB, не меняет Google и не выполняет recovery автоматически;
 - private financial payload не входит в admission result и не должен попадать в logs/evidence.
 
+## Single-observation handoff
+
+`START_INCREMENTAL` относится к конкретному fresh authoritative observation. Runtime не имеет права после admission повторно читать source и молча обрабатывать уже другой snapshot.
+
+Поэтому application-layer invocation:
+
+1. читает full source observation ровно один раз;
+2. выполняет admission по digest именно этого observation;
+3. при `START_INCREMENTAL` передаёт incremental runner тот же immutable observation/opaque snapshot handle;
+4. при остальных решениях incremental runner не вызывается;
+5. наружу возвращает только safe decision/digest status, без snapshot payload.
+
+Это устраняет TOCTOU между admission и incremental processing, не превращая raw financial payload в operational evidence.
+
 ## Следующая runtime boundary
 
-Следующий S-unit должен получить эти три вида evidence через concrete read adapters и только при `START_INCREMENTAL` передать управление уже существующему incremental pipeline. Таймер/cron не должен содержать financial semantics: scheduler только инициирует одну runtime invocation, а policy остаётся в application layer.
+Следующий S-unit должен добавить concrete Google Sheets read adapter для immutable full-snapshot observation и связать его с существующим incremental pipeline. Таймер/cron не должен содержать financial semantics: scheduler только инициирует одну runtime invocation, а policy остаётся в application layer.
