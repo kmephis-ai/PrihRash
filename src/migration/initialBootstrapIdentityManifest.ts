@@ -269,8 +269,13 @@ function safeInteger(value: unknown, minimum: number): number {
   return value;
 }
 
-function nonEmptyString(value: unknown): string {
+function canonicalString(value: unknown): string {
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
+  return value;
+}
+
+function digestString(value: unknown): string {
+  if (typeof value !== 'string' || value.trim().length === 0) malformed();
   return value;
 }
 
@@ -282,12 +287,12 @@ function parseBinding(value: unknown): Readonly<InitialBootstrapIdentityBinding>
   if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) malformed();
   const transactionId = record.transaction_id === null
     ? null
-    : normalizedUuid(nonEmptyString(record.transaction_id), 'MALFORMED_MANIFEST_ROW');
+    : normalizedUuid(canonicalString(record.transaction_id), 'MALFORMED_MANIFEST_ROW');
   return Object.freeze({
     sourceOrdinal: safeInteger(record.source_ordinal, 0),
     rowHint: safeInteger(record.row_hint, 1),
-    rowDigest: nonEmptyString(record.row_digest),
-    sourceRecordId: normalizedUuid(nonEmptyString(record.source_record_id), 'MALFORMED_MANIFEST_ROW'),
+    rowDigest: digestString(record.row_digest),
+    sourceRecordId: normalizedUuid(canonicalString(record.source_record_id), 'MALFORMED_MANIFEST_ROW'),
     transactionId,
   });
 }
@@ -347,17 +352,17 @@ export function parseInitialBootstrapIdentityManifestRows(
   const bindingCount = safeInteger(row.binding_count, 0);
   const snapshotRowCount = safeInteger(row.snapshot_row_count, 0);
   if (bindingCount !== bindings.length) malformed();
-  const runState = nonEmptyString(row.run_state);
+  const runState = canonicalString(row.run_state);
   return Object.freeze({
     manifest: Object.freeze({
       migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MANIFEST_ROW'),
-      sourceSnapshotId: normalizedUuid(nonEmptyString(row.source_snapshot_id), 'MALFORMED_MANIFEST_ROW'),
-      sourceSnapshotDigest: nonEmptyString(row.source_snapshot_digest),
+      sourceSnapshotId: normalizedUuid(canonicalString(row.source_snapshot_id), 'MALFORMED_MANIFEST_ROW'),
+      sourceSnapshotDigest: digestString(row.source_snapshot_digest),
       bindings,
     }),
     runState,
-    runSnapshotDigest: nonEmptyString(row.run_snapshot_digest),
-    snapshotDigest: nonEmptyString(row.snapshot_digest),
+    runSnapshotDigest: digestString(row.run_snapshot_digest),
+    snapshotDigest: digestString(row.snapshot_digest),
     snapshotRowCount,
   });
 }
@@ -393,8 +398,8 @@ function normalizeResumeObservations(
       || observation.sourceOrdinal < 0
       || !Number.isSafeInteger(observation.rowHint)
       || observation.rowHint < 1
+      || typeof observation.digest !== 'string'
       || observation.digest.trim().length === 0
-      || observation.digest !== observation.digest.trim()
     ) {
       throw new InitialBootstrapIdentityManifestError('INVALID_RESUME_OBSERVATION');
     }
