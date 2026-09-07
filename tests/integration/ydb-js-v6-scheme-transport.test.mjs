@@ -25,9 +25,9 @@ function sessionOperation(id = 'session-1') {
   return successOperation(anyPack(CreateSessionResultSchema, create(CreateSessionResultSchema, { sessionId: id })));
 }
 
-function listingOperation() {
+function listingOperation(selfType = Entry_Type.DATABASE) {
   return successOperation(anyPack(ListDirectoryResultSchema, create(ListDirectoryResultSchema, {
-    self: { name: 'db', type: Entry_Type.DATABASE },
+    self: { name: selfType === Entry_Type.DATABASE ? 'db' : 'r_001', type: selfType },
     children: [
       { name: 'transactions', type: Entry_Type.TABLE },
       { name: 'rebuild', type: Entry_Type.DIRECTORY },
@@ -44,7 +44,10 @@ function fakeDriver(overrides = {}) {
     },
     async listDirectory(request) {
       events.push(['listDirectory', request]);
-      return { operation: listingOperation() };
+      const selfType = request.path === '/ru-central1/test/db'
+        ? Entry_Type.DATABASE
+        : Entry_Type.DIRECTORY;
+      return { operation: listingOperation(selfType) };
     },
   };
   const tableClient = {
