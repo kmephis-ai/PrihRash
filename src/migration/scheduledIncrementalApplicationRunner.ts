@@ -2,15 +2,21 @@ import { YdbAdapter } from '../integration/ydb/adapter.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import type { GoogleSnapshotMigrationProjection } from './googleSnapshotProjection.js';
 import type { InitialReconciliationEvidence } from './initialValidationGate.js';
-import { readConsistentIncrementalCurrentEvidence } from './consistentIncrementalCurrentEvidence.js';
 import {
-  runPreparedScheduledIncremental,
+  readConsistentIncrementalCurrentEvidence,
+  type ConsistentIncrementalCurrentEvidenceSnapshot,
+} from './consistentIncrementalCurrentEvidence.js';
+import type { IncrementalCurrentReconciliationPlan } from './incrementalCurrentReconciliation.js';
+import {
+  executePreparedScheduledIncrementalCandidate,
   type ScheduledIncrementalExecutionResult,
 } from './scheduledIncrementalExecution.js';
-import type {
-  IncrementalSourceIdentityAllocator,
-  IncrementalTransactionIdentityAllocator,
+import {
+  prepareScheduledIncrementalCandidate,
+  type IncrementalSourceIdentityAllocator,
+  type IncrementalTransactionIdentityAllocator,
 } from './scheduledIncrementalCandidatePreparation.js';
+import type { MigrationRun } from './migrationRunState.js';
 import { evaluateScheduledSyncAdmission } from './scheduledSyncAdmission.js';
 import type {
   AuthoritativeFullSnapshotLease,
@@ -29,12 +35,22 @@ export interface ScheduledIncrementalRunContext {
   readonly finishedAt: string;
 }
 
+export interface ScheduledIncrementalReconciliationRequest<TSnapshot> {
+  readonly observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>;
+  readonly baselineRun: Readonly<MigrationRun>;
+  readonly candidateRun: Readonly<MigrationRun>;
+  readonly reconciliationPlan: Readonly<IncrementalCurrentReconciliationPlan>;
+  readonly verifiedCurrentEvidence: Readonly<ConsistentIncrementalCurrentEvidenceSnapshot>;
+}
+
 export interface ScheduledIncrementalApplicationDependencies<TSnapshot> {
   readonly projectObservation: (
     observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>,
   ) => Readonly<ScheduledIncrementalObservationProjection>;
   readonly createRunContext: () => Readonly<ScheduledIncrementalRunContext>;
-  readonly readReconciliationEvidence: () => Promise<Readonly<InitialReconciliationEvidence>>;
+  readonly readReconciliationEvidence: (
+    request: Readonly<ScheduledIncrementalReconciliationRequest<TSnapshot>>,
+  ) => Promise<Readonly<InitialReconciliationEvidence>>;
   readonly refs: ReferenceResolver;
   readonly sourceIdentityAllocator: IncrementalSourceIdentityAllocator;
   readonly transactionIdentityAllocator: IncrementalTransactionIdentityAllocator;
@@ -93,23 +109,34 @@ export class ScheduledIncrementalApplicationRunner<TSnapshot>
 
     const projected = this.#dependencies.projectObservation(observation);
     const context = this.#dependencies.createRunContext();
-    const reconciliationEvidence = await this.#dependencies.readReconciliationEvidence();
-    this.#lastResult = await runPreparedScheduledIncremental(this.#adapter, {
+    const prepared = await prepareScheduledIncrementalCandidate({
       baselineRun,
       sourceEvidence: evidence.sourceEvidence,
       revisionEvidence: evidence.revisionEvidence,
       previousTransactions: evidence.previousTransactions,
       projection: projected.projection,
-      leasedSnapshotDigest: observation.snapshotDigest,
+      sourceSnapshotDigest: observation.snapshotDigest,
       runId: context.runId,
       startedAt: context.startedAt,
       observedAt: projected.observedAt,
-      promotedAt: context.promotedAt,
-      finishedAt: context.finishedAt,
       refs: this.#dependencies.refs,
       sourceIdentityAllocator: this.#dependencies.sourceIdentityAllocator,
       transactionIdentityAllocator: this.#dependencies.transactionIdentityAllocator,
+    });
+    const reconciliationEvidence = await this.#dependencies.readReconciliationEvidence(Object.freeze({
+      observation,
+      baselineRun,
+      candidateRun: prepared.run,
+      reconciliationPlan: prepared.reconciliation,
+      verifiedCurrentEvidence: evidence,
+    }));
+
+    this.#lastResult = await executePreparedScheduledIncrementalCandidate(this.#adapter, {
+      baselineRun,
+      prepared,
       reconciliationEvidence,
+      promotedAt: context.promotedAt,
+      finishedAt: context.finishedAt,
     });
   }
 }

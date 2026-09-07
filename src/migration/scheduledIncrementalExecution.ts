@@ -9,6 +9,7 @@ import {
   prepareScheduledIncrementalCandidate,
   type IncrementalSourceIdentityAllocator,
   type IncrementalTransactionIdentityAllocator,
+  type ScheduledIncrementalCandidatePreparationPlan,
 } from './scheduledIncrementalCandidatePreparation.js';
 import {
   runScheduledIncrementalLifecycle,
@@ -34,11 +35,43 @@ export interface ScheduledIncrementalExecutionInput {
   readonly reconciliationEvidence: Readonly<InitialReconciliationEvidence>;
 }
 
+export interface PreparedScheduledIncrementalExecutionInput {
+  readonly baselineRun: Readonly<MigrationRun>;
+  readonly prepared: Readonly<ScheduledIncrementalCandidatePreparationPlan>;
+  readonly reconciliationEvidence: Readonly<InitialReconciliationEvidence>;
+  readonly promotedAt: string;
+  readonly finishedAt: string;
+}
+
 export interface ScheduledIncrementalExecutionResult {
   readonly lifecycle: Readonly<ScheduledIncrementalLifecycleResult>;
   readonly candidateRun: Readonly<MigrationRun>;
   readonly sourceAssignmentRequestCount: number;
   readonly transactionAssignmentRequestCount: number;
+}
+
+export async function executePreparedScheduledIncrementalCandidate(
+  adapter: YdbAdapter,
+  input: Readonly<PreparedScheduledIncrementalExecutionInput>,
+): Promise<Readonly<ScheduledIncrementalExecutionResult>> {
+  const lifecycle = await runScheduledIncrementalLifecycle(adapter, {
+    expectedBaseline: input.baselineRun,
+    candidateRun: input.prepared.run,
+    sourceDelta: input.prepared.structural.sourceDelta,
+    reconciliationPlan: input.prepared.reconciliation,
+    reconciliationEvidence: input.reconciliationEvidence,
+    currentDelta: input.prepared.candidates.currentDelta,
+    revisions: input.prepared.structural.revisions,
+    promotedAt: input.promotedAt,
+    finishedAt: input.finishedAt,
+  });
+
+  return Object.freeze({
+    lifecycle,
+    candidateRun: input.prepared.run,
+    sourceAssignmentRequestCount: input.prepared.sourceAssignmentRequests.length,
+    transactionAssignmentRequestCount: input.prepared.transactionAssignmentRequests.length,
+  });
 }
 
 export async function runPreparedScheduledIncremental(
@@ -60,22 +93,11 @@ export async function runPreparedScheduledIncremental(
     transactionIdentityAllocator: input.transactionIdentityAllocator,
   });
 
-  const lifecycle = await runScheduledIncrementalLifecycle(adapter, {
-    expectedBaseline: input.baselineRun,
-    candidateRun: prepared.run,
-    sourceDelta: prepared.structural.sourceDelta,
-    reconciliationPlan: prepared.reconciliation,
+  return executePreparedScheduledIncrementalCandidate(adapter, {
+    baselineRun: input.baselineRun,
+    prepared,
     reconciliationEvidence: input.reconciliationEvidence,
-    currentDelta: prepared.candidates.currentDelta,
-    revisions: prepared.structural.revisions,
     promotedAt: input.promotedAt,
     finishedAt: input.finishedAt,
-  });
-
-  return Object.freeze({
-    lifecycle,
-    candidateRun: prepared.run,
-    sourceAssignmentRequestCount: prepared.sourceAssignmentRequests.length,
-    transactionAssignmentRequestCount: prepared.transactionAssignmentRequests.length,
   });
 }
