@@ -96,12 +96,14 @@ Operational reconciliation result наружу содержит только che
 
 ### Lifecycle после reconciliation
 
-1. только после successful roll-forward comparison и остальных validation guards candidate run может быть atomic-claimed как `STAGING`;
-2. validation повторно проверяет exact candidate/delta/reconciliation evidence; при отсутствии blockers `STAGING → VALIDATED` означает только разрешение на atomic promotion;
-3. exact previous provider state защищается optimistic predicates внутри одной atomic promotion transaction, которая применяет delta и commit marker;
-4. expected post-change candidate **не** сравнивается с pre-promotion YDB current rows как будто delta уже materialized;
-5. `VALIDATED` сам по себе не является verified shadow state; verified baseline по-прежнему только последний `COMMITTED` run;
-6. post-commit current-state read-back/reconciliation — отдельная verification/recovery boundary; mismatch требует recovery/incident handling и не разрешает считать сомнительный state частично verified.
+1. expected + roll-forward comparison рассчитывается до claim из immutable candidate/delta и exact verified baseline evidence; successful comparison сам по себе ещё не означает lifecycle success;
+2. atomic claim повторно проверяет provider run history/baseline и только затем создаёт exact candidate run как `STAGING`;
+3. validation gate на уже claimed `STAGING` run проверяет run/counters, candidate/delta guards, unresolved lineage и переданное reconciliation evidence; любой blocker запрещает `VALIDATED`;
+4. при отсутствии blockers `STAGING → VALIDATED` означает только разрешение на atomic promotion;
+5. exact previous provider state защищается optimistic predicates внутри одной atomic promotion transaction, которая применяет delta и commit marker;
+6. expected post-change candidate **не** сравнивается с pre-promotion YDB current rows как будто delta уже materialized;
+7. `VALIDATED` сам по себе не является verified shadow state; verified baseline по-прежнему только последний `COMMITTED` run;
+8. post-commit current-state read-back/reconciliation — отдельная verification/recovery boundary; mismatch требует recovery/incident handling и не разрешает считать сомнительный state частично verified.
 
 Controlled bootstrap/rebuild остаётся другим механизмом: там candidate может быть materialized в staging и reconciliation выполняется против staging evidence до явного promotion. Эти staging semantics не переносятся автоматически на ordinary incremental sync.
 
