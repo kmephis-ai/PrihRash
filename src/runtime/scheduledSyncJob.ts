@@ -80,6 +80,16 @@ function requiredValue(
   return value;
 }
 
+function requiredSecret(
+  value: unknown,
+  code: ScheduledSyncJobErrorCode,
+): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new ScheduledSyncJobError(code);
+  }
+  return value;
+}
+
 function validateConfig(config: Readonly<ScheduledSyncJobConfig>): Readonly<ScheduledSyncJobConfig> {
   return Object.freeze({
     spreadsheetId: requiredValue(config.spreadsheetId, 'INVALID_SPREADSHEET_ID'),
@@ -87,7 +97,7 @@ function validateConfig(config: Readonly<ScheduledSyncJobConfig>): Readonly<Sche
       config.googleServiceAccountEmail,
       'INVALID_GOOGLE_SERVICE_ACCOUNT_EMAIL',
     ),
-    googleServiceAccountPrivateKey: requiredValue(
+    googleServiceAccountPrivateKey: requiredSecret(
       config.googleServiceAccountPrivateKey,
       'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
     ),
