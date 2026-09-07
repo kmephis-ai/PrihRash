@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Driver } from '@ydbjs/core';
 import { query } from '@ydbjs/query';
+import { Uuid } from '@ydbjs/value/primitive';
 import { EnvironCredentialsProvider } from '@ydbjs/auth/environ';
 import { SchemeServiceDefinition } from '@ydbjs/api/scheme';
 import { OperationParams_OperationMode, StatusIds_StatusCode } from '@ydbjs/api/operation';
@@ -114,7 +115,7 @@ async function rowCount(sql, path) {
 }
 
 async function hasSyntheticId(sql, path, id) {
-  const resultSets = await sql`SELECT COUNT(*) AS c FROM ${sql.identifier(path)} WHERE id = Uuid(${id})`;
+  const resultSets = await sql`SELECT COUNT(*) AS c FROM ${sql.identifier(path)} WHERE id = ${new Uuid(id)}`;
   const row = resultSets?.[0]?.[0];
   const value = row?.c;
   const count = typeof value === 'bigint' ? Number(value) : value;
@@ -182,9 +183,9 @@ async function createCase(scheme, sql, paths) {
     stage = 'CREATE_SOURCE_RECORDS_TABLE';
     await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
     stage = 'INSERT_TRANSACTION_ROW';
-    await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (Uuid(${SYNTHETIC_TRANSACTION_ID}))`;
+    await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (${new Uuid(SYNTHETIC_TRANSACTION_ID)})`;
     stage = 'INSERT_SOURCE_RECORD_ROW';
-    await sql`INSERT INTO ${sql.identifier(paths.currentSourceRecords)} (id) VALUES (Uuid(${SYNTHETIC_SOURCE_ID}))`;
+    await sql`INSERT INTO ${sql.identifier(paths.currentSourceRecords)} (id) VALUES (${new Uuid(SYNTHETIC_SOURCE_ID)})`;
   } catch (error) {
     throw safeStageError(error, `CREATE_CASE_${stage}`);
   }
