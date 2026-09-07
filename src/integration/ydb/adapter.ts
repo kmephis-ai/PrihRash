@@ -21,7 +21,11 @@ export interface YdbTransport {
   serializableReadWrite<T>(work: (transaction: YdbTransportTransaction) => Promise<T>): Promise<T>;
 }
 
-export interface YdbTransaction {
+export interface YdbReadScope {
+  read<Row = Readonly<Record<string, unknown>>>(statement: YdbStatement): Promise<YdbQueryResult<Row>>;
+}
+
+export interface YdbTransaction extends YdbReadScope {
   execute<Row = Readonly<Record<string, unknown>>>(statement: YdbStatement): Promise<YdbQueryResult<Row>>;
 }
 
@@ -77,7 +81,11 @@ export function writeStatement(
   return Object.freeze({ kind: 'WRITE' as const, text, parameters: freezeParameters(parameters) });
 }
 
-export class YdbAdapter {
+function assertReadStatement(statement: YdbStatement): void {
+  if (statement.kind !== 'READ') throw new YdbAdapterError('WRITE_REQUIRES_TRANSACTION');
+}
+
+export class YdbAdapter implements YdbReadScope {
   readonly #transport: YdbTransport;
 
   constructor(transport: YdbTransport) {
@@ -85,17 +93,21 @@ export class YdbAdapter {
   }
 
   async read<Row = Readonly<Record<string, unknown>>>(statement: YdbStatement): Promise<YdbQueryResult<Row>> {
-    if (statement.kind !== 'READ') throw new YdbAdapterError('WRITE_REQUIRES_TRANSACTION');
+    assertReadStatement(statement);
     return this.#transport.executeRead<Row>(statement);
   }
 
   async serializableReadWrite<T>(work: (transaction: YdbTransaction) => Promise<T>): Promise<T> {
     try {
       return await this.#transport.serializableReadWrite(async (transportTransaction) => {
-        const transaction = Object.freeze({
+        const transaction: YdbTransaction = Object.freeze({
           execute: <Row = Readonly<Record<string, unknown>>>(statement: YdbStatement) => (
             transportTransaction.execute<Row>(statement)
           ),
+          read: <Row = Readonly<Record<string, unknown>>>(statement: YdbStatement) => {
+            assertReadStatement(statement);
+            return transportTransaction.execute<Row>(statement);
+          },
         });
         return work(transaction);
       });
