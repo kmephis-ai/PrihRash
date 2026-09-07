@@ -8,7 +8,7 @@ import { YdbJsV6SchemeTransport } from '../dist/integration/ydb/ydbJsV6SchemeTra
 import { YdbSchemeTransportOutcomeUnknownError } from '../dist/integration/ydb/scheme.js';
 
 const REQUIRED_SCOPE = 'TEST_PRIVATE';
-const SAFE_TOP = 'prihrash_test_private_smoke';
+const SAFE_PREFIX = 'prihrash_test_private_smoke';
 const SYNTHETIC_TRANSACTION_ID = '00000000-0000-0000-0000-00000000a101';
 const SYNTHETIC_SOURCE_ID = '00000000-0000-0000-0000-00000000a102';
 
@@ -30,6 +30,13 @@ function msSince(start) {
 
 function safeEvidence(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function safeStageError(error, stage) {
+  if (typeof error?.code === 'string' && error.code.length > 0) return error;
+  const wrapped = new Error(`TEST_PRIVATE_${stage}_FAILED`, { cause: error });
+  wrapped.code = `TEST_PRIVATE_${stage}_FAILED`;
+  return wrapped;
 }
 
 async function credentialsProvider(connectionString) {
@@ -131,7 +138,7 @@ async function dropTableBestEffort(sql, path) {
   try {
     await sql`DROP TABLE ${sql.identifier(path)}`;
   } catch {
-    // Cleanup is idempotent best effort; final cleanup status is checked by directory removal.
+    // Cleanup is idempotent best effort; final run-root removal verifies emptiness.
   }
 }
 
@@ -143,36 +150,33 @@ async function cleanupCase(driver, sql, paths) {
     try {
       await removeDirectoryRaw(driver, path);
     } catch {
-      // Final root cleanup determines whether synthetic objects remain.
+      // Final run-root cleanup determines whether run-scoped synthetic objects remain.
     }
   }
 }
 
-async function createCase(scheme, sql, caseDirectory) {
+function casePaths(caseDirectory) {
   const currentDirectory = `${caseDirectory}/current`;
   const stagingDirectory = `${caseDirectory}/staging`;
-  const currentTransactions = `${currentDirectory}/transactions`;
-  const currentSourceRecords = `${currentDirectory}/source_records`;
-  const stagingTransactions = `${stagingDirectory}/transactions`;
-  const stagingSourceRecords = `${stagingDirectory}/source_records`;
-
-  await scheme.ensureDirectory(caseDirectory);
-  await scheme.ensureDirectory(currentDirectory);
-  await scheme.ensureDirectory(stagingDirectory);
-  await canonicalTransactionTable(sql, currentTransactions);
-  await canonicalSourceRecordTable(sql, currentSourceRecords);
-  await sql`INSERT INTO ${sql.identifier(currentTransactions)} (id) VALUES (Uuid(${SYNTHETIC_TRANSACTION_ID}))`;
-  await sql`INSERT INTO ${sql.identifier(currentSourceRecords)} (id) VALUES (Uuid(${SYNTHETIC_SOURCE_ID}))`;
-
   return Object.freeze({
     caseDirectory,
     currentDirectory,
     stagingDirectory,
-    currentTransactions,
-    currentSourceRecords,
-    stagingTransactions,
-    stagingSourceRecords,
+    currentTransactions: `${currentDirectory}/transactions`,
+    currentSourceRecords: `${currentDirectory}/source_records`,
+    stagingTransactions: `${stagingDirectory}/transactions`,
+    stagingSourceRecords: `${stagingDirectory}/source_records`,
   });
+}
+
+async function createCase(scheme, sql, paths) {
+  await scheme.ensureDirectory(paths.caseDirectory);
+  await scheme.ensureDirectory(paths.currentDirectory);
+  await scheme.ensureDirectory(paths.stagingDirectory);
+  await canonicalTransactionTable(sql, paths.currentTransactions);
+  await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
+  await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (Uuid(${SYNTHETIC_TRANSACTION_ID}))`;
+  await sql`INSERT INTO ${sql.identifier(paths.currentSourceRecords)} (id) VALUES (Uuid(${SYNTHETIC_SOURCE_ID}))`;
 }
 
 async function copyAndVerify(scheme, sql, paths) {
@@ -259,24 +263,29 @@ async function main() {
   const sql = query(driver, { poolOptions: { maxSize: 4 } });
   const scheme = new YdbJsV6SchemeTransport(driver);
   const runTag = randomUUID().replaceAll('-', '');
-  const runDirectory = `${SAFE_TOP}/r_${runTag}`;
-  const normalDirectory = `${runDirectory}/normal`;
-  const unknownDirectory = `${runDirectory}/unknown`;
-  let normalPaths;
-  let unknownPaths;
+  const runDirectory = `${SAFE_PREFIX}_r_${runTag}`;
+  const normalPaths = casePaths(`${runDirectory}/normal`);
+  const unknownPaths = casePaths(`${runDirectory}/unknown`);
   let cleanupStatus = 'PASS';
+  let primaryError = null;
+  let stage = 'ENSURE_RUN_DIRECTORY';
 
   const totalStarted = performance.now();
   try {
-    await scheme.ensureDirectory(SAFE_TOP);
     await scheme.ensureDirectory(runDirectory);
 
-    normalPaths = await createCase(scheme, sql, normalDirectory);
+    stage = 'CREATE_NORMAL_CASE';
+    await createCase(scheme, sql, normalPaths);
+    stage = 'COPY_NORMAL_CASE';
     const copyLatencyMs = await copyAndVerify(scheme, sql, normalPaths);
+    stage = 'RENAME_NORMAL_CASE';
     const renameLatencyMs = await renameAndVerify(scheme, sql, normalPaths);
 
-    unknownPaths = await createCase(scheme, sql, unknownDirectory);
+    stage = 'CREATE_UNKNOWN_CASE';
+    await createCase(scheme, sql, unknownPaths);
+    stage = 'COPY_UNKNOWN_CASE';
     const unknownCopyLatencyMs = await copyAndVerify(scheme, sql, unknownPaths);
+    stage = 'UNKNOWN_OUTCOME_CASE';
     const unknown = await unknownOutcomeCase(scheme, sql, unknownPaths);
 
     safeEvidence({
@@ -295,12 +304,13 @@ async function main() {
         renameLatencyMs: unknown.latencyMs,
       },
     });
+  } catch (error) {
+    primaryError = safeStageError(error, stage);
   } finally {
     try {
-      if (unknownPaths) await cleanupCase(driver, sql, unknownPaths);
-      if (normalPaths) await cleanupCase(driver, sql, normalPaths);
+      await cleanupCase(driver, sql, unknownPaths);
+      await cleanupCase(driver, sql, normalPaths);
       await removeDirectoryRaw(driver, runDirectory);
-      await removeDirectoryRaw(driver, SAFE_TOP);
     } catch {
       cleanupStatus = 'FAILED';
     }
@@ -315,8 +325,10 @@ async function main() {
       cleanup: cleanupStatus,
       totalLatencyMs: msSince(totalStarted),
     });
-    if (cleanupStatus !== 'PASS') failClosed('SYNTHETIC_CLEANUP_FAILED');
   }
+
+  if (primaryError !== null) throw primaryError;
+  if (cleanupStatus !== 'PASS') failClosed('SYNTHETIC_CLEANUP_FAILED');
 }
 
 main().catch((error) => {
