@@ -20,5 +20,10 @@
   },
   "devDependencies": {
     "typescript": "5.8.3"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.12.0",
+    "@ydbjs/api": "6.0.7",
+    "@ydbjs/core": "6.0.7"
   }
 }
