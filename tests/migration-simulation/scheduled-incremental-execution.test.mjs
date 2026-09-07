@@ -133,8 +133,18 @@ function makeAdapter() {
           }
 
           if (transactionNumber === 3) {
-            if (statement.text.includes('RETURNING id')) return { rows: [{ id: RUN_ID }] };
-            return { rows: [] };
+            if (statement.text.includes('RETURNING source_record_id')) {
+              return { rows: [{ source_record_id: SOURCE_ID }] };
+            }
+            if (statement.text.startsWith('INSERT INTO transactions')) {
+              return { rows: [{ id: TX_ID }] };
+            }
+            if (statement.text.startsWith('INSERT INTO source_records')) {
+              return { rows: [{ id: SOURCE_ID }] };
+            }
+            if (statement.text.startsWith('UPDATE migration_runs SET state = $state')) {
+              return { rows: [{ id: RUN_ID }] };
+            }
           }
 
           throw new Error(`UNEXPECTED_STATEMENT_${transactionNumber}: ${statement.text}`);
@@ -201,7 +211,10 @@ test('binds the prepared run to the leased digest and commits through the existi
   assert.equal(result.lifecycle.run.state, 'COMMITTED');
   assert.equal(result.lifecycle.run.sourceSnapshotDigest, LEASED_DIGEST);
   assert.equal(observed.transactionCount, 3);
-  assert.equal(observed.statements.some((item) => item.transactionNumber === 3 && item.text.includes('RETURNING id')), true);
+  assert.equal(observed.statements.some((item) => item.transactionNumber === 3 && item.text.startsWith('INSERT INTO transactions')), true);
+  assert.equal(observed.statements.some((item) => item.transactionNumber === 3 && item.text.includes('RETURNING source_record_id')), true);
+  assert.equal(observed.statements.some((item) => item.transactionNumber === 3 && item.text.startsWith('INSERT INTO source_records')), true);
+  assert.equal(observed.statements.some((item) => item.transactionNumber === 3 && item.text.startsWith('UPDATE migration_runs SET state = $state')), true);
   assert.equal(Object.isFrozen(result), true);
 });
 
