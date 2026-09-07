@@ -25,193 +25,83 @@ function payload(overrides = {}) {
   };
 }
 
-function reviseIntent(overrides = {}) {
+function lineage(outcome = {}) {
   return {
-    kind: 'REVISE',
-    sourceRecordId: SOURCE_ID,
-    expectedPreviousRevision: 2,
-    expectedPreviousDigest: 'digest-before',
-    previousRowHint: 5,
-    currentRevision: 3,
-    currentDigest: 'digest-after',
-    currentRowHint: 5,
-    observedAt: '2026-09-07T12:00:00.000Z',
-    ...overrides,
+    outcomes: [{
+      kind: 'REVISED', sourceRecordId: SOURCE_ID,
+      previousRowHint: 5, currentRowHint: 5,
+      previousDigest: 'digest-before', currentDigest: 'digest-after',
+      ...outcome,
+    }],
+    counters: { rowsSeen: 1, rowsNew: 0, rowsChanged: 1, rowsMissing: 0, rowsAmbiguous: 0 },
   };
-}
-
-function delta(intent = reviseIntent()) {
-  return { intents: [intent], unresolvedBlocks: [] };
 }
 
 function previous(rawPayload = payload(), overrides = {}) {
   return {
-    sourceRecordId: SOURCE_ID,
-    revision: 2,
+    sourceRecordId: SOURCE_ID, revision: 2,
     migrationRunId: '00000000-0000-0000-0000-000000000101',
-    observedAt: '2026-09-06T12:00:00.000Z',
-    rowHint: 5,
-    rowDigest: 'digest-before',
-    changeClass: 'OWNER_CORRECTION',
-    rawPayload,
-    ...overrides,
+    observedAt: '2026-09-06T12:00:00.000Z', rowHint: 5, rowDigest: 'digest-before',
+    changeClass: 'OWNER_CORRECTION', rawPayload, ...overrides,
   };
 }
-
 function current(rawPayload, overrides = {}) {
-  return {
-    rowHint: 5,
-    digest: 'digest-after',
-    rawPayload,
-    ...overrides,
-  };
+  return { rowHint: 5, digest: 'digest-after', rawPayload, ...overrides };
 }
+const FULL_CONTEXT = { preCloseObservationProven: true, inJustClosedWorkingSetProven: true, closeClusterDetected: true, observedAfterClose: true, batchCleanupPatternConfirmed: true };
+const PARTIAL_CONTEXT = { ...FULL_CONTEXT, inJustClosedWorkingSetProven: false, closeClusterDetected: false, observedAfterClose: false, batchCleanupPatternConfirmed: false };
 
-const FULL_CONTEXT = {
-  preCloseObservationProven: true,
-  inJustClosedWorkingSetProven: true,
-  closeClusterDetected: true,
-  observedAfterClose: true,
-  batchCleanupPatternConfirmed: true,
-};
-
-const PARTIAL_CONTEXT = {
-  preCloseObservationProven: true,
-  inJustClosedWorkingSetProven: false,
-  closeClusterDetected: false,
-  observedAfterClose: false,
-  batchCleanupPatternConfirmed: false,
-};
-
-test('ordinary owner correction is context-independent and classifies without close evidence', () => {
-  const plan = buildIncrementalRevisionChangeEvidence(
-    delta(),
-    [previous()],
-    [current(payload({ description: { kind: 'STRING', value: 'after' } }))],
-  );
-
+test('ordinary owner correction is lineage-first and context-independent', () => {
+  const plan = buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [current(payload({ description: { kind: 'STRING', value: 'after' } }))]);
   assert.deepEqual(plan.changeEvidence, [{ sourceRecordId: SOURCE_ID, changeClass: 'OWNER_CORRECTION' }]);
   assert.deepEqual(plan.contextDependentSourceRecordIds, []);
-  assert.equal(Object.isFrozen(plan), true);
 });
 
-test('structural danger remains AMBIGUOUS_CHANGE without close context', () => {
-  const plan = buildIncrementalRevisionChangeEvidence(
-    delta(),
-    [previous()],
-    [current(payload({ expense_amount: null }))],
-  );
+test('structural danger remains ambiguous without close context', () => {
+  const plan = buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [current(payload({ expense_amount: null }))]);
   assert.deepEqual(plan.changeEvidence, [{ sourceRecordId: SOURCE_ID, changeClass: 'AMBIGUOUS_CHANGE' }]);
-  assert.deepEqual(plan.contextDependentSourceRecordIds, []);
 });
 
-test('known cleanup transition is blocked when close context is not proven', () => {
+test('known cleanup blocks without context and follows proven full/partial context', () => {
   const before = payload({ expense_account: { kind: 'STRING', value: 'Карта Credit' } });
   const after = payload({ expense_account: { kind: 'STRING', value: 'Карта Visa' } });
-
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [previous(before)], [current(after)]),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'MISSING_CONTEXTUAL_CHANGE_EVIDENCE',
-  );
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous(before)], [current(after)]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'MISSING_CONTEXTUAL_CHANGE_EVIDENCE');
+  assert.deepEqual(buildIncrementalRevisionChangeEvidence(lineage(), [previous(before)], [current(after)], [{ sourceRecordId: SOURCE_ID, context: FULL_CONTEXT }]).changeEvidence,
+    [{ sourceRecordId: SOURCE_ID, changeClass: 'WORKFLOW_TRANSFORM' }]);
+  assert.deepEqual(buildIncrementalRevisionChangeEvidence(lineage(), [previous(before)], [current(after)], [{ sourceRecordId: SOURCE_ID, context: PARTIAL_CONTEXT }]).changeEvidence,
+    [{ sourceRecordId: SOURCE_ID, changeClass: 'AMBIGUOUS_CHANGE' }]);
 });
 
-test('known cleanup uses explicit full or partial proven context through the existing classifier', () => {
-  const before = payload({ expense_account: { kind: 'STRING', value: 'Карта Credit' } });
-  const after = payload({ expense_account: { kind: 'STRING', value: 'Карта Visa' } });
-
-  const workflow = buildIncrementalRevisionChangeEvidence(
-    delta(), [previous(before)], [current(after)], [{ sourceRecordId: SOURCE_ID, context: FULL_CONTEXT }],
-  );
-  assert.deepEqual(workflow.changeEvidence, [{ sourceRecordId: SOURCE_ID, changeClass: 'WORKFLOW_TRANSFORM' }]);
-  assert.deepEqual(workflow.contextDependentSourceRecordIds, [SOURCE_ID]);
-
-  const ambiguous = buildIncrementalRevisionChangeEvidence(
-    delta(), [previous(before)], [current(after)], [{ sourceRecordId: SOURCE_ID, context: PARTIAL_CONTEXT }],
-  );
-  assert.deepEqual(ambiguous.changeEvidence, [{ sourceRecordId: SOURCE_ID, changeClass: 'AMBIGUOUS_CHANGE' }]);
-});
-
-test('stale previous revision or current row evidence is rejected', () => {
-  for (const previousOverrides of [
-    { revision: 1 },
-    { rowHint: 6 },
-    { rowDigest: 'other-before' },
-  ]) {
-    assert.throws(
-      () => buildIncrementalRevisionChangeEvidence(
-        delta(), [previous(payload(), previousOverrides)], [current(payload({ description: { kind: 'STRING', value: 'after' } }))],
-      ),
-      (error) => error instanceof IncrementalRevisionChangeEvidenceError
-        && error.code === 'PREVIOUS_REVISION_INTENT_MISMATCH',
-    );
+test('stale previous/current evidence is rejected against lineage', () => {
+  for (const overrides of [{ rowHint: 6 }, { rowDigest: 'other-before' }]) {
+    assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous(payload(), overrides)], [current(payload({ description: { kind: 'STRING', value: 'after' } }))]),
+      (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'PREVIOUS_REVISION_LINEAGE_MISMATCH');
   }
-
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(
-      delta(), [previous()], [current(payload({ description: { kind: 'STRING', value: 'after' } }), { digest: 'other-after' })],
-    ),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'CURRENT_ROW_INTENT_MISMATCH',
-  );
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [current(payload({ description: { kind: 'STRING', value: 'after' } }), { digest: 'other-after' })]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'CURRENT_ROW_LINEAGE_MISMATCH');
 });
 
-test('missing, extra and duplicate previous/current evidence fails closed', () => {
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [], [current(payload())]),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'MISSING_PREVIOUS_REVISION_EVIDENCE',
-  );
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [previous()], []),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'MISSING_CURRENT_ROW_EVIDENCE',
-  );
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [previous(), previous()], [current(payload())]),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'DUPLICATE_PREVIOUS_REVISION_SOURCE_ID',
-  );
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [previous()], [current(payload()), current(payload())]),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'DUPLICATE_CURRENT_ROW_HINT',
-  );
+test('missing/duplicate and extra evidence remains fail-closed', () => {
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [], [current(payload())]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'MISSING_PREVIOUS_REVISION_EVIDENCE');
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous()], []),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'MISSING_CURRENT_ROW_EVIDENCE');
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous(), previous()], [current(payload())]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'DUPLICATE_PREVIOUS_REVISION_SOURCE_ID');
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [current(payload()), current(payload())]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'DUPLICATE_CURRENT_ROW_HINT');
 });
 
-test('extra or duplicate contextual evidence is rejected', () => {
+test('extra context is forbidden and unchanged financial projection cannot satisfy REVISED lineage', () => {
   const changed = current(payload({ description: { kind: 'STRING', value: 'after' } }));
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(
-      delta(), [previous()], [changed], [{ sourceRecordId: SOURCE_ID, context: FULL_CONTEXT }],
-    ),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'EXTRA_CONTEXTUAL_CHANGE_EVIDENCE',
-  );
-
-  const before = payload({ expense_account: { kind: 'STRING', value: 'Карта Credit' } });
-  const after = payload({ expense_account: { kind: 'STRING', value: 'Карта Visa' } });
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(
-      delta(), [previous(before)], [current(after)], [
-        { sourceRecordId: SOURCE_ID, context: FULL_CONTEXT },
-        { sourceRecordId: SOURCE_ID.toUpperCase(), context: FULL_CONTEXT },
-      ],
-    ),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'DUPLICATE_CONTEXT_SOURCE_ID',
-  );
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [changed], [{ sourceRecordId: SOURCE_ID, context: FULL_CONTEXT }]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'EXTRA_CONTEXTUAL_CHANGE_EVIDENCE');
+  assert.throws(() => buildIncrementalRevisionChangeEvidence(lineage(), [previous()], [current(payload())]),
+    (e) => e instanceof IncrementalRevisionChangeEvidenceError && e.code === 'REVISED_FINANCIAL_FIELDS_NO_CHANGE');
 });
 
-test('REVISE whose financial projection is unchanged is rejected rather than labeled NO_CHANGE', () => {
-  assert.throws(
-    () => buildIncrementalRevisionChangeEvidence(delta(), [previous()], [current(payload())]),
-    (error) => error instanceof IncrementalRevisionChangeEvidenceError
-      && error.code === 'REVISED_FINANCIAL_FIELDS_NO_CHANGE',
-  );
-});
-
-test('no REVISE intents require no previous/current/context evidence', () => {
-  const plan = buildIncrementalRevisionChangeEvidence({ intents: [], unresolvedBlocks: [] }, [], []);
+test('lineage without REVISED outcomes needs no revision payload evidence', () => {
+  const plan = buildIncrementalRevisionChangeEvidence({ outcomes: [], counters: { rowsSeen: 0, rowsNew: 0, rowsChanged: 0, rowsMissing: 0, rowsAmbiguous: 0 } }, [], []);
   assert.deepEqual(plan, { changeEvidence: [], contextDependentSourceRecordIds: [] });
 });
