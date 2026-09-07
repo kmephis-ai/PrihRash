@@ -18,11 +18,10 @@ export interface ScheduledSyncPreflightResult {
   readonly observedSnapshotDigest: string;
 }
 
-export async function runScheduledSyncPreflight(
-  source: AuthoritativeFullSnapshotReader,
+export async function evaluateScheduledSyncPreflightObservation(
+  observation: Readonly<AuthoritativeFullSnapshotObservation>,
   adapter: YdbAdapter,
 ): Promise<Readonly<ScheduledSyncPreflightResult>> {
-  const observation = await source.readFullSnapshotObservation();
   const evidence = await readScheduledSyncAdmissionEvidence(adapter);
   const admission = evaluateScheduledSyncAdmission({
     observedSnapshotDigest: observation.snapshotDigest,
@@ -34,4 +33,12 @@ export async function runScheduledSyncPreflight(
     decision: admission.decision,
     observedSnapshotDigest: observation.snapshotDigest,
   });
+}
+
+export async function runScheduledSyncPreflight(
+  source: AuthoritativeFullSnapshotReader,
+  adapter: YdbAdapter,
+): Promise<Readonly<ScheduledSyncPreflightResult>> {
+  const observation = await source.readFullSnapshotObservation();
+  return evaluateScheduledSyncPreflightObservation(observation, adapter);
 }
