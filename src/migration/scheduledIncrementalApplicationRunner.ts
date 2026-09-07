@@ -1,12 +1,10 @@
 import { YdbAdapter } from '../integration/ydb/adapter.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import type { GoogleSnapshotMigrationProjection } from './googleSnapshotProjection.js';
-import type { InitialReconciliationEvidence } from './initialValidationGate.js';
+import { readConsistentIncrementalCurrentEvidence } from './consistentIncrementalCurrentEvidence.js';
 import {
-  readConsistentIncrementalCurrentEvidence,
-  type ConsistentIncrementalCurrentEvidenceSnapshot,
-} from './consistentIncrementalCurrentEvidence.js';
-import type { IncrementalCurrentReconciliationPlan } from './incrementalCurrentReconciliation.js';
+  compareIncrementalRollForwardReconciliation,
+} from './incrementalRollForwardReconciliation.js';
 import {
   executePreparedScheduledIncrementalCandidateWithClock,
   type ScheduledIncrementalExecutionResult,
@@ -17,7 +15,6 @@ import {
   type IncrementalTransactionIdentityAllocator,
 } from './scheduledIncrementalCandidatePreparation.js';
 import type { ScheduledIncrementalLifecycleClock } from './scheduledIncrementalLifecycle.js';
-import type { MigrationRun } from './migrationRunState.js';
 import { evaluateScheduledSyncAdmission } from './scheduledSyncAdmission.js';
 import type {
   AuthoritativeFullSnapshotLease,
@@ -34,23 +31,12 @@ export interface ScheduledIncrementalRunContext {
   readonly startedAt: string;
 }
 
-export interface ScheduledIncrementalReconciliationRequest<TSnapshot> {
-  readonly observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>;
-  readonly baselineRun: Readonly<MigrationRun>;
-  readonly candidateRun: Readonly<MigrationRun>;
-  readonly reconciliationPlan: Readonly<IncrementalCurrentReconciliationPlan>;
-  readonly verifiedCurrentEvidence: Readonly<ConsistentIncrementalCurrentEvidenceSnapshot>;
-}
-
 export interface ScheduledIncrementalApplicationDependencies<TSnapshot> {
   readonly projectObservation: (
     observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>,
   ) => Readonly<ScheduledIncrementalObservationProjection>;
   readonly createRunContext: () => Readonly<ScheduledIncrementalRunContext>;
   readonly lifecycleClock: Readonly<ScheduledIncrementalLifecycleClock>;
-  readonly readReconciliationEvidence: (
-    request: Readonly<ScheduledIncrementalReconciliationRequest<TSnapshot>>,
-  ) => Promise<Readonly<InitialReconciliationEvidence>>;
   readonly refs: ReferenceResolver;
   readonly sourceIdentityAllocator: IncrementalSourceIdentityAllocator;
   readonly transactionIdentityAllocator: IncrementalTransactionIdentityAllocator;
@@ -123,13 +109,13 @@ export class ScheduledIncrementalApplicationRunner<TSnapshot>
       sourceIdentityAllocator: this.#dependencies.sourceIdentityAllocator,
       transactionIdentityAllocator: this.#dependencies.transactionIdentityAllocator,
     });
-    const reconciliationEvidence = await this.#dependencies.readReconciliationEvidence(Object.freeze({
-      observation,
-      baselineRun,
-      candidateRun: prepared.run,
-      reconciliationPlan: prepared.reconciliation,
-      verifiedCurrentEvidence: evidence,
-    }));
+
+    const reconciliationEvidence = compareIncrementalRollForwardReconciliation(
+      prepared.reconciliation,
+      evidence.sourceEvidence.sourceCurrent,
+      evidence.previousTransactions,
+      prepared.candidates.currentDelta,
+    );
 
     this.#lastResult = await executePreparedScheduledIncrementalCandidateWithClock(this.#adapter, {
       baselineRun,
