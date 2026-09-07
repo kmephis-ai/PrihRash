@@ -34,10 +34,10 @@ export interface ScheduledIncrementalApplicationDependencies<TSnapshot> {
     observation: Readonly<AuthoritativeFullSnapshotLease<TSnapshot>>,
   ) => Readonly<ScheduledIncrementalObservationProjection>;
   readonly createRunContext: () => Readonly<ScheduledIncrementalRunContext>;
+  readonly readReconciliationEvidence: () => Promise<Readonly<InitialReconciliationEvidence>>;
   readonly refs: ReferenceResolver;
   readonly sourceIdentityAllocator: IncrementalSourceIdentityAllocator;
   readonly transactionIdentityAllocator: IncrementalTransactionIdentityAllocator;
-  readonly reconciliationEvidence: Readonly<InitialReconciliationEvidence>;
 }
 
 export type ScheduledIncrementalApplicationRunnerErrorCode =
@@ -55,7 +55,7 @@ export class ScheduledIncrementalApplicationRunnerError extends Error {
 }
 
 export class ScheduledIncrementalApplicationRunner<TSnapshot>
-implements ScheduledIncrementalRunner<TSnapshot> {
+  implements ScheduledIncrementalRunner<TSnapshot> {
   readonly #adapter: YdbAdapter;
   readonly #dependencies: ScheduledIncrementalApplicationDependencies<TSnapshot>;
   #lastResult: Readonly<ScheduledIncrementalExecutionResult> | null = null;
@@ -93,6 +93,7 @@ implements ScheduledIncrementalRunner<TSnapshot> {
 
     const projected = this.#dependencies.projectObservation(observation);
     const context = this.#dependencies.createRunContext();
+    const reconciliationEvidence = await this.#dependencies.readReconciliationEvidence();
     this.#lastResult = await runPreparedScheduledIncremental(this.#adapter, {
       baselineRun,
       sourceEvidence: evidence.sourceEvidence,
@@ -108,7 +109,7 @@ implements ScheduledIncrementalRunner<TSnapshot> {
       refs: this.#dependencies.refs,
       sourceIdentityAllocator: this.#dependencies.sourceIdentityAllocator,
       transactionIdentityAllocator: this.#dependencies.transactionIdentityAllocator,
-      reconciliationEvidence: this.#dependencies.reconciliationEvidence,
+      reconciliationEvidence,
     });
   }
 }
