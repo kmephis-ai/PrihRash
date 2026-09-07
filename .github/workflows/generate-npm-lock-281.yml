@@ -1,0 +1,42 @@
+name: Generate canonical npm lock 281
+
+on:
+  push:
+    branches:
+      - transport/npm-lock-281
+
+permissions:
+  contents: read
+
+jobs:
+  lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 241e2d49276b6caed8e01e80459498bd78765d61
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Generate canonical lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          test -s package-lock.json
+          npm ci --ignore-scripts --no-audit --no-fund
+          sha256sum package-lock.json > package-lock.sha256
+      - name: Upload exact lockfile artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-lock-281
+          path: |
+            package-lock.json
+            package-lock.sha256
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
