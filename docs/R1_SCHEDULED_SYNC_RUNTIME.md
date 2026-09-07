@@ -60,6 +60,22 @@ Read-only admission не является distributed lock. Два scheduler inv
 
 Claim не добавляет lock table или новый lifecycle state: serializable transaction связывает recheck baseline и единственный STAGING insert. Financial current-state promotion по-прежнему происходит только после candidate validation через существующий atomic promotion path.
 
+## Validation, reconciliation и promotion
+
+Ordinary incremental runtime не materializes отдельные staging tables для будущего post-change current state.
+
+После atomic run claim:
+
+1. тот же authoritative observation проходит existing lineage/semantic/candidate pipeline относительно exact last `COMMITTED` baseline;
+2. pre-promotion validation использует independent reconciliation evidence и exact verified current evidence; самосравнение candidate с самим собой не считается proof;
+3. expected post-change candidate **не** сравнивается с pre-promotion YDB current rows как будто delta уже materialized;
+4. при отсутствии blockers `STAGING → VALIDATED` означает только разрешение на atomic promotion;
+5. exact previous provider state повторно защищается optimistic predicates внутри одной atomic promotion transaction, которая применяет delta и commit marker;
+6. `VALIDATED` сам по себе не является verified shadow state; verified baseline по-прежнему только последний `COMMITTED` run;
+7. post-commit current-state read-back/reconciliation — отдельная verification/recovery boundary; mismatch требует recovery/incident handling и не разрешает считать сомнительный/failed state частично verified.
+
+Controlled bootstrap/rebuild остаётся другим механизмом: там candidate может быть materialized в staging и reconciliation выполняется против staging evidence до явного promotion. Эти staging semantics не переносятся автоматически на ordinary incremental sync.
+
 ## Следующая runtime boundary
 
-Следующий S-unit должен материализовать verified current YDB evidence, нужный существующему incremental candidate pipeline, а затем собрать thin application runner вокруг уже доказанных lineage/semantic/delta/validation/promotion компонентов. Таймер/cron не содержит financial semantics: scheduler только инициирует одну runtime invocation, policy остаётся в application layer.
+После синхронизации reconciliation lifecycle следующий S-unit должен собрать thin application runner вокруг уже доказанных admission/claim, single-observation handoff, verified YDB evidence, lineage/semantic/delta/validation/promotion компонентов. Таймер/cron не содержит financial semantics: scheduler только инициирует одну runtime invocation, policy остаётся в application layer.
