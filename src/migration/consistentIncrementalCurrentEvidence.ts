@@ -11,8 +11,15 @@ import {
   readIncrementalTransactionCurrentEvidence,
 } from './incrementalTransactionCurrentEvidenceReader.js';
 import type { IncrementalPreviousTransactionCurrentEvidence } from './incrementalTransactionCurrentCandidate.js';
+import {
+  parseScheduledSyncAdmissionEvidence,
+  scheduledSyncAdmissionEvidenceStatement,
+  type MigrationRunEvidenceRow,
+  type ScheduledSyncAdmissionEvidence,
+} from './scheduledSyncAdmissionEvidence.js';
 
 export interface ConsistentIncrementalCurrentEvidenceSnapshot {
+  readonly admissionEvidence: Readonly<ScheduledSyncAdmissionEvidence>;
   readonly sourceEvidence: Readonly<IncrementalSourceCurrentEvidenceSnapshot>;
   readonly revisionEvidence: Readonly<IncrementalCurrentRevisionEvidenceSnapshot>;
   readonly previousTransactions: readonly Readonly<IncrementalPreviousTransactionCurrentEvidence>[];
@@ -22,6 +29,10 @@ export async function readConsistentIncrementalCurrentEvidence(
   adapter: YdbAdapter,
 ): Promise<Readonly<ConsistentIncrementalCurrentEvidenceSnapshot>> {
   return adapter.serializableReadWrite(async (transaction) => {
+    const admissionRows = await transaction.read<MigrationRunEvidenceRow>(
+      scheduledSyncAdmissionEvidenceStatement(),
+    );
+    const admissionEvidence = parseScheduledSyncAdmissionEvidence(admissionRows.rows);
     const sourceEvidence = await readIncrementalSourceCurrentEvidence(transaction);
     const revisionEvidence = await readIncrementalCurrentRevisionEvidence(
       transaction,
@@ -30,6 +41,7 @@ export async function readConsistentIncrementalCurrentEvidence(
     const previousTransactions = await readIncrementalTransactionCurrentEvidence(transaction);
 
     return Object.freeze({
+      admissionEvidence,
       sourceEvidence,
       revisionEvidence,
       previousTransactions,
