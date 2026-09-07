@@ -153,7 +153,7 @@ test('malformed provider and canonical transaction evidence fails closed', async
       () => readIncrementalTransactionCurrentEvidence(adapter),
       (error) => error instanceof IncrementalTransactionCurrentEvidenceReaderError
         && error.code === 'MALFORMED_TRANSACTION_CURRENT_EVIDENCE',
-      JSON.stringify(overrides),
+      `field=${Object.keys(overrides)[0]}`,
     );
   }
 });
