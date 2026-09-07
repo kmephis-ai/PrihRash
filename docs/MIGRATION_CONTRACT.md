@@ -374,6 +374,22 @@ Resolution сохраняет `resolved_at`, `resolved_by`, `resolution_code`; �
 
 Effect plan и audit metadata — разные части одного resolution workflow: будущий conditional executor обязан применять effect с optimistic/lost-update guards и сохранять тот же chosen `resolution_code`; успешная запись metadata сама по себе не доказывает, что effectful Transaction/source-link mutation была выполнена.
 
+### 17.2. Incremental review materialization
+
+Incremental review различает **identified SourceRecord ambiguity** и **unresolved lineage**. Это не взаимозаменяемые состояния.
+
+Для SourceRecord, identity которого уже доказана sequence reconciliation:
+
+- `REVIEW_REQUIRED` из contextual classification drift, semantic transition или `AMBIGUOUS_CHANGE` материализуется как `SourceRecord.classification=AMBIGUOUS`, `SourceRecord.state=null`;
+- existing exact `transaction_id`, если он уже есть, сохраняется; review не имеет права автоматически unlink/void/replace canonical Transaction;
+- новый `INSERTED` SourceRecord с доказанной identity, но ambiguous financial/source semantics, также материализуется `classification=AMBIGUOUS`, `state=null`, без invented `transaction_id`;
+- disappearance уже идентифицированного SourceRecord материализуется отдельно: `state=MISSING`, previous classification и exact transaction link сохраняются;
+- `normalization_status` **не** используется как скрытый `REVIEW_REQUIRED` flag; до отдельного vocabulary contract он остаётся существующим значением/null.
+
+Current-side rows из `AMBIGUOUS_BLOCK`, которым deterministic sequence reconciliation не может выдать SourceRecord identity, не превращаются в `classification=AMBIGUOUS` с guessed ID. Пока не существует отдельного durable row-level unresolved-lineage persistence/resolution contract, наличие хотя бы одной такой observation блокирует verified-current promotion (`UNRESOLVED_LINEAGE`): candidate/reconciliation evidence может быть построен, но run не становится COMMITTED shadow state.
+
+`resolution_code/resolved_at/resolved_by` относятся к уже завершённому owner resolution текущего review epoch. Новый review reason поверх non-null resolution audit нельзя молча открыть очисткой или overwrite этих полей: до отдельного rollover/history contract такой case fail-closed (`RESOLUTION_EPOCH_ROLLOVER_REQUIRED`). Это сохраняет owner audit и не выдаёт stale resolution за решение новой ambiguity.
+
 ## 18. MigrationRun и atomic promotion
 
 ```text
@@ -477,7 +493,7 @@ Regular replication.
 
 ### READ_ELIGIBLE
 
-PWA может читать YDB, Google всё ещё authority.
+PWA может читать YDB, Google всё ещё authority/fallback.
 
 ### CUTOVER_CANDIDATE
 
