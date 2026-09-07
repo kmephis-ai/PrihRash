@@ -10,7 +10,14 @@ import {
   type TransactionType,
 } from '../domain/transaction.js';
 import { readStatement, YdbAdapter, type YdbStatement } from '../integration/ydb/adapter.js';
-import { uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import {
+  dateParameter,
+  timestampParameter,
+  uint64Parameter,
+  utf8Parameter,
+  uuidParameter,
+  type YdbParameter,
+} from '../integration/ydb/parameters.js';
 
 export const READER_RECENT_OPERATIONS_DEFAULT_LIMIT = 50 as const;
 export const READER_RECENT_OPERATIONS_MAX_LIMIT = 100 as const;
@@ -56,9 +63,14 @@ export interface ReaderRecentOperationsResult {
   readonly limit: number;
 }
 
+export interface ReaderRecentOperationsPageResult extends ReaderRecentOperationsResult {
+  readonly nextCursor: string | null;
+}
+
 export type ReaderRecentOperationsErrorCode =
   | 'INVALID_LIMIT'
   | 'INVALID_FILTER'
+  | 'INVALID_CURSOR'
   | 'MALFORMED_READER_EVIDENCE';
 
 export class ReaderRecentOperationsError extends Error {
@@ -107,8 +119,16 @@ interface MutableReaderRecentOperationsFilters {
   categoryId?: string;
 }
 
+interface ReaderRecentOperationsCursorPayload {
+  readonly v: 1;
+  readonly o: string;
+  readonly c: string;
+  readonly i: string;
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const TYPES = new Set<TransactionType>(['EXPENSE', 'INCOME', 'TRANSFER']);
 const GRANULARITIES = new Set<RecordGranularity>(['TRANSACTION', 'PERIOD_AGGREGATE', 'UNKNOWN']);
 const DATE_PRECISIONS = new Set<DatePrecision>(['DAY', 'MONTH', 'UNKNOWN']);
@@ -124,6 +144,10 @@ function fail(): never {
 
 function invalidFilter(): never {
   throw new ReaderRecentOperationsError('INVALID_FILTER');
+}
+
+function invalidCursor(): never {
+  throw new ReaderRecentOperationsError('INVALID_CURSOR');
 }
 
 function normalizeLimit(limit: number | undefined): number {
@@ -298,32 +322,95 @@ function parseOperation(row: Readonly<ReaderOperationRow>): Readonly<ReaderOpera
   });
 }
 
-export function recentOperationsStatement(
-  limit: number,
-  filters?: Readonly<ReaderRecentOperationsFilters>,
+function validateCursorPayload(value: unknown): Readonly<ReaderRecentOperationsCursorPayload> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return invalidCursor();
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.join(',') !== 'c,i,o,v' || record.v !== 1) return invalidCursor();
+  if (
+    typeof record.o !== 'string'
+    || !DATE_PATTERN.test(record.o)
+    || !Number.isFinite(Date.parse(`${record.o}T00:00:00.000Z`))
+    || typeof record.c !== 'string'
+    || record.c.length === 0
+    || record.c !== record.c.trim()
+    || !Number.isFinite(Date.parse(record.c))
+    || typeof record.i !== 'string'
+    || !UUID_PATTERN.test(record.i)
+  ) {
+    return invalidCursor();
+  }
+  return Object.freeze({ v: 1, o: record.o, c: record.c, i: record.i.toLowerCase() });
+}
+
+export function encodeRecentOperationsCursor(operation: Pick<ReaderOperation, 'occurredOn' | 'capturedAt' | 'id'>): string {
+  const payload = validateCursorPayload({
+    v: 1,
+    o: operation.occurredOn,
+    c: operation.capturedAt,
+    i: operation.id,
+  });
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+export function decodeRecentOperationsCursor(cursor: string): Readonly<ReaderRecentOperationsCursorPayload> {
+  if (
+    typeof cursor !== 'string'
+    || cursor.length === 0
+    || cursor !== cursor.trim()
+    || !BASE64URL_PATTERN.test(cursor)
+  ) {
+    return invalidCursor();
+  }
+  let decoded: string;
+  try {
+    const bytes = Buffer.from(cursor, 'base64url');
+    decoded = bytes.toString('utf8');
+    if (bytes.toString('base64url') !== cursor) return invalidCursor();
+  } catch {
+    return invalidCursor();
+  }
+  try {
+    return validateCursorPayload(JSON.parse(decoded));
+  } catch (error) {
+    if (error instanceof ReaderRecentOperationsError) throw error;
+    return invalidCursor();
+  }
+}
+
+function buildRecentOperationsStatement(
+  providerLimit: number,
+  filters: Readonly<ReaderRecentOperationsFilters>,
+  cursor: Readonly<ReaderRecentOperationsCursorPayload> | null,
 ): Readonly<YdbStatement> {
-  const normalizedLimit = normalizeLimit(limit);
-  const normalizedFilters = normalizeFilters(filters);
   const clauses: string[] = [];
-  const parameters: Record<string, ReturnType<typeof uint64Parameter>> = {
-    limit: uint64Parameter(normalizedLimit),
+  const parameters: Record<string, YdbParameter> = {
+    limit: uint64Parameter(providerLimit),
   };
 
-  if (normalizedFilters.type !== undefined) {
+  if (filters.type !== undefined) {
     clauses.push('t.type = $type');
-    parameters.type = utf8Parameter(normalizedFilters.type);
+    parameters.type = utf8Parameter(filters.type);
   }
-  if (normalizedFilters.status !== undefined) {
+  if (filters.status !== undefined) {
     clauses.push('t.status = $status');
-    parameters.status = utf8Parameter(normalizedFilters.status);
+    parameters.status = utf8Parameter(filters.status);
   }
-  if (normalizedFilters.accountId !== undefined) {
+  if (filters.accountId !== undefined) {
     clauses.push('(t.from_account_id = $account_id OR t.to_account_id = $account_id)');
-    parameters.account_id = uuidParameter(normalizedFilters.accountId);
+    parameters.account_id = uuidParameter(filters.accountId);
   }
-  if (normalizedFilters.categoryId !== undefined) {
+  if (filters.categoryId !== undefined) {
     clauses.push('t.category_id = $category_id');
-    parameters.category_id = uuidParameter(normalizedFilters.categoryId);
+    parameters.category_id = uuidParameter(filters.categoryId);
+  }
+  if (cursor !== null) {
+    clauses.push('(t.occurred_on < $cursor_occurred_on OR '
+      + '(t.occurred_on = $cursor_occurred_on AND t.captured_at < $cursor_captured_at) OR '
+      + '(t.occurred_on = $cursor_occurred_on AND t.captured_at = $cursor_captured_at AND t.id < $cursor_id))');
+    parameters.cursor_occurred_on = dateParameter(cursor.o);
+    parameters.cursor_captured_at = timestampParameter(cursor.c);
+    parameters.cursor_id = uuidParameter(cursor.i);
   }
 
   const where = clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')} `;
@@ -344,6 +431,25 @@ export function recentOperationsStatement(
   );
 }
 
+export function recentOperationsStatement(
+  limit: number,
+  filters?: Readonly<ReaderRecentOperationsFilters>,
+): Readonly<YdbStatement> {
+  const normalizedLimit = normalizeLimit(limit);
+  return buildRecentOperationsStatement(normalizedLimit, normalizeFilters(filters), null);
+}
+
+export function recentOperationsPageStatement(
+  limit: number,
+  filters?: Readonly<ReaderRecentOperationsFilters>,
+  cursor?: string,
+): Readonly<YdbStatement> {
+  const normalizedLimit = normalizeLimit(limit);
+  const normalizedFilters = normalizeFilters(filters);
+  const decodedCursor = cursor === undefined ? null : decodeRecentOperationsCursor(cursor);
+  return buildRecentOperationsStatement(normalizedLimit + 1, normalizedFilters, decodedCursor);
+}
+
 export async function readRecentOperations(
   adapter: YdbAdapter,
   limit?: number,
@@ -356,5 +462,28 @@ export async function readRecentOperations(
   return Object.freeze({
     items: Object.freeze(items),
     limit: normalizedLimit,
+  });
+}
+
+export async function readRecentOperationsPage(
+  adapter: YdbAdapter,
+  limit?: number,
+  filters?: Readonly<ReaderRecentOperationsFilters>,
+  cursor?: string,
+): Promise<Readonly<ReaderRecentOperationsPageResult>> {
+  const normalizedLimit = normalizeLimit(limit);
+  const normalizedFilters = normalizeFilters(filters);
+  const result = await adapter.read<ReaderOperationRow>(
+    recentOperationsPageStatement(normalizedLimit, normalizedFilters, cursor),
+  );
+  const parsed = result.rows.map(parseOperation);
+  const hasMore = parsed.length > normalizedLimit;
+  const items = parsed.slice(0, normalizedLimit);
+  const last = items.at(-1);
+  const nextCursor = hasMore && last !== undefined ? encodeRecentOperationsCursor(last) : null;
+  return Object.freeze({
+    items: Object.freeze(items),
+    limit: normalizedLimit,
+    nextCursor,
   });
 }
