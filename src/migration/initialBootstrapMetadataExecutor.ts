@@ -2,6 +2,7 @@ import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
+import type { MigrationRun } from './migrationRunState.js';
 import {
   parseScheduledSyncAdmissionEvidence,
   scheduledSyncAdmissionEvidenceStatement,
@@ -82,19 +83,22 @@ function runMatches(row: RunReadRow, candidate: InitialBootstrapCandidateEnvelop
     && row.error_code === null;
 }
 
-function claimedRunMatches(candidate: InitialBootstrapCandidateEnvelope, observed: MigrationRunEvidenceRow): boolean {
+function claimedRunMatches(
+  candidate: InitialBootstrapCandidateEnvelope,
+  observed: Readonly<MigrationRun>,
+): boolean {
   const run = candidate.run;
   return observed.id === run.id
-    && observed.started_at === run.startedAt
-    && observed.finished_at === run.finishedAt
-    && observed.source_snapshot_digest === run.sourceSnapshotDigest
+    && observed.startedAt === run.startedAt
+    && observed.finishedAt === run.finishedAt
+    && observed.sourceSnapshotDigest === run.sourceSnapshotDigest
     && observed.state === run.state
-    && counterMatches(observed.rows_seen, run.rowsSeen)
-    && counterMatches(observed.rows_new, run.rowsNew)
-    && counterMatches(observed.rows_changed, run.rowsChanged)
-    && counterMatches(observed.rows_missing, run.rowsMissing)
-    && counterMatches(observed.rows_ambiguous, run.rowsAmbiguous)
-    && observed.error_code === run.errorCode;
+    && observed.rowsSeen === run.rowsSeen
+    && observed.rowsNew === run.rowsNew
+    && observed.rowsChanged === run.rowsChanged
+    && observed.rowsMissing === run.rowsMissing
+    && observed.rowsAmbiguous === run.rowsAmbiguous
+    && observed.errorCode === run.errorCode;
 }
 
 export async function executeInitialBootstrapMetadataWrites(
@@ -146,12 +150,15 @@ export async function executeInitialBootstrapMetadataWrites(
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
     }
 
-    const postAdmissionResult = await transaction.execute<MigrationRunEvidenceRow>(admissionRead);
-    const postAdmission = parseScheduledSyncAdmissionEvidence(postAdmissionResult.rows);
+    const postAdmission = parseScheduledSyncAdmissionEvidence(
+      (await transaction.execute<MigrationRunEvidenceRow>(admissionRead)).rows,
+    );
+    const claimedRun = postAdmission.incompleteRuns[0];
     if (
       postAdmission.committedBaselineRun !== null
       || postAdmission.incompleteRuns.length !== 1
-      || !claimedRunMatches(candidate, postAdmissionResult.rows[0] ?? {})
+      || claimedRun === undefined
+      || !claimedRunMatches(candidate, claimedRun)
     ) {
       throw new InitialBootstrapMetadataExecutorError('CLAIM_READBACK_MISMATCH');
     }
