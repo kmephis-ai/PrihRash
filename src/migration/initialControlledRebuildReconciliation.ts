@@ -5,7 +5,6 @@ import {
   type InitialReconciliationCheck,
   type InitialReconciliationEvidence,
 } from './initialValidationGate.js';
-import type { InitialVerifiedCurrentPlan } from './initialVerifiedCurrentPlan.js';
 
 export type InitialFinancialTransactionType = 'EXPENSE' | 'INCOME';
 
@@ -27,6 +26,20 @@ export interface InitialControlledRebuildReconciliationSnapshot {
   readonly accountAggregates: readonly Readonly<StagingDimensionAggregate>[];
   readonly classificationCounts: Readonly<Record<SourceRowClassification, number>>;
   readonly missingSourceRecordCount: number;
+}
+
+export interface ExpectedReconciliationSourceRecord {
+  readonly classification: SourceRowClassification;
+  readonly state: 'MISSING' | null;
+}
+
+export interface ExpectedReconciliationTransaction {
+  readonly transaction: Readonly<CanonicalTransaction>;
+}
+
+export interface ExpectedReconciliationPlan {
+  readonly sourceRecords: readonly Readonly<ExpectedReconciliationSourceRecord>[];
+  readonly transactions: readonly Readonly<ExpectedReconciliationTransaction>[];
 }
 
 export type InitialControlledRebuildReconciliationErrorCode =
@@ -134,7 +147,7 @@ function freezeDimensionAggregates(
 }
 
 export function buildExpectedControlledRebuildReconciliation(
-  plan: Readonly<InitialVerifiedCurrentPlan>,
+  plan: Readonly<ExpectedReconciliationPlan>,
 ): Readonly<InitialControlledRebuildReconciliationSnapshot> {
   const classificationCounts = emptyClassificationCounts();
   for (const record of plan.sourceRecords) {
