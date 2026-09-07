@@ -7,8 +7,13 @@ import {
   utf8Parameter,
   uuidParameter,
 } from '../integration/ydb/parameters.js';
-import { type YdbStatement, writeStatement } from '../integration/ydb/adapter.js';
+import { type YdbStatement, writeStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import type { IncrementalRevisionEvidencePlan } from './incrementalRevisionEvidence.js';
+import {
+  executeInitialRevisionEvidenceBatches,
+  planInitialRevisionEvidenceBatches,
+  type InitialRevisionEvidenceBatch,
+} from './initialSourceRevisionEvidenceExecutor.js';
 
 export interface PreparedIncrementalRevisionEvidenceWrite {
   readonly role: 'STAGING_EVIDENCE';
@@ -63,4 +68,17 @@ export function prepareIncrementalRevisionEvidenceWrites(
       estimatedParameterBytes: estimateParameterBytes(statement.parameters),
     });
   }));
+}
+
+export function planIncrementalRevisionEvidenceBatches(
+  writes: readonly Readonly<PreparedIncrementalRevisionEvidenceWrite>[],
+): readonly Readonly<InitialRevisionEvidenceBatch>[] {
+  return planInitialRevisionEvidenceBatches(writes);
+}
+
+export async function executeIncrementalRevisionEvidenceBatches(
+  adapter: YdbAdapter,
+  batches: readonly Readonly<InitialRevisionEvidenceBatch>[],
+): Promise<void> {
+  await executeInitialRevisionEvidenceBatches(adapter, batches);
 }
