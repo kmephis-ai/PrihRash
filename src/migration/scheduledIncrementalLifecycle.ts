@@ -18,7 +18,7 @@ import type { MigrationRun } from './migrationRunState.js';
 import { promoteAtomicDelta } from './atomicPromotion.js';
 import { claimScheduledIncrementalRun } from './scheduledIncrementalRunClaim.js';
 
-export interface ScheduledIncrementalLifecycleInput {
+export interface ScheduledIncrementalLifecycleCoreInput {
   readonly expectedBaseline: Readonly<MigrationRun>;
   readonly candidateRun: Readonly<MigrationRun>;
   readonly sourceDelta: Readonly<IncrementalSourceDeltaIntentPlan>;
@@ -26,8 +26,15 @@ export interface ScheduledIncrementalLifecycleInput {
   readonly reconciliationEvidence: Readonly<InitialReconciliationEvidence>;
   readonly currentDelta: Readonly<IncrementalCurrentDeltaPlan>;
   readonly revisions: Readonly<IncrementalRevisionEvidencePlan>;
+}
+
+export interface ScheduledIncrementalLifecycleInput extends ScheduledIncrementalLifecycleCoreInput {
   readonly promotedAt: string;
   readonly finishedAt: string;
+}
+
+export interface ScheduledIncrementalLifecycleClock {
+  now(): string;
 }
 
 export type ScheduledIncrementalLifecycleResult =
@@ -46,9 +53,15 @@ export type ScheduledIncrementalLifecycleResult =
     run: Readonly<MigrationRun>;
   }>;
 
-export async function runScheduledIncrementalLifecycle(
+interface LifecycleTiming {
+  promotedAt(): string;
+  finishedAt(): string;
+}
+
+async function runLifecycle(
   adapter: YdbAdapter,
-  input: Readonly<ScheduledIncrementalLifecycleInput>,
+  input: Readonly<ScheduledIncrementalLifecycleCoreInput>,
+  timing: LifecycleTiming,
 ): Promise<ScheduledIncrementalLifecycleResult> {
   const claimedRun = await claimScheduledIncrementalRun(
     adapter,
@@ -82,17 +95,19 @@ export async function runScheduledIncrementalLifecycle(
     validation.validatedRun,
   );
 
+  const promotedAt = timing.promotedAt();
   const writePlan = prepareIncrementalCurrentWrites(
     validatedRun,
     input.currentDelta,
     input.revisions,
-    input.promotedAt,
+    promotedAt,
   );
+  const finishedAt = timing.finishedAt();
   const promotion = await promoteAtomicDelta(
     adapter,
     validatedRun,
     writePlan.writes,
-    input.finishedAt,
+    finishedAt,
   );
 
   if (promotion.status === 'FAILED_PRECHECK') {
@@ -112,5 +127,26 @@ export async function runScheduledIncrementalLifecycle(
   return Object.freeze({
     status: 'COMMITTED' as const,
     run: promotion.run,
+  });
+}
+
+export async function runScheduledIncrementalLifecycle(
+  adapter: YdbAdapter,
+  input: Readonly<ScheduledIncrementalLifecycleInput>,
+): Promise<ScheduledIncrementalLifecycleResult> {
+  return runLifecycle(adapter, input, {
+    promotedAt: () => input.promotedAt,
+    finishedAt: () => input.finishedAt,
+  });
+}
+
+export async function runScheduledIncrementalLifecycleWithClock(
+  adapter: YdbAdapter,
+  input: Readonly<ScheduledIncrementalLifecycleCoreInput>,
+  clock: Readonly<ScheduledIncrementalLifecycleClock>,
+): Promise<ScheduledIncrementalLifecycleResult> {
+  return runLifecycle(adapter, input, {
+    promotedAt: () => clock.now(),
+    finishedAt: () => clock.now(),
   });
 }

@@ -105,6 +105,18 @@ function matchedEvidence() {
   });
 }
 
+function mismatchedEvidence() {
+  return Object.freeze({
+    checks: Object.freeze(Object.fromEntries(
+      INITIAL_RECONCILIATION_CHECKS.map((check) => [
+        check,
+        check === 'SOURCE_RECORD_COUNT' ? 'MISMATCH' : 'MATCHED',
+      ]),
+    )),
+    unexplainedHighImpactMismatchCount: 1,
+  });
+}
+
 function observation() {
   return Object.freeze({
     snapshotDigest: LEASED_DIGEST,
@@ -131,10 +143,22 @@ function dependencies(calls) {
       return Object.freeze({
         runId: RUN_ID,
         startedAt: STARTED_AT,
-        promotedAt: PROMOTED_AT,
-        finishedAt: FINISHED_AT,
       });
     },
+    lifecycleClock: Object.freeze({
+      now() {
+        calls.clock += 1;
+        if (calls.clock === 1) {
+          calls.order.push('clock-promoted');
+          return PROMOTED_AT;
+        }
+        if (calls.clock === 2) {
+          calls.order.push('clock-finished');
+          return FINISHED_AT;
+        }
+        throw new Error('UNEXPECTED_CLOCK_CALL');
+      },
+    }),
     async readReconciliationEvidence(request) {
       calls.reconciliation += 1;
       calls.order.push('reconciliation');
@@ -149,7 +173,7 @@ function dependencies(calls) {
       assert.equal(request.reconciliationPlan.promotionBlocker, null);
       assert.equal(request.verifiedCurrentEvidence.sourceEvidence.sourceCurrent.length, 0);
       assert.equal(request.verifiedCurrentEvidence.previousTransactions.length, 0);
-      return matchedEvidence();
+      return calls.reconciliationEvidence ?? matchedEvidence();
     },
     refs: Object.freeze({
       vikaMemberId: MEMBER_ID,
@@ -190,6 +214,8 @@ function newCalls() {
     reconciliation: 0,
     sourceAllocate: 0,
     transactionAllocate: 0,
+    clock: 0,
+    reconciliationEvidence: null,
     order: [],
     expectedObservation: observation(),
   };
@@ -202,7 +228,7 @@ function emptyCurrentEvidence(statement) {
   return null;
 }
 
-test('changed admission fails closed before projection, allocators, reconciliation or lifecycle writes', async () => {
+test('changed admission fails closed before projection, allocators, reconciliation, clock or lifecycle writes', async () => {
   const calls = newCalls();
   let transactionCount = 0;
   let writeCount = 0;
@@ -248,11 +274,62 @@ test('changed admission fails closed before projection, allocators, reconciliati
 
   assert.equal(transactionCount, 1);
   assert.equal(writeCount, 0);
+  assert.equal(calls.clock, 0);
   assert.deepEqual(calls.order, []);
   assert.equal(runner.lastResult, null);
 });
 
-test('happy path binds independent reconciliation request to the already prepared exact candidate', async () => {
+test('validation block never consumes promotion or finished clock timestamps', async () => {
+  const calls = newCalls();
+  calls.reconciliationEvidence = mismatchedEvidence();
+  const observed = { transactionCount: 0 };
+  const adapter = new YdbAdapter({
+    async executeRead() {
+      throw new Error('OUTSIDE_TRANSACTION_READ_FORBIDDEN');
+    },
+    async serializableReadWrite(work) {
+      observed.transactionCount += 1;
+      const transactionNumber = observed.transactionCount;
+      return work({
+        async execute(statement) {
+          if (transactionNumber === 1) {
+            if (statement.text.includes("state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
+              return { rows: [evidenceRow(baselineRun)] };
+            }
+            const current = emptyCurrentEvidence(statement);
+            if (current !== null) return current;
+          }
+          if (transactionNumber === 2) {
+            if (statement.text.includes("state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
+              return { rows: [evidenceRow(baselineRun)] };
+            }
+            if (statement.text.startsWith('INSERT INTO migration_runs')) return { rows: [] };
+            if (statement.text.includes('FROM migration_runs WHERE id = $id')) {
+              return { rows: [evidenceRow(candidateRun())] };
+            }
+          }
+          throw new Error(`UNEXPECTED_STATEMENT_${transactionNumber}: ${statement.text}`);
+        },
+      });
+    },
+  });
+  const runner = new ScheduledIncrementalApplicationRunner(adapter, dependencies(calls));
+
+  await runner.runIncremental(calls.expectedObservation);
+
+  assert.equal(runner.lastResult?.lifecycle.status, 'VALIDATION_BLOCKED');
+  assert.equal(calls.clock, 0);
+  assert.equal(observed.transactionCount, 2);
+  assert.deepEqual(calls.order, [
+    'project',
+    'context',
+    'source-allocate',
+    'transaction-allocate',
+    'reconciliation',
+  ]);
+});
+
+test('happy path timestamps promotion only after reconciliation and VALIDATED transition', async () => {
   const calls = newCalls();
   const observed = { transactionCount: 0, statements: [] };
   const adapter = new YdbAdapter({
@@ -262,6 +339,7 @@ test('happy path binds independent reconciliation request to the already prepare
     async serializableReadWrite(work) {
       observed.transactionCount += 1;
       const transactionNumber = observed.transactionCount;
+      calls.order.push(`tx-${transactionNumber}`);
       return work({
         async execute(statement) {
           observed.statements.push({ transactionNumber, text: statement.text, kind: statement.kind });
@@ -316,15 +394,23 @@ test('happy path binds independent reconciliation request to the already prepare
   await runner.runIncremental(calls.expectedObservation);
 
   assert.deepEqual(calls.order, [
+    'tx-1',
     'project',
     'context',
     'source-allocate',
     'transaction-allocate',
     'reconciliation',
+    'tx-2',
+    'tx-3',
+    'clock-promoted',
+    'clock-finished',
+    'tx-4',
   ]);
+  assert.equal(calls.clock, 2);
   assert.equal(calls.reconciliation, 1);
   assert.equal(runner.lastResult?.lifecycle.status, 'COMMITTED');
   assert.equal(runner.lastResult?.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
+  assert.equal(runner.lastResult?.lifecycle.run.finishedAt, FINISHED_AT);
   assert.equal(observed.transactionCount, 4);
   assert.deepEqual(
     observed.statements.filter((item) => item.transactionNumber === 1).map((item) => item.kind),
