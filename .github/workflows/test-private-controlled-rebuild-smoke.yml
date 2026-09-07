@@ -1,0 +1,45 @@
+name: TEST_PRIVATE controlled rebuild smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/test-private-controlled-rebuild-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prihrash-test-private-controlled-rebuild-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: synthetic controlled rebuild provider evidence
+    runs-on: ubuntu-latest
+    environment: TEST_PRIVATE
+    timeout-minutes: 10
+    env:
+      PRIHRASH_TEST_PRIVATE_SCOPE: TEST_PRIVATE
+      TEST_PRIVATE_YDB_CONNECTION_STRING: ${{ secrets.TEST_PRIVATE_YDB_CONNECTION_STRING }}
+      YDB_ACCESS_TOKEN_CREDENTIALS: ${{ secrets.TEST_PRIVATE_YDB_ACCESS_TOKEN }}
+      TEST_PRIVATE_YDB_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.TEST_PRIVATE_YDB_SERVICE_ACCOUNT_KEY_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install repository dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Install TEST_PRIVATE runtime-only YDB helpers
+        run: npm install --no-save --ignore-scripts --no-audit --no-fund @ydbjs/query@6.3.0 @ydbjs/auth@6.3.1 @ydbjs/auth-yandex-cloud@0.2.0
+
+      - name: Build exact main sources
+        run: npm run build
+
+      - name: Run synthetic TEST_PRIVATE controlled rebuild smoke
+        run: node scripts/test-private-controlled-rebuild-smoke.mjs
