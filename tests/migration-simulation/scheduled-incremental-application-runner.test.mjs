@@ -102,6 +102,18 @@ function observation() {
   });
 }
 
+function referenceResolver() {
+  return Object.freeze({
+    vikaMemberId: MEMBER_ID,
+    resolveAccountId(label) {
+      return label === 'Карта Visa' ? ACCOUNT_ID : null;
+    },
+    resolveCategoryId(kind, label) {
+      return kind === 'EXPENSE' && label === 'Synthetic Category' ? CATEGORY_ID : null;
+    },
+  });
+}
+
 function dependencies(calls) {
   return Object.freeze({
     projectObservation(received) {
@@ -137,15 +149,12 @@ function dependencies(calls) {
         throw new Error('UNEXPECTED_CLOCK_CALL');
       },
     }),
-    refs: Object.freeze({
-      vikaMemberId: MEMBER_ID,
-      resolveAccountId(label) {
-        return label === 'Карта Visa' ? ACCOUNT_ID : null;
-      },
-      resolveCategoryId(kind, label) {
-        return kind === 'EXPENSE' && label === 'Synthetic Category' ? CATEGORY_ID : null;
-      },
-    }),
+    async readReferenceResolver() {
+      calls.referenceRead += 1;
+      calls.order.push('read-refs');
+      if (calls.referenceError !== null) throw calls.referenceError;
+      return referenceResolver();
+    },
     sourceIdentityAllocator: Object.freeze({
       async allocate(requests) {
         calls.sourceAllocate += 1;
@@ -173,6 +182,8 @@ function newCalls() {
   return {
     project: 0,
     context: 0,
+    referenceRead: 0,
+    referenceError: null,
     sourceAllocate: 0,
     transactionAllocate: 0,
     clock: 0,
@@ -194,7 +205,7 @@ test('dependencies expose no injectable reconciliation evidence provider', () =>
   assert.equal(Object.hasOwn(configured, 'readReconciliationEvidence'), false);
 });
 
-test('changed admission fails closed before projection, allocators, clock or lifecycle writes', async () => {
+test('changed admission fails closed before reference read, projection, allocators, clock or lifecycle writes', async () => {
   const calls = newCalls();
   let transactionCount = 0;
   let writeCount = 0;
@@ -240,12 +251,58 @@ test('changed admission fails closed before projection, allocators, clock or lif
 
   assert.equal(transactionCount, 1);
   assert.equal(writeCount, 0);
+  assert.equal(calls.referenceRead, 0);
   assert.equal(calls.clock, 0);
   assert.deepEqual(calls.order, []);
   assert.equal(runner.lastResult, null);
 });
 
-test('happy path derives reconciliation internally before STAGING claim and timestamps promotion after VALIDATED', async () => {
+test('reference resolver failure is retried fresh on each admitted invocation and blocks planning/writes', async () => {
+  const calls = newCalls();
+  calls.referenceError = new Error('SYNTHETIC_REFERENCE_READ_FAILURE');
+  let transactionCount = 0;
+  let writeCount = 0;
+  const adapter = new YdbAdapter({
+    async executeRead() {
+      throw new Error('OUTSIDE_READ_FORBIDDEN');
+    },
+    async serializableReadWrite(work) {
+      transactionCount += 1;
+      return work({
+        async execute(statement) {
+          if (statement.kind === 'WRITE') writeCount += 1;
+          if (statement.text.includes("state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
+            return { rows: [evidenceRow(baselineRun)] };
+          }
+          const current = emptyCurrentEvidence(statement);
+          if (current !== null) return current;
+          throw new Error(`UNEXPECTED_STATEMENT: ${statement.text}`);
+        },
+      });
+    },
+  });
+  const runner = new ScheduledIncrementalApplicationRunner(adapter, dependencies(calls));
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await assert.rejects(
+      () => runner.runIncremental(calls.expectedObservation),
+      /SYNTHETIC_REFERENCE_READ_FAILURE/,
+    );
+  }
+
+  assert.equal(transactionCount, 2);
+  assert.equal(writeCount, 0);
+  assert.equal(calls.referenceRead, 2);
+  assert.equal(calls.project, 0);
+  assert.equal(calls.context, 0);
+  assert.equal(calls.sourceAllocate, 0);
+  assert.equal(calls.transactionAllocate, 0);
+  assert.equal(calls.clock, 0);
+  assert.deepEqual(calls.order, ['read-refs', 'read-refs']);
+  assert.equal(runner.lastResult, null);
+});
+
+test('happy path reads one fresh resolver after admission before projection and planning', async () => {
   const calls = newCalls();
   const observed = { transactionCount: 0, statements: [] };
   const adapter = new YdbAdapter({
@@ -311,6 +368,7 @@ test('happy path derives reconciliation internally before STAGING claim and time
 
   assert.deepEqual(calls.order, [
     'tx-1',
+    'read-refs',
     'project',
     'context',
     'source-allocate',
@@ -321,6 +379,7 @@ test('happy path derives reconciliation internally before STAGING claim and time
     'clock-finished',
     'tx-4',
   ]);
+  assert.equal(calls.referenceRead, 1);
   assert.equal(calls.clock, 2);
   assert.equal(runner.lastResult?.lifecycle.status, 'COMMITTED');
   assert.equal(runner.lastResult?.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
