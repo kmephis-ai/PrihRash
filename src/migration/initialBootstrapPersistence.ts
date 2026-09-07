@@ -95,7 +95,7 @@ function sourceSnapshotStatement(candidate: InitialBootstrapCandidateEnvelope): 
   };
 
   return writeStatement(
-    'UPSERT INTO source_snapshots (id, captured_at, source_sheet, snapshot_digest, row_count) '
+    'INSERT INTO source_snapshots (id, captured_at, source_sheet, snapshot_digest, row_count) '
       + 'VALUES ($id, $captured_at, $source_sheet, $snapshot_digest, $row_count)',
     parameters,
   );
@@ -118,7 +118,7 @@ function migrationRunStatement(candidate: InitialBootstrapCandidateEnvelope): Yd
   };
 
   return writeStatement(
-    'UPSERT INTO migration_runs '
+    'INSERT INTO migration_runs '
       + '(id, started_at, finished_at, source_snapshot_digest, state, rows_seen, rows_new, rows_changed, '
       + 'rows_missing, rows_ambiguous, error_code) '
       + 'VALUES ($id, $started_at, $finished_at, $source_snapshot_digest, $state, $rows_seen, $rows_new, '

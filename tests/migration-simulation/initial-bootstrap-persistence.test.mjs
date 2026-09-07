@@ -31,7 +31,7 @@ function expectPersistenceError(code, work) {
   );
 }
 
-test('prepares deterministic source snapshot and STAGING migration run writes', () => {
+test('prepares deterministic non-overwriting source snapshot and STAGING migration run writes', () => {
   const writes = prepareInitialBootstrapMetadataWrites(candidate());
 
   assert.equal(writes.length, 2);
@@ -41,7 +41,7 @@ test('prepares deterministic source snapshot and STAGING migration run writes', 
   assert.equal(writes.every((write) => write.estimatedParameterBytes > 0), true);
 
   const [snapshotWrite, runWrite] = writes;
-  assert.match(snapshotWrite.statement.text, /^UPSERT INTO source_snapshots /);
+  assert.match(snapshotWrite.statement.text, /^INSERT INTO source_snapshots /);
   assert.deepEqual(snapshotWrite.statement.parameters, {
     id: { type: 'Uuid', value: SNAPSHOT_ID },
     captured_at: { type: 'Timestamp', value: '2026-09-06T19:40:00Z' },
@@ -50,7 +50,7 @@ test('prepares deterministic source snapshot and STAGING migration run writes', 
     row_count: { type: 'Uint64', value: 1n },
   });
 
-  assert.match(runWrite.statement.text, /^UPSERT INTO migration_runs /);
+  assert.match(runWrite.statement.text, /^INSERT INTO migration_runs /);
   assert.deepEqual(runWrite.statement.parameters, {
     id: { type: 'Uuid', value: RUN_ID },
     started_at: { type: 'Timestamp', value: '2026-09-06T19:40:01Z' },
