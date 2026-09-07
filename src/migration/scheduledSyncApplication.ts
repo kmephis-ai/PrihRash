@@ -46,22 +46,25 @@ function createLazyIncrementalRunner(
       const readReferences = dependencies.readReferenceResolver
         ?? (() => readYdbReferenceResolverSnapshot(dependencies.adapter));
 
-      const runner = new ScheduledIncrementalApplicationRunner(dependencies.adapter, {
-        projectObservation(received) {
-          return Object.freeze({
-            projection: projectGoogleSnapshotForIncrementalMigration(
-              received.snapshot,
-              dependencies.rowDigest,
-            ),
-            observedAt: dependencies.observationClock.now(),
-          });
+      const runner = new ScheduledIncrementalApplicationRunner<GoogleSheetsImmutableSnapshot>(
+        dependencies.adapter,
+        {
+          projectObservation(received) {
+            return Object.freeze({
+              projection: projectGoogleSnapshotForIncrementalMigration(
+                received.snapshot,
+                dependencies.rowDigest,
+              ),
+              observedAt: dependencies.observationClock.now(),
+            });
+          },
+          createRunContext: runtime.createRunContext,
+          lifecycleClock: runtime.lifecycleClock,
+          readReferenceResolver: readReferences,
+          sourceIdentityAllocator: runtime.sourceIdentityAllocator,
+          transactionIdentityAllocator: runtime.transactionIdentityAllocator,
         },
-        createRunContext: runtime.createRunContext,
-        lifecycleClock: runtime.lifecycleClock,
-        readReferenceResolver: readReferences,
-        sourceIdentityAllocator: runtime.sourceIdentityAllocator,
-        transactionIdentityAllocator: runtime.transactionIdentityAllocator,
-      });
+      );
 
       await runner.runIncremental(observation);
     },
