@@ -103,6 +103,19 @@ test('RELINK_SOURCE requires an explicit different target and source revision', 
     (error) => error instanceof ResolutionEffectPlanError
       && error.code === 'RELINK_TARGET_UNCHANGED',
   );
+
+  assert.throws(
+    () => planResolutionEffect(
+      markReviewRequired(SOURCE_ID, 'AMBIGUOUS', LINKED_TX_ID),
+      {
+        resolutionCode: 'RELINK_SOURCE',
+        targetTransactionId: 'not-a-uuid',
+        expectedSourceRevision: 4,
+      },
+    ),
+    (error) => error instanceof ResolutionEffectPlanError
+      && error.code === 'INVALID_TARGET_TRANSACTION_ID',
+  );
 });
 
 test('ACCEPT_SOURCE_CORRECTION uses an explicit validated canonical candidate and expected version', () => {
@@ -122,6 +135,22 @@ test('ACCEPT_SOURCE_CORRECTION uses an explicit validated canonical candidate an
   assert.equal(plan.transactionEffect.expectedVersion, 8);
   assert.deepEqual(plan.transactionEffect.canonicalTransaction, candidate);
   assert.equal(Object.isFrozen(plan.transactionEffect.canonicalTransaction), true);
+});
+
+test('correction requires explicit category context for categorized transaction types', () => {
+  assert.throws(
+    () => planResolutionEffect(
+      markReviewRequired(SOURCE_ID, 'AMBIGUOUS', LINKED_TX_ID),
+      {
+        resolutionCode: 'ACCEPT_SOURCE_CORRECTION',
+        expectedTransactionVersion: 2,
+        canonicalTransaction: expense(),
+        categoryKind: null,
+      },
+    ),
+    (error) => error instanceof ResolutionEffectPlanError
+      && error.code === 'CANONICAL_TRANSACTION_INVALID',
+  );
 });
 
 test('invalid correction candidate fails closed before any persistence layer', () => {
