@@ -341,6 +341,23 @@ RESOLVED_NO_CHANGE
 
 Resolution сохраняет `resolved_at`, `resolved_by`, `resolution_code`; после resolution mismatch не должен бесконечно считаться unexplained.
 
+### 17.1. Resolution decision vs mechanical effect
+
+`resolution_code` фиксирует уже принятое осознанное решение. Migration engine не имеет права выводить нужный code автоматически только из `MISSING`/`AMBIGUOUS`, similarity, суммы, позиции строки или предполагаемой intent владельца. Если semantic applicability конкретного code не доказана отдельным правилом/context, решение остаётся review-required.
+
+После выбора code mechanical planner обязан быть fail-closed и не выполнять identity inference:
+
+- `KEEP_CANONICAL` — no Transaction mutation; требуется уже существующая exact `transaction_id` link;
+- `RESOLVED_NO_CHANGE` — no Transaction/source-link mutation;
+- `VOID_CANONICAL_CONFIRMED` — target только текущая exact linked Transaction и явный optimistic `expectedTransactionVersion`; hard delete запрещён;
+- `RELINK_SOURCE` — target задаётся только explicit `targetTransactionId`, а source mutation защищена явным `expectedSourceRevision`; fuzzy/nearest/content matching запрещён;
+- `ACCEPT_SOURCE_CORRECTION` — target только текущая exact linked Transaction, correction передаётся как explicit canonical candidate, проходит обычный domain validation с явным category context и защищена `expectedTransactionVersion`;
+- invalid/missing UUID, version, source revision или invalid canonical candidate блокируют plan до persistence;
+- planner не создаёт новую Transaction identity и не выбирает target по source payload;
+- applicability code к конкретному `MISSING`/`AMBIGUOUS` case остаётся semantic decision/reconciliation concern, пока отдельное normative rule не доказано.
+
+Effect plan и audit metadata — разные части одного resolution workflow: будущий conditional executor обязан применять effect с optimistic/lost-update guards и сохранять тот же chosen `resolution_code`; успешная запись metadata сама по себе не доказывает, что effectful Transaction/source-link mutation была выполнена.
+
 ## 18. MigrationRun и atomic promotion
 
 ```text
