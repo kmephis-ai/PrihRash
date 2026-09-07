@@ -8,6 +8,24 @@ import {
   recentOperationsStatement,
 } from '../../dist/reader/recentOperations.js';
 
+const COMMITTED_RUN_ROW = Object.freeze({
+  id: '00000000-0000-0000-0000-000000000901',
+  started_at: '2026-09-07T10:00:00.000Z',
+  finished_at: '2026-09-07T10:00:05.000Z',
+  source_snapshot_digest: 'synthetic-reader-verified-shadow',
+  state: 'COMMITTED',
+  rows_seen: 1n,
+  rows_new: 1n,
+  rows_changed: 0n,
+  rows_missing: 0n,
+  rows_ambiguous: 0n,
+  error_code: null,
+});
+
+function rowsForStatement(statement, rows) {
+  return statement.text.includes('FROM migration_runs WHERE state IN') ? [COMMITTED_RUN_ROW] : rows;
+}
+
 const ACCOUNT_ID = '00000000-0000-0000-0000-000000000201';
 const CATEGORY_ID = '00000000-0000-0000-0000-000000000301';
 
@@ -15,7 +33,7 @@ function adapterCapturing(statementCapture) {
   return new YdbAdapter({
     async executeRead(statement) {
       statementCapture.push(statement);
-      return { rows: [] };
+      return { rows: rowsForStatement(statement, []) };
     },
     async serializableReadWrite() {
       throw new Error('unexpected transaction');
@@ -96,8 +114,9 @@ test('readRecentOperations passes normalized filters to the provider query', asy
 
   assert.equal(result.limit, 7);
   assert.deepEqual(result.items, []);
-  assert.equal(statements.length, 1);
-  assert.equal(statements[0].parameters.type.value, 'INCOME');
-  assert.equal(statements[0].parameters.account_id.value, ACCOUNT_ID);
-  assert.equal(statements[0].parameters.limit.value, 7n);
+  assert.equal(statements.length, 2);
+  assert.match(statements[0].text, /FROM migration_runs WHERE state IN/);
+  assert.equal(statements[1].parameters.type.value, 'INCOME');
+  assert.equal(statements[1].parameters.account_id.value, ACCOUNT_ID);
+  assert.equal(statements[1].parameters.limit.value, 7n);
 });

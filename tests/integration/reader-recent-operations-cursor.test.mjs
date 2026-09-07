@@ -10,6 +10,24 @@ import {
   recentOperationsPageStatement,
 } from '../../dist/reader/recentOperations.js';
 
+const COMMITTED_RUN_ROW = Object.freeze({
+  id: '00000000-0000-0000-0000-000000000901',
+  started_at: '2026-09-07T10:00:00.000Z',
+  finished_at: '2026-09-07T10:00:05.000Z',
+  source_snapshot_digest: 'synthetic-reader-verified-shadow',
+  state: 'COMMITTED',
+  rows_seen: 1n,
+  rows_new: 1n,
+  rows_changed: 0n,
+  rows_missing: 0n,
+  rows_ambiguous: 0n,
+  error_code: null,
+});
+
+function rowsForStatement(statement, rows) {
+  return statement.text.includes('FROM migration_runs WHERE state IN') ? [COMMITTED_RUN_ROW] : rows;
+}
+
 const IDS = Object.freeze({
   first: '00000000-0000-0000-0000-000000000501',
   second: '00000000-0000-0000-0000-000000000502',
@@ -53,7 +71,7 @@ function adapterWithRows(rows, capture = []) {
   return new YdbAdapter({
     async executeRead(statement) {
       capture.push(statement);
-      return { rows };
+      return { rows: rowsForStatement(statement, rows) };
     },
     async serializableReadWrite() {
       throw new Error('unexpected transaction');
@@ -121,7 +139,9 @@ test('page returns at most requested items and cursor from last returned row', a
     c: '2026-09-07T12:34:57.000Z',
     i: IDS.second,
   });
-  assert.equal(capture[0].parameters.limit.value, 3n);
+  assert.equal(capture.length, 2);
+  assert.match(capture[0].text, /FROM migration_runs WHERE state IN/);
+  assert.equal(capture[1].parameters.limit.value, 3n);
 });
 
 test('page returns null cursor when provider has no extra row', async () => {
