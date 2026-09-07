@@ -153,6 +153,22 @@ Digest не является Transaction ID.
 
 Такие участки fail-closed → `AMBIGUOUS`/`REVIEW_REQUIRED`.
 
+### 8.1. Incremental lineage counters
+
+Incremental sync всегда строит lineage относительно **последнего COMMITTED** snapshot; `row_hint` остаётся locator, а не identity. Новый `SourceRecord.id` для доказанного `INSERTED` observation задаётся только explicit assignment после sequence diff: migration engine не генерирует identity из row number, digest или similarity.
+
+MigrationRun counters для incremental lineage имеют следующую deterministic семантику:
+
+- `rows_seen` = число observations в текущем full snapshot;
+- `rows_new` = число diff outcomes `INSERTED`, которым выдан explicit новый SourceRecord ID;
+- `rows_changed` = число доказанных one-to-one `REVISED` outcomes;
+- `rows_missing` = число explicit `MISSING` outcomes, доказанных sequence diff;
+- `rows_ambiguous` = число **current-side row hints** во всех `AMBIGUOUS_BLOCK` outcomes.
+
+Previous-side SourceRecords внутри `AMBIGUOUS_BLOCK` не считаются автоматически `MISSING` или `CHANGED`, а current-side rows такого блока не получают guessed SourceRecord IDs. Они остаются unresolved evidence до deterministic resolution. Поэтому `rows_ambiguous` — counter текущих неоднозначно сопоставленных observations, а не сумма обеих сторон ambiguous block.
+
+Для unchanged full snapshot сохраняется `rows_seen`, а `rows_new = rows_changed = rows_missing = rows_ambiguous = 0`. Explicit assignments обязаны точно покрывать только доказанные `INSERTED` rows; missing/extra/duplicate assignments или collision с существующим SourceRecord ID блокируют incremental plan до persistence.
+
 ## 9. Change classes
 
 ### WORKFLOW_TRANSFORM
