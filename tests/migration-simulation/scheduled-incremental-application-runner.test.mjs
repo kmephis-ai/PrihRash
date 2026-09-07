@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
-import { INITIAL_RECONCILIATION_CHECKS } from '../../dist/migration/initialValidationGate.js';
 import {
   ScheduledIncrementalApplicationRunner,
   ScheduledIncrementalApplicationRunnerError,
@@ -96,27 +95,6 @@ function lifecycleRow(run) {
   };
 }
 
-function matchedEvidence() {
-  return Object.freeze({
-    checks: Object.freeze(Object.fromEntries(
-      INITIAL_RECONCILIATION_CHECKS.map((check) => [check, 'MATCHED']),
-    )),
-    unexplainedHighImpactMismatchCount: 0,
-  });
-}
-
-function mismatchedEvidence() {
-  return Object.freeze({
-    checks: Object.freeze(Object.fromEntries(
-      INITIAL_RECONCILIATION_CHECKS.map((check) => [
-        check,
-        check === 'SOURCE_RECORD_COUNT' ? 'MISMATCH' : 'MATCHED',
-      ]),
-    )),
-    unexplainedHighImpactMismatchCount: 1,
-  });
-}
-
 function observation() {
   return Object.freeze({
     snapshotDigest: LEASED_DIGEST,
@@ -159,22 +137,6 @@ function dependencies(calls) {
         throw new Error('UNEXPECTED_CLOCK_CALL');
       },
     }),
-    async readReconciliationEvidence(request) {
-      calls.reconciliation += 1;
-      calls.order.push('reconciliation');
-      assert.equal(calls.sourceAllocate, 1);
-      assert.equal(calls.transactionAllocate, 1);
-      assert.equal(request.observation, calls.expectedObservation);
-      assert.equal(request.baselineRun.id, BASELINE_RUN);
-      assert.equal(request.candidateRun.id, RUN_ID);
-      assert.equal(request.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
-      assert.equal(request.reconciliationPlan.expected.sourceRecordCount, 1);
-      assert.equal(request.reconciliationPlan.expected.transactionCount, 1);
-      assert.equal(request.reconciliationPlan.promotionBlocker, null);
-      assert.equal(request.verifiedCurrentEvidence.sourceEvidence.sourceCurrent.length, 0);
-      assert.equal(request.verifiedCurrentEvidence.previousTransactions.length, 0);
-      return calls.reconciliationEvidence ?? matchedEvidence();
-    },
     refs: Object.freeze({
       vikaMemberId: MEMBER_ID,
       resolveAccountId(label) {
@@ -211,11 +173,9 @@ function newCalls() {
   return {
     project: 0,
     context: 0,
-    reconciliation: 0,
     sourceAllocate: 0,
     transactionAllocate: 0,
     clock: 0,
-    reconciliationEvidence: null,
     order: [],
     expectedObservation: observation(),
   };
@@ -228,7 +188,13 @@ function emptyCurrentEvidence(statement) {
   return null;
 }
 
-test('changed admission fails closed before projection, allocators, reconciliation, clock or lifecycle writes', async () => {
+test('dependencies expose no injectable reconciliation evidence provider', () => {
+  const calls = newCalls();
+  const configured = dependencies(calls);
+  assert.equal(Object.hasOwn(configured, 'readReconciliationEvidence'), false);
+});
+
+test('changed admission fails closed before projection, allocators, clock or lifecycle writes', async () => {
   const calls = newCalls();
   let transactionCount = 0;
   let writeCount = 0;
@@ -279,57 +245,7 @@ test('changed admission fails closed before projection, allocators, reconciliati
   assert.equal(runner.lastResult, null);
 });
 
-test('validation block never consumes promotion or finished clock timestamps', async () => {
-  const calls = newCalls();
-  calls.reconciliationEvidence = mismatchedEvidence();
-  const observed = { transactionCount: 0 };
-  const adapter = new YdbAdapter({
-    async executeRead() {
-      throw new Error('OUTSIDE_TRANSACTION_READ_FORBIDDEN');
-    },
-    async serializableReadWrite(work) {
-      observed.transactionCount += 1;
-      const transactionNumber = observed.transactionCount;
-      return work({
-        async execute(statement) {
-          if (transactionNumber === 1) {
-            if (statement.text.includes("state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
-              return { rows: [evidenceRow(baselineRun)] };
-            }
-            const current = emptyCurrentEvidence(statement);
-            if (current !== null) return current;
-          }
-          if (transactionNumber === 2) {
-            if (statement.text.includes("state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
-              return { rows: [evidenceRow(baselineRun)] };
-            }
-            if (statement.text.startsWith('INSERT INTO migration_runs')) return { rows: [] };
-            if (statement.text.includes('FROM migration_runs WHERE id = $id')) {
-              return { rows: [evidenceRow(candidateRun())] };
-            }
-          }
-          throw new Error(`UNEXPECTED_STATEMENT_${transactionNumber}: ${statement.text}`);
-        },
-      });
-    },
-  });
-  const runner = new ScheduledIncrementalApplicationRunner(adapter, dependencies(calls));
-
-  await runner.runIncremental(calls.expectedObservation);
-
-  assert.equal(runner.lastResult?.lifecycle.status, 'VALIDATION_BLOCKED');
-  assert.equal(calls.clock, 0);
-  assert.equal(observed.transactionCount, 2);
-  assert.deepEqual(calls.order, [
-    'project',
-    'context',
-    'source-allocate',
-    'transaction-allocate',
-    'reconciliation',
-  ]);
-});
-
-test('happy path timestamps promotion only after reconciliation and VALIDATED transition', async () => {
+test('happy path derives reconciliation internally before STAGING claim and timestamps promotion after VALIDATED', async () => {
   const calls = newCalls();
   const observed = { transactionCount: 0, statements: [] };
   const adapter = new YdbAdapter({
@@ -399,7 +315,6 @@ test('happy path timestamps promotion only after reconciliation and VALIDATED tr
     'context',
     'source-allocate',
     'transaction-allocate',
-    'reconciliation',
     'tx-2',
     'tx-3',
     'clock-promoted',
@@ -407,7 +322,6 @@ test('happy path timestamps promotion only after reconciliation and VALIDATED tr
     'tx-4',
   ]);
   assert.equal(calls.clock, 2);
-  assert.equal(calls.reconciliation, 1);
   assert.equal(runner.lastResult?.lifecycle.status, 'COMMITTED');
   assert.equal(runner.lastResult?.candidateRun.sourceSnapshotDigest, LEASED_DIGEST);
   assert.equal(runner.lastResult?.lifecycle.run.finishedAt, FINISHED_AT);
@@ -416,6 +330,16 @@ test('happy path timestamps promotion only after reconciliation and VALIDATED tr
     observed.statements.filter((item) => item.transactionNumber === 1).map((item) => item.kind),
     ['READ', 'READ', 'READ', 'READ'],
   );
-  assert.equal(observed.statements.some((item) => item.transactionNumber === 4 && item.text.startsWith('INSERT INTO transactions')), true);
-  assert.equal(observed.statements.some((item) => item.transactionNumber === 4 && item.text.startsWith('INSERT INTO source_records')), true);
+  assert.equal(
+    observed.statements.some(
+      (item) => item.transactionNumber === 4 && item.text.startsWith('INSERT INTO transactions'),
+    ),
+    true,
+  );
+  assert.equal(
+    observed.statements.some(
+      (item) => item.transactionNumber === 4 && item.text.startsWith('INSERT INTO source_records'),
+    ),
+    true,
+  );
 });
