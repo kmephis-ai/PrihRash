@@ -10,7 +10,7 @@ import {
   type TransactionType,
 } from '../domain/transaction.js';
 import { readStatement, YdbAdapter, type YdbStatement } from '../integration/ydb/adapter.js';
-import { uint64Parameter } from '../integration/ydb/parameters.js';
+import { uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 
 export const READER_RECENT_OPERATIONS_DEFAULT_LIMIT = 50 as const;
 export const READER_RECENT_OPERATIONS_MAX_LIMIT = 100 as const;
@@ -44,6 +44,13 @@ export interface ReaderOperation {
   readonly version: number;
 }
 
+export interface ReaderRecentOperationsFilters {
+  readonly type?: TransactionType;
+  readonly status?: TransactionStatus;
+  readonly accountId?: string;
+  readonly categoryId?: string;
+}
+
 export interface ReaderRecentOperationsResult {
   readonly items: readonly Readonly<ReaderOperation>[];
   readonly limit: number;
@@ -51,6 +58,7 @@ export interface ReaderRecentOperationsResult {
 
 export type ReaderRecentOperationsErrorCode =
   | 'INVALID_LIMIT'
+  | 'INVALID_FILTER'
   | 'MALFORMED_READER_EVIDENCE';
 
 export class ReaderRecentOperationsError extends Error {
@@ -107,12 +115,42 @@ function fail(): never {
   throw new ReaderRecentOperationsError('MALFORMED_READER_EVIDENCE');
 }
 
+function invalidFilter(): never {
+  throw new ReaderRecentOperationsError('INVALID_FILTER');
+}
+
 function normalizeLimit(limit: number | undefined): number {
   if (limit === undefined) return READER_RECENT_OPERATIONS_DEFAULT_LIMIT;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > READER_RECENT_OPERATIONS_MAX_LIMIT) {
     throw new ReaderRecentOperationsError('INVALID_LIMIT');
   }
   return limit;
+}
+
+function normalizeFilters(
+  filters: Readonly<ReaderRecentOperationsFilters> | undefined,
+): Readonly<ReaderRecentOperationsFilters> {
+  if (filters === undefined) return Object.freeze({});
+  const normalized: ReaderRecentOperationsFilters = {};
+
+  if (filters.type !== undefined) {
+    if (!TYPES.has(filters.type)) return invalidFilter();
+    normalized.type = filters.type;
+  }
+  if (filters.status !== undefined) {
+    if (!STATUSES.has(filters.status)) return invalidFilter();
+    normalized.status = filters.status;
+  }
+  if (filters.accountId !== undefined) {
+    if (!UUID_PATTERN.test(filters.accountId)) return invalidFilter();
+    normalized.accountId = filters.accountId.toLowerCase();
+  }
+  if (filters.categoryId !== undefined) {
+    if (!UUID_PATTERN.test(filters.categoryId)) return invalidFilter();
+    normalized.categoryId = filters.categoryId.toLowerCase();
+  }
+
+  return Object.freeze(normalized);
 }
 
 function stringValue(value: unknown, nullable = false): string | null {
@@ -253,8 +291,35 @@ function parseOperation(row: Readonly<ReaderOperationRow>): Readonly<ReaderOpera
   });
 }
 
-export function recentOperationsStatement(limit: number): Readonly<YdbStatement> {
+export function recentOperationsStatement(
+  limit: number,
+  filters?: Readonly<ReaderRecentOperationsFilters>,
+): Readonly<YdbStatement> {
   const normalizedLimit = normalizeLimit(limit);
+  const normalizedFilters = normalizeFilters(filters);
+  const clauses: string[] = [];
+  const parameters: Record<string, ReturnType<typeof uint64Parameter>> = {
+    limit: uint64Parameter(normalizedLimit),
+  };
+
+  if (normalizedFilters.type !== undefined) {
+    clauses.push('t.type = $type');
+    parameters.type = utf8Parameter(normalizedFilters.type);
+  }
+  if (normalizedFilters.status !== undefined) {
+    clauses.push('t.status = $status');
+    parameters.status = utf8Parameter(normalizedFilters.status);
+  }
+  if (normalizedFilters.accountId !== undefined) {
+    clauses.push('(t.from_account_id = $account_id OR t.to_account_id = $account_id)');
+    parameters.account_id = uuidParameter(normalizedFilters.accountId);
+  }
+  if (normalizedFilters.categoryId !== undefined) {
+    clauses.push('t.category_id = $category_id');
+    parameters.category_id = uuidParameter(normalizedFilters.categoryId);
+  }
+
+  const where = clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')} `;
   return readStatement(
     'SELECT t.id, t.type, t.occurred_on, t.captured_at, t.record_granularity, t.date_precision, '
       + 't.aggregate_period_month, t.financial_period_id, t.period_assignment_quality, t.amount_minor, '
@@ -266,17 +331,20 @@ export function recentOperationsStatement(limit: number): Readonly<YdbStatement>
       + 'LEFT JOIN accounts AS ta ON ta.id = t.to_account_id '
       + 'LEFT JOIN categories AS c ON c.id = t.category_id '
       + 'LEFT JOIN family_members AS fm ON fm.id = t.paid_by_member_id '
+      + where
       + 'ORDER BY t.occurred_on DESC, t.captured_at DESC, t.id DESC LIMIT $limit',
-    { limit: uint64Parameter(normalizedLimit) },
+    parameters,
   );
 }
 
 export async function readRecentOperations(
   adapter: YdbAdapter,
   limit?: number,
+  filters?: Readonly<ReaderRecentOperationsFilters>,
 ): Promise<Readonly<ReaderRecentOperationsResult>> {
   const normalizedLimit = normalizeLimit(limit);
-  const result = await adapter.read<ReaderOperationRow>(recentOperationsStatement(normalizedLimit));
+  const normalizedFilters = normalizeFilters(filters);
+  const result = await adapter.read<ReaderOperationRow>(recentOperationsStatement(normalizedLimit, normalizedFilters));
   const items = result.rows.map(parseOperation);
   return Object.freeze({
     items: Object.freeze(items),
