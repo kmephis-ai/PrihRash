@@ -100,6 +100,13 @@ interface ReaderOperationRow {
   readonly version?: unknown;
 }
 
+interface MutableReaderRecentOperationsFilters {
+  type?: TransactionType;
+  status?: TransactionStatus;
+  accountId?: string;
+  categoryId?: string;
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const TYPES = new Set<TransactionType>(['EXPENSE', 'INCOME', 'TRANSFER']);
@@ -131,7 +138,7 @@ function normalizeFilters(
   filters: Readonly<ReaderRecentOperationsFilters> | undefined,
 ): Readonly<ReaderRecentOperationsFilters> {
   if (filters === undefined) return Object.freeze({});
-  const normalized: ReaderRecentOperationsFilters = {};
+  const normalized: MutableReaderRecentOperationsFilters = {};
 
   if (filters.type !== undefined) {
     if (!TYPES.has(filters.type)) return invalidFilter();
