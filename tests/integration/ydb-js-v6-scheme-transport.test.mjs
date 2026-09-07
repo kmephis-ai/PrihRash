@@ -6,6 +6,10 @@ import {
   OperationParams_OperationMode,
   StatusIds_StatusCode,
 } from '@ydbjs/api/operation';
+import {
+  Entry_Type,
+  ListDirectoryResultSchema,
+} from '@ydbjs/api/scheme';
 import { CreateSessionResultSchema } from '@ydbjs/api/table';
 import {
   YdbJsV6SchemeProviderError,
@@ -21,12 +25,26 @@ function sessionOperation(id = 'session-1') {
   return successOperation(anyPack(CreateSessionResultSchema, create(CreateSessionResultSchema, { sessionId: id })));
 }
 
+function listingOperation() {
+  return successOperation(anyPack(ListDirectoryResultSchema, create(ListDirectoryResultSchema, {
+    self: { name: 'db', type: Entry_Type.DATABASE },
+    children: [
+      { name: 'transactions', type: Entry_Type.TABLE },
+      { name: 'rebuild', type: Entry_Type.DIRECTORY },
+    ],
+  })));
+}
+
 function fakeDriver(overrides = {}) {
   const events = [];
   const schemeClient = {
     async makeDirectory(request) {
       events.push(['makeDirectory', request]);
       return { operation: successOperation() };
+    },
+    async listDirectory(request) {
+      events.push(['listDirectory', request]);
+      return { operation: listingOperation() };
     },
   };
   const tableClient = {
@@ -134,4 +152,38 @@ test('session creation failure is definite and mutation is never issued', async 
     (error) => error instanceof YdbJsV6SchemeProviderError && error.code === 'TABLE_SESSION_CREATE_FAILED',
   );
   assert.equal(fake.events.some(([name]) => name === 'copyTables'), false);
+});
+
+
+test('lists root/directory paths read-only and maps provider entry kinds', async () => {
+  const fake = fakeDriver();
+  const transport = new YdbJsV6SchemeTransport(fake.driver);
+  const root = await transport.listDirectory('');
+  const nested = await transport.listDirectory('rebuild/r_001');
+  const reads = fake.events.filter(([name]) => name === 'listDirectory');
+  assert.deepEqual(reads.map(([, request]) => request.path), [
+    '/ru-central1/test/db',
+    '/ru-central1/test/db/rebuild/r_001',
+  ]);
+  assert.equal(reads.every(([, request]) => request.operationParams.operationMode === OperationParams_OperationMode.SYNC), true);
+  assert.deepEqual(root, {
+    selfKind: 'DATABASE',
+    children: [{ name: 'transactions', kind: 'TABLE' }, { name: 'rebuild', kind: 'DIRECTORY' }],
+  });
+  assert.equal(nested.selfKind, 'DIRECTORY');
+});
+
+test('read RPC/status ambiguity never becomes proof of path absence', async () => {
+  for (const schemeClient of [
+    { listDirectory: async () => { throw new Error('network'); } },
+    { listDirectory: async () => ({ operation: { ready: true, status: StatusIds_StatusCode.TIMEOUT, issues: [] } }) },
+    { listDirectory: async () => ({ operation: { ready: true, status: StatusIds_StatusCode.SCHEME_ERROR, issues: [] } }) },
+  ]) {
+    const fake = fakeDriver({ schemeClient });
+    await assert.rejects(
+      () => new YdbJsV6SchemeTransport(fake.driver).listDirectory('rebuild/r_001'),
+      (error) => error instanceof YdbJsV6SchemeProviderError
+        && error.code === 'SCHEME_PROVIDER_READ_FAILED',
+    );
+  }
 });

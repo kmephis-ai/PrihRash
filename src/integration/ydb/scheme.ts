@@ -10,10 +10,23 @@ export interface YdbTableRenameItem {
   readonly replace: boolean;
 }
 
+export type YdbSchemeEntryKind = 'DATABASE' | 'DIRECTORY' | 'TABLE' | 'OTHER';
+
+export interface YdbSchemeDirectoryEntry {
+  readonly name: string;
+  readonly kind: YdbSchemeEntryKind;
+}
+
+export interface YdbSchemeDirectoryListing {
+  readonly selfKind: YdbSchemeEntryKind;
+  readonly children: readonly Readonly<YdbSchemeDirectoryEntry>[];
+}
+
 export interface YdbSchemeTransport {
   ensureDirectory(path: string): Promise<void>;
   copyTables(items: readonly Readonly<YdbTableCopyItem>[]): Promise<void>;
   renameTables(items: readonly Readonly<YdbTableRenameItem>[]): Promise<void>;
+  listDirectory(path: string): Promise<Readonly<YdbSchemeDirectoryListing>>;
 }
 
 export type YdbSchemeErrorCode =
@@ -21,6 +34,7 @@ export type YdbSchemeErrorCode =
   | 'EMPTY_SCHEME_OPERATION'
   | 'DUPLICATE_SCHEME_SOURCE'
   | 'DUPLICATE_SCHEME_DESTINATION'
+  | 'MALFORMED_SCHEME_READ_EVIDENCE'
   | 'SCHEME_OPERATION_OUTCOME_UNKNOWN';
 
 export class YdbSchemeError extends Error {
@@ -52,6 +66,32 @@ const SAFE_PATH_PATTERN = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/;
 
 function validatePath(path: string): void {
   if (!SAFE_PATH_PATTERN.test(path)) throw new YdbSchemeError('INVALID_SCHEME_PATH');
+}
+
+function validateReadDirectoryPath(path: string): void {
+  if (path.length === 0) return;
+  validatePath(path);
+}
+
+function freezeDirectoryListing(listing: Readonly<YdbSchemeDirectoryListing>): Readonly<YdbSchemeDirectoryListing> {
+  if (listing.selfKind !== 'DIRECTORY' && listing.selfKind !== 'DATABASE') {
+    throw new YdbSchemeError('MALFORMED_SCHEME_READ_EVIDENCE');
+  }
+  const names = new Set<string>();
+  const children = listing.children.map((entry) => {
+    if (
+      typeof entry.name !== 'string'
+      || entry.name.length === 0
+      || entry.name.includes('/')
+      || (entry.kind !== 'DATABASE' && entry.kind !== 'DIRECTORY' && entry.kind !== 'TABLE' && entry.kind !== 'OTHER')
+      || names.has(entry.name)
+    ) {
+      throw new YdbSchemeError('MALFORMED_SCHEME_READ_EVIDENCE');
+    }
+    names.add(entry.name);
+    return Object.freeze({ name: entry.name, kind: entry.kind });
+  });
+  return Object.freeze({ selfKind: listing.selfKind, children: Object.freeze(children) });
 }
 
 function validateUniqueItems<T extends { readonly source: string; readonly destination: string }>(
@@ -108,6 +148,11 @@ export class YdbSchemeAdapter {
   async renameTables(items: readonly Readonly<YdbTableRenameItem>[]): Promise<void> {
     const frozen = freezeRenameItems(items);
     await this.#execute(() => this.#transport.renameTables(frozen));
+  }
+
+  async listDirectory(path: string): Promise<Readonly<YdbSchemeDirectoryListing>> {
+    validateReadDirectoryPath(path);
+    return freezeDirectoryListing(await this.#transport.listDirectory(path));
   }
 
   async #execute(work: () => Promise<void>): Promise<void> {
