@@ -83,7 +83,13 @@ export function parseReaderRecentOperationsApiRequest(
   if (statusText !== undefined && !STATUSES.has(statusText as TransactionStatus)) return invalidQuery();
   if (accountId !== undefined && !UUID_PATTERN.test(accountId)) return invalidQuery();
   if (categoryId !== undefined && !UUID_PATTERN.test(categoryId)) return invalidQuery();
-  if (cursor !== undefined) decodeRecentOperationsCursor(cursor);
+  if (cursor !== undefined) {
+    try {
+      decodeRecentOperationsCursor(cursor);
+    } catch {
+      return invalidQuery();
+    }
+  }
 
   const filters: {
     type?: TransactionType;
