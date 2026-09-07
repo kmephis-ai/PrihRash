@@ -329,7 +329,7 @@ function reviewDirectiveMap(
   transition: Readonly<IncrementalSemanticTransitionPlan>,
   previousById: ReadonlyMap<string, Readonly<IncrementalPreviousSourceCurrentEvidence>>,
 ): ReturnType<typeof planIncrementalReviewMaterialization> & {
-  bySource: ReadonlyMap<string, Readonly<IncrementalReviewMaterializationDirective>>;
+  readonly bySource: ReadonlyMap<string, Readonly<IncrementalReviewMaterializationDirective>>;
 } {
   const previousReviewEvidence = transition.decisions
     .filter((decision) => decision.kind === 'REVIEW_REQUIRED_PRESERVE'
@@ -349,7 +349,8 @@ function reviewDirectiveMap(
       });
     });
   const review = planIncrementalReviewMaterialization(transition, previousReviewEvidence);
-  return Object.assign(review, {
+  return Object.freeze({
+    ...review,
     bySource: new Map(review.directives.map((directive) => [directive.sourceRecordId, directive] as const)),
   });
 }
