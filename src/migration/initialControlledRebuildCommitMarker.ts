@@ -10,10 +10,10 @@ import {
   utf8Parameter,
   uuidParameter,
 } from '../integration/ydb/parameters.js';
-import {
-  INITIAL_RECONCILIATION_CHECKS,
-  type InitialReconciliationEvidence,
-} from './initialValidationGate.js';
+import { YdbSchemeAdapter } from '../integration/ydb/scheme.js';
+import { recoverUnknownControlledInitialSwapOutcome } from './initialControlledRebuildSchemeRecovery.js';
+import type { ControlledInitialSwapPlan } from './initialControlledRebuildSwapGate.js';
+import type { InitialVerifiedCurrentPlan } from './initialVerifiedCurrentPlan.js';
 import {
   markMigrationRunCommitted,
   type MigrationRun,
@@ -21,7 +21,7 @@ import {
 
 export type ControlledInitialCommitMarkerErrorCode =
   | 'RUN_NOT_VALIDATED'
-  | 'CURRENT_VERIFICATION_NOT_MATCHED'
+  | 'POST_SWAP_VERIFICATION_NOT_MATCHED'
   | 'MARKER_TRANSITION_CONFLICT'
   | 'MALFORMED_MARKER_ROW';
 
@@ -43,12 +43,31 @@ interface MigrationRunMarkerRow {
 
 export type ControlledInitialCommitRecovery =
   | Readonly<{ status: 'COMMITTED' }>
-  | Readonly<{ status: 'NOT_COMMITTED' }>;
+  | Readonly<{ status: 'SWAP_APPLIED_MARKER_PENDING' }>
+  | Readonly<{ status: 'RECOVERY_REQUIRED' }>;
 
-function verificationMatched(evidence: Readonly<InitialReconciliationEvidence>): boolean {
-  return Number.isSafeInteger(evidence.unexplainedHighImpactMismatchCount)
-    && evidence.unexplainedHighImpactMismatchCount === 0
-    && INITIAL_RECONCILIATION_CHECKS.every((check) => evidence.checks[check] === 'MATCHED');
+function sameRun(runId: string, swapPlan: Readonly<ControlledInitialSwapPlan>): boolean {
+  return swapPlan.runId.toLowerCase() === runId.toLowerCase();
+}
+
+async function exactPostSwapApplied(
+  scheme: YdbSchemeAdapter,
+  adapter: YdbAdapter,
+  runId: string,
+  swapPlan: Readonly<ControlledInitialSwapPlan>,
+  verifiedPlan: Readonly<InitialVerifiedCurrentPlan>,
+): Promise<boolean> {
+  if (!sameRun(runId, swapPlan)) return false;
+  try {
+    return (await recoverUnknownControlledInitialSwapOutcome(
+      scheme,
+      adapter,
+      swapPlan,
+      verifiedPlan,
+    )).verdict === 'APPLIED';
+  } catch {
+    return false;
+  }
 }
 
 function markerReadStatement(runId: string) {
@@ -86,15 +105,17 @@ async function verifyCommittedInsideTransaction(
 
 export async function commitControlledInitialRun(
   adapter: YdbAdapter,
+  scheme: YdbSchemeAdapter,
   run: Readonly<MigrationRun>,
-  currentVerification: Readonly<InitialReconciliationEvidence>,
+  swapPlan: Readonly<ControlledInitialSwapPlan>,
+  verifiedPlan: Readonly<InitialVerifiedCurrentPlan>,
   finishedAt: string,
 ): Promise<Readonly<MigrationRun>> {
   if (run.state !== 'VALIDATED' || run.finishedAt !== null || run.errorCode !== null) {
     throw new ControlledInitialCommitMarkerError('RUN_NOT_VALIDATED');
   }
-  if (!verificationMatched(currentVerification)) {
-    throw new ControlledInitialCommitMarkerError('CURRENT_VERIFICATION_NOT_MATCHED');
+  if (!await exactPostSwapApplied(scheme, adapter, run.id, swapPlan, verifiedPlan)) {
+    throw new ControlledInitialCommitMarkerError('POST_SWAP_VERIFICATION_NOT_MATCHED');
   }
 
   const update = writeStatement(
@@ -119,20 +140,31 @@ export async function commitControlledInitialRun(
 
 export async function recoverControlledInitialCommitMarker(
   adapter: YdbAdapter,
+  scheme: YdbSchemeAdapter,
   runId: string,
+  swapPlan: Readonly<ControlledInitialSwapPlan>,
+  verifiedPlan: Readonly<InitialVerifiedCurrentPlan>,
   expectedFinishedAt: string,
 ): Promise<ControlledInitialCommitRecovery> {
   timestampParameter(expectedFinishedAt);
-  const row = parseSingleRow(await adapter.read<MigrationRunMarkerRow>(markerReadStatement(runId)));
+  if (!await exactPostSwapApplied(scheme, adapter, runId, swapPlan, verifiedPlan)) {
+    return Object.freeze({ status: 'RECOVERY_REQUIRED' as const });
+  }
 
-  if (row.state === 'COMMITTED') {
-    if (row.finished_at !== expectedFinishedAt || row.error_code !== null) {
-      throw new ControlledInitialCommitMarkerError('MALFORMED_MARKER_ROW');
+  try {
+    const row = parseSingleRow(await adapter.read<MigrationRunMarkerRow>(markerReadStatement(runId)));
+    if (row.state === 'COMMITTED') {
+      return Object.freeze({
+        status: row.finished_at === expectedFinishedAt && row.error_code === null
+          ? 'COMMITTED' as const
+          : 'RECOVERY_REQUIRED' as const,
+      });
     }
-    return Object.freeze({ status: 'COMMITTED' as const });
+    if (row.state === 'VALIDATED' && row.finished_at === null && row.error_code === null) {
+      return Object.freeze({ status: 'SWAP_APPLIED_MARKER_PENDING' as const });
+    }
+    return Object.freeze({ status: 'RECOVERY_REQUIRED' as const });
+  } catch {
+    return Object.freeze({ status: 'RECOVERY_REQUIRED' as const });
   }
-  if (row.state === 'VALIDATED' && row.finished_at === null && row.error_code === null) {
-    return Object.freeze({ status: 'NOT_COMMITTED' as const });
-  }
-  throw new ControlledInitialCommitMarkerError('MALFORMED_MARKER_ROW');
 }
