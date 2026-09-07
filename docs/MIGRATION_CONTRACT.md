@@ -413,15 +413,20 @@ Invariant:
 
 > `FAILED` run не может изменить observable verified shadow state.
 
-Протокол:
+Протокол ordinary incremental promotion:
 
 1. full source snapshot читается и candidate canonical projection строится **до** mutation current state;
-2. candidate проходит classification + reconciliation;
+2. candidate проходит classification и pre-promotion reconciliation/validation по независимому evidence, описанному в §19;
 3. вычисляется delta относительно last COMMITTED state;
-4. обычный delta применяется одной атомарной YDB read-write transaction вместе с commit marker;
-5. safe promotion limit определяется отдельным R1 spike по актуальным YDB limits/latency;
-6. если delta превышает safe limit, текущий state не меняется, run получает `FAILED/PROMOTION_TOO_LARGE`;
-7. большой bootstrap/rebuild выполняется отдельным controlled staging/rebuild path с явным promotion, а не partial batch overwrite current state.
+4. после отсутствия blockers run может перейти `STAGING → VALIDATED`; `VALIDATED` означает разрешение на atomic promotion и **не** означает, что post-change current rows уже materialized;
+5. ordinary delta применяется одной атомарной YDB read-write transaction вместе с commit marker; exact previous YDB state защищается verified current readers и optimistic predicates внутри этой transaction;
+6. expected post-change candidate не сравнивается с pre-promotion current rows как будто delta уже записан;
+7. safe promotion limit определяется отдельным R1 spike по актуальным YDB limits/latency;
+8. если delta превышает safe limit, текущий state не меняется, run получает `FAILED/PROMOTION_TOO_LARGE`;
+9. большой bootstrap/rebuild выполняется отдельным controlled staging/rebuild path с materialized staging reconciliation и явным promotion, а не partial batch overwrite current state;
+10. post-commit current-state read-back/reconciliation является отдельной verification/recovery boundary: mismatch не делает частично проверенный state новым verified shadow и требует recovery/incident handling.
+
+Ordinary incremental sync не получает отдельные staging tables только ради reconciliation. In-memory candidate/delta + independent pre-promotion evidence + atomic guarded promotion остаются canonical path.
 
 `source_record_revisions` могут записываться append-only в staging/evidence path, но ни одна revision failed run не должна заставить Reader считать candidate verified current state.
 
@@ -429,9 +434,27 @@ Invariant:
 
 ## 19. Reconciliation gate
 
-После normalizer сравнивать expected canonical projection с YDB current state.
+Reconciliation имеет разные materialization boundaries для controlled rebuild и ordinary incremental sync.
 
-Минимум:
+### Controlled bootstrap/rebuild
+
+Expected candidate сравнивается с **materialized YDB staging evidence** до явного staging promotion. Staging reconciliation обязана доказать, что materialized staging state соответствует candidate в пределах перечисленных ниже invariant/aggregate checks.
+
+### Ordinary incremental atomic delta
+
+До atomic promotion expected post-change snapshot **не** сравнивается с pre-promotion YDB current rows: при реальном delta они по определению различаются. Pre-promotion validation использует независимое evidence и fail-closed invariants, включая:
+
+- exact lineage/current-evidence coverage относительно last COMMITTED baseline;
+- candidate/delta internal consistency;
+- отсутствие unresolved lineage и других promotion blockers;
+- reconciliation evidence, рассчитанное независимо от будущих writes и достаточное для существующего validation gate;
+- exact previous provider state, подтверждённый verified readers, а затем защищённый optimistic predicates внутри atomic promotion transaction.
+
+Самосравнение `expected candidate` с тем же in-memory candidate не считается reconciliation evidence.
+
+После успешного atomic commit runtime может выполнить отдельный post-commit current-state read-back и сравнить committed state с promoted candidate. Любой mismatch переводит выполнение в recovery/incident boundary; он не должен превращать failed/сомнительный run в partially verified shadow state.
+
+Минимальный reconciliation vocabulary, применимый к materialized staging либо к independently proven/post-commit evidence в соответствующей boundary:
 
 - SourceRecord count;
 - EXPENSE/INCOME counts;
