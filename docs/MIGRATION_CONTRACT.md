@@ -413,6 +413,21 @@ Invariant:
 
 > `FAILED` run не может изменить observable verified shadow state.
 
+### Initial bootstrap claim and resume identity
+
+Initial bootstrap до любых verified-current mutations обязан сначала закрепить durable writer identity и все уже принятые row identity decisions.
+
+Минимальный протокол:
+
+1. один serializable YDB claim атомарно проверяет отсутствие другого `STAGING/VALIDATED` run и отсутствие уже существующего `COMMITTED` bootstrap baseline;
+2. exact `source_snapshots` row, `migration_runs(STAGING)` row и run-scoped `initial_bootstrap_identity_manifests` row создаются в этой же transaction через non-overwriting `INSERT` и exact read-back;
+3. identity manifest связывает immutable source observation evidence `(migration_run_id, source_snapshot_id, source_snapshot_digest, source_ordinal, row_hint, row_digest)` с explicit `SourceRecord.id` и, только когда transaction semantics уже доказана, с explicit `Transaction.id`;
+4. `source_ordinal`, `row_hint`, digest, similarity и payload content не являются генераторами ID; IDs задаются explicit allocation и после durable claim не переаллоцируются для того же run;
+5. resume разрешён только для того же `STAGING/VALIDATED` run и только при exact совпадении manifest с тем же immutable source observation evidence; mismatch, malformed/duplicate binding или contradictory provider evidence переводят выполнение в recovery-required boundary без current-state mutation;
+6. initial `SourceRecordRevision(revision=1)` является append-only evidence: persistence использует `INSERT`, а retry сначала читает уже materialized revision-1 rows этого run, exact-сверяет identity/row/payload evidence и пишет только отсутствующие revisions;
+7. существующая exact revision-1 не переписывается `UPSERT`-ом и не заменяется новым `SourceRecord.id`, digest или payload решением; extra/duplicate/contradictory revision evidence fail-closed;
+8. durable identity manifest является operational resume evidence, а не второй financial authority: Google observation остаётся authoritative, а Reader по-прежнему видит verified shadow только через `COMMITTED` current state.
+
 Протокол ordinary incremental promotion:
 
 1. full source snapshot читается и candidate canonical projection строится **до** mutation current state;
