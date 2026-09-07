@@ -150,7 +150,7 @@ test('serializable transaction commits only after successful callback', async ()
   });
 
   const value = await adapter.serializableReadWrite(async (transaction) => {
-    assert.deepEqual(Object.keys(transaction), ['execute']);
+    assert.deepEqual(Object.keys(transaction), ['execute', 'read']);
     await transaction.execute(first);
     await transaction.execute(second);
     return 'committed';
