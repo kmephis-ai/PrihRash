@@ -442,7 +442,11 @@ Initial bootstrap до любых verified-current mutations обязан сна
 
 Для atomic rename discriminator использует тот же exact run-scoped pair. `APPLIED` допустим только если staging pair доказанно исчез и canonical current exact-сверен с validated candidate. `NOT_APPLIED` допустим только если canonical current всё ещё exact pre-swap empty state, staging pair полностью существует и staging reconciliation exact-сверена с тем же candidate. Любой mixed pair/content mismatch → `RECOVERY_REQUIRED`.
 
-Scheme existence evidence получается через read-only directory/path inspection; provider read error никогда не трактуется как доказательство отсутствия объекта. Recovery path не вызывает `copyTables`, `renameTables` или другую scheme mutation. COMMITTED-marker visibility после доказанного swap является отдельной boundary и здесь не определяется.
+Scheme existence evidence получается через read-only directory/path inspection; provider read error никогда не трактуется как доказательство отсутствия объекта. Recovery path не вызывает `copyTables`, `renameTables` или другую scheme mutation.
+
+После доказанного atomic rename `COMMITTED` marker остаётся отдельной data-transaction boundary, но marker нельзя записать по generic reconciliation evidence. Перед `VALIDATED → COMMITTED` runtime обязан заново получить read-only post-swap proof для **того же** `runId` и **того же** validated candidate: canonical `transactions` + `source_records` должны дать exact `APPLIED` verdict controlled rename discriminator. `NOT_APPLIED`, mixed/foreign structure, content mismatch, provider read failure или run/candidate mismatch блокируют marker как `RECOVERY_REQUIRED`; повторный `renameTables` из marker path запрещён.
+
+Marker recovery возвращает только `COMMITTED | SWAP_APPLIED_MARKER_PENDING | RECOVERY_REQUIRED`. `SWAP_APPLIED_MARKER_PENDING` допустим только для durable unfinished `VALIDATED` row при exact post-swap canonical proof; это recoverable intermediate boundary, а не verified shadow. `COMMITTED` считается доказанным только при exact post-swap proof и exact durable `COMMITTED` marker с ожидаемым lifecycle evidence. `FAILED`, conflicting/malformed marker evidence или canonical mismatch дают `RECOVERY_REQUIRED`. Recovery выполняет только reads и никогда не повторяет scheme mutation. Reader и verified-shadow semantics по-прежнему признают verified только последний durable `COMMITTED` run.
 
 Протокол ordinary incremental promotion:
 
