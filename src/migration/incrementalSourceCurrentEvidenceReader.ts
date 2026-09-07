@@ -1,5 +1,5 @@
 import type { SourceRowClassification } from '../classification/sourceRow.js';
-import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { SOURCE_SHEET_NAME } from '../integration/google/sourceSchema.js';
 import { utf8Parameter } from '../integration/ydb/parameters.js';
 import type { VerifiedSourceRecordLineageEvidence } from './incrementalCommittedBaseline.js';
@@ -166,7 +166,7 @@ function lineageFrom(
 }
 
 export async function readIncrementalSourceCurrentEvidence(
-  adapter: YdbAdapter,
+  reader: YdbReadScope,
 ): Promise<Readonly<IncrementalSourceCurrentEvidenceSnapshot>> {
   const statement = readStatement(
     'SELECT id, source_type, source_sheet, first_seen_at, last_seen_at, last_row_hint, '
@@ -178,7 +178,7 @@ export async function readIncrementalSourceCurrentEvidence(
       source_sheet: utf8Parameter(SOURCE_SHEET_NAME),
     },
   );
-  const result = await adapter.read<SourceCurrentEvidenceRow>(statement);
+  const result = await reader.read<SourceCurrentEvidenceRow>(statement);
 
   const seen = new Set<string>();
   const sourceCurrent: Readonly<IncrementalPreviousSourceCurrentEvidence>[] = [];
