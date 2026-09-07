@@ -69,6 +69,9 @@ export type IncrementalSourceDeltaIntentErrorCode =
   | 'PREVIOUS_BASELINE_EVIDENCE_MISMATCH'
   | 'MISSING_PREVIOUS_SOURCE_EVIDENCE'
   | 'EXTRA_PREVIOUS_SOURCE_EVIDENCE'
+  | 'DUPLICATE_LINEAGE_PREVIOUS_SOURCE_ID'
+  | 'LINEAGE_PREVIOUS_COVERAGE_MISMATCH'
+  | 'AMBIGUOUS_BLOCK_PREVIOUS_EVIDENCE_MISMATCH'
   | 'RESERVED_INSERTED_SOURCE_ID'
   | 'DUPLICATE_REVISION_SOURCE_ID'
   | 'MISSING_REVISION_EVIDENCE'
@@ -161,13 +164,26 @@ function existingEvidence(
   return previous;
 }
 
+function markPreviousCoverage(
+  sourceRecordId: string,
+  coveredPreviousIds: Set<string>,
+): void {
+  const normalized = normalizedId(sourceRecordId);
+  if (coveredPreviousIds.has(normalized)) {
+    throw new IncrementalSourceDeltaIntentError('DUPLICATE_LINEAGE_PREVIOUS_SOURCE_ID');
+  }
+  coveredPreviousIds.add(normalized);
+}
+
 function assertInsertedRevision(
   operation: Extract<IncrementalLineageOutcome, { kind: 'INSERTED' }>,
   revision: Readonly<IncrementalSourceRecordRevisionProjection>,
+  observedAt: string,
 ): void {
   if (
     revision.revision !== 1
     || revision.changeClass !== null
+    || revision.observedAt !== observedAt
     || revision.rowHint !== operation.currentRowHint
     || revision.rowDigest !== operation.digest
     || normalizedId(revision.sourceRecordId) !== normalizedId(operation.sourceRecordId)
@@ -180,16 +196,47 @@ function assertRevisedRevision(
   operation: Extract<IncrementalLineageOutcome, { kind: 'REVISED' }>,
   previous: Readonly<IncrementalPreviousActiveSourceEvidence>,
   revision: Readonly<IncrementalSourceRecordRevisionProjection>,
+  observedAt: string,
 ): void {
   if (
     revision.revision !== previous.currentRevision + 1
     || revision.changeClass === null
+    || revision.observedAt !== observedAt
     || revision.rowHint !== operation.currentRowHint
     || revision.rowDigest !== operation.currentDigest
     || normalizedId(revision.sourceRecordId) !== normalizedId(operation.sourceRecordId)
   ) {
     throw new IncrementalSourceDeltaIntentError('REVISION_LINEAGE_MISMATCH');
   }
+}
+
+function preserveAmbiguousBlock(
+  outcome: Extract<IncrementalLineageOutcome, { kind: 'AMBIGUOUS_BLOCK' }>,
+  previousById: ReadonlyMap<string, Readonly<IncrementalPreviousActiveSourceEvidence>>,
+  coveredPreviousIds: Set<string>,
+): Readonly<IncrementalUnresolvedLineageBlock> {
+  if (outcome.previousSourceRecordIds.length !== outcome.previousRowHints.length) {
+    throw new IncrementalSourceDeltaIntentError('AMBIGUOUS_BLOCK_PREVIOUS_EVIDENCE_MISMATCH');
+  }
+
+  for (let index = 0; index < outcome.previousSourceRecordIds.length; index += 1) {
+    const sourceRecordId = outcome.previousSourceRecordIds[index];
+    const previousRowHint = outcome.previousRowHints[index];
+    if (sourceRecordId === undefined || previousRowHint === undefined) {
+      throw new IncrementalSourceDeltaIntentError('AMBIGUOUS_BLOCK_PREVIOUS_EVIDENCE_MISMATCH');
+    }
+    const previous = previousById.get(normalizedId(sourceRecordId));
+    if (previous === undefined || previous.lastRowHint !== previousRowHint) {
+      throw new IncrementalSourceDeltaIntentError('AMBIGUOUS_BLOCK_PREVIOUS_EVIDENCE_MISMATCH');
+    }
+    markPreviousCoverage(sourceRecordId, coveredPreviousIds);
+  }
+
+  return Object.freeze({
+    previousSourceRecordIds: Object.freeze(outcome.previousSourceRecordIds.map(normalizedId)),
+    previousRowHints: Object.freeze([...outcome.previousRowHints]),
+    currentRowHints: Object.freeze([...outcome.currentRowHints]),
+  });
 }
 
 export function buildIncrementalSourceDeltaIntentPlan(
@@ -203,6 +250,7 @@ export function buildIncrementalSourceDeltaIntentPlan(
   const revisionById = revisionEvidenceMap(revisionPlan);
   const reservedIds = new Set(baseline.reservedSourceRecordIds.map(normalizedId));
   const usedRevisionIds = new Set<string>();
+  const coveredPreviousIds = new Set<string>();
   const intents: IncrementalSourceDeltaIntent[] = [];
   const unresolvedBlocks: Readonly<IncrementalUnresolvedLineageBlock>[] = [];
 
@@ -210,6 +258,7 @@ export function buildIncrementalSourceDeltaIntentPlan(
     switch (outcome.kind) {
       case 'UNCHANGED': {
         const previous = existingEvidence(outcome, previousById);
+        markPreviousCoverage(outcome.sourceRecordId, coveredPreviousIds);
         intents.push(Object.freeze({
           kind: 'TOUCH' as const,
           sourceRecordId: normalizedId(outcome.sourceRecordId),
@@ -231,7 +280,7 @@ export function buildIncrementalSourceDeltaIntentPlan(
         if (revision === undefined) {
           throw new IncrementalSourceDeltaIntentError('MISSING_REVISION_EVIDENCE');
         }
-        assertInsertedRevision(outcome, revision);
+        assertInsertedRevision(outcome, revision, observedAt);
         usedRevisionIds.add(sourceRecordId);
         intents.push(Object.freeze({
           kind: 'CREATE' as const,
@@ -246,12 +295,13 @@ export function buildIncrementalSourceDeltaIntentPlan(
 
       case 'REVISED': {
         const previous = existingEvidence(outcome, previousById);
+        markPreviousCoverage(outcome.sourceRecordId, coveredPreviousIds);
         const sourceRecordId = normalizedId(outcome.sourceRecordId);
         const revision = revisionById.get(sourceRecordId);
         if (revision === undefined) {
           throw new IncrementalSourceDeltaIntentError('MISSING_REVISION_EVIDENCE');
         }
-        assertRevisedRevision(outcome, previous, revision);
+        assertRevisedRevision(outcome, previous, revision, observedAt);
         usedRevisionIds.add(sourceRecordId);
         intents.push(Object.freeze({
           kind: 'REVISE' as const,
@@ -269,6 +319,7 @@ export function buildIncrementalSourceDeltaIntentPlan(
 
       case 'MISSING': {
         const previous = existingEvidence(outcome, previousById);
+        markPreviousCoverage(outcome.sourceRecordId, coveredPreviousIds);
         intents.push(Object.freeze({
           kind: 'MARK_MISSING' as const,
           sourceRecordId: normalizedId(outcome.sourceRecordId),
@@ -280,12 +331,14 @@ export function buildIncrementalSourceDeltaIntentPlan(
       }
 
       case 'AMBIGUOUS_BLOCK':
-        unresolvedBlocks.push(Object.freeze({
-          previousSourceRecordIds: Object.freeze(outcome.previousSourceRecordIds.map(normalizedId)),
-          previousRowHints: Object.freeze([...outcome.previousRowHints]),
-          currentRowHints: Object.freeze([...outcome.currentRowHints]),
-        }));
+        unresolvedBlocks.push(preserveAmbiguousBlock(outcome, previousById, coveredPreviousIds));
         break;
+    }
+  }
+
+  for (const sourceRecordId of previousById.keys()) {
+    if (!coveredPreviousIds.has(sourceRecordId)) {
+      throw new IncrementalSourceDeltaIntentError('LINEAGE_PREVIOUS_COVERAGE_MISMATCH');
     }
   }
 
