@@ -13,6 +13,8 @@ import {
 } from './scheduledIncrementalCandidatePreparation.js';
 import {
   runScheduledIncrementalLifecycle,
+  runScheduledIncrementalLifecycleWithClock,
+  type ScheduledIncrementalLifecycleClock,
   type ScheduledIncrementalLifecycleResult,
 } from './scheduledIncrementalLifecycle.js';
 import type { MigrationRun } from './migrationRunState.js';
@@ -43,11 +45,32 @@ export interface PreparedScheduledIncrementalExecutionInput {
   readonly finishedAt: string;
 }
 
+export interface PreparedScheduledIncrementalClockExecutionInput {
+  readonly baselineRun: Readonly<MigrationRun>;
+  readonly prepared: Readonly<ScheduledIncrementalCandidatePreparationPlan>;
+  readonly reconciliationEvidence: Readonly<InitialReconciliationEvidence>;
+  readonly clock: Readonly<ScheduledIncrementalLifecycleClock>;
+}
+
 export interface ScheduledIncrementalExecutionResult {
   readonly lifecycle: Readonly<ScheduledIncrementalLifecycleResult>;
   readonly candidateRun: Readonly<MigrationRun>;
   readonly sourceAssignmentRequestCount: number;
   readonly transactionAssignmentRequestCount: number;
+}
+
+function resultFrom(
+  input: Readonly<{
+    prepared: Readonly<ScheduledIncrementalCandidatePreparationPlan>;
+    lifecycle: Readonly<ScheduledIncrementalLifecycleResult>;
+  }>,
+): Readonly<ScheduledIncrementalExecutionResult> {
+  return Object.freeze({
+    lifecycle: input.lifecycle,
+    candidateRun: input.prepared.run,
+    sourceAssignmentRequestCount: input.prepared.sourceAssignmentRequests.length,
+    transactionAssignmentRequestCount: input.prepared.transactionAssignmentRequests.length,
+  });
 }
 
 export async function executePreparedScheduledIncrementalCandidate(
@@ -65,13 +88,23 @@ export async function executePreparedScheduledIncrementalCandidate(
     promotedAt: input.promotedAt,
     finishedAt: input.finishedAt,
   });
+  return resultFrom({ prepared: input.prepared, lifecycle });
+}
 
-  return Object.freeze({
-    lifecycle,
+export async function executePreparedScheduledIncrementalCandidateWithClock(
+  adapter: YdbAdapter,
+  input: Readonly<PreparedScheduledIncrementalClockExecutionInput>,
+): Promise<Readonly<ScheduledIncrementalExecutionResult>> {
+  const lifecycle = await runScheduledIncrementalLifecycleWithClock(adapter, {
+    expectedBaseline: input.baselineRun,
     candidateRun: input.prepared.run,
-    sourceAssignmentRequestCount: input.prepared.sourceAssignmentRequests.length,
-    transactionAssignmentRequestCount: input.prepared.transactionAssignmentRequests.length,
-  });
+    sourceDelta: input.prepared.structural.sourceDelta,
+    reconciliationPlan: input.prepared.reconciliation,
+    reconciliationEvidence: input.reconciliationEvidence,
+    currentDelta: input.prepared.candidates.currentDelta,
+    revisions: input.prepared.structural.revisions,
+  }, input.clock);
+  return resultFrom({ prepared: input.prepared, lifecycle });
 }
 
 export async function runPreparedScheduledIncremental(
