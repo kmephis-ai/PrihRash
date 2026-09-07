@@ -2,6 +2,11 @@ import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
+import {
+  parseScheduledSyncAdmissionEvidence,
+  scheduledSyncAdmissionEvidenceStatement,
+  type MigrationRunEvidenceRow,
+} from './scheduledSyncAdmissionEvidence.js';
 
 interface SnapshotReadRow {
   readonly captured_at?: unknown;
@@ -25,8 +30,11 @@ interface RunReadRow {
 
 export type InitialBootstrapMetadataExecutorErrorCode =
   | 'METADATA_WRITE_SET_INVALID'
+  | 'IN_FLIGHT_RUN_EXISTS'
+  | 'COMMITTED_BASELINE_EXISTS'
   | 'SNAPSHOT_READBACK_MISMATCH'
-  | 'RUN_READBACK_MISMATCH';
+  | 'RUN_READBACK_MISMATCH'
+  | 'CLAIM_READBACK_MISMATCH';
 
 export class InitialBootstrapMetadataExecutorError extends Error {
   readonly code: InitialBootstrapMetadataExecutorErrorCode;
@@ -74,6 +82,21 @@ function runMatches(row: RunReadRow, candidate: InitialBootstrapCandidateEnvelop
     && row.error_code === null;
 }
 
+function claimedRunMatches(candidate: InitialBootstrapCandidateEnvelope, observed: MigrationRunEvidenceRow): boolean {
+  const run = candidate.run;
+  return observed.id === run.id
+    && observed.started_at === run.startedAt
+    && observed.finished_at === run.finishedAt
+    && observed.source_snapshot_digest === run.sourceSnapshotDigest
+    && observed.state === run.state
+    && counterMatches(observed.rows_seen, run.rowsSeen)
+    && counterMatches(observed.rows_new, run.rowsNew)
+    && counterMatches(observed.rows_changed, run.rowsChanged)
+    && counterMatches(observed.rows_missing, run.rowsMissing)
+    && counterMatches(observed.rows_ambiguous, run.rowsAmbiguous)
+    && observed.error_code === run.errorCode;
+}
+
 export async function executeInitialBootstrapMetadataWrites(
   adapter: YdbAdapter,
   candidate: InitialBootstrapCandidateEnvelope,
@@ -86,6 +109,7 @@ export async function executeInitialBootstrapMetadataWrites(
     throw new InitialBootstrapMetadataExecutorError('METADATA_WRITE_SET_INVALID');
   }
 
+  const admissionRead = scheduledSyncAdmissionEvidenceStatement();
   const snapshotRead = readStatement(
     'SELECT captured_at, source_sheet, CAST(snapshot_digest AS Utf8) AS snapshot_digest, row_count '
       + 'FROM source_snapshots WHERE id = $id',
@@ -99,6 +123,16 @@ export async function executeInitialBootstrapMetadataWrites(
   );
 
   await adapter.serializableReadWrite(async (transaction) => {
+    const preAdmission = parseScheduledSyncAdmissionEvidence(
+      (await transaction.execute<MigrationRunEvidenceRow>(admissionRead)).rows,
+    );
+    if (preAdmission.incompleteRuns.length > 0) {
+      throw new InitialBootstrapMetadataExecutorError('IN_FLIGHT_RUN_EXISTS');
+    }
+    if (preAdmission.committedBaselineRun !== null) {
+      throw new InitialBootstrapMetadataExecutorError('COMMITTED_BASELINE_EXISTS');
+    }
+
     await transaction.execute(snapshotWrite.statement);
     await transaction.execute(runWrite.statement);
 
@@ -110,6 +144,16 @@ export async function executeInitialBootstrapMetadataWrites(
     const runResult = await transaction.execute<RunReadRow>(runRead);
     if (runResult.rows.length !== 1 || !runMatches(runResult.rows[0] ?? {}, candidate)) {
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
+    }
+
+    const postAdmissionResult = await transaction.execute<MigrationRunEvidenceRow>(admissionRead);
+    const postAdmission = parseScheduledSyncAdmissionEvidence(postAdmissionResult.rows);
+    if (
+      postAdmission.committedBaselineRun !== null
+      || postAdmission.incompleteRuns.length !== 1
+      || !claimedRunMatches(candidate, postAdmissionResult.rows[0] ?? {})
+    ) {
+      throw new InitialBootstrapMetadataExecutorError('CLAIM_READBACK_MISMATCH');
     }
   });
 }
