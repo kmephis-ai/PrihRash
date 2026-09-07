@@ -10,6 +10,7 @@ import {
   type TransactionType,
 } from '../domain/transaction.js';
 import { readStatement, YdbAdapter, type YdbStatement } from '../integration/ydb/adapter.js';
+import { readScheduledSyncAdmissionEvidence } from '../migration/scheduledSyncAdmissionEvidence.js';
 import {
   dateParameter,
   timestampParameter,
@@ -71,7 +72,8 @@ export type ReaderRecentOperationsErrorCode =
   | 'INVALID_LIMIT'
   | 'INVALID_FILTER'
   | 'INVALID_CURSOR'
-  | 'MALFORMED_READER_EVIDENCE';
+  | 'MALFORMED_READER_EVIDENCE'
+  | 'VERIFIED_SHADOW_UNAVAILABLE';
 
 export class ReaderRecentOperationsError extends Error {
   readonly code: ReaderRecentOperationsErrorCode;
@@ -148,6 +150,18 @@ function invalidFilter(): never {
 
 function invalidCursor(): never {
   throw new ReaderRecentOperationsError('INVALID_CURSOR');
+}
+
+async function requireVerifiedShadow(adapter: YdbAdapter): Promise<void> {
+  try {
+    const evidence = await readScheduledSyncAdmissionEvidence(adapter);
+    if (evidence.committedBaselineRun === null) {
+      throw new ReaderRecentOperationsError('VERIFIED_SHADOW_UNAVAILABLE');
+    }
+  } catch (error) {
+    if (error instanceof ReaderRecentOperationsError) throw error;
+    throw new ReaderRecentOperationsError('VERIFIED_SHADOW_UNAVAILABLE');
+  }
 }
 
 function normalizeLimit(limit: number | undefined): number {
@@ -457,7 +471,9 @@ export async function readRecentOperations(
 ): Promise<Readonly<ReaderRecentOperationsResult>> {
   const normalizedLimit = normalizeLimit(limit);
   const normalizedFilters = normalizeFilters(filters);
-  const result = await adapter.read<ReaderOperationRow>(recentOperationsStatement(normalizedLimit, normalizedFilters));
+  const statement = recentOperationsStatement(normalizedLimit, normalizedFilters);
+  await requireVerifiedShadow(adapter);
+  const result = await adapter.read<ReaderOperationRow>(statement);
   const items = result.rows.map(parseOperation);
   return Object.freeze({
     items: Object.freeze(items),
@@ -473,9 +489,9 @@ export async function readRecentOperationsPage(
 ): Promise<Readonly<ReaderRecentOperationsPageResult>> {
   const normalizedLimit = normalizeLimit(limit);
   const normalizedFilters = normalizeFilters(filters);
-  const result = await adapter.read<ReaderOperationRow>(
-    recentOperationsPageStatement(normalizedLimit, normalizedFilters, cursor),
-  );
+  const statement = recentOperationsPageStatement(normalizedLimit, normalizedFilters, cursor);
+  await requireVerifiedShadow(adapter);
+  const result = await adapter.read<ReaderOperationRow>(statement);
   const parsed = result.rows.map(parseOperation);
   const hasMore = parsed.length > normalizedLimit;
   const items = parsed.slice(0, normalizedLimit);

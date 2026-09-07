@@ -448,6 +448,8 @@ Scheme existence evidence получается через read-only directory/pa
 
 Marker recovery возвращает только `COMMITTED | SWAP_APPLIED_MARKER_PENDING | RECOVERY_REQUIRED`. `SWAP_APPLIED_MARKER_PENDING` допустим только для durable unfinished `VALIDATED` row при exact post-swap canonical proof; это recoverable intermediate boundary, а не verified shadow. `COMMITTED` считается доказанным только при exact post-swap proof и exact durable `COMMITTED` marker с ожидаемым lifecycle evidence. `FAILED`, conflicting/malformed marker evidence или canonical mismatch дают `RECOVERY_REQUIRED`. Recovery выполняет только reads и никогда не повторяет scheme mutation. Reader и verified-shadow semantics по-прежнему признают verified только последний durable `COMMITTED` run.
 
+Reader перед canonical `transactions` read обязан получить durable migration-run admission evidence. Если durable `COMMITTED` baseline отсутствует — включая initial `STAGING/VALIDATED` и post-swap `SWAP_APPLIED_MARKER_PENDING` — canonical rows не читаются и Reader fail-closed. Malformed/unreadable admission evidence также fail-closed. После появления хотя бы одного durable `COMMITTED` baseline ordinary incremental `STAGING/VALIDATED` сам по себе не инвалидирует последний verified shadow: ordinary incremental current mutation и новый `COMMITTED` marker выполняются одной atomic YDB transaction, поэтому Reader может продолжать читать last COMMITTED current state до её commit.
+
 Протокол ordinary incremental promotion:
 
 1. full source snapshot читается и candidate canonical projection строится **до** mutation current state;

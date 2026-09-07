@@ -10,6 +10,24 @@ import {
   recentOperationsStatement,
 } from '../../dist/reader/recentOperations.js';
 
+const COMMITTED_RUN_ROW = Object.freeze({
+  id: '00000000-0000-0000-0000-000000000901',
+  started_at: '2026-09-07T10:00:00.000Z',
+  finished_at: '2026-09-07T10:00:05.000Z',
+  source_snapshot_digest: 'synthetic-reader-verified-shadow',
+  state: 'COMMITTED',
+  rows_seen: 1n,
+  rows_new: 1n,
+  rows_changed: 0n,
+  rows_missing: 0n,
+  rows_ambiguous: 0n,
+  error_code: null,
+});
+
+function rowsForStatement(statement, rows) {
+  return statement.text.includes('FROM migration_runs WHERE state IN') ? [COMMITTED_RUN_ROW] : rows;
+}
+
 const IDS = Object.freeze({
   txExpense: '00000000-0000-0000-0000-000000000101',
   txIncome: '00000000-0000-0000-0000-000000000102',
@@ -26,7 +44,7 @@ function adapterWithRows(rows, capture = { statements: [], transactions: 0 }) {
     adapter: new YdbAdapter({
       async executeRead(statement) {
         capture.statements.push(statement);
-        return { rows };
+        return { rows: rowsForStatement(statement, rows) };
       },
       async serializableReadWrite() {
         capture.transactions += 1;
@@ -69,7 +87,7 @@ function baseRow(overrides = {}) {
   };
 }
 
-test('recent operations query is one bounded read with stable ordering and joins', async () => {
+test('recent operations query performs verified-shadow admission before one bounded canonical read', async () => {
   const rows = [
     baseRow(),
     baseRow({
@@ -110,12 +128,13 @@ test('recent operations query is one bounded read with stable ordering and joins
   assert.equal(result.items[1].status, 'VOIDED');
   assert.equal(result.items[2].category, null);
   assert.equal(capture.transactions, 0);
-  assert.equal(capture.statements.length, 1);
-  assert.match(capture.statements[0].text, /LEFT JOIN accounts AS fa/);
-  assert.match(capture.statements[0].text, /LEFT JOIN categories AS c/);
-  assert.match(capture.statements[0].text, /ORDER BY t\.occurred_on DESC, t\.captured_at DESC, t\.id DESC LIMIT \$limit/);
-  assert.equal(capture.statements[0].parameters.limit.type, 'Uint64');
-  assert.equal(capture.statements[0].parameters.limit.value, 25n);
+  assert.equal(capture.statements.length, 2);
+  assert.match(capture.statements[0].text, /FROM migration_runs WHERE state IN/);
+  assert.match(capture.statements[1].text, /LEFT JOIN accounts AS fa/);
+  assert.match(capture.statements[1].text, /LEFT JOIN categories AS c/);
+  assert.match(capture.statements[1].text, /ORDER BY t\.occurred_on DESC, t\.captured_at DESC, t\.id DESC LIMIT \$limit/);
+  assert.equal(capture.statements[1].parameters.limit.type, 'Uint64');
+  assert.equal(capture.statements[1].parameters.limit.value, 25n);
 });
 
 test('coarse and uncertain historical quality remains explicit in Reader projection', async () => {
