@@ -84,7 +84,7 @@ export type ResolutionEffectPersistenceErrorCode =
   | 'TRANSACTION_RESULT_AMBIGUOUS'
   | 'TRANSACTION_EFFECT_EVIDENCE_MISMATCH'
   | 'SOURCE_RECORD_NOT_FOUND_AFTER_RESOLUTION'
-  | 'SOURCE_RECORD_RESULT_AMIGUOUS'
+  | 'SOURCE_RECORD_RESULT_AMBIGUOUS'
   | 'SOURCE_EFFECT_EVIDENCE_MISMATCH';
 
 export class ResolutionEffectPersistenceError extends Error {
@@ -511,7 +511,7 @@ function requireSourceReadBack(
     throw new ResolutionEffectPersistenceError('SOURCE_RECORD_NOT_FOUND_AFTER_RESOLUTION');
   }
   if (rows.length !== 1) {
-    throw new ResolutionEffectPersistenceError('SOURCE_RECORD_RESULT_AMIGUOUS');
+    throw new ResolutionEffectPersistenceError('SOURCE_RECORD_RESULT_AMBIGUOUS');
   }
   const row = rows[0];
   if (row === undefined || !sourceRowMatches(row, prepared)) {
