@@ -442,19 +442,48 @@ Expected candidate сравнивается с **materialized YDB staging eviden
 
 ### Ordinary incremental atomic delta
 
-До atomic promotion expected post-change snapshot **не** сравнивается с pre-promotion YDB current rows: при реальном delta они по определению различаются. Pre-promotion validation использует независимое evidence и fail-closed invariants, включая:
+До atomic promotion expected post-change snapshot **не** сравнивается с pre-promotion YDB current rows: при реальном delta они по определению различаются. Ordinary incremental pre-promotion reconciliation имеет две distinct construction paths поверх одного canonical financial semantics pipeline.
 
-- exact lineage/current-evidence coverage относительно last COMMITTED baseline;
-- candidate/delta internal consistency;
-- отсутствие unresolved lineage и других promotion blockers;
-- reconciliation evidence, рассчитанное независимо от будущих writes и достаточное для существующего validation gate;
-- exact previous provider state, подтверждённый verified readers, а затем защищённый optimistic predicates внутри atomic promotion transaction.
+#### Expected path
 
-Самосравнение `expected candidate` с тем же in-memory candidate не считается reconciliation evidence.
+Expected reconciliation snapshot строится из полного post-change candidate current state после deterministic lineage/semantic/candidate preparation. Этот snapshot выражает то состояние, которое run собирается materialize после atomic delta.
+
+#### Independent roll-forward path
+
+Observed-for-validation snapshot не читается как несуществующий future YDB state и не строится повторным обходом full candidate. Он механически рассчитывается из:
+
+1. exact verified baseline `SourceRecord` rows и canonical Transactions, прочитанных согласованно с exact last `COMMITTED` MigrationRun;
+2. prepared `sourceIntents` и `transactionIntents`, рассчитанных из того же leased authoritative observation относительно этого exact baseline;
+3. explicit optimistic preconditions, уже присутствующих в delta intents.
+
+Mechanical roll-forward правила:
+
+- baseline entity без delta intent сохраняется без изменения;
+- `CREATE_SOURCE_RECORD` / `CREATE_TRANSACTION` добавляют ровно payload соответствующего intent;
+- `UPDATE_SOURCE_RECORD` заменяет только exact baseline SourceRecord identity и только при совпадении всех declared previous-state guards (`expectedCurrentRevision`, digest/state/link/resolution predicates и применимых immutable identity facts);
+- `REPLACE_TRANSACTION` заменяет только exact baseline Transaction identity и только при совпадении `expectedVersion` и применимых identity facts;
+- duplicate intent, missing target, target collision, predicate mismatch, malformed baseline/candidate payload, unsupported operation или implicit delete → construction failure; такой run не получает reconciliation `MATCHED`;
+- roll-forward projector не выполняет source classification, fuzzy mapping, entity resolution, normalization или financial inference и не создаёт новые identities;
+- после replay итоговый in-memory set агрегируется тем же reconciliation vocabulary, но без чтения full candidate arrays.
+
+Эта independence является **construction independence**, а не второй financial authority. Google observation остаётся authoritative source, canonical normalizer остаётся единственным financial semantics engine. Цель второго path — доказать, что exact verified baseline + prepared mutation intents механически приводят к тому aggregate state, который заявляет independently constructed full candidate snapshot. Это обнаруживает omission/extra/divergence между candidate и write intent без materialized staging и без второго analytics/normalization engine.
+
+#### Comparison and fail-closed result
+
+Expected snapshot и roll-forward snapshot сравниваются exact по существующим checks. `MATCHED` разрешён только при точном совпадении соответствующего invariant/aggregate set. Для допуска к `VALIDATED`:
+
+- все reconciliation checks должны быть `MATCHED`;
+- `NOT_CHECKED` не является success;
+- construction failure не конвертируется в `MATCHED` и блокирует lifecycle до promotion;
+- mismatch count отражает реальные mismatched checks; hardcoded/synthetic `MATCHED` в production path запрещён;
+- exact source-observation coverage, unresolved-lineage blockers, run counters и candidate/delta internal consistency остаются отдельными validation guards и не заменяются aggregate reconciliation;
+- optimistic predicates повторно защищают exact previous provider state внутри atomic promotion transaction, поэтому успешный pre-promotion roll-forward не отменяет lost-update protection.
+
+Самосравнение `expected candidate` с тем же in-memory candidate не считается reconciliation evidence. Прямое сравнение expected post-change snapshot с pre-promotion CURRENT также не считается reconciliation evidence.
 
 После успешного atomic commit runtime может выполнить отдельный post-commit current-state read-back и сравнить committed state с promoted candidate. Любой mismatch переводит выполнение в recovery/incident boundary; он не должен превращать failed/сомнительный run в partially verified shadow state.
 
-Минимальный reconciliation vocabulary, применимый к materialized staging либо к independently proven/post-commit evidence в соответствующей boundary:
+Минимальный reconciliation vocabulary, применимый к materialized staging, roll-forward либо post-commit evidence в соответствующей boundary:
 
 - SourceRecord count;
 - EXPENSE/INCOME counts;
@@ -465,7 +494,7 @@ Expected candidate сравнивается с **materialized YDB staging eviden
 - LEGACY_PERIOD_CLOSE;
 - INVALID/AMBIGUOUS/MISSING.
 
-Private totals не публиковать в GitHub evidence.
+Operational/public evidence содержит только privacy-safe statuses/counts. Private totals, descriptions, raw payload и private aggregate values не публиковать в GitHub/log evidence.
 
 ## 20. Pre-close protection
 
