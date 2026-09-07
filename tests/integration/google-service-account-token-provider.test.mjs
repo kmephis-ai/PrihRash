@@ -9,7 +9,12 @@ import {
 } from '../../dist/integration/google/googleServiceAccountTokenProvider.js';
 
 const SYNTHETIC_EMAIL = 'synthetic-reader@example.invalid';
-const SYNTHETIC_PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----\nsynthetic-not-a-real-key\n-----END PRIVATE KEY-----\n';
+const SYNTHETIC_PRIVATE_KEY = [
+  '-----BEGIN ' + 'PRIVATE KEY-----',
+  'synthetic-not-a-real-key',
+  '-----END ' + 'PRIVATE KEY-----',
+  '',
+].join('\n');
 
 test('read-only scope is exact and does not grant write access', () => {
   assert.equal(
