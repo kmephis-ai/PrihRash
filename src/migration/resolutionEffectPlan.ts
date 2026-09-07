@@ -191,6 +191,9 @@ export function planResolutionEffect(
     case 'ACCEPT_SOURCE_CORRECTION': {
       const transactionId = requireLinkedTransaction(item);
       assertPositiveVersion(request.expectedTransactionVersion);
+      if (request.canonicalTransaction.type !== 'TRANSFER' && request.categoryKind === null) {
+        throw new ResolutionEffectPlanError('CANONICAL_TRANSACTION_INVALID');
+      }
       const validationErrors = validateTransaction(request.canonicalTransaction, {
         categoryKind: request.categoryKind,
       });
