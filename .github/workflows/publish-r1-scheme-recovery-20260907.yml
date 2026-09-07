@@ -1,0 +1,41 @@
+name: Publish local R1 scheme recovery
+
+on:
+  push:
+    branches:
+      - chore/publish-r1-scheme-recovery-20260907
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact local tree
+        shell: bash
+        env:
+          SOURCE_SHA: 47d663697e08af56b3b5976fe6db822f1d672150
+          TARGET_BRANCH: fix/r1-controlled-scheme-outcome-recovery
+          EXPECTED_TREE: 12b251624f6e7223eab97ca3bf883756b4cc439c
+          PATCH_SHA256: 223cd2043c72037b026aa12a386fd04d0dc356027e7b0b633ca14f9e7fd34028
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}"
+          test "$(git rev-parse "origin/${TARGET_BRANCH}")" = "${SOURCE_SHA}"
+          cat tmp/r1-scheme.patch.b64.* > /tmp/patch.b64
+          test "$(sha256sum /tmp/patch.b64 | awk '{print $1}')" = "${PATCH_SHA256}"
+          base64 -d /tmp/patch.b64 > /tmp/local.patch
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          git clean -fdx
+          git apply --index --binary /tmp/local.patch
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git commit -m "R1: discriminate unknown controlled scheme outcomes"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          git push origin "HEAD:${TARGET_BRANCH}"
