@@ -170,13 +170,24 @@ function casePaths(caseDirectory) {
 }
 
 async function createCase(scheme, sql, paths) {
-  await scheme.ensureDirectory(paths.caseDirectory);
-  await scheme.ensureDirectory(paths.currentDirectory);
-  await scheme.ensureDirectory(paths.stagingDirectory);
-  await canonicalTransactionTable(sql, paths.currentTransactions);
-  await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
-  await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (Uuid(${SYNTHETIC_TRANSACTION_ID}))`;
-  await sql`INSERT INTO ${sql.identifier(paths.currentSourceRecords)} (id) VALUES (Uuid(${SYNTHETIC_SOURCE_ID}))`;
+  let stage = 'ENSURE_CASE_DIRECTORY';
+  try {
+    await scheme.ensureDirectory(paths.caseDirectory);
+    stage = 'ENSURE_CURRENT_DIRECTORY';
+    await scheme.ensureDirectory(paths.currentDirectory);
+    stage = 'ENSURE_STAGING_DIRECTORY';
+    await scheme.ensureDirectory(paths.stagingDirectory);
+    stage = 'CREATE_TRANSACTIONS_TABLE';
+    await canonicalTransactionTable(sql, paths.currentTransactions);
+    stage = 'CREATE_SOURCE_RECORDS_TABLE';
+    await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
+    stage = 'INSERT_TRANSACTION_ROW';
+    await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (Uuid(${SYNTHETIC_TRANSACTION_ID}))`;
+    stage = 'INSERT_SOURCE_RECORD_ROW';
+    await sql`INSERT INTO ${sql.identifier(paths.currentSourceRecords)} (id) VALUES (Uuid(${SYNTHETIC_SOURCE_ID}))`;
+  } catch (error) {
+    throw safeStageError(error, `CREATE_CASE_${stage}`);
+  }
 }
 
 async function copyAndVerify(scheme, sql, paths) {
