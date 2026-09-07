@@ -1,12 +1,12 @@
 import type { CanonicalTransaction } from '../domain/transaction.js';
-import { type YdbParameter, dateParameter, int64Parameter, stringParameter, timestampParameter, uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import { type YdbParameter, dateParameter, int64Parameter, jsonDocumentParameter, stringParameter, timestampParameter, uint64Parameter, utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import { type YdbStatement, writeStatement } from '../integration/ydb/adapter.js';
 import { assessAtomicPromotionWrites, type AtomicPromotionPreflightAssessment, type PromotionWrite } from './atomicPromotion.js';
 import type { IncrementalCurrentDeltaPlan, IncrementalSourceCurrentDeltaIntent, IncrementalTransactionCurrentDeltaIntent } from './incrementalCurrentDelta.js';
 import type { IncrementalRevisionEvidencePlan, IncrementalSourceRecordRevisionProjection } from './incrementalRevisionEvidence.js';
 import type { MigrationRun } from './migrationRunState.js';
 
-export type IncrementalPromotionWriteRole = 'TRANSACTION' | 'SOURCE_RECORD';
+export type IncrementalPromotionWriteRole = 'TRANSACTION' | 'SOURCE_REVISION' | 'SOURCE_RECORD';
 
 export interface PreparedIncrementalPromotionWrite extends PromotionWrite {
   readonly role: IncrementalPromotionWriteRole;
@@ -220,6 +220,26 @@ function transactionReplaceStatement(
   );
 }
 
+function revisionInsertStatement(revision: Readonly<IncrementalSourceRecordRevisionProjection>): YdbStatement {
+  const parameters = {
+    source_record_id: uuidParameter(revision.sourceRecordId),
+    revision: uint64Parameter(revision.revision),
+    migration_run_id: uuidParameter(revision.migrationRunId),
+    observed_at: timestampParameter(revision.observedAt),
+    row_hint: uint64Parameter(revision.rowHint),
+    row_digest: stringParameter(revision.rowDigest),
+    change_class: utf8Parameter(revision.changeClass),
+    raw_payload: jsonDocumentParameter(revision.rawPayload),
+  };
+  return writeStatement(
+    'INSERT INTO source_record_revisions '
+      + '(source_record_id, revision, migration_run_id, observed_at, row_hint, row_digest, change_class, raw_payload) '
+      + 'VALUES ($source_record_id, $revision, $migration_run_id, $observed_at, $row_hint, $row_digest, '
+      + '$change_class, $raw_payload) RETURNING source_record_id',
+    parameters,
+  );
+}
+
 function requiredRevisionSources(
   delta: Readonly<IncrementalCurrentDeltaPlan>,
 ): ReadonlyMap<string, { readonly revision: number; readonly rowHint: number; readonly digest: string; readonly create: boolean }> {
@@ -300,6 +320,12 @@ export function prepareIncrementalCurrentWrites(
       ? transactionCreateStatement(intent, promotedAt)
       : transactionReplaceStatement(intent, promotedAt);
     writes.push(prepared('TRANSACTION', intent.candidate.id, statement));
+  }
+
+  for (const revision of [...revisionPlan.revisions].sort((left, right) => (
+    left.sourceRecordId.localeCompare(right.sourceRecordId) || left.revision - right.revision
+  ))) {
+    writes.push(prepared('SOURCE_REVISION', revision.sourceRecordId, revisionInsertStatement(revision)));
   }
 
   for (const intent of [...delta.sourceIntents].sort((left, right) => left.candidate.id.localeCompare(right.candidate.id))) {
