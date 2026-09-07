@@ -32,6 +32,7 @@ export type IncrementalTransactionCurrentCandidateErrorCode =
   | 'TRANSITION_SOURCE_NOT_FOUND'
   | 'TRANSITION_BLOCKS_CANDIDATE'
   | 'SOURCE_TRANSACTION_LINK_MISMATCH'
+  | 'SOURCE_SEMANTIC_MISMATCH'
   | 'PREVIOUS_TRANSACTION_NOT_FOUND'
   | 'TRANSACTION_VERSION_MISMATCH'
   | 'CREATE_TRANSACTION_LINK_MISSING'
@@ -162,6 +163,12 @@ function assertPreservedLinkExists(
   }
 }
 
+function assertSemantic(condition: boolean): void {
+  if (!condition) {
+    throw new IncrementalTransactionCurrentCandidateError('SOURCE_SEMANTIC_MISMATCH');
+  }
+}
+
 export function buildIncrementalTransactionCurrentCandidatePlan(
   previousTransactions: readonly Readonly<IncrementalPreviousTransactionCurrentEvidence>[],
   transition: Readonly<IncrementalSemanticTransitionPlan>,
@@ -180,7 +187,7 @@ export function buildIncrementalTransactionCurrentCandidatePlan(
         throw new IncrementalTransactionCurrentCandidateError('TRANSITION_BLOCKS_CANDIDATE');
 
       case 'CREATE_FINANCIAL_CANDIDATE': {
-        if (source.classification !== 'FINANCIAL_RECORD' || source.transactionId === null) {
+        if (source.classification !== 'FINANCIAL_RECORD' || source.state !== null || source.transactionId === null) {
           throw new IncrementalTransactionCurrentCandidateError('CREATE_TRANSACTION_LINK_MISSING');
         }
         const transactionId = normalizedId(source.transactionId);
@@ -196,13 +203,21 @@ export function buildIncrementalTransactionCurrentCandidatePlan(
       }
 
       case 'CREATE_SOURCE_ONLY':
+        assertSemantic(source.state === null && source.classification === decision.classification);
+        if (source.transactionId !== null) {
+          throw new IncrementalTransactionCurrentCandidateError('SOURCE_ONLY_TRANSACTION_LINK_PRESENT');
+        }
+        break;
+
       case 'CREATE_REVIEW_REQUIRED':
+        assertSemantic(source.state === null && source.classification === 'AMBIGUOUS');
         if (source.transactionId !== null) {
           throw new IncrementalTransactionCurrentCandidateError('SOURCE_ONLY_TRANSACTION_LINK_PRESENT');
         }
         break;
 
       case 'OWNER_CORRECTION_REPLACE_CANDIDATE': {
+        assertSemantic(source.state === null && source.classification === 'FINANCIAL_RECORD');
         assertSourceLink(source, decision.transactionId);
         const previous = requirePreviousTransaction(previousById, decision.transactionId);
         if (previous.version !== decision.expectedTransactionVersion) {
@@ -217,21 +232,25 @@ export function buildIncrementalTransactionCurrentCandidatePlan(
       }
 
       case 'WORKFLOW_TRANSFORM_PRESERVE_CANONICAL':
+        assertSemantic(source.state === null && source.classification === 'FINANCIAL_RECORD');
         assertSourceLink(source, decision.transactionId);
         requirePreviousTransaction(previousById, decision.transactionId);
         break;
 
       case 'REVIEW_REQUIRED_PRESERVE':
+        assertSemantic(source.state === null && source.classification === 'AMBIGUOUS');
         assertSourceLink(source, decision.transactionId);
         assertPreservedLinkExists(previousById, decision.transactionId);
         break;
 
       case 'MARK_MISSING_PRESERVE_CANONICAL':
+        assertSemantic(source.state === 'MISSING');
         assertSourceLink(source, decision.transactionId);
         assertPreservedLinkExists(previousById, decision.transactionId);
         break;
 
       case 'TOUCH_PRESERVE':
+        assertSemantic(source.state === null && source.classification === decision.classification);
         assertPreservedLinkExists(previousById, source.transactionId);
         break;
     }
