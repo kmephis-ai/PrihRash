@@ -10,6 +10,7 @@ name: TEST_PRIVATE controlled rebuild smoke
 # Create-operation diagnostics added for provider OVERLOADED localization; rerun trigger 8.
 # Bounded explicit-OVERLOADED backoff for idempotent setup/cleanup; rerun trigger 9.
 # Numeric YDB query status diagnostics added; rerun trigger 10.
+# Numeric YDB issue-code diagnostics added; rerun trigger 11.
 on:
   workflow_dispatch:
   push:
