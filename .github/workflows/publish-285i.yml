@@ -1,0 +1,156 @@
+name: Publish bounded tri-state TEST_PRIVATE fixture
+
+on:
+  push:
+    branches:
+      - transport/publish-285i
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic tri-state fixture transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='fix/r1-test-private-reuse-tri-state-fixture'
+          expected_base='e784dad63f559d17582b43ef5abab3fb545922fb'
+          expected_script_blob='75f8188e6cb3d5b631fec9b62175f2c0bb320b8f'
+          expected_workflow_blob='74ca552bf89ec20192979e7f68de948d74eee192'
+          git fetch origin "$target"
+          git checkout -B publish-target "origin/$target"
+          test "$(git rev-parse HEAD)" = "$expected_base"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/test-private-controlled-rebuild-smoke.mjs')
+          source = path.read_text()
+          start = source.index('async function triStateCase(')
+          end = source.index('\nasync function main()', start)
+          replacement = '''function recoveryEvidence(name, before, after, injected) {
+            return Object.freeze({
+              name,
+              before,
+              after: after.verdict,
+              mutationAttempts: injected.mutationAttempts,
+              providerRenameCalls: injected.providerRenameCalls,
+              recoveryRenameCalls: 0,
+              injectionLatencyMs: injected.latencyMs,
+              recoveryLatencyMs: after.latencyMs,
+            });
+          }
+
+          async function triStateProof(driver, baseScheme, baseDataTransport, sql, runDirectory) {
+            const name = 'TRI_STATE';
+            const runId = randomUUID().toLowerCase();
+            const paths = casePaths(`${runDirectory}/tri_state`, runId);
+            const plan = swapPlan(runId);
+            const candidate = candidatePlan();
+            try {
+              await atStage(`${name}_CREATE_CASE`, () => createCase(baseScheme, sql, paths, name));
+
+              const scopedScheme = createScopedSchemeTransport(baseScheme, paths.caseDirectory);
+              const scheme = new YdbSchemeAdapter(scopedScheme.transport);
+              const data = new YdbAdapter(createScopedDataTransport(baseDataTransport, paths.caseDirectory));
+              const cases = [];
+
+              const notAppliedBefore = await atStage(
+                'NOT_APPLIED_RECOVER_BEFORE',
+                () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+              );
+              const notAppliedInjected = await atStage(
+                'NOT_APPLIED_INJECT_UNKNOWN',
+                () => injectUnknown('NOT_APPLIED', scopedScheme, plan),
+              );
+              const notAppliedAfter = await atStage(
+                'NOT_APPLIED_RECOVER_AFTER',
+                () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+              );
+              cases.push(recoveryEvidence(
+                'NOT_APPLIED',
+                notAppliedBefore.verdict,
+                notAppliedAfter,
+                notAppliedInjected,
+              ));
+
+              const appliedInjected = await atStage(
+                'APPLIED_INJECT_UNKNOWN',
+                () => injectUnknown('APPLIED', scopedScheme, plan),
+              );
+              const appliedAfter = await atStage(
+                'APPLIED_RECOVER_AFTER',
+                () => requireRecoveryVerdict(scheme, data, plan, candidate, 'APPLIED', scopedScheme.counters),
+              );
+              cases.push(recoveryEvidence('APPLIED', 'NOT_APPLIED', appliedAfter, appliedInjected));
+
+              await atStage('RECOVERY_REQUIRED_RESET_COPY_STAGING', () => scheme.copyTables(
+                plan.replacements.map((replacement) => ({
+                  source: replacement.destination,
+                  destination: replacement.source,
+                  omitIndexes: false,
+                })),
+              ));
+              await atStage('RECOVERY_REQUIRED_RESET_CURRENT_TRANSACTIONS', () => sql`DELETE FROM ${sql.identifier(paths.currentTransactions)}`);
+              await atStage('RECOVERY_REQUIRED_RESET_CURRENT_SOURCE_RECORDS', () => sql`DELETE FROM ${sql.identifier(paths.currentSourceRecords)}`);
+              const recoveryRequiredBefore = await atStage(
+                'RECOVERY_REQUIRED_RECOVER_BEFORE',
+                () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+              );
+              const recoveryRequiredInjected = await atStage(
+                'RECOVERY_REQUIRED_INJECT_UNKNOWN',
+                () => injectUnknown('RECOVERY_REQUIRED', scopedScheme, plan),
+              );
+              const recoveryRequiredAfter = await atStage(
+                'RECOVERY_REQUIRED_RECOVER_AFTER',
+                () => requireRecoveryVerdict(scheme, data, plan, candidate, 'RECOVERY_REQUIRED', scopedScheme.counters),
+              );
+              cases.push(recoveryEvidence(
+                'RECOVERY_REQUIRED',
+                recoveryRequiredBefore.verdict,
+                recoveryRequiredAfter,
+                recoveryRequiredInjected,
+              ));
+
+              return Object.freeze(cases);
+            } finally {
+              await atStage(`${name}_CLEANUP`, () => cleanupCase(driver, sql, paths));
+            }
+          }
+          '''
+          source = source[:start] + replacement + source[end:]
+          old = '''    stage = 'PROVE_APPLIED';
+              cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'APPLIED', 'APPLIED'));
+              stage = 'PROVE_NOT_APPLIED';
+              cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'NOT_APPLIED', 'NOT_APPLIED'));
+              stage = 'PROVE_RECOVERY_REQUIRED';
+              cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'RECOVERY_REQUIRED', 'RECOVERY_REQUIRED'));
+          '''
+          new = '''    stage = 'PROVE_TRI_STATE';
+              cases.push(...await triStateProof(driver, baseScheme, baseDataTransport, sql, runDirectory));
+          '''
+          if old not in source:
+              raise SystemExit('main tri-state call guard failed')
+          path.write_text(source.replace(old, new, 1))
+
+          workflow = Path('.github/workflows/test-private-controlled-rebuild-smoke.yml')
+          text = workflow.read_text()
+          trigger = '# Numeric YDB issue-code diagnostics added; rerun trigger 11.\n'
+          addition = trigger + '# Reuse one tri-state fixture to bound provider scheme DDL; rerun trigger 12.\n'
+          if trigger not in text or addition in text:
+              raise SystemExit('workflow trigger guard failed')
+          workflow.write_text(text.replace(trigger, addition, 1))
+          PY
+          test "$(git hash-object scripts/test-private-controlled-rebuild-smoke.mjs)" = "$expected_script_blob"
+          test "$(git hash-object .github/workflows/test-private-controlled-rebuild-smoke.yml)" = "$expected_workflow_blob"
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs .github/workflows/test-private-controlled-rebuild-smoke.yml
+          git commit -m 'R1: reuse TEST_PRIVATE tri-state fixture'
+          git push origin HEAD:"$target"
