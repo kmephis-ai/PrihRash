@@ -1,0 +1,34 @@
+name: R2 UI Preview
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify synthetic preview boundary
+        run: node --test tests/integration/r2-safe-ui-preview.test.mjs
+      - name: Build static preview
+        run: npm run preview:build
+      - name: Privacy smoke
+        run: npm run privacy
+      - name: Upload static preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-ui-preview
+          path: .artifacts/r2-ui-preview/
+          if-no-files-found: error
+          retention-days: 7
