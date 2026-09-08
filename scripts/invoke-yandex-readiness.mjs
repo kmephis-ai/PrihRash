@@ -13,6 +13,17 @@ const SAFE_READY = Object.freeze({
 const SAFE_PASS = Object.freeze({ status: 'PASS', code: 'READINESS_READY' });
 const SAFE_CONFIG_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_CONFIG_INVALID' });
 const SAFE_INVOKE_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+const SAFE_PROBE_FAILURE_CODE_BY_MARKER = Object.freeze({
+  CONFIG_INVALID: 'READINESS_RUNTIME_CONFIG_INVALID',
+  GOOGLE_SOURCE_READ_FAILED: 'READINESS_GOOGLE_SOURCE_READ_FAILED',
+  YDB_CLIENT_CREATE_FAILED: 'READINESS_YDB_CLIENT_CREATE_FAILED',
+  YDB_SCHEMA_READ_FAILED: 'READINESS_YDB_SCHEMA_READ_FAILED',
+  MALFORMED_SCHEMA_MIGRATION_EVIDENCE: 'READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE',
+  MISSING_REQUIRED_SCHEMA_MIGRATION: 'READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION',
+  UNEXPECTED_SCHEMA_MIGRATION: 'READINESS_UNEXPECTED_SCHEMA_MIGRATION',
+  YDB_CLIENT_CLOSE_FAILED: 'READINESS_YDB_CLIENT_CLOSE_FAILED',
+  READINESS_FAILED: 'READINESS_RUNTIME_FAILED',
+});
 
 function nonBlank(value) {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
@@ -56,6 +67,20 @@ function exactReadinessEvidence(stdout) {
     && value.requiredMigrationVersion === SAFE_READY.requiredMigrationVersion;
 }
 
+function capturedErrorField(error, field) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return '';
+  const value = Reflect.get(error, field);
+  return typeof value === 'string' ? value : '';
+}
+
+function safeInvokeFailure(error) {
+  const captured = `${capturedErrorField(error, 'stdout')}\n${capturedErrorField(error, 'stderr')}`;
+  const matches = Object.entries(SAFE_PROBE_FAILURE_CODE_BY_MARKER)
+    .filter(([marker]) => captured.includes(marker));
+  if (matches.length !== 1) return SAFE_INVOKE_FAILURE;
+  return Object.freeze({ status: 'FAIL', code: matches[0][1] });
+}
+
 async function invokeReadiness(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_READINESS_FUNCTION_ID;
   const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
@@ -85,8 +110,8 @@ async function invokeReadiness(environment = process.env) {
       },
     );
     return exactReadinessEvidence(stdout) ? SAFE_PASS : SAFE_INVOKE_FAILURE;
-  } catch {
-    return SAFE_INVOKE_FAILURE;
+  } catch (error) {
+    return safeInvokeFailure(error);
   }
 }
 
