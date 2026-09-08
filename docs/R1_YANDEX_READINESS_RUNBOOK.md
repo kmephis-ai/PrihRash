@@ -1,135 +1,222 @@
 # R1 Yandex readiness: provider runbook
 
-Этот runbook — operational gate перед первым real shadow mutation. Он запускает только read-only `readinessHandler` и не создаёт timer trigger, не запускает `handler` и не пишет финансовые строки в YDB.
+Этот runbook — operational gate перед первым real shadow mutation. Он запускает только read-only `readinessHandler`, не создаёт timer trigger, не запускает `index.handler` и не пишет финансовые строки в YDB.
 
 ## Safety contract
 
-- Выполнять только в локальной/provider-capable сессии с Yandex Cloud CLI и разрешённым доступом к нужному cloud/folder.
-- Не выполнять provider deploy/invoke через public GitHub Actions и не переносить туда credentials, Lockbox identifiers, YDB endpoint/database path, Google spreadsheet ID или service-account data.
-- Не публиковать raw `yc` stdout/stderr, function/version IDs, secret IDs/version IDs, connection strings, provider logs или screenshots в Issues/PR/CI evidence.
-- В GitHub допустим только safe итог wrapper-а: `READINESS_READY`, `READINESS_CONFIG_INVALID` или `READINESS_INVOKE_FAILED`.
-- `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` никогда не передавать через `--environment`, shell literal, committed file или workflow secret public-repo job.
-- На этом gate запрещены `yc serverless trigger create`, timer cadence и вызов `index.handler`.
-- Если provider state расходится с этим contract, остановить gate до выяснения; не импровизировать более широкие IAM roles или secret transport.
+Provider execution transport для #302 — **GitHub Actions → GitHub OIDC → Yandex Cloud Workload Identity Federation (WIF)**. Long-lived Yandex authorized key/OAuth token в GitHub не используется.
 
-## Provider prerequisites
+- Workflow запускается только вручную (`workflow_dispatch`) и только из canonical `main` repository `kmephis-ai/PrihRash`.
+- WIF federated credential должен принимать только GitHub subject `repo:kmephis-ai/PrihRash:ref:refs/heads/main`.
+- GitHub workflow получает только short-lived OIDC/JWT и обменивает его на short-lived Yandex IAM token. IAM token маскируется и живёт только в ephemeral runner environment.
+- Google spreadsheet ID, Google service-account email/private key, YDB connection string и Lockbox payload **никогда не передаются в GitHub**. Они хранятся только в Yandex Lockbox и инжектируются в Function server-side.
+- В GitHub Actions secrets допустимы только два non-credential provider locator-а, которые нужны до Yandex authentication: `YC_R1_FOLDER_ID` и `YC_R1_WIF_SERVICE_ACCOUNT_ID`. Они не выводятся в logs/evidence.
+- Provider IDs, Lockbox IDs/version IDs, YDB endpoint/database path, raw `yc` stdout/stderr, provider logs/screenshots не публикуются в Issues/PR/Actions evidence. Workflow держит найденные IDs только в ephemeral env/temp files и маскирует их до deploy/invoke.
+- В public evidence допустим только safe status code: `READINESS_READY`, `READINESS_CONFIG_INVALID`, `READINESS_INVOKE_FAILED`, `READINESS_PROVIDER_CONFIG_INVALID` или `READINESS_DEPLOY_FAILED`.
+- На этом gate запрещены `yc serverless trigger create`, timer cadence, вызов `index.handler`, bootstrap/incremental shadow writes и authority cutover.
+- Любое расхождение provider state с этим contract → fail closed; не расширять IAM и не менять secret transport внутри workflow.
 
-Перед deploy сделать fresh local discovery и убедиться, что используются нужные cloud/folder/function/service account. Raw discovery output остаётся локальным.
+Этот WIF transport заменяет прежний local-CLI-only transport. Причина изменения: Yandex Cloud официально поддерживает GitHub OIDC/WIF для Cloud Functions CI/CD, а owner-facing ручная CLI orchestration оказалась хрупкой и не даёт дополнительной безопасности по сравнению с branch-bound short-lived identity.
 
-Target function resource должен быть private и **не иметь ни одного trigger**, включая trigger, который вызывает default/`$latest` version. Создание новой version меняет provider version state, поэтому существующий trigger на том же function resource делает readiness deploy небезопасным. Если trigger существует — остановить gate; не переиспользовать этот function resource без отдельного provider review.
+## One-time provider bootstrap
 
-Identity, выполняющая authenticated one-shot invoke, должна иметь `functions.functionInvoker` на target function (или унаследованное минимально достаточное право). Не делать readiness function public ради упрощения вызова. Deploy identity должна уже иметь право создавать function version; этот runbook не расширяет её IAM сам.
+Bootstrap выполняется владельцем в Yandex Cloud Management Console. Он не повторяется на каждом readiness run.
 
-Readiness function service account должен иметь только необходимые права:
+### 1. Dedicated readiness function
 
-- `ydb.viewer` на target YDB database (или на минимальном родительском scope) для connection/read queries;
-- `lockbox.payloadViewer` на используемый Lockbox secret;
-- `kms.keys.encrypterDecrypter` на KMS key только если secret зашифрован customer-managed KMS key.
+Создать private Cloud Function resource:
+
+```text
+prihrash-r1-readiness
+```
+
+Требования:
+
+- function resource существует до запуска workflow;
+- public invocation выключен;
+- triggers = 0;
+- версий может не быть;
+- workflow создаёт только version с tag `r1-readiness`.
+
+### 2. Runtime service account
+
+Используется existing:
+
+```text
+prihrash-backend
+```
+
+Для #302 runtime service account должен иметь только необходимые права:
+
+- `ydb.viewer` на `prihrash-prod` (или минимальном доказанном parent scope);
+- `lockbox.payloadViewer` на readiness Lockbox secret;
+- `kms.keys.encrypterDecrypter` только если secret использует customer-managed KMS key.
+
+Известная owner/provider discovery 2026-09-08 уже привела YDB binding к `ydb.viewer` без `ydb.editor`; повторно расширять эту роль workflow не должен.
+
+### 3. Lockbox
+
+Создать custom secret:
+
+```text
+prihrash-r1-readiness
+```
+
+Одна current version содержит ровно четыре keys:
+
+- `google_spreadsheet_id` → authoritative Google spreadsheet ID;
+- `google_service_account_email` → Google service-account email;
+- `google_service_account_private_key` → Google service-account private key;
+- `ydb_connection_string` → `prihrash-prod` connection string.
+
+Значения вводятся только через Yandex Cloud Management Console. Их нельзя переносить в GitHub Secrets/Variables, workflow dispatch inputs, Issues/PR или chat logs.
 
 Google service account должен уже иметь read-only доступ к authoritative spreadsheet. Production code использует только Google Sheets readonly OAuth scope.
 
-### Lockbox Preview gate
+### 4. Dedicated WIF deploy identity
 
-Перед выполнением отдельно проверить текущий статус Yandex Cloud Functions → Lockbox secret injection в официальной документации. На 2026-09-08 функция помечена `Preview`.
+Создать отдельный service account:
 
-Если owner policy не разрешает Preview, **остановить R1 provider gate**. Не заменять Lockbox на `--environment` с secret values и не коммитить альтернативное secret transport решение без отдельного review.
-
-## Exact package
-
-Начинать с fresh checkout canonical `main` и зафиксировать его SHA локально. SHA можно публиковать; provider identifiers — нельзя.
-
-```bash
-npm ci --ignore-scripts --no-audit --no-fund
-npm run privacy
-npm test
-npm run package:function
+```text
+prihrash-github-readiness
 ```
 
-Deploy source — только проверенный каталог:
+Не использовать `prihrash-backend` как GitHub deployment identity.
+
+Минимальная цель IAM:
+
+- read metadata, необходимую для discovery target function/resource;
+- `functions.editor` только на dedicated `prihrash-r1-readiness` function resource;
+- `functions.functionInvoker` только на dedicated readiness function;
+- `iam.serviceAccounts.user` только в объёме, необходимом для attachment `prihrash-backend` к version;
+- Lockbox payload read **не требуется** deployment identity: workflow передаёт только secret references, payload читает runtime service account.
+
+Если provider UI/role model требует более широкий read-only parent scope для lookup resource-by-name, разрешается только read metadata; write scope не расширять на другие functions.
+
+### 5. Workload Identity Federation
+
+Создать WIF в том же controlled folder:
+
+```text
+name: prihrash-github
+issuer: https://token.actions.githubusercontent.com
+jwks: https://token.actions.githubusercontent.com/.well-known/jwks
+audience: https://github.com/kmephis-ai
+```
+
+Создать federated credential для `prihrash-github-readiness` с exact external subject:
+
+```text
+repo:kmephis-ai/PrihRash:ref:refs/heads/main
+```
+
+Не добавлять wildcard repository/branch subjects.
+
+### 6. GitHub Actions locator secrets
+
+В repository Actions secrets создать только:
+
+```text
+YC_R1_FOLDER_ID
+YC_R1_WIF_SERVICE_ACCOUNT_ID
+```
+
+Это non-credential locators. Они хранятся как GitHub Secrets только для automatic masking. Никаких Yandex authorized keys, OAuth tokens, IAM tokens, Lockbox payload, Google credentials или YDB connection strings в GitHub не хранить.
+
+## Lockbox Preview gate
+
+Перед live run проверить текущий статус Yandex Cloud Functions → Lockbox secret injection в официальной документации.
+
+На 2026-09-08 feature помечена `Preview`. Owner отдельно разрешил Preview Functions → Lockbox для #302. Если это решение будет отозвано или provider feature станет недоступной, gate останавливается. Plaintext `--environment` workaround запрещён.
+
+## Canonical workflow
+
+Единственный provider workflow:
+
+```text
+.github/workflows/r1-yandex-readiness.yml
+```
+
+Он обязан:
+
+1. подтвердить `github.repository == kmephis-ai/PrihRash` и `github.ref == refs/heads/main`;
+2. checkout exact `GITHUB_SHA` без persisted GitHub credentials;
+3. выполнить `npm ci --ignore-scripts --no-audit --no-fund` и literal `npm run check`;
+4. установить официальный Yandex Cloud CLI до получения cloud token;
+5. запросить GitHub OIDC token (`permissions.id-token=write`) с audience `https://github.com/kmephis-ai`;
+6. обменять JWT на short-lived Yandex IAM token через `https://auth.yandex.cloud/oauth/token`;
+7. fail-closed проверить dedicated function: private, triggers = 0;
+8. локально в runner memory разрешить runtime SA и Lockbox current version; не печатать IDs;
+9. создать ровно readiness version из `.artifacts/yandex-scheduled-sync-function`;
+10. повторно проверить private + zero triggers;
+11. вызвать только tag `r1-readiness` через privacy-safe wrapper `npm run readiness:invoke`.
+
+Workflow не имеет `push`, `pull_request`, `schedule` или `repository_dispatch` trigger.
+
+## Exact package and version
+
+Deploy source:
 
 ```text
 .artifacts/yandex-scheduled-sync-function
 ```
 
-`index.js` этого package экспортирует `readinessHandler`; deploy entrypoint должен быть ровно `index.readinessHandler`.
+`index.js` экспортирует `readinessHandler`; entrypoint version должен быть ровно:
 
-## Private local variables
-
-Следующие значения задаются только в локальной provider-capable shell. Не вставлять их значения в Issue/PR/comment/log evidence.
-
-```bash
-export PRIHRASH_YC_FUNCTION_ID='<local-only>'
-export PRIHRASH_YC_FUNCTION_SA_ID='<local-only>'
-export PRIHRASH_LOCKBOX_SECRET_ID='<local-only>'
-export PRIHRASH_LOCKBOX_VERSION_ID='<local-only>'
+```text
+index.readinessHandler
 ```
 
-Предпочтительно один Lockbox secret version с четырьмя keys, соответствующими existing runtime environment:
+Version configuration:
 
-- `google_spreadsheet_id` → `PRIHRASH_GOOGLE_SPREADSHEET_ID`;
-- `google_service_account_email` → `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL`;
-- `google_service_account_private_key` → `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`;
-- `ydb_connection_string` → `PRIHRASH_YDB_CONNECTION_STRING`.
-
-## Create readiness-only version
-
-Создать новую version trigger-free function resource. Версия должна быть отдельной от future timer deployment и получить operational tag `r1-readiness`. В рамках конкретного evidence cycle tag считается pinned: не переназначать его на другую version между deploy verification и invocation.
-
-```bash
-yc serverless function version create \
-  --function-id "$PRIHRASH_YC_FUNCTION_ID" \
-  --runtime nodejs22 \
-  --entrypoint index.readinessHandler \
-  --memory 128m \
-  --execution-timeout 30s \
-  --source-path .artifacts/yandex-scheduled-sync-function \
-  --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
-  --tags r1-readiness \
-  --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
-  --no-logging \
-  --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
-  --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
-  --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
-  --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string"
+```text
+runtime: nodejs22
+memory: 128m
+execution timeout: 30s
+tag: r1-readiness
+logging: disabled
+runtime service account: prihrash-backend
 ```
 
-Не добавлять trigger. Локально проверить, что `r1-readiness` указывает на только что созданную version, function остаётся private и target function resource по-прежнему не имеет triggers вообще. Provider output не переносить в GitHub.
+Secret injection:
+
+- `PRIHRASH_GOOGLE_SPREADSHEET_ID` ← `google_spreadsheet_id`;
+- `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL` ← `google_service_account_email`;
+- `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` ← `google_service_account_private_key`;
+- `PRIHRASH_YDB_CONNECTION_STRING` ← `ydb_connection_string`.
 
 ## One-shot safe invocation
 
-Safe wrapper всегда вызывает только tag `r1-readiness`, отключает CLI retries и захватывает raw provider stdout/stderr без echo.
+`npm run readiness:invoke` вызывает только tag `r1-readiness`, отключает CLI retries и захватывает provider stdout/stderr без echo.
 
-```bash
-export PRIHRASH_YANDEX_READINESS_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
-npm run readiness:invoke
-```
-
-Допустимый public evidence:
+Допустимый PASS:
 
 ```json
 {"status":"PASS","code":"READINESS_READY"}
 ```
 
-`PASS` выдаётся только если provider вернул exact object:
+Он выдаётся только если provider вернул exact object:
 
 ```json
 {"googleSource":"READY","ydbSchema":"READY","requiredMigrationVersion":2}
 ```
 
-Любой non-zero `yc`, spawn/timeout/buffer error, malformed JSON, лишний key или любое отличающееся значение сворачивается в:
+Любой non-zero `yc`, spawn/timeout/buffer error, malformed JSON, extra key или отличающееся значение →
 
 ```json
 {"status":"FAIL","code":"READINESS_INVOKE_FAILED"}
 ```
 
-Отсутствующий/пустой function ID сворачивается в:
+Отсутствующая/пустая function identity →
 
 ```json
 {"status":"FAIL","code":"READINESS_CONFIG_INVALID"}
 ```
 
-При `FAIL` не копировать raw provider output в GitHub. Диагностику выполнять локально, начиная с permissions/config/provider health, сохраняя privacy contract.
+Provider preflight/deploy failure остаётся безопасным коротким code без raw output.
 
 ## Exit from this gate
 
-Только `READINESS_READY` на version, собранной из exact current canonical `main`, разрешает перейти к следующему R1 operational item. Это **не** является разрешением включить timer или автоматически выполнить bootstrap/incremental writes: следующий mutation item начинается только после fresh discovery и отдельной acceptance boundary.
+Только `READINESS_READY` на version, собранной из exact current canonical `main`, закрывает #302 и разрешает начать fresh discovery для следующего R1 mutation item.
+
+Readiness PASS **не** включает timer, bootstrap/incremental shadow writes, auth DDL или authority cutover.

@@ -1,0 +1,214 @@
+name: R1 Yandex readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: r1-yandex-readiness
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUNCTION_NAME: prihrash-r1-readiness
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-backend
+      LOCKBOX_SECRET_NAME: prihrash-r1-readiness
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_WIF_SERVICE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify immutable source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Verify and package exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange GitHub OIDC token for short-lived Yandex IAM token
+        id: yandex-auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          encoded_audience='https%3A%2F%2Fgithub.com%2Fkmephis-ai'
+          oidc_json="$(curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}")"
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$oidc_json")"
+
+          iam_json="$(curl --fail --silent --show-error \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token')"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_json")"
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Fail closed if provider boundary is unsafe
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-provider"
+          mkdir -p "$tmp"
+
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+
+          yc serverless function list-access-bindings --id "$function_id" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")"
+
+          secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          secret_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$secret_json")"
+          secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json")"
+
+          echo "::add-mask::${function_id}"
+          echo "::add-mask::${runtime_sa_id}"
+          echo "::add-mask::${secret_id}"
+          echo "::add-mask::${secret_version_id}"
+          {
+            printf 'PRIHRASH_YC_FUNCTION_ID=%s\n' "$function_id"
+            printf 'PRIHRASH_YC_FUNCTION_SA_ID=%s\n' "$runtime_sa_id"
+            printf 'PRIHRASH_LOCKBOX_SECRET_ID=%s\n' "$secret_id"
+            printf 'PRIHRASH_LOCKBOX_VERSION_ID=%s\n' "$secret_version_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Deploy readiness-only function version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-deploy"
+          mkdir -p "$tmp"
+          if ! yc serverless function version create \
+            --function-id "$PRIHRASH_YC_FUNCTION_ID" \
+            --runtime nodejs22 \
+            --entrypoint index.readinessHandler \
+            --memory 128m \
+            --execution-timeout 30s \
+            --source-path .artifacts/yandex-scheduled-sync-function \
+            --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --tags r1-readiness \
+            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+            --no-logging \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
+            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+            echo 'READINESS_DEPLOY_FAILED'
+            exit 1
+          fi
+
+      - name: Re-verify private trigger-free boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-postflight"
+          mkdir -p "$tmp"
+
+          yc serverless function list-access-bindings --id "$PRIHRASH_YC_FUNCTION_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'READINESS_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+      - name: Invoke exact readiness tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRIHRASH_YANDEX_READINESS_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+          npm run readiness:invoke

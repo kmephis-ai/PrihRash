@@ -27,6 +27,7 @@ async function runInvoker({ fakeSource, includeFunctionId = true, ycPath = null 
     HOME: process.env.HOME,
     PRIHRASH_YC_BIN: ycPath ?? fake?.path,
     SYNTHETIC_PRIVATE_VALUE: PRIVATE_LOOKING,
+    YC_IAM_TOKEN: 'synthetic-short-lived-iam-token',
     ...(includeFunctionId ? { PRIHRASH_YANDEX_READINESS_FUNCTION_ID: FUNCTION_ID } : {}),
   };
   try {
@@ -61,6 +62,7 @@ const expected = ['serverless','function','invoke','--id','${FUNCTION_ID}','--ta
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(91);
 if (process.env.PRIHRASH_YANDEX_READINESS_FUNCTION_ID !== undefined) process.exit(92);
 if (process.env.SYNTHETIC_PRIVATE_VALUE !== undefined) process.exit(93);
+if (process.env.YC_IAM_TOKEN !== 'synthetic-short-lived-iam-token') process.exit(94);
 process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:2}));
 `,
   });
