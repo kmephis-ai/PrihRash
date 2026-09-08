@@ -40,11 +40,26 @@ function safeEvidence(value) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+function safeInternalCode(value) {
+  return typeof value === 'string' && /^[A-Z0-9_]+$/u.test(value) ? value : null;
+}
+
 function safeStageError(error, stage) {
-  if (typeof error?.code === 'string' && error.code.length > 0) return error;
+  if (typeof error?.stage === 'string' && safeInternalCode(error?.code) !== null) return error;
   const wrapped = new Error(`TEST_PRIVATE_${stage}_FAILED`, { cause: error });
   wrapped.code = `TEST_PRIVATE_${stage}_FAILED`;
+  wrapped.stage = stage;
+  wrapped.innerCode = safeInternalCode(error?.code);
+  wrapped.providerStatus = Number.isSafeInteger(error?.status) ? error.status : null;
   return wrapped;
+}
+
+async function atStage(stage, work) {
+  try {
+    return await work();
+  } catch (error) {
+    throw safeStageError(error, stage);
+  }
 }
 
 async function credentialsProvider(connectionString) {
@@ -415,15 +430,21 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
   const plan = swapPlan(runId);
   const candidate = candidatePlan();
   try {
-    await createCase(baseScheme, sql, paths);
+    await atStage(`${name}_CREATE_CASE`, () => createCase(baseScheme, sql, paths));
 
     const scopedScheme = createScopedSchemeTransport(baseScheme, paths.caseDirectory);
     const scheme = new YdbSchemeAdapter(scopedScheme.transport);
     const data = new YdbAdapter(createScopedDataTransport(baseDataTransport, paths.caseDirectory));
 
-    const before = await requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters);
-    const injected = await injectUnknown(expectedAfter, scopedScheme, plan);
-    const after = await requireRecoveryVerdict(scheme, data, plan, candidate, expectedAfter, scopedScheme.counters);
+    const before = await atStage(
+      `${name}_RECOVER_BEFORE`,
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+    );
+    const injected = await atStage(`${name}_INJECT_UNKNOWN`, () => injectUnknown(expectedAfter, scopedScheme, plan));
+    const after = await atStage(
+      `${name}_RECOVER_AFTER`,
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, expectedAfter, scopedScheme.counters),
+    );
 
     return Object.freeze({
       name,
@@ -436,7 +457,7 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
       recoveryLatencyMs: after.latencyMs,
     });
   } finally {
-    await cleanupCase(driver, sql, paths);
+    await atStage(`${name}_CLEANUP`, () => cleanupCase(driver, sql, paths));
   }
 }
 
@@ -529,7 +550,10 @@ main().catch((error) => {
     scope: REQUIRED_SCOPE,
     syntheticOnly: true,
     status: 'FAIL',
-    errorCode: typeof error?.code === 'string' ? error.code : 'TEST_PRIVATE_SMOKE_FAILED',
+    errorCode: safeInternalCode(error?.code) ?? 'TEST_PRIVATE_SMOKE_FAILED',
+    stage: typeof error?.stage === 'string' ? error.stage : null,
+    innerCode: safeInternalCode(error?.innerCode),
+    providerStatus: Number.isSafeInteger(error?.providerStatus) ? error.providerStatus : null,
   });
   process.exitCode = 1;
 });
