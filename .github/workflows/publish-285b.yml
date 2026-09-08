@@ -1,0 +1,119 @@
+name: Transport publish 285b
+
+on:
+  push:
+    branches:
+      - transport/publish-285b
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply verified script patch and publish target branch
+        shell: bash
+        env:
+          BASE_SHA: de928a7e4c85919ddffbc5c286f69b41fe36a8df
+          TARGET_BRANCH: fix/r1-test-private-provider-diagnostics
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          cat > /tmp/diagnostics.patch <<'PATCH'
+          diff --git a/scripts/test-private-controlled-rebuild-smoke.mjs b/scripts/test-private-controlled-rebuild-smoke.mjs
+          index 120f6a0..7ac978a 100644
+          --- a/scripts/test-private-controlled-rebuild-smoke.mjs
+          +++ b/scripts/test-private-controlled-rebuild-smoke.mjs
+          @@ -40,13 +40,28 @@ function safeEvidence(value) {
+            process.stdout.write(`${JSON.stringify(value)}\n`);
+          }
+          
+          +function safeInternalCode(value) {
+          +  return typeof value === 'string' && /^[A-Z0-9_]+$/u.test(value) ? value : null;
+          +}
+          +
+           function safeStageError(error, stage) {
+          -  if (typeof error?.code === 'string' && error.code.length > 0) return error;
+          +  if (typeof error?.stage === 'string' && safeInternalCode(error?.code) !== null) return error;
+             const wrapped = new Error(`TEST_PRIVATE_${stage}_FAILED`, { cause: error });
+             wrapped.code = `TEST_PRIVATE_${stage}_FAILED`;
+          +  wrapped.stage = stage;
+          +  wrapped.innerCode = safeInternalCode(error?.code);
+          +  wrapped.providerStatus = Number.isSafeInteger(error?.status) ? error.status : null;
+             return wrapped;
+           }
+          
+          +async function atStage(stage, work) {
+          +  try {
+          +    return await work();
+          +  } catch (error) {
+          +    throw safeStageError(error, stage);
+          +  }
+          +}
+          +
+           async function credentialsProvider(connectionString) {
+             const serviceAccountJson = process.env.TEST_PRIVATE_YDB_SERVICE_ACCOUNT_KEY_JSON?.trim();
+             if (serviceAccountJson) {
+          @@ -415,15 +430,21 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
+             const plan = swapPlan(runId);
+             const candidate = candidatePlan();
+             try {
+          -    await createCase(baseScheme, sql, paths);
+          +    await atStage(`${name}_CREATE_CASE`, () => createCase(baseScheme, sql, paths));
+          
+               const scopedScheme = createScopedSchemeTransport(baseScheme, paths.caseDirectory);
+               const scheme = new YdbSchemeAdapter(scopedScheme.transport);
+               const data = new YdbAdapter(createScopedDataTransport(baseDataTransport, paths.caseDirectory));
+          
+          -    const before = await requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters);
+          -    const injected = await injectUnknown(expectedAfter, scopedScheme, plan);
+          -    const after = await requireRecoveryVerdict(scheme, data, plan, candidate, expectedAfter, scopedScheme.counters);
+          +    const before = await atStage(
+          +      `${name}_RECOVER_BEFORE`,
+          +      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+          +    );
+          +    const injected = await atStage(`${name}_INJECT_UNKNOWN`, () => injectUnknown(expectedAfter, scopedScheme, plan));
+          +    const after = await atStage(
+          +      `${name}_RECOVER_AFTER`,
+          +      () => requireRecoveryVerdict(scheme, data, plan, candidate, expectedAfter, scopedScheme.counters),
+          +    );
+          
+               return Object.freeze({
+                 name,
+          @@ -436,7 +457,7 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
+                 recoveryLatencyMs: after.latencyMs,
+               });
+             } finally {
+          -    await cleanupCase(driver, sql, paths);
+          +    await atStage(`${name}_CLEANUP`, () => cleanupCase(driver, sql, paths));
+             }
+           }
+          
+          @@ -529,7 +550,10 @@ main().catch((error) => {
+               scope: REQUIRED_SCOPE,
+               syntheticOnly: true,
+               status: 'FAIL',
+          -    errorCode: typeof error?.code === 'string' ? error.code : 'TEST_PRIVATE_SMOKE_FAILED',
+          +    errorCode: safeInternalCode(error?.code) ?? 'TEST_PRIVATE_SMOKE_FAILED',
+          +    stage: typeof error?.stage === 'string' ? error.stage : null,
+          +    innerCode: safeInternalCode(error?.innerCode),
+          +    providerStatus: Number.isSafeInteger(error?.providerStatus) ? error.providerStatus : null,
+             });
+             process.exitCode = 1;
+           });
+          PATCH
+          git apply --check /tmp/diagnostics.patch
+          git apply /tmp/diagnostics.patch
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs
+          git commit -m 'R1: expose safe TEST_PRIVATE provider stage'
+          git push origin "HEAD:${TARGET_BRANCH}"
