@@ -122,18 +122,23 @@ Transport rules:
 
 API Gateway должен вызывать private Function через отдельную provider identity/service account. Это provider deployment requirement, а не browser credential.
 
-## Persistence boundary и следующий S-unit
+## Durable persistence boundary
 
-`YandexOwnerOAuthTransactionStore`, `OwnerSessionIssuer` и `OwnerSessionRevoker` остаются injected durable ports. Process-local memory для них запрещён в production Cloud Functions runtime. До concrete durable implementation и provider deployment PWA/Reader **не** считается production-authenticated.
+Concrete OWNER auth persistence использует ту же YDB/runtime boundary, но **не** расширяет financial `schema_migrations`. Первый auth bootstrap contract хранится отдельно в `db/auth/001_owner_auth.sql` и создаёт только `owner_oauth_transactions` + `owner_sessions`. Это deliberate separation: R1 readiness #302 продолжает exact fail-closed проверку applied financial migrations `1..2`; наличие versioned auth DDL в repository само по себе не является provider mutation.
 
-R1 readiness сейчас требует financial `schema_migrations` ровно до version `2` и fail-closed отклоняет unexpected versions. Поэтому R2 auth transport не добавляет migration `3`, auth tables или иной schema mutation в этот S-unit и не обходит R1 #302.
+`YdbOwnerAuthPersistence` реализует `YandexOwnerOAuthTransactionStore`, `OwnerSessionIssuer`, `OwnerSessionRevoker` и `OwnerSessionVerifier`:
 
-Следующий минимальный S-unit должен выбрать и доказать concrete durable transaction/session persistence lifecycle так, чтобы:
+- OAuth `state` используется для lookup только как SHA-256 hex; raw state не хранится primary key;
+- transaction `create` использует insert-only semantics, collision не перезаписывает pending flow;
+- `consume` выполняет exact read + delete в одной `serializableReadWrite` transaction, поэтому successful consume one-time; commit-unknown/storage failures fail-closed;
+- session issuer генерирует 32 cryptographically-random bytes → 43-char base64url handle; browser получает opaque handle, YDB получает только SHA-256 handle;
+- session row хранит только role `OWNER`, issue/expiry times и hash; OAuth access token/profile не попадают в session storage;
+- verifier принимает handle + backend current time и разрешает только exact stored `OWNER` при `issuedAt <= now < expiresAt`; cookie `Max-Age` не является security authority;
+- revoke удаляет exact hashed session; subsequent verification fail-closed;
+- malformed YDB evidence и provider/commit failures имеют только value-free persistence error codes.
 
-- one-time transaction `consume` оставался atomic;
-- sessions имели server-enforced expiry и revoke;
-- auth persistence не создавала конфликт с canonical financial migration/readiness contract;
-- real OAuth/session identifiers не попадали в GitHub evidence;
-- после этого отдельный provider item мог связать API Gateway/private Function/custom domain/runtime secrets без изменения OWNER identity semantics.
+Auth DDL **не применяется** этим repository S-unit. Его real YDB apply и wiring в API Gateway/private Function разрешаются только отдельным provider item после successful canonical R1 readiness #302 и fresh provider discovery. Process-local memory остаётся запрещён в production.
+
+Следующая R2 auth/runtime boundary после provider-safe schema apply — связать OWNER session verifier с Reader HTTP route `/api/v1/operations/recent` и existing API Gateway v2 transport, не меняя Reader FIN-TRUTH semantics.
 
 OAuth/session tokens по-прежнему не сохраняются в IndexedDB/localStorage.

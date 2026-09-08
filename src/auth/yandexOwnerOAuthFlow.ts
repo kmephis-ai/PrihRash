@@ -55,6 +55,15 @@ export interface OwnerSessionRevoker {
   revoke(sessionHandle: string): Promise<void>;
 }
 
+export interface OwnerSessionVerification {
+  readonly role: 'OWNER';
+  readonly expiresAtMs: number;
+}
+
+export interface OwnerSessionVerifier {
+  verify(sessionHandle: string, nowMs: number): Promise<Readonly<OwnerSessionVerification> | null>;
+}
+
 export interface OAuthClock {
   nowMs(): number;
 }
