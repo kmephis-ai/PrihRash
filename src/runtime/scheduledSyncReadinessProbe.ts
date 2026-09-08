@@ -38,6 +38,10 @@ export interface ScheduledSyncReadinessRuntime {
 }
 
 export type ScheduledSyncReadinessErrorCode =
+  | 'CONFIG_INVALID'
+  | 'GOOGLE_SOURCE_READ_FAILED'
+  | 'YDB_CLIENT_CREATE_FAILED'
+  | 'YDB_SCHEMA_READ_FAILED'
   | 'MALFORMED_SCHEMA_MIGRATION_EVIDENCE'
   | 'MISSING_REQUIRED_SCHEMA_MIGRATION'
   | 'UNEXPECTED_SCHEMA_MIGRATION'
@@ -107,15 +111,24 @@ export async function runScheduledSyncReadinessProbe(
   source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>,
   adapter: YdbAdapter,
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
-  await source.readFullSnapshotObservation();
+  try {
+    await source.readFullSnapshotObservation();
+  } catch {
+    throw new ScheduledSyncReadinessError('GOOGLE_SOURCE_READ_FAILED');
+  }
 
-  const migrationEvidence = await adapter.read<SchemaMigrationEvidenceRow>(readStatement(
-    'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC',
-  ));
-  validateSchemaMigrationEvidence(migrationEvidence.rows);
+  try {
+    const migrationEvidence = await adapter.read<SchemaMigrationEvidenceRow>(readStatement(
+      'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC',
+    ));
+    validateSchemaMigrationEvidence(migrationEvidence.rows);
 
-  await adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0'));
-  await adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0'));
+    await adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0'));
+    await adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0'));
+  } catch (error) {
+    if (error instanceof ScheduledSyncReadinessError) throw error;
+    throw new ScheduledSyncReadinessError('YDB_SCHEMA_READ_FAILED');
+  }
 
   return Object.freeze({
     googleSource: 'READY' as const,
@@ -153,8 +166,19 @@ export async function executeScheduledSyncReadinessProbe(
   runtime: Readonly<ScheduledSyncReadinessRuntime>,
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
   const digest = createCanonicalSourceDigest();
-  const source = runtime.createSource(config, digest);
-  const ydbClient = await runtime.createYdbClient(config);
+  let source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>;
+  try {
+    source = runtime.createSource(config, digest);
+  } catch {
+    throw new ScheduledSyncReadinessError('GOOGLE_SOURCE_READ_FAILED');
+  }
+
+  let ydbClient: Readonly<ScheduledSyncReadinessYdbClient>;
+  try {
+    ydbClient = await runtime.createYdbClient(config);
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_CLIENT_CREATE_FAILED');
+  }
   const adapter = new YdbAdapter(ydbClient.transport);
   let primaryError: unknown = null;
 
@@ -177,6 +201,11 @@ export async function executeScheduledSyncReadinessProbe(
 export function runScheduledSyncReadinessProbeFromEnvironment(
   environment: ScheduledSyncJobEnvironment = process.env,
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
-  const config = readScheduledSyncJobConfig(environment);
+  let config: Readonly<ScheduledSyncJobConfig>;
+  try {
+    config = readScheduledSyncJobConfig(environment);
+  } catch {
+    return Promise.reject(new ScheduledSyncReadinessError('CONFIG_INVALID'));
+  }
   return executeScheduledSyncReadinessProbe(config, productionRuntime);
 }
