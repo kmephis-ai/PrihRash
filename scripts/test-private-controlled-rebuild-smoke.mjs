@@ -351,24 +351,24 @@ function createScopedDataTransport(base, prefix) {
   });
 }
 
-async function createCase(baseScheme, sql, paths) {
-  await baseScheme.ensureDirectory(paths.caseDirectory);
-  await baseScheme.ensureDirectory(paths.rebuildDirectory);
-  await baseScheme.ensureDirectory(paths.stagingDirectory);
-  await canonicalTransactionTable(sql, paths.currentTransactions);
-  await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
-  await canonicalTransactionTable(sql, paths.stagingTransactions);
-  await canonicalSourceRecordTable(sql, paths.stagingSourceRecords);
+async function createCase(baseScheme, sql, paths, name) {
+  await atStage(`${name}_CREATE_ENSURE_CASE_DIRECTORY`, () => baseScheme.ensureDirectory(paths.caseDirectory));
+  await atStage(`${name}_CREATE_ENSURE_REBUILD_DIRECTORY`, () => baseScheme.ensureDirectory(paths.rebuildDirectory));
+  await atStage(`${name}_CREATE_ENSURE_STAGING_DIRECTORY`, () => baseScheme.ensureDirectory(paths.stagingDirectory));
+  await atStage(`${name}_CREATE_CURRENT_TRANSACTIONS`, () => canonicalTransactionTable(sql, paths.currentTransactions));
+  await atStage(`${name}_CREATE_CURRENT_SOURCE_RECORDS`, () => canonicalSourceRecordTable(sql, paths.currentSourceRecords));
+  await atStage(`${name}_CREATE_STAGING_TRANSACTIONS`, () => canonicalTransactionTable(sql, paths.stagingTransactions));
+  await atStage(`${name}_CREATE_STAGING_SOURCE_RECORDS`, () => canonicalSourceRecordTable(sql, paths.stagingSourceRecords));
 
-  await sql`INSERT INTO ${sql.identifier(paths.stagingTransactions)} (
+  await atStage(`${name}_CREATE_INSERT_STAGING_TRANSACTION`, () => sql`INSERT INTO ${sql.identifier(paths.stagingTransactions)} (
     id, type, amount_minor, from_account_id, to_account_id, category_id
   ) VALUES (
     ${new Uuid(SYNTHETIC_TRANSACTION_ID)}, ${new Utf8('EXPENSE')}, ${new Int64(BigInt(SYNTHETIC_AMOUNT_MINOR))},
     ${new Uuid(SYNTHETIC_ACCOUNT_ID)}, NULL, ${new Uuid(SYNTHETIC_CATEGORY_ID)}
-  )`;
-  await sql`INSERT INTO ${sql.identifier(paths.stagingSourceRecords)} (id, classification, state) VALUES (
+  )`);
+  await atStage(`${name}_CREATE_INSERT_STAGING_SOURCE_RECORD`, () => sql`INSERT INTO ${sql.identifier(paths.stagingSourceRecords)} (id, classification, state) VALUES (
     ${new Uuid(SYNTHETIC_SOURCE_ID)}, ${new Utf8('FINANCIAL_RECORD')}, NULL
-  )`;
+  )`);
 }
 
 async function cleanupCase(driver, sql, paths) {
@@ -430,7 +430,7 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
   const plan = swapPlan(runId);
   const candidate = candidatePlan();
   try {
-    await atStage(`${name}_CREATE_CASE`, () => createCase(baseScheme, sql, paths));
+    await atStage(`${name}_CREATE_CASE`, () => createCase(baseScheme, sql, paths, name));
 
     const scopedScheme = createScopedSchemeTransport(baseScheme, paths.caseDirectory);
     const scheme = new YdbSchemeAdapter(scopedScheme.transport);
