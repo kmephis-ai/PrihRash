@@ -40,7 +40,7 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /--output "\$tmp\/iam\.json"/);
   assert.match(workflow, /::add-mask::\$\{oidc_token\}/);
   assert.match(workflow, /OIDC_ISSUER:\s*https:\/\/token\.actions\.githubusercontent\.com/);
-  assert.match(workflow, /OIDC_SUBJECT:\s*repo:kmephis-ai\/PrihRash:ref:refs\/heads\/main/);
+  assert.match(workflow, /OIDC_SUBJECT:\s*repo:kmephis-ai@310519475\/PrihRash@1359286840:ref:refs\/heads\/main/);
   assert.match(workflow, /base64 --decode >"\$tmp\/claims\.json"/);
   assert.match(workflow, /\.iss == \$expected/);
   assert.match(workflow, /\.sub == \$expected/);
@@ -68,10 +68,10 @@ test('R1 readiness workflow never transports Lockbox payload through GitHub', as
   assert.doesNotMatch(workflow, /--environment[^\n]*(GOOGLE|YDB)/i);
 });
 
-test('canonical runbook binds WIF identity to exact repository main subject', async () => {
+test('canonical runbook binds WIF identity to immutable exact repository main subject', async () => {
   const runbook = await text(RUNBOOK);
 
-  assert.match(runbook, /repo:kmephis-ai\/PrihRash:ref:refs\/heads\/main/);
+  assert.match(runbook, /repo:kmephis-ai@310519475\/PrihRash@1359286840:ref:refs\/heads\/main/);
   assert.match(runbook, /issuer: https:\/\/token\.actions\.githubusercontent\.com/);
   assert.match(runbook, /audience: https:\/\/github\.com\/kmephis-ai/);
   assert.match(runbook, /YC_R1_FOLDER_ID/);
