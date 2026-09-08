@@ -12,7 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "package:function": "npm run build --silent && node scripts/package-yandex-function.mjs && node scripts/verify-yandex-function-package.mjs",
     "readiness:invoke": "node scripts/invoke-yandex-readiness.mjs",
-    "test": "npm run build --silent && node --test tests/domain/*.test.mjs tests/reference/*.test.mjs tests/source-normalizer/*.test.mjs tests/migration-simulation/*.test.mjs tests/schema/*.test.mjs tests/integration/*.test.mjs",
+    "test": "npm run build --silent && node --test tests/domain/*.test.mjs tests/reference/*.test.mjs tests/source-normalizer/*.test.mjs tests/migration-simulation/*.test.mjs tests/schema/*.test.mjs tests/integration/*.test.mjs tests/tooling/*.test.mjs",
     "test:domain": "npm run build --silent && node --test tests/domain/*.test.mjs",
     "test:source-normalizer": "npm run build --silent && node --test tests/source-normalizer/*.test.mjs",
     "test:migration-simulation": "npm run build --silent && node --test tests/migration-simulation/*.test.mjs",
