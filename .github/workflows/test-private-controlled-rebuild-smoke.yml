@@ -11,6 +11,7 @@ name: TEST_PRIVATE controlled rebuild smoke
 # Bounded explicit-OVERLOADED backoff for idempotent setup/cleanup; rerun trigger 9.
 # Numeric YDB query status diagnostics added; rerun trigger 10.
 # Numeric YDB issue-code diagnostics added; rerun trigger 11.
+# Reuse one tri-state fixture to bound provider scheme DDL; rerun trigger 12.
 on:
   workflow_dispatch:
   push:

@@ -465,9 +465,23 @@ async function injectUnknown(mode, transport, plan) {
   });
 }
 
-async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, name, expectedAfter) {
+function recoveryEvidence(name, before, after, injected) {
+  return Object.freeze({
+    name,
+    before,
+    after: after.verdict,
+    mutationAttempts: injected.mutationAttempts,
+    providerRenameCalls: injected.providerRenameCalls,
+    recoveryRenameCalls: 0,
+    injectionLatencyMs: injected.latencyMs,
+    recoveryLatencyMs: after.latencyMs,
+  });
+}
+
+async function triStateProof(driver, baseScheme, baseDataTransport, sql, runDirectory) {
+  const name = 'TRI_STATE';
   const runId = randomUUID().toLowerCase();
-  const paths = casePaths(`${runDirectory}/${name.toLowerCase()}`, runId);
+  const paths = casePaths(`${runDirectory}/tri_state`, runId);
   const plan = swapPlan(runId);
   const candidate = candidatePlan();
   try {
@@ -476,27 +490,66 @@ async function triStateCase(driver, baseScheme, baseDataTransport, sql, runDirec
     const scopedScheme = createScopedSchemeTransport(baseScheme, paths.caseDirectory);
     const scheme = new YdbSchemeAdapter(scopedScheme.transport);
     const data = new YdbAdapter(createScopedDataTransport(baseDataTransport, paths.caseDirectory));
+    const cases = [];
 
-    const before = await atStage(
-      `${name}_RECOVER_BEFORE`,
+    const notAppliedBefore = await atStage(
+      'NOT_APPLIED_RECOVER_BEFORE',
       () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
     );
-    const injected = await atStage(`${name}_INJECT_UNKNOWN`, () => injectUnknown(expectedAfter, scopedScheme, plan));
-    const after = await atStage(
-      `${name}_RECOVER_AFTER`,
-      () => requireRecoveryVerdict(scheme, data, plan, candidate, expectedAfter, scopedScheme.counters),
+    const notAppliedInjected = await atStage(
+      'NOT_APPLIED_INJECT_UNKNOWN',
+      () => injectUnknown('NOT_APPLIED', scopedScheme, plan),
     );
+    const notAppliedAfter = await atStage(
+      'NOT_APPLIED_RECOVER_AFTER',
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+    );
+    cases.push(recoveryEvidence(
+      'NOT_APPLIED',
+      notAppliedBefore.verdict,
+      notAppliedAfter,
+      notAppliedInjected,
+    ));
 
-    return Object.freeze({
-      name,
-      before: before.verdict,
-      after: after.verdict,
-      mutationAttempts: injected.mutationAttempts,
-      providerRenameCalls: injected.providerRenameCalls,
-      recoveryRenameCalls: 0,
-      injectionLatencyMs: injected.latencyMs,
-      recoveryLatencyMs: after.latencyMs,
-    });
+    const appliedInjected = await atStage(
+      'APPLIED_INJECT_UNKNOWN',
+      () => injectUnknown('APPLIED', scopedScheme, plan),
+    );
+    const appliedAfter = await atStage(
+      'APPLIED_RECOVER_AFTER',
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'APPLIED', scopedScheme.counters),
+    );
+    cases.push(recoveryEvidence('APPLIED', 'NOT_APPLIED', appliedAfter, appliedInjected));
+
+    await atStage('RECOVERY_REQUIRED_RESET_COPY_STAGING', () => scheme.copyTables(
+      plan.replacements.map((replacement) => ({
+        source: replacement.destination,
+        destination: replacement.source,
+        omitIndexes: false,
+      })),
+    ));
+    await atStage('RECOVERY_REQUIRED_RESET_CURRENT_TRANSACTIONS', () => sql`DELETE FROM ${sql.identifier(paths.currentTransactions)}`);
+    await atStage('RECOVERY_REQUIRED_RESET_CURRENT_SOURCE_RECORDS', () => sql`DELETE FROM ${sql.identifier(paths.currentSourceRecords)}`);
+    const recoveryRequiredBefore = await atStage(
+      'RECOVERY_REQUIRED_RECOVER_BEFORE',
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'NOT_APPLIED', scopedScheme.counters),
+    );
+    const recoveryRequiredInjected = await atStage(
+      'RECOVERY_REQUIRED_INJECT_UNKNOWN',
+      () => injectUnknown('RECOVERY_REQUIRED', scopedScheme, plan),
+    );
+    const recoveryRequiredAfter = await atStage(
+      'RECOVERY_REQUIRED_RECOVER_AFTER',
+      () => requireRecoveryVerdict(scheme, data, plan, candidate, 'RECOVERY_REQUIRED', scopedScheme.counters),
+    );
+    cases.push(recoveryEvidence(
+      'RECOVERY_REQUIRED',
+      recoveryRequiredBefore.verdict,
+      recoveryRequiredAfter,
+      recoveryRequiredInjected,
+    ));
+
+    return Object.freeze(cases);
   } finally {
     await atStage(`${name}_CLEANUP`, () => cleanupCase(driver, sql, paths));
   }
@@ -531,12 +584,8 @@ async function main() {
 
     stage = 'NORMAL_COPY_RENAME';
     const normal = await normalCopyRenameSmoke(driver, baseScheme, sql, runDirectory);
-    stage = 'PROVE_APPLIED';
-    cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'APPLIED', 'APPLIED'));
-    stage = 'PROVE_NOT_APPLIED';
-    cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'NOT_APPLIED', 'NOT_APPLIED'));
-    stage = 'PROVE_RECOVERY_REQUIRED';
-    cases.push(await triStateCase(driver, baseScheme, baseDataTransport, sql, runDirectory, 'RECOVERY_REQUIRED', 'RECOVERY_REQUIRED'));
+    stage = 'PROVE_TRI_STATE';
+    cases.push(...await triStateProof(driver, baseScheme, baseDataTransport, sql, runDirectory));
 
     safeEvidence({
       scope: REQUIRED_SCOPE,
