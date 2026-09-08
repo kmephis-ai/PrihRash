@@ -1,0 +1,60 @@
+name: Local Dependency Bootstrap
+
+on:
+  push:
+    branches:
+      - agent/transport-r1google-302-20260909a
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: 1c21379cace2f7b502db894b2716f101c7595af7
+  DEPS_ARTIFACT_NAME: local-deps-r1google-302-20260909a
+
+jobs:
+  build-deps:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact dependency source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          test "$(git rev-parse "${SOURCE_SHA}:package-lock.json")" = "$(git rev-parse HEAD:package-lock.json)"
+          test "$(git rev-parse "${SOURCE_SHA}:package.json")" = "$(git rev-parse HEAD:package.json)"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+
+      - name: Install exact dependencies
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Pack dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deps-artifact
+          tar -czf deps-artifact/node_modules.tar.gz node_modules
+          SHA="$(sha256sum deps-artifact/node_modules.tar.gz | awk '{print $1}')"
+          BYTES="$(wc -c < deps-artifact/node_modules.tar.gz | tr -d ' ')"
+          printf '%s  %s\n' "$SHA" node_modules.tar.gz > deps-artifact/SHA256SUMS.txt
+          cat > deps-artifact/manifest.json <<JSON
+          {"schema_version":1,"source_sha":"${SOURCE_SHA}","archive_sha256":"${SHA}","archive_bytes":${BYTES}}
+          JSON
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.DEPS_ARTIFACT_NAME }}
+          path: deps-artifact/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
