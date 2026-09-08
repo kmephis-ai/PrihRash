@@ -7,6 +7,7 @@ name: TEST_PRIVATE controlled rebuild smoke
 # Create-case substage evidence added; rerun trigger 5.
 # Explicit YDB Uuid binding added; rerun trigger 6.
 # Privacy-safe provider stage diagnostics added; rerun trigger 7.
+# Create-operation diagnostics added for provider OVERLOADED localization; rerun trigger 8.
 on:
   workflow_dispatch:
   push:
