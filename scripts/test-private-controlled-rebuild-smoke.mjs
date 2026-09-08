@@ -18,6 +18,8 @@ const SYNTHETIC_SOURCE_ID = '00000000-0000-0000-0000-00000000a102';
 const SYNTHETIC_ACCOUNT_ID = '00000000-0000-0000-0000-00000000a103';
 const SYNTHETIC_CATEGORY_ID = '00000000-0000-0000-0000-00000000a104';
 const SYNTHETIC_AMOUNT_MINOR = 12345;
+const OVERLOADED_PROVIDER_STATUS = 400060;
+const OVERLOADED_RETRY_DELAYS_MS = Object.freeze([250, 500, 1000]);
 const LOGICAL_TABLE = /`(rebuild\/r_[0-9a-f]{32}\/(?:transactions|source_records)|transactions|source_records)`/gu;
 
 function failClosed(code) {
@@ -59,6 +61,22 @@ async function atStage(stage, work) {
     return await work();
   } catch (error) {
     throw safeStageError(error, stage);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryExplicitOverloaded(work) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      const overloaded = Number.isSafeInteger(error?.status) && error.status === OVERLOADED_PROVIDER_STATUS;
+      if (!overloaded || attempt >= OVERLOADED_RETRY_DELAYS_MS.length) throw error;
+      await sleep(OVERLOADED_RETRY_DELAYS_MS[attempt]);
+    }
   }
 }
 
@@ -177,9 +195,9 @@ async function cleanupNormalCase(driver, sql, paths) {
 async function normalCopyRenameSmoke(driver, scheme, sql, runDirectory) {
   const paths = normalCasePaths(`${runDirectory}/normal`);
   try {
-    await scheme.ensureDirectory(paths.caseDirectory);
-    await scheme.ensureDirectory(paths.currentDirectory);
-    await scheme.ensureDirectory(paths.stagingDirectory);
+    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.caseDirectory));
+    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.currentDirectory));
+    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.stagingDirectory));
     await canonicalTransactionTable(sql, paths.currentTransactions);
     await canonicalSourceRecordTable(sql, paths.currentSourceRecords);
     await sql`INSERT INTO ${sql.identifier(paths.currentTransactions)} (id) VALUES (${new Uuid(SYNTHETIC_TRANSACTION_ID)})`;
@@ -216,14 +234,19 @@ async function normalCopyRenameSmoke(driver, scheme, sql, runDirectory) {
 async function removeDirectoryRaw(driver, relativePath) {
   const root = driver.database.replace(/\/+$/u, '');
   const client = driver.createClient(SchemeServiceDefinition);
-  const response = await client.removeDirectory({
-    operationParams: { operationMode: OperationParams_OperationMode.SYNC },
-    path: `${root}/${relativePath}`,
+  await retryExplicitOverloaded(async () => {
+    const response = await client.removeDirectory({
+      operationParams: { operationMode: OperationParams_OperationMode.SYNC },
+      path: `${root}/${relativePath}`,
+    });
+    const operation = response.operation;
+    if (operation?.ready !== true || operation.status !== StatusIds_StatusCode.SUCCESS) {
+      const error = new Error('REMOVE_DIRECTORY_FAILED');
+      error.code = 'REMOVE_DIRECTORY_FAILED';
+      error.status = Number.isSafeInteger(operation?.status) ? operation.status : null;
+      throw error;
+    }
   });
-  const operation = response.operation;
-  if (operation?.ready !== true || operation.status !== StatusIds_StatusCode.SUCCESS) {
-    failClosed('REMOVE_DIRECTORY_FAILED');
-  }
 }
 
 async function dropTableBestEffort(sql, path) {
@@ -352,9 +375,9 @@ function createScopedDataTransport(base, prefix) {
 }
 
 async function createCase(baseScheme, sql, paths, name) {
-  await atStage(`${name}_CREATE_ENSURE_CASE_DIRECTORY`, () => baseScheme.ensureDirectory(paths.caseDirectory));
-  await atStage(`${name}_CREATE_ENSURE_REBUILD_DIRECTORY`, () => baseScheme.ensureDirectory(paths.rebuildDirectory));
-  await atStage(`${name}_CREATE_ENSURE_STAGING_DIRECTORY`, () => baseScheme.ensureDirectory(paths.stagingDirectory));
+  await atStage(`${name}_CREATE_ENSURE_CASE_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.caseDirectory)));
+  await atStage(`${name}_CREATE_ENSURE_REBUILD_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.rebuildDirectory)));
+  await atStage(`${name}_CREATE_ENSURE_STAGING_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.stagingDirectory)));
   await atStage(`${name}_CREATE_CURRENT_TRANSACTIONS`, () => canonicalTransactionTable(sql, paths.currentTransactions));
   await atStage(`${name}_CREATE_CURRENT_SOURCE_RECORDS`, () => canonicalSourceRecordTable(sql, paths.currentSourceRecords));
   await atStage(`${name}_CREATE_STAGING_TRANSACTIONS`, () => canonicalTransactionTable(sql, paths.stagingTransactions));
@@ -486,7 +509,7 @@ async function main() {
 
   const totalStarted = performance.now();
   try {
-    await baseScheme.ensureDirectory(runDirectory);
+    await retryExplicitOverloaded(() => baseScheme.ensureDirectory(runDirectory));
 
     stage = 'NORMAL_COPY_RENAME';
     const normal = await normalCopyRenameSmoke(driver, baseScheme, sql, runDirectory);
