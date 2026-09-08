@@ -1,0 +1,76 @@
+name: Publish R1 authority wording
+
+on:
+  push:
+    branches:
+      - transport/publish-r1-294
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact normative wording patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='fix/r1-shadow-authority-wording'
+          expected_base='d8322ecabed8f799b636520a79003b8b09ab78f6'
+          expected_tree='b62008eca605dcffe8063dbc2f51600c6ebc3233'
+
+          git fetch origin "$target"
+          git checkout -B publish-target "origin/$target"
+          test "$(git rev-parse HEAD)" = "$expected_base"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              'AGENTS.md': [(
+                  '- Production YDB writes запрещены до CUTOVER GATE; Writer UX можно доказывать в test/private pilot namespace.',
+                  '- R1 shadow/migration writes в YDB разрешены только по `MIGRATION_CONTRACT` и не меняют authority: Google остаётся единственной write authority. YDB-authoritative product/Writer writes (`YDB_WRITE_ENABLED=true`) запрещены до CUTOVER GATE; Writer UX можно доказывать в test/private pilot namespace.'
+              )],
+              'REBOOT_BLUEPRINT.md': [(
+                  'До production writes обязаны быть доказаны: несколько real shadow cycles, loop-safe reverse Google compatibility mirror с stable canonical ID, restore/fallback, idempotency/conflicts, owner usage Reader, отсутствие unexplained high-impact mismatch и controlled cost.',
+                  'До YDB-authoritative product/Writer writes обязаны быть доказаны: несколько real shadow cycles, loop-safe reverse Google compatibility mirror с stable canonical ID, restore/fallback, idempotency/conflicts, owner usage Reader, отсутствие unexplained high-impact mismatch и controlled cost. R1 shadow/migration writes в YDB выполняются раньше как replication path и не меняют Google authority.'
+              )],
+              'docs/MIGRATION_CONTRACT.md': [(
+                  'Можно обсуждать production YDB writes. До этого Writer UX/API разрешено разрабатывать только в synthetic/test/private pilot namespace; production financial `YDB_WRITE_ENABLED=false`.',
+                  'Можно обсуждать YDB-authoritative product/Writer writes. До этого Writer UX/API разрешено разрабатывать только в synthetic/test/private pilot namespace; production financial `YDB_WRITE_ENABLED=false`. R1 shadow/migration writes в YDB при этом разрешены только через этот migration contract и не меняют authority: Google остаётся единственной write authority.'
+              )],
+              'docs/ROADMAP.md': [(
+                  '### Exit criteria\n\n- `FAILED` run не меняет verified shadow;',
+                  '### Exit criteria\n\nR1 bootstrap/incremental `shadow/migration writes` в YDB являются частью shadow replication и не меняют authority: до CUTOVER Google остаётся единственной write authority.\n\n- `FAILED` run не меняет verified shadow;'
+              ), (
+                  'Production YDB writes разрешаются только после:',
+                  'YDB-authoritative product/Writer writes (`YDB_WRITE_ENABLED=true`) разрешаются только после:'
+              )],
+          }
+
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{filename}: expected one exact source occurrence, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+
+          git diff --check
+          git add AGENTS.md REBOOT_BLUEPRINT.md docs/MIGRATION_CONTRACT.md docs/ROADMAP.md
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = '4'
+          test "$(git write-tree)" = "$expected_tree"
+
+          git config user.name 'PrihRash AI Agent'
+          git config user.email 'agent@local.invalid'
+          git commit -m 'R1: clarify shadow versus authoritative writes'
+          test "$(git rev-parse HEAD^{tree})" = "$expected_tree"
+          git push origin HEAD:"$target"
