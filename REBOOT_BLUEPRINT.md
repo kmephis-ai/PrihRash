@@ -842,7 +842,7 @@ Configurable target day, explicit period membership, bootstrap anchor, PeriodClo
 
 ### CUTOVER GATE — Stage D
 
-До production writes обязаны быть доказаны: несколько real shadow cycles, loop-safe reverse Google compatibility mirror с stable canonical ID, restore/fallback, idempotency/conflicts, owner usage Reader, отсутствие unexplained high-impact mismatch и controlled cost.
+До YDB-authoritative product/Writer writes обязаны быть доказаны: несколько real shadow cycles, loop-safe reverse Google compatibility mirror с stable canonical ID, restore/fallback, idempotency/conflicts, owner usage Reader, отсутствие unexplained high-impact mismatch и controlled cost. R1 shadow/migration writes в YDB выполняются раньше как replication path и не меняют Google authority.
 
 ### R3B — Production Writer / YDB authoritative
 

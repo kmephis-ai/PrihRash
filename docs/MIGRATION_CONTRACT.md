@@ -586,7 +586,7 @@ PWA может читать YDB, Google всё ещё authority/fallback.
 
 ### CUTOVER_CANDIDATE
 
-Можно обсуждать production YDB writes. До этого Writer UX/API разрешено разрабатывать только в synthetic/test/private pilot namespace; production financial `YDB_WRITE_ENABLED=false`.
+Можно обсуждать YDB-authoritative product/Writer writes. До этого Writer UX/API разрешено разрабатывать только в synthetic/test/private pilot namespace; production financial `YDB_WRITE_ENABLED=false`. R1 shadow/migration writes в YDB при этом разрешены только через этот migration contract и не меняют authority: Google остаётся единственной write authority.
 
 ## 22. READ_ELIGIBLE minimum
 
