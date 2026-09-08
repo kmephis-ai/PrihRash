@@ -11,6 +11,17 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-readiness.mjs');
 const FUNCTION_ID = 'synthetic-function-id';
 const PRIVATE_LOOKING = 'private-sheet-id grpcs://private-ydb private-token-value';
+const SAFE_PROBE_FAILURES = Object.freeze([
+  ['CONFIG_INVALID', 'READINESS_RUNTIME_CONFIG_INVALID'],
+  ['GOOGLE_SOURCE_READ_FAILED', 'READINESS_GOOGLE_SOURCE_READ_FAILED'],
+  ['YDB_CLIENT_CREATE_FAILED', 'READINESS_YDB_CLIENT_CREATE_FAILED'],
+  ['YDB_SCHEMA_READ_FAILED', 'READINESS_YDB_SCHEMA_READ_FAILED'],
+  ['MALFORMED_SCHEMA_MIGRATION_EVIDENCE', 'READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE'],
+  ['MISSING_REQUIRED_SCHEMA_MIGRATION', 'READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION'],
+  ['UNEXPECTED_SCHEMA_MIGRATION', 'READINESS_UNEXPECTED_SCHEMA_MIGRATION'],
+  ['YDB_CLIENT_CLOSE_FAILED', 'READINESS_YDB_CLIENT_CLOSE_FAILED'],
+  ['READINESS_FAILED', 'READINESS_RUNTIME_FAILED'],
+]);
 
 async function fakeYc(source) {
   const directory = await mkdtemp(join(tmpdir(), 'prihrash-fake-yc-'));
@@ -76,6 +87,32 @@ test('non-zero yc failure is collapsed without echoing raw stdout or stderr', as
     fakeSource: `
 process.stdout.write('${PRIVATE_LOOKING}');
 process.stderr.write('${PRIVATE_LOOKING}');
+process.exit(17);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+});
+
+test('one allowlisted sanitized readiness marker is classified without echoing provider output', async () => {
+  for (const [marker, code] of SAFE_PROBE_FAILURES) {
+    const result = await runInvoker({
+      fakeSource: `
+process.stderr.write(${JSON.stringify(`${marker}\n${PRIVATE_LOOKING}`)});
+process.exit(17);
+`,
+    });
+
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, { status: 'FAIL', code });
+  }
+});
+
+test('ambiguous sanitized readiness markers still fail closed to the generic invoke code', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`GOOGLE_SOURCE_READ_FAILED YDB_SCHEMA_READ_FAILED\n${PRIVATE_LOOKING}`)});
 process.exit(17);
 `,
   });
