@@ -1,0 +1,49 @@
+name: Publish R2 308 exact tree
+
+on:
+  push:
+    branches:
+      - transport/local-mirror-r2-308
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 0c1de4f864e6ee00c29f1b6a0f35374ddd9ca7b8
+  TARGET_BRANCH: feature/r2-auth-transport
+  EXPECTED_TREE: 36d7a92c87c8981b526333b48afec2aa95a2063e
+  PATCH_GIT_BLOB: bd54e6ec30ec3f347f314fde18b85f0765e146c8
+  PATCH_SHA256: 120addc119aeb5ce3349bd4800ceb3d455f774d308c713f2abf9620b6b0dd6c1
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact verified patch and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git show "${GITHUB_SHA}:.transport/r2-308.patch.gz" > /tmp/r2-308.patch.gz
+          test "$(git hash-object /tmp/r2-308.patch.gz)" = "${PATCH_GIT_BLOB}"
+          test "$(sha256sum /tmp/r2-308.patch.gz | awk '{print $1}')" = "${PATCH_SHA256}"
+          gzip -cd /tmp/r2-308.patch.gz > /tmp/r2-308.patch
+
+          git checkout --detach "${BASE_SHA}"
+          git apply --check /tmp/r2-308.patch
+          git apply --index /tmp/r2-308.patch
+          git diff --cached --check
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+
+          git config user.name "kmephis-ai"
+          git config user.email "kmephis@gmail.com"
+          git commit -m "R2: define API Gateway OWNER auth transport"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          test "$(git rev-parse HEAD^)" = "${BASE_SHA}"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
