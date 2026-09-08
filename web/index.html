@@ -11,7 +11,7 @@
 </head>
 <body>
   <header class="app-header"><div><span class="eyebrow">PrihRash</span><h1>Операции</h1></div><button class="add" disabled aria-label="Добавить операцию">＋</button></header>
-  <main><section class="panel"><div class="section-head"><h2>Последние операции</h2><span>Только чтение</span></div><p data-state class="state">Загрузка…</p><div data-operations class="operations"></div></section></main>
+  <main><section class="panel"><div class="section-head"><h2>Последние операции</h2><span>Только чтение</span></div><p data-sync-state class="sync-state" aria-live="polite"></p><p data-state class="state">Загрузка…</p><div data-operations class="operations"></div></section></main>
   <nav class="bottom-nav" aria-label="Основная навигация"><a href="#home">Главная</a><a class="active" href="#operations">Операции</a><a href="#analytics">Аналитика</a><a href="#more">Ещё</a></nav>
   <script type="module" src="/app.mjs"></script>
 </body>

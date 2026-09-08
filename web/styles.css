@@ -9,7 +9,8 @@ h1 { margin: 4px 0 0; font-size: 32px; }
 .panel { margin: 0 12px; padding: 18px; background: white; border: 1px solid #e7e5e4; border-radius: 22px; box-shadow: 0 10px 30px rgb(28 25 23 / .05); }
 .section-head { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
 .section-head h2 { margin: 0; font-size: 18px; }
-.section-head span, .state, .operation-card__meta { color: #78716c; font-size: 13px; }
+.section-head span, .state, .sync-state, .operation-card__meta { color: #78716c; font-size: 13px; }
+.sync-state { min-height: 18px; margin: 10px 0 0; }
 .operations { display: grid; gap: 10px; margin-top: 14px; }
 .operation-card { padding: 14px; border: 1px solid #e7e5e4; border-radius: 16px; }
 .operation-card__top { display: flex; justify-content: space-between; gap: 16px; }
