@@ -1,0 +1,42 @@
+name: Publish R1 claims patch
+
+on:
+  push:
+    branches:
+      - agent/transport-publish-r1claims-302-20260908a
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 8f66906ebc5a219bfd066b966d1ac60cc41fdd42
+  TARGET_BRANCH: agent/r1-wif-claims-302
+  PATCH_B64: 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
+
+jobs:
+  publish:
+    if: github.repository == 'kmephis-ai/PrihRash'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Apply exact local patch and publish target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "${BASE_SHA}^{commit}")" = "$BASE_SHA"
+          remote_target="$(git ls-remote origin "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          test "$remote_target" = "$BASE_SHA"
+          git checkout --detach "$BASE_SHA"
+          printf '%s' "$PATCH_B64" | base64 --decode | gzip -d > /tmp/r1claims.patch
+          git apply --check /tmp/r1claims.patch
+          git apply /tmp/r1claims.patch
+          node --test tests/tooling/r1-yandex-readiness-workflow.test.mjs
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/r1-yandex-readiness.yml docs/R1_YANDEX_READINESS_RUNBOOK.md tests/tooling/r1-yandex-readiness-workflow.test.mjs
+          git commit -m 'R1 #302: локализовать WIF claim и OAuth отказ'
+          git push origin HEAD:"refs/heads/${TARGET_BRANCH}"
