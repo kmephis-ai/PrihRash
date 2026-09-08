@@ -20,7 +20,7 @@ await mkdir(ARTIFACT_ROOT, { recursive: true });
 await cp(DIST, resolve(ARTIFACT_ROOT, 'dist'), { recursive: true });
 await writeFile(
   resolve(ARTIFACT_ROOT, 'index.js'),
-  "export { handler } from './dist/runtime/yandexCloudScheduledSyncFunction.js';\n",
+  "export { handler, readinessHandler } from './dist/runtime/yandexCloudScheduledSyncFunction.js';\n",
   'utf8',
 );
 await writeFile(
