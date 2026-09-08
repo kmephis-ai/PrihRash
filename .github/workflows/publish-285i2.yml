@@ -1,0 +1,37 @@
+name: Publish TEST_PRIVATE tri-state script only
+
+on:
+  push:
+    branches:
+      - transport/publish-285i2
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Publish exact script patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='fix/r1-test-private-reuse-tri-state-fixture'
+          expected_base='e784dad63f559d17582b43ef5abab3fb545922fb'
+          expected_script_blob='75f8188e6cb3d5b631fec9b62175f2c0bb320b8f'
+          git fetch origin "$target"
+          git checkout -B publish-target "origin/$target"
+          test "$(git rev-parse HEAD)" = "$expected_base"
+          printf '%s' 'H4sICNqQn2oAAzI4NWktc2NyaXB0LnBhdGNoAM1YW2/aSBR+51fMQyWMsN2kTdI0UVelxK3oJsAa01W1WpHBHrduje2Oh6ZsxH/fMxdfMaHQdrW8YM+c+/nOmTP2At9HhvEhYAg/Tl0aJCx9zEjKjIQGXzEjhhtHjMZhSDyDkvkyCD0jXcSfibn4lKL5/jytIPLIN/T89OTpuY9N89mpf358fo6Oj47OTk5ahmEcYkmr2+0eZM3Ll8g4OTvVn6Mu/3vyFMEKTleRi/xl5LIgjlAQfSIum0afo/gu0haxR3TEKI7SJKZMR0mIow66byGE1p3LFlq3UMuoiWA0mDAwpo9TonlgGKE6msPLxP1IFkQ+X2GGnUJu+iXUEV1GVwEF9TFd6SjCnJZ8S2CBeD2fEco1d3M9QBmD7JX1NfBI5BJNcsyJH1P4x5xDVw4RT/AiYGJLGqHRnK+aPiXkH6KJHSQ1ykclRL4ISRfyzwSNXuAytbVYgqdgTI8xsoBsXOT6zPqW4khozO2lNuHq+jgMy0wNu4ov87bCd6Q2JT8ou4a4R+7qpiwzzNZqkkq00rUqIc9vd93qtrpb8jumcewfnGCVDwBsykTk0QvUduzBbOL0HKt9ySEmN4Fr4MEuCPPixXQ6uNI6Jouv4ztCBcbAUCMjTjD7mAKxCxtj/qzdProv610/fnTP1VUlrG91qYc7vYcsiMUs5cEo8eeG82IB9vQOJ2N41DYIXPAo8IBbKFHPglRSMbqCKImyfXamP3kGdfv8SD87a6jbHy46ri+zK3XjhHiSk5tGCUielBZzIVpZhYiXyaNVZPmyKldJjMgdeu/NJWPPwwnATytrNfOeU5UAAcIFf8ZZNrDio9bgdZOVMutFWlLC8/7X35e8vRUbsivADr7D/BRhEPIPRJMkCN1KZK1nttUfvbPs2Svr9ci2bvWy8ChmvSQJA+K92iKtK6W1hyNn1huPrwfWVU1iW8+ItA568RtU9Jcl+GKrwn4nW5SWqrzwoMnWrRcw0ysK2nol6aYbLyOIbNpRmqoBKnwYqCbzfV4Mhm+tvjObDn8fjv4c1r2oHj0PWKeOoR2miRNjv+j2XjuWDWah/yy4SHlQAlmwLaQ5vKphhM7TFL/KwdkYv6pa3ByubdAWoQJkGz8eqgcs3cChKE0zWaYftY3jvym1BcbqdVc7yFEdOQ3rGdgz4HHklbGHv7cmDqqHHbWQIWnTnh2FsK0IfkaH2be7PJDdkqxabZXd1OtJ4ElSPXzL6KcQLIc/9SIb/YX6L6CitpsHQrW510ioeA4YChXntrFQbX/vYFiT9tBoKEjXWcqqoGorEL0HNP0xHdgCVhPLmfVH4/d8snszGL5pZw0rzdCQrBw8D0mag5IjyaQE/lygiFhqLnCiaaUVISAb3PkvjZfUhZSVaEwPrkZBJEKuF5Sl1Sq5FFGijBcBG/ArHIFA+DhMi811p1NuA/uEYmrb1tCZOXZvOOn1ncFoOClC8iW8vbKuLcdCr+3RDXp0DysmLwEW+AGMOmp6WVIKS2KqwSK/KYywBxoyGU3tviXq37461JSJiB3vD9Qr26JG+Byloo3sHH2aTP4/DUB1f3a3/E2P9mr+G+x7jER1Y3ecB9tj/zNPhl0OHXRGbPehsLoZihvTQGPQtu5unwwaDx3hg7zYrJEPvSgMV/KjSr1487mrf231htNxPuy5IcHRMqlc98R9TlRlRwkXd8fTp8f68RPUPT0/0c8bro4LHMCFk+uXFqRcM7+ND0f2Te9a9m7oFL0bdS0vZm26wGGOJPnah24uD6MJ//DUeBfd/BigRtFc9diG/OW1mQ2qReqlxp/0pak8WmSPnS0mlVvGrzar2p4qr9vM2wT+rzayqZAbFvNTsmZw+YtPvb5N06za+oNfnMQoKCGOfZJ3jfvsvif6zwXK+94EkG/prX8B4cRRzjgWAAA=' | base64 -d | gzip -d > /tmp/285i-script.patch
+          git apply --check /tmp/285i-script.patch
+          git apply /tmp/285i-script.patch
+          test "$(git hash-object scripts/test-private-controlled-rebuild-smoke.mjs)" = "$expected_script_blob"
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs
+          git commit -m 'R1: reuse TEST_PRIVATE tri-state fixture'
+          git push origin HEAD:"$target"
