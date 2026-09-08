@@ -1,9 +1,13 @@
 import { createIndexedDbReaderCache } from './reader-cache.mjs';
-import { refreshRecentOperations } from './reader-load.mjs';
+import { buildRecentOperationsUrl, hasActiveReaderFilters } from './reader-filters.mjs';
+import { createRecentOperationsView } from './reader-view.mjs';
 
 const list = document.querySelector('[data-operations]');
 const state = document.querySelector('[data-state]');
 const syncState = document.querySelector('[data-sync-state]');
+const typeFilter = document.querySelector('[data-filter-type]');
+const statusFilter = document.querySelector('[data-filter-status]');
+const resetFilters = document.querySelector('[data-reset-filters]');
 const cache = createIndexedDbReaderCache();
 
 function escapeHtml(value) {
@@ -12,12 +16,12 @@ function escapeHtml(value) {
 
 function render(items) {
   list.innerHTML = '';
-  state.hidden = true;
   if (!items.length) {
     state.textContent = 'Операций пока нет.';
     state.hidden = false;
     return;
   }
+  state.hidden = true;
   list.innerHTML = items.map((item) => `
     <article class="operation-card">
       <div class="operation-card__top"><strong>${escapeHtml(item.description)}</strong><span>${escapeHtml(item.amountLabel)}</span></div>
@@ -35,7 +39,6 @@ function savedLabel(savedAt) {
 }
 
 function setStatus(status) {
-  state.hidden = true;
   if (status.kind === 'cached') {
     syncState.textContent = `Локальные данные от ${savedLabel(status.savedAt)} · обновляем…`;
     return;
@@ -52,13 +55,29 @@ function setStatus(status) {
     syncState.textContent = 'Обновлено';
     return;
   }
+  if (status.kind === 'filter-loading') {
+    syncState.textContent = 'Фильтр · загрузка…';
+    state.textContent = 'Загрузка выбранного фильтра…';
+    state.hidden = false;
+    return;
+  }
+  if (status.kind === 'filtered-fresh') {
+    syncState.textContent = 'Фильтр применён';
+    return;
+  }
+  if (status.kind === 'filtered-error') {
+    syncState.textContent = '';
+    state.textContent = 'Не удалось загрузить выбранный фильтр.';
+    state.hidden = false;
+    return;
+  }
   syncState.textContent = '';
   state.textContent = 'Не удалось загрузить операции. Попробуйте обновить экран.';
   state.hidden = false;
 }
 
-async function fetchRecent() {
-  const response = await fetch('/api/v1/operations/recent?limit=50', {
+async function fetchRecent(filters) {
+  const response = await fetch(buildRecentOperationsUrl(filters), {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   });
@@ -66,5 +85,28 @@ async function fetchRecent() {
   return response.json();
 }
 
+function selectedFilters() {
+  return {
+    type: typeFilter.value || null,
+    status: statusFilter.value || null,
+  };
+}
+
+const view = createRecentOperationsView({ cache, fetchRecent, render, setStatus });
+
+function applyFilters() {
+  const filters = selectedFilters();
+  resetFilters.hidden = !hasActiveReaderFilters(filters);
+  view.load(filters);
+}
+
+typeFilter.addEventListener('change', applyFilters);
+statusFilter.addEventListener('change', applyFilters);
+resetFilters.addEventListener('click', () => {
+  typeFilter.value = '';
+  statusFilter.value = '';
+  applyFilters();
+});
+
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-refreshRecentOperations({ cache, fetchRecent, render, setStatus });
+applyFilters();
