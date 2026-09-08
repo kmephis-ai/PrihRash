@@ -173,3 +173,19 @@ CI/AI проверяют технические детали.
 - next safe action.
 
 Новый чат сначала делает fresh discovery и сверяет handover с provider state.
+
+## 15. Direct Git transport fallback
+
+Перед local development один раз проверь direct Git transport к canonical GitHub remote.
+
+Если `git ls-remote` / `git clone` не работает из-за DNS/HTTPS egress, это **не** означает, что local Git unavailable. Обязательный следующий шаг — `tools/local-git-mirror` по его repository-local contract.
+
+После materialization обязательно доказать:
+
+- `HEAD == exact current provider SHA`;
+- `git fsck --full --no-dangling` PASS;
+- initial working tree clean.
+
+Дальше normal cycle остаётся локальным: branch/worktree → implement → доступный `npm run check` → commit. Если direct `git push` также заблокирован, публикуй проверенный local result через authorized GitHub connector/API transport и затем проверяй provider-side exact-head CI.
+
+GitHub API-only development допустим только если отдельно доказано, что не сработали **и** direct Git transport, **и** `tools/local-git-mirror`. Нельзя писать `local Git unavailable` только на основании failed `git clone` / `git ls-remote`; фиксируй отдельно `direct Git transport unavailable` и конкретную ошибку mirror/materialization path.
