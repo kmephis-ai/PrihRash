@@ -7,6 +7,7 @@ import {
   ScheduledSyncReadinessError,
   executeScheduledSyncReadinessProbe,
   runScheduledSyncReadinessProbe,
+  runScheduledSyncReadinessProbeFromEnvironment,
 } from '../../dist/runtime/scheduledSyncReadinessProbe.js';
 
 function sourceThatSucceeds(counter = { calls: 0 }) {
@@ -103,30 +104,42 @@ test('missing and future migration versions are distinct fail-closed blockers', 
   );
 });
 
-test('Google source failure prevents every YDB readiness read', async () => {
+test('Google source provider failure is sanitized and prevents every YDB readiness read', async () => {
   const capture = { statements: [], transactions: 0 };
   const { adapter } = adapterForReads([validMigrationRows], capture);
+  const privateDetail = 'spreadsheet-private-id secret-google-detail';
   const source = {
     async readFullSnapshotObservation() {
-      throw new Error('synthetic-google-failure');
+      throw new Error(privateDetail);
     },
   };
 
-  await assert.rejects(() => runScheduledSyncReadinessProbe(source, adapter), /synthetic-google-failure/);
+  await assert.rejects(
+    () => runScheduledSyncReadinessProbe(source, adapter),
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'GOOGLE_SOURCE_READ_FAILED'
+      && error.message === 'GOOGLE_SOURCE_READ_FAILED'
+      && !JSON.stringify(error).includes(privateDetail)
+      && !Object.hasOwn(error, 'cause'),
+  );
   assert.equal(capture.statements.length, 0);
   assert.equal(capture.transactions, 0);
 });
 
-test('physical migration-002 column read failure propagates and never opens a transaction', async () => {
+test('YDB provider read failure is sanitized and never opens a transaction', async () => {
   const capture = { statements: [], transactions: 0 };
   const { adapter } = adapterForReads([
     validMigrationRows,
-    new Error('synthetic-accounts-column-missing'),
+    new Error('private-ydb-endpoint synthetic-accounts-column-missing'),
   ], capture);
 
   await assert.rejects(
     () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), adapter),
-    /synthetic-accounts-column-missing/,
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'YDB_SCHEMA_READ_FAILED'
+      && error.message === 'YDB_SCHEMA_READ_FAILED'
+      && !JSON.stringify(error).includes('private-ydb-endpoint')
+      && !Object.hasOwn(error, 'cause'),
   );
   assert.equal(capture.statements.length, 2);
   assert.equal(capture.transactions, 0);
@@ -151,6 +164,7 @@ function runtimeForLifecycle(options = {}) {
   const runtime = {
     createSource() {
       state.sourceCreated += 1;
+      if (options.createSourceError) throw options.createSourceError;
       if (options.sourceError) {
         return {
           async readFullSnapshotObservation() {
@@ -162,6 +176,7 @@ function runtimeForLifecycle(options = {}) {
     },
     async createYdbClient() {
       state.clientCreated += 1;
+      if (options.clientCreateError) throw options.clientCreateError;
       return {
         transport,
         async close() {
@@ -197,8 +212,8 @@ test('execution closes YDB client on success and reports close failure only afte
   assert.equal(closeFailure.state.closed, 1);
 });
 
-test('execution preserves primary readiness failure when close also fails', async () => {
-  const primary = new Error('synthetic-primary-readiness-failure');
+test('execution sanitizes primary readiness failure when close also fails', async () => {
+  const primary = new Error('private-primary-readiness-failure');
   const { runtime, state } = runtimeForLifecycle({
     sourceError: primary,
     closeError: new Error('synthetic-close-failure'),
@@ -206,7 +221,51 @@ test('execution preserves primary readiness failure when close also fails', asyn
 
   await assert.rejects(
     () => executeScheduledSyncReadinessProbe(syntheticConfig, runtime),
-    (error) => error === primary,
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'GOOGLE_SOURCE_READ_FAILED'
+      && !error.message.includes('private-primary-readiness-failure')
+      && !Object.hasOwn(error, 'cause'),
   );
   assert.equal(state.closed, 1);
+});
+
+test('execution sanitizes source construction and YDB client creation failures by stage', async () => {
+  const sourceFailure = runtimeForLifecycle({
+    createSourceError: new Error('private-google-service-account-detail'),
+  });
+  await assert.rejects(
+    () => executeScheduledSyncReadinessProbe(syntheticConfig, sourceFailure.runtime),
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'GOOGLE_SOURCE_READ_FAILED'
+      && !error.message.includes('private-google-service-account-detail')
+      && !Object.hasOwn(error, 'cause'),
+  );
+  assert.equal(sourceFailure.state.clientCreated, 0);
+  assert.equal(sourceFailure.state.closed, 0);
+
+  const clientFailure = runtimeForLifecycle({
+    clientCreateError: new Error('grpcs://private-ydb-id.example.invalid/database-private-id'),
+  });
+  await assert.rejects(
+    () => executeScheduledSyncReadinessProbe(syntheticConfig, clientFailure.runtime),
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'YDB_CLIENT_CREATE_FAILED'
+      && !error.message.includes('private-ydb-id')
+      && !Object.hasOwn(error, 'cause'),
+  );
+  assert.equal(clientFailure.state.clientCreated, 1);
+  assert.equal(clientFailure.state.closed, 0);
+});
+
+test('environment config failure becomes one value-free readiness code before provider access', async () => {
+  await assert.rejects(
+    () => runScheduledSyncReadinessProbeFromEnvironment(Object.freeze({
+      PRIHRASH_GOOGLE_SPREADSHEET_ID: 'private-looking-id',
+    })),
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'CONFIG_INVALID'
+      && error.message === 'CONFIG_INVALID'
+      && !error.message.includes('private-looking-id')
+      && !Object.hasOwn(error, 'cause'),
+  );
 });

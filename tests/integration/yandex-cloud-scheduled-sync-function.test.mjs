@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  YandexScheduledSyncReadinessFunctionError,
   YandexTimerScheduledSyncFunctionError,
   executeYandexScheduledSyncReadinessFunction,
   executeYandexTimerScheduledSyncFunction,
 } from '../../dist/runtime/yandexCloudScheduledSyncFunction.js';
+import { ScheduledSyncReadinessError } from '../../dist/runtime/scheduledSyncReadinessProbe.js';
 
 const TIMER_TYPE = 'yandex.cloud.events.serverless.triggers.TimerMessage';
 const ENVIRONMENT = Object.freeze({
@@ -30,6 +32,37 @@ test('readiness entrypoint invokes only the injected read-only readiness job wit
 
   assert.equal(result, safeResult);
   assert.deepEqual(calls, [ENVIRONMENT]);
+});
+
+
+test('readiness entrypoint sanitizes unknown provider failure without retaining private detail', async () => {
+  const privateDetail = 'private-spreadsheet-id grpcs://private-ydb-id secret-token';
+
+  await assert.rejects(
+    () => executeYandexScheduledSyncReadinessFunction(
+      ENVIRONMENT,
+      async () => { throw new Error(privateDetail); },
+    ),
+    (error) => error instanceof YandexScheduledSyncReadinessFunctionError
+      && error.code === 'READINESS_FAILED'
+      && error.message === 'READINESS_FAILED'
+      && !JSON.stringify(error).includes(privateDetail)
+      && !Object.hasOwn(error, 'cause'),
+  );
+});
+
+test('readiness entrypoint preserves only already-sanitized readiness errors', async () => {
+  const safeFailure = new ScheduledSyncReadinessError('YDB_SCHEMA_READ_FAILED');
+
+  await assert.rejects(
+    () => executeYandexScheduledSyncReadinessFunction(
+      ENVIRONMENT,
+      async () => { throw safeFailure; },
+    ),
+    (error) => error === safeFailure
+      && error.message === 'YDB_SCHEMA_READ_FAILED'
+      && !Object.hasOwn(error, 'cause'),
+  );
 });
 
 function timerEvent(overrides = {}) {

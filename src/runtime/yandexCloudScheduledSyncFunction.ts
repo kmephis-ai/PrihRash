@@ -4,6 +4,7 @@ import {
 } from './scheduledSyncJob.js';
 import type { ScheduledSyncInvocationResult } from '../migration/scheduledSyncInvocation.js';
 import {
+  ScheduledSyncReadinessError,
   runScheduledSyncReadinessProbeFromEnvironment,
   type ScheduledSyncReadinessResult,
 } from './scheduledSyncReadinessProbe.js';
@@ -28,6 +29,18 @@ export interface YandexTimerScheduledSyncJob {
 
 export interface YandexScheduledSyncReadinessJob {
   (environment: ScheduledSyncJobEnvironment): Promise<Readonly<ScheduledSyncReadinessResult>>;
+}
+
+export type YandexScheduledSyncReadinessFunctionErrorCode = 'READINESS_FAILED';
+
+export class YandexScheduledSyncReadinessFunctionError extends Error {
+  readonly code: YandexScheduledSyncReadinessFunctionErrorCode;
+
+  constructor(code: YandexScheduledSyncReadinessFunctionErrorCode) {
+    super(code);
+    this.name = 'YandexScheduledSyncReadinessFunctionError';
+    this.code = code;
+  }
 }
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
@@ -74,7 +87,12 @@ export async function executeYandexScheduledSyncReadinessFunction(
   environment: ScheduledSyncJobEnvironment,
   runReadiness: YandexScheduledSyncReadinessJob,
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
-  return runReadiness(environment);
+  try {
+    return await runReadiness(environment);
+  } catch (error) {
+    if (error instanceof ScheduledSyncReadinessError) throw error;
+    throw new YandexScheduledSyncReadinessFunctionError('READINESS_FAILED');
+  }
 }
 
 export async function readinessHandler(
