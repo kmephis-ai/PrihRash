@@ -34,6 +34,11 @@ export function createRecentOperationsView({
     return value === generation;
   }
 
+  function replaceVisible(items) {
+    render(items);
+    visibleIds = new Set(items.map((item) => item.id));
+  }
+
   function resetPagination() {
     nextCursor = null;
     visibleIds = new Set();
@@ -57,7 +62,7 @@ export function createRecentOperationsView({
       await refreshRecentOperations({
         cache,
         fetchRecent: () => fetchRecent(filters, null),
-        render: (items) => { if (isCurrent(currentGeneration)) render(items); },
+        render: (items) => { if (isCurrent(currentGeneration)) replaceVisible(items); },
         setStatus: (status) => { if (isCurrent(currentGeneration)) setStatus(status); },
         onFreshResponse: (response) => { if (isCurrent(currentGeneration)) acceptFreshFirstPage(response); },
         clock,
@@ -66,7 +71,7 @@ export function createRecentOperationsView({
     }
 
     if (isCurrent(currentGeneration)) {
-      render([]);
+      replaceVisible([]);
       setStatus({ kind: 'filter-loading' });
     }
 
@@ -75,13 +80,54 @@ export function createRecentOperationsView({
       const safeResponse = sanitizeReaderResponse(networkValue);
       const items = parseReaderResponse(safeResponse);
       if (!isCurrent(currentGeneration)) return;
-      render(items);
+      replaceVisible(items);
       setStatus({ kind: 'filtered-fresh' });
       acceptFreshFirstPage(safeResponse);
     } catch {
       if (!isCurrent(currentGeneration)) return;
       setStatus({ kind: 'filtered-error' });
       setPagination({ kind: 'hidden' });
+    }
+  }
+
+  async function refresh(selection = currentFilters) {
+    const filters = normalizeReaderFilters(selection);
+    const currentGeneration = ++generation;
+    const hadVisibleItems = visibleIds.size > 0;
+    currentFilters = filters;
+    nextCursor = null;
+    pageLoading = false;
+    setPagination({ kind: 'hidden' });
+    setStatus({ kind: 'refreshing', hasVisibleItems: hadVisibleItems });
+
+    try {
+      const networkValue = await fetchRecent(filters, null);
+      const safeResponse = sanitizeReaderResponse(networkValue);
+      const items = parseReaderResponse(safeResponse);
+      if (!isCurrent(currentGeneration)) return false;
+
+      if (!hasActiveReaderFilters(filters)) {
+        const savedAt = clock().toISOString();
+        let persisted = true;
+        try {
+          await cache.write(safeResponse, savedAt);
+        } catch {
+          persisted = false;
+        }
+        if (!isCurrent(currentGeneration)) return false;
+        replaceVisible(items);
+        setStatus({ kind: persisted ? 'fresh' : 'fresh-uncached', savedAt });
+      } else {
+        replaceVisible(items);
+        setStatus({ kind: 'filtered-fresh' });
+      }
+      acceptFreshFirstPage(safeResponse);
+      return true;
+    } catch {
+      if (!isCurrent(currentGeneration)) return false;
+      setStatus({ kind: 'refresh-error', hasVisibleItems: hadVisibleItems });
+      setPagination({ kind: 'hidden' });
+      return false;
     }
   }
 
@@ -114,5 +160,5 @@ export function createRecentOperationsView({
     }
   }
 
-  return Object.freeze({ load, loadMore });
+  return Object.freeze({ load, refresh, loadMore });
 }

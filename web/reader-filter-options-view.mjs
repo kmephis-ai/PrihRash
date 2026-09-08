@@ -23,6 +23,12 @@ export function createReaderFilterOptionsView({
   clock = () => new Date(),
 }) {
   let generation = 0;
+  let hasVisibleOptions = false;
+
+  function replaceVisible(options) {
+    render(options);
+    hasVisibleOptions = true;
+  }
 
   async function load() {
     const currentGeneration = ++generation;
@@ -35,7 +41,7 @@ export function createReaderFilterOptionsView({
     }
 
     if (cached !== null && currentGeneration === generation) {
-      render(cached.response);
+      replaceVisible(cached.response);
       setStatus({ kind: 'cached', savedAt: cached.savedAt });
     }
 
@@ -52,7 +58,7 @@ export function createReaderFilterOptionsView({
       }
       if (currentGeneration !== generation) return;
 
-      render(safe);
+      replaceVisible(safe);
       setStatus({ kind: persisted ? 'fresh' : 'fresh-uncached', savedAt });
     } catch {
       if (currentGeneration !== generation) return;
@@ -64,5 +70,32 @@ export function createReaderFilterOptionsView({
     }
   }
 
-  return Object.freeze({ load });
+
+  async function refresh() {
+    const currentGeneration = ++generation;
+    const hadVisibleOptions = hasVisibleOptions;
+    try {
+      const safe = sanitizeReaderFilterOptions(await fetchOptions());
+      if (currentGeneration !== generation) return false;
+
+      const savedAt = clock().toISOString();
+      let persisted = true;
+      try {
+        await cache.write(safe, savedAt);
+      } catch {
+        persisted = false;
+      }
+      if (currentGeneration !== generation) return false;
+
+      replaceVisible(safe);
+      setStatus({ kind: persisted ? 'fresh' : 'fresh-uncached', savedAt });
+      return true;
+    } catch {
+      if (currentGeneration !== generation) return false;
+      setStatus({ kind: 'refresh-error', hasVisibleOptions: hadVisibleOptions });
+      return false;
+    }
+  }
+
+  return Object.freeze({ load, refresh });
 }
