@@ -1,0 +1,57 @@
+name: Publish numeric YDB issue-code diagnostics
+
+on:
+  push:
+    branches:
+      - transport/publish-285h
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 6b28ed1387a473f38605e7cd2dccffe68db41dac
+  TARGET_BRANCH: fix/r1-test-private-query-issue-code-diagnostics
+  EXPECTED_SCRIPT_BLOB: 95438fadc2e0fbfa775ae856c4215618435f4f64
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic issue-code diagnostics transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/test-private-controlled-rebuild-smoke.mjs')
+          s = p.read_text()
+          old = """function safeInternalCode(value) {\n  return typeof value === 'string' && /^[A-Z0-9_]+$/u.test(value) ? value : null;\n}\n\nfunction safeStageError(error, stage) {\n"""
+          new = """function safeInternalCode(value) {\n  return typeof value === 'string' && /^[A-Z0-9_]+$/u.test(value) ? value : null;\n}\n\nfunction safeProviderIssueCodes(issues) {\n  const codes = [];\n  const visit = (items) => {\n    if (!Array.isArray(items)) return;\n    for (const issue of items) {\n      if (codes.length >= 16) return;\n      if (Number.isSafeInteger(issue?.issueCode)) codes.push(issue.issueCode);\n      visit(issue?.issues);\n      if (codes.length >= 16) return;\n    }\n  };\n  visit(issues);\n  return Object.freeze(codes);\n}\n\nfunction safeStageError(error, stage) {\n"""
+          if old not in s:
+              raise SystemExit('EXPECTED_HELPER_FRAGMENT_MISSING')
+          s = s.replace(old, new, 1)
+          old = """  wrapped.providerStatus = Number.isSafeInteger(error?.status)\n    ? error.status\n    : (Number.isSafeInteger(error?.code) ? error.code : null);\n  return wrapped;\n"""
+          new = """  wrapped.providerStatus = Number.isSafeInteger(error?.status)\n    ? error.status\n    : (Number.isSafeInteger(error?.code) ? error.code : null);\n  wrapped.providerIssueCodes = safeProviderIssueCodes(error?.issues);\n  return wrapped;\n"""
+          if old not in s:
+              raise SystemExit('EXPECTED_STAGE_FRAGMENT_MISSING')
+          s = s.replace(old, new, 1)
+          old = """    providerStatus: Number.isSafeInteger(error?.providerStatus) ? error.providerStatus : null,\n  });\n"""
+          new = """    providerStatus: Number.isSafeInteger(error?.providerStatus) ? error.providerStatus : null,\n    providerIssueCodes: Array.isArray(error?.providerIssueCodes) ? error.providerIssueCodes : [],\n  });\n"""
+          if old not in s:
+              raise SystemExit('EXPECTED_OUTPUT_FRAGMENT_MISSING')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          test "$(git hash-object scripts/test-private-controlled-rebuild-smoke.mjs)" = "${EXPECTED_SCRIPT_BLOB}"
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs
+          git commit -m 'R1: expose numeric YDB issue codes'
+          git push origin "HEAD:${TARGET_BRANCH}"
