@@ -1,10 +1,11 @@
-const CACHE = 'prihrash-shell-v6';
+const CACHE = 'prihrash-shell-v7';
 const SHELL = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.mjs',
   '/presentation.mjs',
+  '/operation-markup.mjs',
   '/reader-cache.mjs',
   '/reader-filters.mjs',
   '/reader-filter-options-view.mjs',

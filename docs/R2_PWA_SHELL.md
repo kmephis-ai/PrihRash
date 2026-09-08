@@ -86,6 +86,12 @@ Valid additional page append-ится к уже видимым операция�
 
 Load-more failure не очищает уже показанный список. Concurrent second click не создаёт второй page request. Смена filters/reset увеличивает generation, поэтому старый in-flight page response не может append-иться после новой selection. Отдельный pagination status не переопределяет first-page `Обновлено / Офлайн / Фильтр` status. Между несколькими HTTP pages нет snapshot transaction; этот S-unit не обещает frozen historical snapshot во время конкурентных source changes.
 
+## Responsive operations presentation
+
+Экран `Операции` использует один validated presentation dataset из existing Reader v1 boundary, но показывает его по-разному в зависимости от ширины экрана: compact cards на mobile и semantic table на desktop. JavaScript не выбирает отдельный data path по viewport: `render/append` получают один и тот же массив presentation items и синхронно обновляют обе поверхности, а видимость определяет только CSS breakpoint. Поэтому filters, local-first cache, offline state и keyset pagination остаются одной state machine и не создают второй Reader/FIN-TRUTH mapping.
+
+Desktop table имеет колонки `Дата / Операция / Тип / Контекст / Сумма / Качество`. Поле `Качество` сохраняет те же явные предупреждения `Аннулировано`, `Исторический агрегат`, unknown granularity/date precision, что и mobile cards; coarse history не становится визуально точнее из-за табличного вида. Description/context экранируются перед HTML render. Table горизонтально прокручивается внутри собственного desktop container при недостатке места и не создаёт mobile overflow. Сортировка, search, date-range, Saved Views, export и editor остаются отдельными rolling-wave items.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
