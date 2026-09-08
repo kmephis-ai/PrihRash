@@ -12,7 +12,7 @@ Provider execution transport для #302 — **GitHub Actions → GitHub OIDC �
 - Google spreadsheet ID, Google service-account email/private key, YDB connection string и Lockbox payload **никогда не передаются в GitHub**. Они хранятся только в Yandex Lockbox и инжектируются в Function server-side.
 - В GitHub Actions secrets допустимы только два non-credential provider locator-а, которые нужны до Yandex authentication: `YC_R1_FOLDER_ID` и `YC_R1_WIF_SERVICE_ACCOUNT_ID`. Они не выводятся в logs/evidence.
 - Provider IDs, Lockbox IDs/version IDs, YDB endpoint/database path, raw `yc` stdout/stderr, provider logs/screenshots не публикуются в Issues/PR/Actions evidence. Workflow держит найденные IDs только в ephemeral env/temp files и маскирует их до deploy/invoke.
-- В public evidence допустим только safe status code: `READINESS_READY`, `READINESS_CONFIG_INVALID`, `READINESS_INVOKE_FAILED`, `READINESS_OIDC_REQUEST_FAILED`, `READINESS_WIF_EXCHANGE_FAILED`, `READINESS_PROVIDER_CONFIG_INVALID` или `READINESS_DEPLOY_FAILED`.
+- В public evidence допустим только safe status code. Для auth boundary разрешены `READINESS_OIDC_REQUEST_FAILED`, `READINESS_OIDC_CLAIMS_INVALID`, `READINESS_OIDC_ISSUER_MISMATCH`, `READINESS_OIDC_AUDIENCE_MISMATCH`, `READINESS_OIDC_SUBJECT_MISMATCH`, `READINESS_WIF_INVALID_REQUEST`, `READINESS_WIF_INVALID_GRANT`, `READINESS_WIF_INVALID_TARGET`, `READINESS_WIF_UNAUTHORIZED_CLIENT`, `READINESS_WIF_UNSUPPORTED_GRANT_TYPE` и generic `READINESS_WIF_EXCHANGE_FAILED`; provider/readiness boundary использует `READINESS_READY`, `READINESS_CONFIG_INVALID`, `READINESS_INVOKE_FAILED`, `READINESS_PROVIDER_CONFIG_INVALID` или `READINESS_DEPLOY_FAILED`.
 - На этом gate запрещены `yc serverless trigger create`, timer cadence, вызов `index.handler`, bootstrap/incremental shadow writes и authority cutover.
 - Любое расхождение provider state с этим contract → fail closed; не расширять IAM и не менять secret transport внутри workflow.
 
@@ -144,7 +144,7 @@ YC_R1_WIF_SERVICE_ACCOUNT_ID
 3. выполнить `npm ci --ignore-scripts --no-audit --no-fund` и literal `npm run check`;
 4. установить официальный Yandex Cloud CLI до получения cloud token;
 5. запросить GitHub OIDC token (`permissions.id-token=write`) с audience `https://github.com/kmephis-ai`;
-6. обменять JWT на short-lived Yandex IAM token через `https://auth.yandex.cloud/oauth/token`; при ошибке различать только безопасные boundaries `READINESS_OIDC_REQUEST_FAILED` и `READINESS_WIF_EXCHANGE_FAILED`, не публикуя HTTP body/JWT/provider IDs;
+6. до exchange локально декодировать только JWT payload и fail-closed сверить exact `iss`, `aud`, `sub` с canonical federation contract; mismatch публикуется только как безопасный claim-specific code без значений; затем обменять JWT на short-lived Yandex IAM token через `https://auth.yandex.cloud/oauth/token`, а отказ Yandex классифицировать только по allowlisted OAuth `error` category без публикации response body/JWT/provider IDs;
 7. fail-closed проверить dedicated function: private, triggers = 0;
 8. локально в runner memory разрешить runtime SA и Lockbox current version; не печатать IDs;
 9. создать ровно readiness version из `.artifacts/yandex-scheduled-sync-function`;
@@ -215,12 +215,15 @@ Secret injection:
 
 Provider preflight/deploy failure остаётся безопасным коротким code без raw output.
 
-Authentication transport также fail-closed и диагностируется только по границе отказа:
+Authentication transport также fail-closed и диагностируется без раскрытия token/provider data:
 
-- `READINESS_OIDC_REQUEST_FAILED` означает, что GitHub OIDC token не был безопасно получен/распознан. Проверяются workflow `id-token: write`, exact `main` boundary и GitHub OIDC request construction; response body/JWT в Actions не выводятся.
-- `READINESS_WIF_EXCHANGE_FAILED` означает, что GitHub OIDC token уже был получен, но Yandex token exchange не выдал пригодный short-lived IAM token. Проверяются WIF federation, federated credential, exact subject/audience и locator deployment service account; raw Yandex response и provider IDs в public evidence не публикуются.
+- `READINESS_OIDC_REQUEST_FAILED` означает, что GitHub OIDC token не был безопасно получен/распознан.
+- `READINESS_OIDC_CLAIMS_INVALID` означает, что JWT payload нельзя безопасно декодировать/распознать.
+- `READINESS_OIDC_ISSUER_MISMATCH`, `READINESS_OIDC_AUDIENCE_MISMATCH`, `READINESS_OIDC_SUBJECT_MISMATCH` локализуют exact canonical claim mismatch; фактические claim values не печатаются.
+- `READINESS_WIF_INVALID_REQUEST`, `READINESS_WIF_INVALID_GRANT`, `READINESS_WIF_INVALID_TARGET`, `READINESS_WIF_UNAUTHORIZED_CLIENT`, `READINESS_WIF_UNSUPPORTED_GRANT_TYPE` отражают только allowlisted OAuth `error` category от Yandex; response body/description не публикуются.
+- `READINESS_WIF_EXCHANGE_FAILED` остаётся generic fallback, если Yandex отказал, но безопасная allowlisted категория не определена или 2xx response не содержит пригодного IAM token.
 
-Оба кода оставляют #302 OPEN и сами по себе не разрешают изменение IAM, secret transport или provider write boundary.
+Любой auth code оставляет #302 OPEN и сам по себе не разрешает расширять IAM, менять secret transport или provider write boundary.
 
 ## Exit from this gate
 

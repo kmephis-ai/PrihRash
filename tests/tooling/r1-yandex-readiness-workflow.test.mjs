@@ -27,10 +27,26 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /YC_R1_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(workflow, /READINESS_OIDC_REQUEST_FAILED/);
   assert.match(workflow, /READINESS_WIF_EXCHANGE_FAILED/);
+  assert.match(workflow, /READINESS_OIDC_ISSUER_MISMATCH/);
+  assert.match(workflow, /READINESS_OIDC_AUDIENCE_MISMATCH/);
+  assert.match(workflow, /READINESS_OIDC_SUBJECT_MISMATCH/);
+  assert.match(workflow, /READINESS_OIDC_CLAIMS_INVALID/);
+  assert.match(workflow, /READINESS_WIF_INVALID_REQUEST/);
+  assert.match(workflow, /READINESS_WIF_INVALID_GRANT/);
+  assert.match(workflow, /READINESS_WIF_INVALID_TARGET/);
+  assert.match(workflow, /READINESS_WIF_UNAUTHORIZED_CLIENT/);
+  assert.match(workflow, /READINESS_WIF_UNSUPPORTED_GRANT_TYPE/);
   assert.match(workflow, /--output "\$tmp\/oidc\.json"/);
   assert.match(workflow, /--output "\$tmp\/iam\.json"/);
   assert.match(workflow, /::add-mask::\$\{oidc_token\}/);
-  assert.doesNotMatch(workflow, /cat .*\/oidc\.json|cat .*\/iam\.json/);
+  assert.match(workflow, /OIDC_ISSUER:\s*https:\/\/token\.actions\.githubusercontent\.com/);
+  assert.match(workflow, /OIDC_SUBJECT:\s*repo:kmephis-ai\/PrihRash:ref:refs\/heads\/main/);
+  assert.match(workflow, /base64 --decode >"\$tmp\/claims\.json"/);
+  assert.match(workflow, /\.iss == \$expected/);
+  assert.match(workflow, /\.sub == \$expected/);
+  assert.match(workflow, /\.aud == \$expected/);
+  assert.doesNotMatch(workflow, /cat .*\/oidc\.json|cat .*\/iam\.json|cat .*\/claims\.json/);
+  assert.doesNotMatch(workflow, /echo \"\$oidc_token\"|echo \"\$token_payload\"|echo \"\$wif_error\"/);
   assert.doesNotMatch(workflow, /secrets\.[A-Z0-9_]*(YC_SA_JSON|PRIVATE_KEY|AUTHORIZED_KEY)/i);
 
   assert.match(workflow, /index\.readinessHandler/);
