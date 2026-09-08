@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -58,14 +59,21 @@ def _safe_extract_zip(archive: Path, destination: Path) -> None:
 
 def _safe_extract_tar(archive: Path, destination: Path) -> None:
     with tarfile.open(archive, "r:gz") as tf:
-        members = tf.getmembers()
-        for member in members:
-            if member.issym() or member.islnk():
-                raise DependencyCacheError("cache archive contains a link")
+        for member in tf.getmembers():
             target = (destination / member.name).resolve()
             if os.path.commonpath([destination.resolve(), target]) != str(destination.resolve()):
                 raise DependencyCacheError("cache archive contains an unsafe path")
-        tf.extractall(destination, members=members)
+            if member.isdir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                raise DependencyCacheError("cache archive contains an unsupported entry")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            source = tf.extractfile(member)
+            if source is None:
+                raise DependencyCacheError("cache archive file could not be read")
+            with source, target.open("wb") as output:
+                shutil.copyfileobj(source, output)
 
 
 def _find_exact(root: Path, name: str) -> Path:
