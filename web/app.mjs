@@ -7,6 +7,7 @@ import {
   sanitizeReaderFilterOptions,
 } from './reader-filters.mjs';
 import { createReaderFilterOptionsView, reconcileReaderFilterSelection } from './reader-filter-options-view.mjs';
+import { createReaderRefreshController } from './reader-refresh.mjs';
 import { createRecentOperationsView } from './reader-view.mjs';
 import { formatReaderSyncStatus, sanitizeReaderSyncStatus } from './reader-sync-status.mjs';
 
@@ -23,6 +24,7 @@ const filterOptionsState = document.querySelector('[data-filter-options-state]')
 const resetFilters = document.querySelector('[data-reset-filters]');
 const loadMore = document.querySelector('[data-load-more]');
 const pageState = document.querySelector('[data-page-state]');
+const refreshReader = document.querySelector('[data-refresh-reader]');
 const cache = createIndexedDbReaderCache();
 const filterOptionsCache = createIndexedDbReaderFilterOptionsCache();
 
@@ -55,6 +57,22 @@ function savedLabel(savedAt) {
 }
 
 function setStatus(status) {
+  if (status.kind === 'refreshing') {
+    syncState.textContent = 'Обновляем…';
+    if (!status.hasVisibleItems) {
+      state.textContent = 'Обновляем операции…';
+      state.hidden = false;
+    }
+    return;
+  }
+  if (status.kind === 'refresh-error') {
+    syncState.textContent = status.hasVisibleItems ? 'Не удалось обновить · показаны прежние данные' : '';
+    if (!status.hasVisibleItems) {
+      state.textContent = 'Не удалось обновить операции.';
+      state.hidden = false;
+    }
+    return;
+  }
   if (status.kind === 'cached') {
     syncState.textContent = `Локальные данные от ${savedLabel(status.savedAt)} · обновляем…`;
     return;
@@ -217,6 +235,16 @@ function setFilterOptionsStatus(status) {
     filterOptionsState.textContent = '';
     return;
   }
+  if (status.kind === 'refresh-error') {
+    if (status.hasVisibleOptions) {
+      filterOptionsState.textContent = 'Не удалось обновить справочники · показаны прежние';
+      return;
+    }
+    accountFilter.disabled = true;
+    categoryFilter.disabled = true;
+    filterOptionsState.textContent = 'Счёт и категория недоступны';
+    return;
+  }
   accountFilter.disabled = true;
   categoryFilter.disabled = true;
   filterOptionsState.textContent = 'Счёт и категория недоступны';
@@ -237,6 +265,18 @@ const filterOptionsView = createReaderFilterOptionsView({
   render: renderFilterOptions,
   setStatus: setFilterOptionsStatus,
 });
+
+const refreshController = createReaderRefreshController({
+  refreshOperations: () => view.refresh(selectedFilters()),
+  refreshFilterOptions: () => filterOptionsView.refresh(),
+  refreshSyncStatus: loadSyncStatus,
+  setRefreshing: (refreshing) => {
+    refreshReader.disabled = refreshing;
+    refreshReader.textContent = refreshing ? 'Обновляем…' : 'Обновить';
+  },
+});
+
+refreshReader.addEventListener('click', () => { refreshController.refresh(); });
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 loadSyncStatus();

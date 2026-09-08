@@ -92,6 +92,16 @@ Load-more failure не очищает уже показанный список. 
 
 Desktop table имеет колонки `Дата / Операция / Тип / Контекст / Сумма / Качество`. Поле `Качество` сохраняет те же явные предупреждения `Аннулировано`, `Исторический агрегат`, unknown granularity/date precision, что и mobile cards; coarse history не становится визуально точнее из-за табличного вида. Description/context экранируются перед HTML render. Table горизонтально прокручивается внутри собственного desktop container при недостатке места и не создаёт mobile overflow. Сортировка, search, date-range, Saved Views, export и editor остаются отдельными rolling-wave items.
 
+## Manual refresh / recovery
+
+Экран `Операции` имеет явное действие `Обновить`, чтобы после временного offline/backend failure владелец мог восстановить Reader без полного reload PWA. Один manual refresh batch повторно использует ровно существующие boundaries: current operations view с exact текущими четырьмя filters, filter-options view и network-only sync-status. Новый API/data mapping при этом не создаётся.
+
+Manual operations refresh является network-only retry поверх уже видимого состояния: он не перечитывает более старый IndexedDB cache поверх текущих rows и не очищает visible items перед подтверждённым network response. Для unfiltered success existing validated response атомарно заменяет bounded `recent-operations-v1`; filtered success остаётся network-only. Failure сохраняет предыдущие rows и явно показывает `Не удалось обновить · показаны прежние данные`, поэтому stale content не маскируется как fresh.
+
+Refresh увеличивает existing operations generation и скрывает старую pagination boundary до нового first-page response. Поэтому in-flight `Загрузить ещё`, начатый до manual refresh, не может append-иться после него. Reference refresh аналогично не перечитывает старый cache поверх текущих controls: valid network response проходит existing exact validation и заменяет cache/UI, а failure оставляет текущие options доступными с честным recovery status.
+
+Повторные нажатия `Обновить`, пока batch активен, coalesce в один operations/reference/sync request batch; кнопка временно disabled. Automatic polling, push и background timer этим contract не вводятся. `/api/*` остаётся вне Service Worker Cache Storage.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
