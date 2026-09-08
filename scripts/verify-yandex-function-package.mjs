@@ -25,13 +25,14 @@ for (const required of [
   'index.js',
   'package.json',
   'dist/runtime/yandexCloudScheduledSyncFunction.js',
+  'dist/runtime/scheduledSyncReadinessProbe.js',
   'dist/runtime/scheduledSyncJob.js',
 ]) {
   await access(resolve(ARTIFACT_ROOT, required));
 }
 
 const indexSource = await readFile(resolve(ARTIFACT_ROOT, 'index.js'), 'utf8');
-if (indexSource !== "export { handler } from './dist/runtime/yandexCloudScheduledSyncFunction.js';\n") {
+if (indexSource !== "export { handler, readinessHandler } from './dist/runtime/yandexCloudScheduledSyncFunction.js';\n") {
   fail('root index.js is not the reviewed handler shim');
 }
 

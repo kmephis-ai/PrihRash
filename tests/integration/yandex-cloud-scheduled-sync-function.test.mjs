@@ -3,12 +3,33 @@ import test from 'node:test';
 
 import {
   YandexTimerScheduledSyncFunctionError,
+  executeYandexScheduledSyncReadinessFunction,
   executeYandexTimerScheduledSyncFunction,
 } from '../../dist/runtime/yandexCloudScheduledSyncFunction.js';
 
 const TIMER_TYPE = 'yandex.cloud.events.serverless.triggers.TimerMessage';
 const ENVIRONMENT = Object.freeze({
   PRIHRASH_GOOGLE_SPREADSHEET_ID: 'synthetic-sheet',
+});
+
+test('readiness entrypoint invokes only the injected read-only readiness job with environment', async () => {
+  const calls = [];
+  const safeResult = Object.freeze({
+    googleSource: 'READY',
+    ydbSchema: 'READY',
+    requiredMigrationVersion: 2,
+  });
+
+  const result = await executeYandexScheduledSyncReadinessFunction(
+    ENVIRONMENT,
+    async (environment) => {
+      calls.push(environment);
+      return safeResult;
+    },
+  );
+
+  assert.equal(result, safeResult);
+  assert.deepEqual(calls, [ENVIRONMENT]);
 });
 
 function timerEvent(overrides = {}) {

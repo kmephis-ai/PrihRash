@@ -3,6 +3,10 @@ import {
   type ScheduledSyncJobEnvironment,
 } from './scheduledSyncJob.js';
 import type { ScheduledSyncInvocationResult } from '../migration/scheduledSyncInvocation.js';
+import {
+  runScheduledSyncReadinessProbeFromEnvironment,
+  type ScheduledSyncReadinessResult,
+} from './scheduledSyncReadinessProbe.js';
 
 const TIMER_EVENT_TYPE = 'yandex.cloud.events.serverless.triggers.TimerMessage';
 
@@ -20,6 +24,10 @@ export class YandexTimerScheduledSyncFunctionError extends Error {
 
 export interface YandexTimerScheduledSyncJob {
   (environment: ScheduledSyncJobEnvironment): Promise<Readonly<ScheduledSyncInvocationResult>>;
+}
+
+export interface YandexScheduledSyncReadinessJob {
+  (environment: ScheduledSyncJobEnvironment): Promise<Readonly<ScheduledSyncReadinessResult>>;
 }
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
@@ -59,5 +67,22 @@ export async function handler(
     event,
     process.env,
     runScheduledSyncJobFromEnvironment,
+  );
+}
+
+export async function executeYandexScheduledSyncReadinessFunction(
+  environment: ScheduledSyncJobEnvironment,
+  runReadiness: YandexScheduledSyncReadinessJob,
+): Promise<Readonly<ScheduledSyncReadinessResult>> {
+  return runReadiness(environment);
+}
+
+export async function readinessHandler(
+  _event: unknown,
+  _context: unknown,
+): Promise<Readonly<ScheduledSyncReadinessResult>> {
+  return executeYandexScheduledSyncReadinessFunction(
+    process.env,
+    runScheduledSyncReadinessProbeFromEnvironment,
   );
 }
