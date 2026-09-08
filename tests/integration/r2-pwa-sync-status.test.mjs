@@ -56,11 +56,11 @@ test('PWA loads sync status independently and never routes it through browser pe
 
   assert.match(html, /data-shadow-sync-status/u);
   assert.match(app, /fetch\('\/api\/v1\/reader\/sync-status'/u);
-  assert.match(app, /loadSyncStatus\(\);[\s\S]*loadFilterOptions\(\);[\s\S]*applyFilters\(\);/u);
+  assert.match(app, /loadSyncStatus\(\);[\s\S]*filterOptionsView\.load\(\);[\s\S]*applyFilters\(\);/u);
   assert.match(app, /Синхронизация: статус недоступен/u);
   assert.doesNotMatch(syncStatus, /indexedDB|localStorage|caches\./u);
   assert.doesNotMatch(cache, /sync-status/u);
-  assert.match(sw, /prihrash-shell-v5/u);
+  assert.match(sw, /prihrash-shell-v6/u);
   assert.match(sw, /'\/reader-sync-status\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

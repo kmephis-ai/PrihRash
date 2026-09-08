@@ -1,10 +1,11 @@
-import { createIndexedDbReaderCache } from './reader-cache.mjs';
+import { createIndexedDbReaderCache, createIndexedDbReaderFilterOptionsCache } from './reader-cache.mjs';
 import {
   buildRecentOperationsUrl,
   categoryOptionLabel,
   hasActiveReaderFilters,
   sanitizeReaderFilterOptions,
 } from './reader-filters.mjs';
+import { createReaderFilterOptionsView, reconcileReaderFilterSelection } from './reader-filter-options-view.mjs';
 import { createRecentOperationsView } from './reader-view.mjs';
 import { formatReaderSyncStatus, sanitizeReaderSyncStatus } from './reader-sync-status.mjs';
 
@@ -21,6 +22,7 @@ const resetFilters = document.querySelector('[data-reset-filters]');
 const loadMore = document.querySelector('[data-load-more]');
 const pageState = document.querySelector('[data-page-state]');
 const cache = createIndexedDbReaderCache();
+const filterOptionsCache = createIndexedDbReaderFilterOptionsCache();
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
@@ -178,33 +180,73 @@ async function loadSyncStatus() {
   }
 }
 
-async function loadFilterOptions() {
-  filterOptionsState.textContent = 'Счёт и категория · загрузка…';
-  try {
-    const response = await fetch('/api/v1/reader/filter-options', {
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    });
-    if (!response.ok) throw new Error('REQUEST_FAILED');
-    const safe = sanitizeReaderFilterOptions(await response.json());
-
-    for (const option of safe.accounts) {
-      accountFilter.add(new Option(option.label, option.id));
-    }
-    for (const option of safe.categories) {
-      categoryFilter.add(new Option(categoryOptionLabel(option), option.id));
-    }
-    accountFilter.disabled = false;
-    categoryFilter.disabled = false;
-    filterOptionsState.textContent = '';
-  } catch {
-    accountFilter.disabled = true;
-    categoryFilter.disabled = true;
-    filterOptionsState.textContent = 'Счёт и категория недоступны';
+function replaceSelectOptions(select, placeholder, options, selectedValue) {
+  select.replaceChildren(new Option(placeholder, ''));
+  for (const option of options) select.add(new Option(option.label, option.id));
+  if (selectedValue && options.some((option) => option.id === selectedValue)) {
+    select.value = selectedValue;
+    return false;
   }
+  select.value = '';
+  return selectedValue !== '';
 }
+
+function renderFilterOptions(safe) {
+  const selection = reconcileReaderFilterSelection(safe, {
+    accountId: accountFilter.value || null,
+    categoryId: categoryFilter.value || null,
+  });
+  replaceSelectOptions(accountFilter, 'Все счета', safe.accounts, selection.accountId ?? '');
+  replaceSelectOptions(
+    categoryFilter,
+    'Все категории',
+    safe.categories.map((option) => ({ id: option.id, label: categoryOptionLabel(option) })),
+    selection.categoryId ?? '',
+  );
+  accountFilter.disabled = false;
+  categoryFilter.disabled = false;
+  if (selection.accountReset || selection.categoryReset) applyFilters();
+}
+
+function setFilterOptionsStatus(status) {
+  if (status.kind === 'cached') {
+    filterOptionsState.textContent = `Локальные справочники от ${savedLabel(status.savedAt)} · обновляем…`;
+    return;
+  }
+  if (status.kind === 'offline') {
+    filterOptionsState.textContent = `Офлайн · справочники от ${savedLabel(status.savedAt)}`;
+    return;
+  }
+  if (status.kind === 'fresh-uncached') {
+    filterOptionsState.textContent = 'Справочники обновлены · локальное сохранение недоступно';
+    return;
+  }
+  if (status.kind === 'fresh') {
+    filterOptionsState.textContent = '';
+    return;
+  }
+  accountFilter.disabled = true;
+  categoryFilter.disabled = true;
+  filterOptionsState.textContent = 'Счёт и категория недоступны';
+}
+
+async function fetchFilterOptions() {
+  const response = await fetch('/api/v1/reader/filter-options', {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error('REQUEST_FAILED');
+  return response.json();
+}
+
+const filterOptionsView = createReaderFilterOptionsView({
+  cache: filterOptionsCache,
+  fetchOptions: fetchFilterOptions,
+  render: renderFilterOptions,
+  setStatus: setFilterOptionsStatus,
+});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 loadSyncStatus();
-loadFilterOptions();
+filterOptionsView.load();
 applyFilters();
