@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { FullSourceSnapshotError } from '../../dist/integration/google/fullSourceSnapshot.js';
+import { GoogleSheetsFullSnapshotReaderError } from '../../dist/integration/google/googleSheetsFullSnapshotReader.js';
+import { GoogleServiceAccountTokenProviderError } from '../../dist/integration/google/googleServiceAccountTokenProvider.js';
+import { SourceValueCodecError } from '../../dist/integration/google/sourceValueCodec.js';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import {
   REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION,
@@ -102,6 +106,45 @@ test('missing and future migration versions are distinct fail-closed blockers', 
     (error) => error instanceof ScheduledSyncReadinessError
       && error.code === 'UNEXPECTED_SCHEMA_MIGRATION',
   );
+});
+
+test('typed Google failures are reduced to value-free readiness stages', async () => {
+  const cases = [
+    [new GoogleServiceAccountTokenProviderError('INVALID_SERVICE_ACCOUNT_EMAIL'), 'GOOGLE_CREDENTIALS_INVALID'],
+    [new GoogleServiceAccountTokenProviderError('INVALID_SERVICE_ACCOUNT_PRIVATE_KEY'), 'GOOGLE_CREDENTIALS_INVALID'],
+    [new GoogleServiceAccountTokenProviderError('TOKEN_ACQUISITION_FAILED'), 'GOOGLE_TOKEN_ACQUISITION_FAILED'],
+    [new GoogleServiceAccountTokenProviderError('INVALID_ACCESS_TOKEN'), 'GOOGLE_TOKEN_ACQUISITION_FAILED'],
+    [new GoogleSheetsFullSnapshotReaderError('INVALID_SPREADSHEET_ID'), 'GOOGLE_SPREADSHEET_ID_INVALID'],
+    [new GoogleSheetsFullSnapshotReaderError('INVALID_ACCESS_TOKEN'), 'GOOGLE_TOKEN_ACQUISITION_FAILED'],
+    [new GoogleSheetsFullSnapshotReaderError('GOOGLE_SHEETS_HTTP_ERROR', 403), 'GOOGLE_SHEETS_ACCESS_FAILED'],
+    [new GoogleSheetsFullSnapshotReaderError('GOOGLE_SHEETS_RESPONSE_INVALID'), 'GOOGLE_SHEETS_RESPONSE_INVALID'],
+    [new GoogleSheetsFullSnapshotReaderError('SOURCE_METADATA_MISMATCH'), 'GOOGLE_SOURCE_METADATA_MISMATCH'],
+    [new GoogleSheetsFullSnapshotReaderError('SOURCE_SHEET_MISSING'), 'GOOGLE_SOURCE_SHEET_MISSING'],
+    [new FullSourceSnapshotError('SOURCE_SCHEMA_MISMATCH'), 'GOOGLE_SOURCE_SCHEMA_MISMATCH'],
+    [new FullSourceSnapshotError('SOURCE_ROW_WIDTH_MISMATCH'), 'GOOGLE_SOURCE_SCHEMA_MISMATCH'],
+    [new SourceValueCodecError('FORMULA_SOURCE_CELL_NOT_ALLOWED'), 'GOOGLE_SOURCE_VALUE_UNSUPPORTED'],
+    [new SourceValueCodecError('UNSUPPORTED_SOURCE_CELL_VALUE'), 'GOOGLE_SOURCE_VALUE_UNSUPPORTED'],
+  ];
+
+  for (const [sourceError, expectedCode] of cases) {
+    const capture = { statements: [], transactions: 0 };
+    const { adapter } = adapterForReads([validMigrationRows], capture);
+    const source = {
+      async readFullSnapshotObservation() {
+        throw sourceError;
+      },
+    };
+
+    await assert.rejects(
+      () => runScheduledSyncReadinessProbe(source, adapter),
+      (error) => error instanceof ScheduledSyncReadinessError
+        && error.code === expectedCode
+        && error.message === expectedCode
+        && !Object.hasOwn(error, 'cause'),
+    );
+    assert.equal(capture.statements.length, 0);
+    assert.equal(capture.transactions, 0);
+  }
 });
 
 test('Google source provider failure is sanitized and prevents every YDB readiness read', async () => {
@@ -230,6 +273,18 @@ test('execution sanitizes primary readiness failure when close also fails', asyn
 });
 
 test('execution sanitizes source construction and YDB client creation failures by stage', async () => {
+  const credentialFailure = runtimeForLifecycle({
+    createSourceError: new GoogleServiceAccountTokenProviderError('INVALID_SERVICE_ACCOUNT_EMAIL'),
+  });
+  await assert.rejects(
+    () => executeScheduledSyncReadinessProbe(syntheticConfig, credentialFailure.runtime),
+    (error) => error instanceof ScheduledSyncReadinessError
+      && error.code === 'GOOGLE_CREDENTIALS_INVALID'
+      && !Object.hasOwn(error, 'cause'),
+  );
+  assert.equal(credentialFailure.state.clientCreated, 0);
+  assert.equal(credentialFailure.state.closed, 0);
+
   const sourceFailure = runtimeForLifecycle({
     createSourceError: new Error('private-google-service-account-detail'),
   });

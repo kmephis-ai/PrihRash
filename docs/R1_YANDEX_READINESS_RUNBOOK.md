@@ -12,7 +12,7 @@ Provider execution transport для #302 — **GitHub Actions → GitHub OIDC �
 - Google spreadsheet ID, Google service-account email/private key, YDB connection string и Lockbox payload **никогда не передаются в GitHub**. Они хранятся только в Yandex Lockbox и инжектируются в Function server-side.
 - В GitHub Actions secrets допустимы только два non-credential provider locator-а, которые нужны до Yandex authentication: `YC_R1_FOLDER_ID` и `YC_R1_WIF_SERVICE_ACCOUNT_ID`. Они не выводятся в logs/evidence.
 - Provider IDs, Lockbox IDs/version IDs, YDB endpoint/database path, raw `yc` stdout/stderr, provider logs/screenshots не публикуются в Issues/PR/Actions evidence. Workflow держит найденные IDs только в ephemeral env/temp files и маскирует их до deploy/invoke.
-- В public evidence допустим только safe status code. Для auth boundary разрешены `READINESS_OIDC_REQUEST_FAILED`, `READINESS_OIDC_CLAIMS_INVALID`, `READINESS_OIDC_ISSUER_MISMATCH`, `READINESS_OIDC_AUDIENCE_MISMATCH`, `READINESS_OIDC_SUBJECT_MISMATCH`, `READINESS_WIF_INVALID_REQUEST`, `READINESS_WIF_INVALID_GRANT`, `READINESS_WIF_INVALID_TARGET`, `READINESS_WIF_UNAUTHORIZED_CLIENT`, `READINESS_WIF_UNSUPPORTED_GRANT_TYPE` и generic `READINESS_WIF_EXCHANGE_FAILED`; provider/readiness boundary использует `READINESS_READY`, `READINESS_CONFIG_INVALID`, `READINESS_INVOKE_FAILED`, `READINESS_PROVIDER_CONFIG_INVALID` или `READINESS_DEPLOY_FAILED`.
+- В public evidence допустим только safe status code. Для auth boundary разрешены `READINESS_OIDC_REQUEST_FAILED`, `READINESS_OIDC_CLAIMS_INVALID`, `READINESS_OIDC_ISSUER_MISMATCH`, `READINESS_OIDC_AUDIENCE_MISMATCH`, `READINESS_OIDC_SUBJECT_MISMATCH`, `READINESS_WIF_INVALID_REQUEST`, `READINESS_WIF_INVALID_GRANT`, `READINESS_WIF_INVALID_TARGET`, `READINESS_WIF_UNAUTHORIZED_CLIENT`, `READINESS_WIF_UNSUPPORTED_GRANT_TYPE` и generic `READINESS_WIF_EXCHANGE_FAILED`; provider/readiness boundary использует только коды, перечисленные ниже в разделе `One-shot safe invocation`, без публикации raw provider output.
 - На этом gate запрещены `yc serverless trigger create`, timer cadence, вызов `index.handler`, bootstrap/incremental shadow writes и authority cutover.
 - Любое расхождение provider state с этим contract → fail closed; не расширять IAM и не менять secret transport внутри workflow.
 
@@ -201,11 +201,26 @@ Secret injection:
 {"googleSource":"READY","ydbSchema":"READY","requiredMigrationVersion":2}
 ```
 
-Любой non-zero `yc`, spawn/timeout/buffer error, malformed JSON, extra key или отличающееся значение →
+Malformed/non-exact success payload, spawn/timeout/buffer error или provider failure без единственного распознанного safe marker →
 
 ```json
 {"status":"FAIL","code":"READINESS_INVOKE_FAILED"}
 ```
+
+Если non-zero invocation содержит **ровно один** allowlisted value-free runtime marker, wrapper не печатает captured stdout/stderr и возвращает соответствующий safe code. Ноль или больше одного распознанного marker остаются generic fail-closed. Для Google source разрешены:
+
+- `READINESS_GOOGLE_SPREADSHEET_ID_INVALID` — source config отклонён до чтения;
+- `READINESS_GOOGLE_CREDENTIALS_INVALID` — service-account email/private-key validation отклонена до token acquisition;
+- `READINESS_GOOGLE_TOKEN_ACQUISITION_FAILED` — Google OAuth token не получен или не прошёл минимальную token validation;
+- `READINESS_GOOGLE_SHEETS_ACCESS_FAILED` — Google Sheets API вернул non-success HTTP response; status/body не публикуются;
+- `READINESS_GOOGLE_SHEETS_RESPONSE_INVALID` — response shape нельзя безопасно интерпретировать по adapter contract;
+- `READINESS_GOOGLE_SOURCE_METADATA_MISMATCH` — spreadsheet title/locale/time zone не совпали с canonical source contract;
+- `READINESS_GOOGLE_SOURCE_SHEET_MISSING` — canonical sheet отсутствует;
+- `READINESS_GOOGLE_SOURCE_SCHEMA_MISMATCH` — physical source headers/row shape не совпали с canonical adapter contract;
+- `READINESS_GOOGLE_SOURCE_VALUE_UNSUPPORTED` — source содержит cell representation, которую canonical adapter обязан отклонить fail-closed;
+- `READINESS_GOOGLE_SOURCE_READ_FAILED` — unknown/untyped Google source failure.
+
+Для YDB/readiness lifecycle разрешены `READINESS_YDB_CLIENT_CREATE_FAILED`, `READINESS_YDB_SCHEMA_READ_FAILED`, `READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE`, `READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION`, `READINESS_UNEXPECTED_SCHEMA_MIGRATION`, `READINESS_YDB_CLIENT_CLOSE_FAILED`, а для generic runtime wrapper — `READINESS_RUNTIME_CONFIG_INVALID` и `READINESS_RUNTIME_FAILED`.
 
 Отсутствующая/пустая function identity →
 

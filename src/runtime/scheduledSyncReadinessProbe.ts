@@ -1,9 +1,15 @@
 import { createCanonicalSourceDigest, type CanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
+import { FullSourceSnapshotError } from '../integration/google/fullSourceSnapshot.js';
 import {
   GoogleSheetsFullSnapshotReader,
+  GoogleSheetsFullSnapshotReaderError,
   type GoogleSheetsImmutableSnapshot,
 } from '../integration/google/googleSheetsFullSnapshotReader.js';
-import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integration/google/googleServiceAccountTokenProvider.js';
+import {
+  createGoogleServiceAccountSheetsAccessTokenProvider,
+  GoogleServiceAccountTokenProviderError,
+} from '../integration/google/googleServiceAccountTokenProvider.js';
+import { SourceValueCodecError } from '../integration/google/sourceValueCodec.js';
 import { readStatement, YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
 import {
   createYdbJsV6MetadataDataClient,
@@ -39,6 +45,15 @@ export interface ScheduledSyncReadinessRuntime {
 
 export type ScheduledSyncReadinessErrorCode =
   | 'CONFIG_INVALID'
+  | 'GOOGLE_SPREADSHEET_ID_INVALID'
+  | 'GOOGLE_CREDENTIALS_INVALID'
+  | 'GOOGLE_TOKEN_ACQUISITION_FAILED'
+  | 'GOOGLE_SHEETS_ACCESS_FAILED'
+  | 'GOOGLE_SHEETS_RESPONSE_INVALID'
+  | 'GOOGLE_SOURCE_METADATA_MISMATCH'
+  | 'GOOGLE_SOURCE_SHEET_MISSING'
+  | 'GOOGLE_SOURCE_SCHEMA_MISMATCH'
+  | 'GOOGLE_SOURCE_VALUE_UNSUPPORTED'
   | 'GOOGLE_SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
   | 'YDB_SCHEMA_READ_FAILED'
@@ -55,6 +70,52 @@ export class ScheduledSyncReadinessError extends Error {
     this.name = 'ScheduledSyncReadinessError';
     this.code = code;
   }
+}
+
+function classifyGoogleSourceFailure(error: unknown): ScheduledSyncReadinessError {
+  if (error instanceof GoogleServiceAccountTokenProviderError) {
+    switch (error.code) {
+      case 'INVALID_SERVICE_ACCOUNT_EMAIL':
+      case 'INVALID_SERVICE_ACCOUNT_PRIVATE_KEY':
+        return new ScheduledSyncReadinessError('GOOGLE_CREDENTIALS_INVALID');
+      case 'TOKEN_ACQUISITION_FAILED':
+      case 'INVALID_ACCESS_TOKEN':
+        return new ScheduledSyncReadinessError('GOOGLE_TOKEN_ACQUISITION_FAILED');
+    }
+  }
+
+  if (error instanceof GoogleSheetsFullSnapshotReaderError) {
+    switch (error.code) {
+      case 'INVALID_SPREADSHEET_ID':
+        return new ScheduledSyncReadinessError('GOOGLE_SPREADSHEET_ID_INVALID');
+      case 'INVALID_ACCESS_TOKEN':
+        return new ScheduledSyncReadinessError('GOOGLE_TOKEN_ACQUISITION_FAILED');
+      case 'GOOGLE_SHEETS_HTTP_ERROR':
+        return new ScheduledSyncReadinessError('GOOGLE_SHEETS_ACCESS_FAILED');
+      case 'GOOGLE_SHEETS_RESPONSE_INVALID':
+        return new ScheduledSyncReadinessError('GOOGLE_SHEETS_RESPONSE_INVALID');
+      case 'SOURCE_METADATA_MISMATCH':
+        return new ScheduledSyncReadinessError('GOOGLE_SOURCE_METADATA_MISMATCH');
+      case 'SOURCE_SHEET_MISSING':
+        return new ScheduledSyncReadinessError('GOOGLE_SOURCE_SHEET_MISSING');
+    }
+  }
+
+  if (error instanceof FullSourceSnapshotError) {
+    switch (error.code) {
+      case 'SOURCE_SCHEMA_MISMATCH':
+      case 'SOURCE_ROW_WIDTH_MISMATCH':
+        return new ScheduledSyncReadinessError('GOOGLE_SOURCE_SCHEMA_MISMATCH');
+      case 'INVALID_SNAPSHOT_DIGEST':
+        break;
+    }
+  }
+
+  if (error instanceof SourceValueCodecError) {
+    return new ScheduledSyncReadinessError('GOOGLE_SOURCE_VALUE_UNSUPPORTED');
+  }
+
+  return new ScheduledSyncReadinessError('GOOGLE_SOURCE_READ_FAILED');
 }
 
 interface SchemaMigrationEvidenceRow {
@@ -113,8 +174,8 @@ export async function runScheduledSyncReadinessProbe(
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
   try {
     await source.readFullSnapshotObservation();
-  } catch {
-    throw new ScheduledSyncReadinessError('GOOGLE_SOURCE_READ_FAILED');
+  } catch (error) {
+    throw classifyGoogleSourceFailure(error);
   }
 
   try {
@@ -169,8 +230,8 @@ export async function executeScheduledSyncReadinessProbe(
   let source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>;
   try {
     source = runtime.createSource(config, digest);
-  } catch {
-    throw new ScheduledSyncReadinessError('GOOGLE_SOURCE_READ_FAILED');
+  } catch (error) {
+    throw classifyGoogleSourceFailure(error);
   }
 
   let ydbClient: Readonly<ScheduledSyncReadinessYdbClient>;
