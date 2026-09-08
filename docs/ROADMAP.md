@@ -63,6 +63,8 @@ Rolling-wave dependency: candidate/evidence части initial bootstrap мог�
 
 ### Exit criteria
 
+R1 bootstrap/incremental `shadow/migration writes` в YDB являются частью shadow replication и не меняют authority: до CUTOVER Google остаётся единственной write authority.
+
 - `FAILED` run не меняет verified shadow;
 - минимум один полный real расчётный цикл;
 - Credit/Cash/Vika semantics сохранены при доказанном cleanup context;
@@ -160,7 +162,7 @@ Rolling-wave dependency: candidate/evidence части initial bootstrap мог�
 
 ## CUTOVER GATE — Stage D
 
-Production YDB writes разрешаются только после:
+YDB-authoritative product/Writer writes (`YDB_WRITE_ENABLED=true`) разрешаются только после:
 
 - нескольких доказанных real shadow cycles;
 - R3A outbox/idempotency/conflict proof;

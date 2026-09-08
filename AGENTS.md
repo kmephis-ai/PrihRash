@@ -58,7 +58,7 @@ Code, schemas, paths, identifiers, protocols — English.
 - `occurred_on` не заменяет `financial_period_id`; same-day close boundary требует explicit membership.
 - `WORKFLOW_TRANSFORM` требует доказанного close context, не только пары old→new.
 - `FAILED MigrationRun` не может изменить verified shadow.
-- Production YDB writes запрещены до CUTOVER GATE; Writer UX можно доказывать в test/private pilot namespace.
+- R1 shadow/migration writes в YDB разрешены только по `MIGRATION_CONTRACT` и не меняют authority: Google остаётся единственной write authority. YDB-authoritative product/Writer writes (`YDB_WRITE_ENABLED=true`) запрещены до CUTOVER GATE; Writer UX можно доказывать в test/private pilot namespace.
 - Reverse Google mirror после cutover обязан иметь stable canonical ID и не создавать re-import loop.
 - YDB schema меняй только versioned migration scripts.
 
