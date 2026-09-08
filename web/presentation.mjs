@@ -5,6 +5,7 @@ const PERIOD_QUALITIES = new Set(['EXPLICIT', 'DERIVED', 'LEGACY_AMBIGUOUS', 'UN
 const STATUSES = new Set(['POSTED', 'VOIDED']);
 const ANALYTICS_STATES = new Set(['INCLUDED', 'EXCLUDED']);
 const FLOW_KINDS = new Set(['OWN_FUNDS_TRANSFER', 'CREDIT_DRAW', 'CREDIT_REPAYMENT']);
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
 function invalidReaderResponse() {
   throw new Error('INVALID_READER_RESPONSE');
@@ -66,7 +67,16 @@ export function sanitizeReaderResponse(value) {
     invalidReaderResponse();
   }
   if (!Number.isSafeInteger(value.pageSize) || value.pageSize < 0) invalidReaderResponse();
-  if (!(value.nextCursor === null || typeof value.nextCursor === 'string')) invalidReaderResponse();
+  if (!(
+    value.nextCursor === null
+    || (
+      typeof value.nextCursor === 'string'
+      && value.nextCursor.length > 0
+      && value.nextCursor.length <= 4096
+      && value.nextCursor === value.nextCursor.trim()
+      && CURSOR_PATTERN.test(value.nextCursor)
+    )
+  )) invalidReaderResponse();
 
   return Object.freeze({
     apiVersion: 1,

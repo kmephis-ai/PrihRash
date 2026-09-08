@@ -8,10 +8,21 @@ const syncState = document.querySelector('[data-sync-state]');
 const typeFilter = document.querySelector('[data-filter-type]');
 const statusFilter = document.querySelector('[data-filter-status]');
 const resetFilters = document.querySelector('[data-reset-filters]');
+const loadMore = document.querySelector('[data-load-more]');
+const pageState = document.querySelector('[data-page-state]');
 const cache = createIndexedDbReaderCache();
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
+}
+
+function operationMarkup(items) {
+  return items.map((item) => `
+    <article class="operation-card">
+      <div class="operation-card__top"><strong>${escapeHtml(item.description)}</strong><span>${escapeHtml(item.amountLabel)}</span></div>
+      <div class="operation-card__meta">${escapeHtml(item.typeLabel)} · ${escapeHtml(item.dateLabel)}${item.meta ? ` · ${escapeHtml(item.meta)}` : ''}</div>
+      ${item.quality.length ? `<div class="badges">${item.quality.map((badge) => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
+    </article>`).join('');
 }
 
 function render(items) {
@@ -22,12 +33,13 @@ function render(items) {
     return;
   }
   state.hidden = true;
-  list.innerHTML = items.map((item) => `
-    <article class="operation-card">
-      <div class="operation-card__top"><strong>${escapeHtml(item.description)}</strong><span>${escapeHtml(item.amountLabel)}</span></div>
-      <div class="operation-card__meta">${escapeHtml(item.typeLabel)} · ${escapeHtml(item.dateLabel)}${item.meta ? ` · ${escapeHtml(item.meta)}` : ''}</div>
-      ${item.quality.length ? `<div class="badges">${item.quality.map((badge) => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
-    </article>`).join('');
+  list.innerHTML = operationMarkup(items);
+}
+
+function append(items) {
+  if (!items.length) return;
+  state.hidden = true;
+  list.insertAdjacentHTML('beforeend', operationMarkup(items));
 }
 
 function savedLabel(savedAt) {
@@ -76,8 +88,8 @@ function setStatus(status) {
   state.hidden = false;
 }
 
-async function fetchRecent(filters) {
-  const response = await fetch(buildRecentOperationsUrl(filters), {
+async function fetchRecent(filters, cursor = null) {
+  const response = await fetch(buildRecentOperationsUrl(filters, cursor), {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   });
@@ -92,7 +104,33 @@ function selectedFilters() {
   };
 }
 
-const view = createRecentOperationsView({ cache, fetchRecent, render, setStatus });
+function setPagination(status) {
+  pageState.textContent = '';
+  loadMore.hidden = status.kind === 'hidden';
+  loadMore.disabled = false;
+  loadMore.textContent = 'Загрузить ещё';
+  if (status.kind === 'ready') {
+    loadMore.hidden = false;
+    return;
+  }
+  if (status.kind === 'loading') {
+    loadMore.hidden = false;
+    loadMore.disabled = true;
+    loadMore.textContent = 'Загружаем…';
+    return;
+  }
+  if (status.kind === 'error') {
+    loadMore.hidden = false;
+    pageState.textContent = 'Не удалось загрузить ещё. Можно повторить.';
+    return;
+  }
+  if (status.kind === 'done') {
+    loadMore.hidden = true;
+    pageState.textContent = 'Больше операций нет.';
+  }
+}
+
+const view = createRecentOperationsView({ cache, fetchRecent, render, append, setStatus, setPagination });
 
 function applyFilters() {
   const filters = selectedFilters();
@@ -102,6 +140,7 @@ function applyFilters() {
 
 typeFilter.addEventListener('change', applyFilters);
 statusFilter.addEventListener('change', applyFilters);
+loadMore.addEventListener('click', () => { view.loadMore(); });
 resetFilters.addEventListener('click', () => {
   typeFilter.value = '';
   statusFilter.value = '';
