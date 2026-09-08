@@ -1,10 +1,13 @@
 import { sanitizeReaderResponse } from './presentation.mjs';
+import { sanitizeReaderFilterOptions } from './reader-filters.mjs';
 
 const DB_NAME = 'prihrash-reader';
 const DB_VERSION = 1;
 const STORE_NAME = 'cache';
 const CACHE_KEY = 'recent-operations-v1';
+const FILTER_OPTIONS_CACHE_KEY = 'reader-filter-options-v1';
 const CACHE_SCHEMA_VERSION = 1;
+const FILTER_OPTIONS_CACHE_SCHEMA_VERSION = 1;
 
 function validSavedAt(value) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -18,6 +21,25 @@ export function createReaderCacheRecord(response, savedAt) {
     savedAt,
     response: sanitizeReaderResponse(response),
   });
+}
+
+
+export function createReaderFilterOptionsCacheRecord(response, savedAt) {
+  if (!validSavedAt(savedAt)) throw new Error('INVALID_READER_FILTER_OPTIONS_CACHE');
+  return Object.freeze({
+    schemaVersion: FILTER_OPTIONS_CACHE_SCHEMA_VERSION,
+    apiVersion: 1,
+    savedAt,
+    response: sanitizeReaderFilterOptions(response),
+  });
+}
+
+export function parseReaderFilterOptionsCacheRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_READER_FILTER_OPTIONS_CACHE');
+  if (value.schemaVersion !== FILTER_OPTIONS_CACHE_SCHEMA_VERSION || value.apiVersion !== 1 || !validSavedAt(value.savedAt)) {
+    throw new Error('INVALID_READER_FILTER_OPTIONS_CACHE');
+  }
+  return createReaderFilterOptionsCacheRecord(value.response, value.savedAt);
 }
 
 export function parseReaderCacheRecord(value) {
@@ -57,7 +79,7 @@ function openDatabase(indexedDb) {
   });
 }
 
-export function createIndexedDbReaderCache(indexedDb = globalThis.indexedDB) {
+function createIndexedDbCache(indexedDb, { key, parseRecord, createRecord, readError, writeError, clearError }) {
   async function withStore(mode, action) {
     const db = await openDatabase(indexedDb);
     try {
@@ -76,16 +98,16 @@ export function createIndexedDbReaderCache(indexedDb = globalThis.indexedDB) {
     async read() {
       let raw;
       try {
-        raw = await withStore('readonly', (store) => requestResult(store.get(CACHE_KEY)));
+        raw = await withStore('readonly', (store) => requestResult(store.get(key)));
       } catch {
-        throw new Error('READER_CACHE_READ_FAILED');
+        throw new Error(readError);
       }
       if (raw === undefined) return null;
       try {
-        return parseReaderCacheRecord(raw);
+        return parseRecord(raw);
       } catch {
         try {
-          await withStore('readwrite', (store) => requestResult(store.delete(CACHE_KEY)));
+          await withStore('readwrite', (store) => requestResult(store.delete(key)));
         } catch {
           // A malformed cache is ignored even if cleanup cannot complete.
         }
@@ -94,20 +116,42 @@ export function createIndexedDbReaderCache(indexedDb = globalThis.indexedDB) {
     },
 
     async write(response, savedAt) {
-      const record = createReaderCacheRecord(response, savedAt);
+      const record = createRecord(response, savedAt);
       try {
-        await withStore('readwrite', (store) => requestResult(store.put(record, CACHE_KEY)));
+        await withStore('readwrite', (store) => requestResult(store.put(record, key)));
       } catch {
-        throw new Error('READER_CACHE_WRITE_FAILED');
+        throw new Error(writeError);
       }
     },
 
     async clear() {
       try {
-        await withStore('readwrite', (store) => requestResult(store.delete(CACHE_KEY)));
+        await withStore('readwrite', (store) => requestResult(store.delete(key)));
       } catch {
-        throw new Error('READER_CACHE_CLEAR_FAILED');
+        throw new Error(clearError);
       }
     },
+  });
+}
+
+export function createIndexedDbReaderCache(indexedDb = globalThis.indexedDB) {
+  return createIndexedDbCache(indexedDb, {
+    key: CACHE_KEY,
+    parseRecord: parseReaderCacheRecord,
+    createRecord: createReaderCacheRecord,
+    readError: 'READER_CACHE_READ_FAILED',
+    writeError: 'READER_CACHE_WRITE_FAILED',
+    clearError: 'READER_CACHE_CLEAR_FAILED',
+  });
+}
+
+export function createIndexedDbReaderFilterOptionsCache(indexedDb = globalThis.indexedDB) {
+  return createIndexedDbCache(indexedDb, {
+    key: FILTER_OPTIONS_CACHE_KEY,
+    parseRecord: parseReaderFilterOptionsCacheRecord,
+    createRecord: createReaderFilterOptionsCacheRecord,
+    readError: 'READER_FILTER_OPTIONS_CACHE_READ_FAILED',
+    writeError: 'READER_FILTER_OPTIONS_CACHE_WRITE_FAILED',
+    clearError: 'READER_FILTER_OPTIONS_CACHE_CLEAR_FAILED',
   });
 }

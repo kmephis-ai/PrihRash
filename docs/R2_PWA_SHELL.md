@@ -53,7 +53,11 @@ UI сериализует canonical enum values вместе с fixed `limit=50`
 - `Категория` → `categoryId`; category label визуально получает prefix `Расход ·` или `Доход ·`, потому что одинаковый label в разных category kind является допустимым;
 - browser принимает только canonical UUID и exact known response shape; source labels, cached-operation guessing и fuzzy mapping запрещены.
 
-Filter options загружаются отдельно через same-origin `GET /api/v1/reader/filter-options` и **не** сохраняются в IndexedDB/Cache Storage. До valid network response `Счёт/Категория` disabled. Если options path недоступен или malformed, existing recent Reader и `Тип/Статус` продолжают работать, а UI честно показывает `Счёт и категория недоступны`.
+Filter options загружаются отдельно через same-origin `GET /api/v1/reader/filter-options` и имеют собственный bounded local-first cache в том же IndexedDB store под единственным ключом `reader-filter-options-v1`. Cache record содержит только `schemaVersion=1`, `apiVersion=1`, `savedAt` и уже прошедший existing exact `sanitizeReaderFilterOptions()` response; operations, OAuth/session identifiers, sync status и provider identifiers туда не попадают.
+
+Warm path сначала повторно валидирует cached filter-options response и при успехе сразу включает `Счёт/Категория` со статусом `Локальные справочники … · обновляем…`. Затем independently выполняется background network refresh. Valid fresh response атомарно заменяет единственную reference запись и UI. Network/malformed failure при valid cache не выключает controls и явно помечает их `Офлайн · справочники от …`; без valid cache сохраняется честная деградация `Счёт и категория недоступны`. Malformed/unsupported persisted record не рендерится и удаляется best-effort, а malformed network evidence не уничтожает previous valid cache.
+
+Fresh canonical options всегда заменяют cache целиком: merge/alias/fuzzy reconciliation запрещены. Если выбранный ранее stable UUID отсутствует в fresh canonical response, соответствующий filter сбрасывается fail-closed до `Все счета`/`Все категории`, после чего Reader выполняет запрос уже без устаревшего UUID. Filter-result/history/pagination cache при этом не создаётся.
 
 ## Owner-facing freshness
 
@@ -90,6 +94,6 @@ Service Worker кэширует только shell assets. `/api/*` по-пре�
 
 ## Non-scope и следующий шаг
 
-Не входят hosting/provider deployment, reference-list cache, history/pagination cache, filter matrix cache, login screen, Writer/outbox и authority change.
+Не входят hosting/provider deployment, history/pagination cache, filter-result matrix cache, login screen, Writer/outbox и authority change.
 
 Следующая R2 boundary выбирается fresh discovery. OWNER-authenticated browser integration/provider deploy остаётся зависимым от canonical R1/auth provider gates; независимые UX-кандидаты выбираются только после fresh discovery.
