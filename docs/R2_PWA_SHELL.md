@@ -53,6 +53,16 @@ Filtered request является network-only browser view. Он проходи
 
 При сбросе всех filters приложение возвращается к canonical unfiltered local-first flow: валидный recent cache может быть показан сразу, затем выполняется background refresh. Generation guard запрещает более медленному старому request перерисовать UI после новой filter selection. Canonical unfiltered refresh может безопасно обновить только свой bounded cache даже если пользователь уже переключился на filtered view; его stale render/status при этом подавляются.
 
+## Keyset pagination
+
+После **успешного network first-page response** UI может показать `Загрузить ещё`, только если Reader API вернул non-null `nextCursor`. Cursor остаётся opaque: browser проверяет лишь безопасную transport shape, не декодирует sort keys и не создаёт cursor самостоятельно. Next-page request сохраняет exact current `type/status`, fixed `limit=50` и передаёт returned cursor в existing Reader API v1.
+
+Cached/offline first page сам по себе pagination не открывает, даже если сохранённый historical response содержит `nextCursor`: это не позволяет stale cursor выглядеть как свежая continuation boundary. Дополнительные страницы всегда network-only и никогда не читаются/не пишутся в bounded IndexedDB `recent-operations-v1`. Поэтому offline storage остаётся одной canonical first page, а не превращается в history cache.
+
+Valid additional page append-ится к уже видимым операциям только после existing fail-closed Reader response validation. Exact duplicate operation `id` относительно уже видимых items или внутри новой page считается inconsistent page: append не выполняется, предыдущие rows и cursor сохраняются для явного retry. Это exact identity guard, не fuzzy dedupe. `nextCursor=null` завершает paging.
+
+Load-more failure не очищает уже показанный список. Concurrent second click не создаёт второй page request. Смена filters/reset увеличивает generation, поэтому старый in-flight page response не может append-иться после новой selection. Отдельный pagination status не переопределяет first-page `Обновлено / Офлайн / Фильтр` status. Между несколькими HTTP pages нет snapshot transaction; этот S-unit не обещает frozen historical snapshot во время конкурентных source changes.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
@@ -63,4 +73,4 @@ Service Worker кэширует только shell assets. `/api/*` по-пре�
 
 Не входят hosting/provider deployment, history/pagination cache, filter matrix cache, login screen, Writer/outbox и authority change.
 
-Следующая R2 boundary выбирается fresh discovery. После basic type/status filters наиболее полезные кандидаты: OWNER-authenticated browser integration/provider deploy, account/category reference-list UX либо date-range UX — без расширения к production writes до соответствующих gates.
+Следующая R2 boundary выбирается fresh discovery. После local-first filters + keyset paging наиболее полезные кандидаты: OWNER-authenticated browser integration/provider deploy, account/category reference-list UX либо date-range UX — без расширения к production writes до соответствующих gates.

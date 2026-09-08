@@ -7,7 +7,14 @@ function isoNow(clock) {
   return date.toISOString();
 }
 
-export async function refreshRecentOperations({ cache, fetchRecent, render, setStatus, clock = () => new Date() }) {
+export async function refreshRecentOperations({
+  cache,
+  fetchRecent,
+  render,
+  setStatus,
+  onFreshResponse = () => {},
+  clock = () => new Date(),
+}) {
   let cached = null;
   try {
     cached = await cache.read();
@@ -34,6 +41,7 @@ export async function refreshRecentOperations({ cache, fetchRecent, render, setS
       render(items);
       setStatus({ kind: 'fresh-uncached', savedAt });
     }
+    onFreshResponse(safeResponse);
   } catch {
     if (cached) {
       setStatus({ kind: 'offline', savedAt: cached.savedAt });
