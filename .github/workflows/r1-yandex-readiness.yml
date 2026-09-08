@@ -22,7 +22,7 @@ jobs:
       LOCKBOX_SECRET_NAME: prihrash-r1-readiness
       OIDC_AUDIENCE: https://github.com/kmephis-ai
       OIDC_ISSUER: https://token.actions.githubusercontent.com
-      OIDC_SUBJECT: repo:kmephis-ai/PrihRash:ref:refs/heads/main
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_WIF_SERVICE_ACCOUNT_ID }}
 

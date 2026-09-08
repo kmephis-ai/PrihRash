@@ -7,7 +7,7 @@
 Provider execution transport для #302 — **GitHub Actions → GitHub OIDC → Yandex Cloud Workload Identity Federation (WIF)**. Long-lived Yandex authorized key/OAuth token в GitHub не используется.
 
 - Workflow запускается только вручную (`workflow_dispatch`) и только из canonical `main` repository `kmephis-ai/PrihRash`.
-- WIF federated credential должен принимать только GitHub subject `repo:kmephis-ai/PrihRash:ref:refs/heads/main`.
+- WIF federated credential должен принимать только immutable GitHub subject `repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main`. Репозиторий создан после GitHub cutoff 2026-07-15, поэтому legacy subject без owner/repository IDs для него не является canonical.
 - GitHub workflow получает только short-lived OIDC/JWT и обменивает его на short-lived Yandex IAM token. IAM token маскируется и живёт только в ephemeral runner environment.
 - Google spreadsheet ID, Google service-account email/private key, YDB connection string и Lockbox payload **никогда не передаются в GitHub**. Они хранятся только в Yandex Lockbox и инжектируются в Function server-side.
 - В GitHub Actions secrets допустимы только два non-credential provider locator-а, которые нужны до Yandex authentication: `YC_R1_FOLDER_ID` и `YC_R1_WIF_SERVICE_ACCOUNT_ID`. Они не выводятся в logs/evidence.
@@ -107,7 +107,7 @@ audience: https://github.com/kmephis-ai
 Создать federated credential для `prihrash-github-readiness` с exact external subject:
 
 ```text
-repo:kmephis-ai/PrihRash:ref:refs/heads/main
+repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
 ```
 
 Не добавлять wildcard repository/branch subjects.
