@@ -75,16 +75,30 @@ Yandex ID OAuth для входа пользователя в сторонний
 
 С 1 июня 2026 Yandex Cloud IAM больше не принимает новые Yandex ID OAuth tokens как способ Cloud authentication. PrihRash не использует пользовательский Yandex ID OAuth token для доступа к Yandex Cloud resources: Cloud Functions/YDB/API Gateway используют собственные provider identities/service accounts по соответствующим contracts.
 
+## Callback/session application boundary
+
+`yandexOwnerOAuthFlow.ts` фиксирует framework-neutral lifecycle до HTTP/provider deployment:
+
+- begin-login создаёт transaction-specific 256-bit `state` и PKCE verifier; используется только `S256`;
+- pending transaction хранится через `YandexOwnerOAuthTransactionStore` и callback atomically `consume` её до token exchange; повторный callback fail-closed;
+- transaction lifetime не превышает documented Yandex authorization-code lifetime 10 минут;
+- `YandexOwnerOAuthProvider` выполняет server-side code exchange с exact stored `codeVerifier`, затем `/info`; OAuth token не передаётся в session issuer;
+- `/info` обязательно проходит `authorizeYandexOwnerIdentity()`;
+- только после OWNER PASS `OwnerSessionIssuer` получает `{ role: OWNER, issuedAtMs, expiresAtMs }`; session TTL ограничен 5..60 минутами;
+- logout использует explicit `OwnerSessionRevoker`; concrete persistence пока не выбрана;
+- callback/provider/storage/runtime failures возвращают только value-free safe codes.
+
+Authorization redirect URL, callback code/state и session handle являются runtime-sensitive transport values и не считаются log-safe evidence.
+
 ## Следующий S-unit
 
-После этого identity boundary следующий минимальный auth item должен определить backend callback/session lifecycle:
+Следующий минимальный transport item должен реализовать поверх этой application boundary:
 
-- state + PKCE verification;
-- server-side code exchange;
-- `/info` request через `Authorization` header;
-- вызов этого exact OWNER verifier;
-- secure session с коротким понятным lifetime;
-- logout/revocation behavior;
-- no OAuth token persistence в browser storage.
+- HTTP begin/callback/logout routes;
+- server-side transaction/session persistence, совместимую с Cloud Functions runtime (не process-local memory);
+- secure `HttpOnly; Secure` session cookie и explicit `SameSite`/CSRF policy;
+- удаление browser cookie при logout вместе с `OwnerSessionRevoker`;
+- реальные Yandex OAuth network adapter semantics без публикации client secret/token/provider identifiers;
+- no OAuth/session token persistence в IndexedDB/localStorage.
 
-До этого момента PWA/Reader transport не считается production-authenticated.
+До этого transport item PWA/Reader transport не считается production-authenticated.
