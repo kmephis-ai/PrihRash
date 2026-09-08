@@ -55,6 +55,19 @@ UI сериализует canonical enum values вместе с fixed `limit=50`
 
 Filter options загружаются отдельно через same-origin `GET /api/v1/reader/filter-options` и **не** сохраняются в IndexedDB/Cache Storage. До valid network response `Счёт/Категория` disabled. Если options path недоступен или malformed, existing recent Reader и `Тип/Статус` продолжают работать, а UI честно показывает `Счёт и категория недоступны`.
 
+## Owner-facing freshness
+
+Shell независимо от recent operations и filter options выполняет network-only `GET /api/v1/reader/sync-status`. Browser принимает только exact v1 shape из `R2_READER_API.md`: known `apiVersion/state`, согласованную пару `state/hasIncompleteRun` и canonical UTC timestamp для `lastCommittedAt`. Unknown keys, malformed timestamp или inconsistent state fail-closed до display.
+
+UI показывает:
+
+- `READY` → `Синхронизация: <дата/время>`;
+- `DEGRADED` → явное `требуется проверка` + время последней успешной committed копии;
+- `UNAVAILABLE` → `подтверждённой копии ещё нет`;
+- network/HTTP/malformed failure → `Синхронизация: статус недоступен`.
+
+Sync status не читается и не пишется через IndexedDB, `localStorage` или Service Worker Cache Storage. Его failure не очищает cached recent operations, не блокирует basic filters и не подменяет operation freshness status `Обновлено / Офлайн`. Service Worker, как и раньше, полностью исключает `/api/*`; новый browser validator кэшируется только как shell asset.
+
 Filtered request является network-only browser view. Он проходит ту же fail-closed Reader response validation, но **не** читает и не пишет IndexedDB `recent-operations-v1`. Поэтому offline filtered view никогда не подменяется unfiltered cache и не выглядит как доказанный результат фильтра. При ошибке показывается отдельный safe filtered-error state.
 
 При сбросе всех filters приложение возвращается к canonical unfiltered local-first flow: валидный recent cache может быть показан сразу, затем выполняется background refresh. Generation guard запрещает более медленному старому request перерисовать UI после новой filter selection. Canonical unfiltered refresh может безопасно обновить только свой bounded cache даже если пользователь уже переключился на filtered view; его stale render/status при этом подавляются.
