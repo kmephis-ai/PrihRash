@@ -1,4 +1,4 @@
-const CACHE = 'prihrash-shell-v2';
+const CACHE = 'prihrash-shell-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -6,7 +6,9 @@ const SHELL = [
   '/app.mjs',
   '/presentation.mjs',
   '/reader-cache.mjs',
+  '/reader-filters.mjs',
   '/reader-load.mjs',
+  '/reader-view.mjs',
   '/manifest.webmanifest',
 ];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL))));

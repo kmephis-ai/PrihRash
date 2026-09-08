@@ -40,6 +40,19 @@ Network/HTTP/malformed-response failure:
 
 Cache не хранит OAuth/session identifiers. OWNER session остаётся HttpOnly cookie boundary из `R2_OWNER_AUTH.md`.
 
+## Basic filters
+
+Экран `Операции` поддерживает минимальные filters из уже существующего Reader API v1:
+
+- `type`: `EXPENSE | INCOME | TRANSFER`;
+- `status`: `POSTED | VOIDED`.
+
+UI сериализует только эти canonical enum values вместе с fixed `limit=50`. Account/category filter controls пока не показываются: отдельного reference-list UX contract для их выбора ещё нет. Date-range, free-text и paging UI также не добавляются этим шагом.
+
+Filtered request является network-only browser view. Он проходит ту же fail-closed Reader response validation, но **не** читает и не пишет IndexedDB `recent-operations-v1`. Поэтому offline filtered view никогда не подменяется unfiltered cache и не выглядит как доказанный результат фильтра. При ошибке показывается отдельный safe filtered-error state.
+
+При сбросе всех filters приложение возвращается к canonical unfiltered local-first flow: валидный recent cache может быть показан сразу, затем выполняется background refresh. Generation guard запрещает более медленному старому request перерисовать UI после новой filter selection. Canonical unfiltered refresh может безопасно обновить только свой bounded cache даже если пользователь уже переключился на filtered view; его stale render/status при этом подавляются.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
@@ -50,4 +63,4 @@ Service Worker кэширует только shell assets. `/api/*` по-пре�
 
 Не входят hosting/provider deployment, history/pagination cache, filter matrix cache, login screen, Writer/outbox и authority change.
 
-Следующая R2 boundary выбирается fresh discovery. Наиболее полезные кандидаты после local-first read: OWNER-authenticated browser integration/provider deploy либо минимальные Reader filters/date-range UX — без расширения к production writes до соответствующих gates.
+Следующая R2 boundary выбирается fresh discovery. После basic type/status filters наиболее полезные кандидаты: OWNER-authenticated browser integration/provider deploy, account/category reference-list UX либо date-range UX — без расширения к production writes до соответствующих gates.
