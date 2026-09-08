@@ -46,6 +46,21 @@ function safeInternalCode(value) {
   return typeof value === 'string' && /^[A-Z0-9_]+$/u.test(value) ? value : null;
 }
 
+function safeProviderIssueCodes(issues) {
+  const codes = [];
+  const visit = (items) => {
+    if (!Array.isArray(items)) return;
+    for (const issue of items) {
+      if (codes.length >= 16) return;
+      if (Number.isSafeInteger(issue?.issueCode)) codes.push(issue.issueCode);
+      visit(issue?.issues);
+      if (codes.length >= 16) return;
+    }
+  };
+  visit(issues);
+  return Object.freeze(codes);
+}
+
 function safeStageError(error, stage) {
   if (typeof error?.stage === 'string' && safeInternalCode(error?.code) !== null) return error;
   const wrapped = new Error(`TEST_PRIVATE_${stage}_FAILED`, { cause: error });
@@ -55,6 +70,7 @@ function safeStageError(error, stage) {
   wrapped.providerStatus = Number.isSafeInteger(error?.status)
     ? error.status
     : (Number.isSafeInteger(error?.code) ? error.code : null);
+  wrapped.providerIssueCodes = safeProviderIssueCodes(error?.issues);
   return wrapped;
 }
 
@@ -579,6 +595,7 @@ main().catch((error) => {
     stage: typeof error?.stage === 'string' ? error.stage : null,
     innerCode: safeInternalCode(error?.innerCode),
     providerStatus: Number.isSafeInteger(error?.providerStatus) ? error.providerStatus : null,
+    providerIssueCodes: Array.isArray(error?.providerIssueCodes) ? error.providerIssueCodes : [],
   });
   process.exitCode = 1;
 });
