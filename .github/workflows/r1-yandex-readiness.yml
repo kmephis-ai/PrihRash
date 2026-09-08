@@ -21,6 +21,8 @@ jobs:
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-backend
       LOCKBOX_SECRET_NAME: prihrash-r1-readiness
       OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai/PrihRash:ref:refs/heads/main
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_WIF_SERVICE_ACCOUNT_ID }}
 
@@ -99,6 +101,36 @@ jobs:
           fi
           echo "::add-mask::${oidc_token}"
 
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *)
+              echo 'READINESS_OIDC_CLAIMS_INVALID'
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>"$tmp/claims.err"; then
+            echo 'READINESS_OIDC_CLAIMS_INVALID'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_ISSUER" '.iss == $expected' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'READINESS_OIDC_ISSUER_MISMATCH'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_AUDIENCE" '(.aud == $expected) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $expected)' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'READINESS_OIDC_AUDIENCE_MISMATCH'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_SUBJECT" '.sub == $expected' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'READINESS_OIDC_SUBJECT_MISMATCH'
+            exit 1
+          fi
+
           if ! iam_status="$(curl --silent --show-error \
             --output "$tmp/iam.json" \
             --write-out '%{http_code}' \
@@ -116,7 +148,15 @@ jobs:
           case "$iam_status" in
             2??) ;;
             *)
-              echo 'READINESS_WIF_EXCHANGE_FAILED'
+              wif_error="$(jq -r '.error // empty' "$tmp/iam.json" 2>/dev/null || true)"
+              case "$wif_error" in
+                invalid_request) echo 'READINESS_WIF_INVALID_REQUEST' ;;
+                invalid_grant) echo 'READINESS_WIF_INVALID_GRANT' ;;
+                invalid_target) echo 'READINESS_WIF_INVALID_TARGET' ;;
+                unauthorized_client) echo 'READINESS_WIF_UNAUTHORIZED_CLIENT' ;;
+                unsupported_grant_type) echo 'READINESS_WIF_UNSUPPORTED_GRANT_TYPE' ;;
+                *) echo 'READINESS_WIF_EXCHANGE_FAILED' ;;
+              esac
               exit 1
               ;;
           esac
