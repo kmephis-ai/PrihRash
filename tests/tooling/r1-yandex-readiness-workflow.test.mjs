@@ -25,6 +25,12 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /auth\.yandex\.cloud\/oauth\/token/);
   assert.match(workflow, /token-exchange/);
   assert.match(workflow, /YC_R1_WIF_SERVICE_ACCOUNT_ID/);
+  assert.match(workflow, /READINESS_OIDC_REQUEST_FAILED/);
+  assert.match(workflow, /READINESS_WIF_EXCHANGE_FAILED/);
+  assert.match(workflow, /--output "\$tmp\/oidc\.json"/);
+  assert.match(workflow, /--output "\$tmp\/iam\.json"/);
+  assert.match(workflow, /::add-mask::\$\{oidc_token\}/);
+  assert.doesNotMatch(workflow, /cat .*\/oidc\.json|cat .*\/iam\.json/);
   assert.doesNotMatch(workflow, /secrets\.[A-Z0-9_]*(YC_SA_JSON|PRIVATE_KEY|AUTHORIZED_KEY)/i);
 
   assert.match(workflow, /index\.readinessHandler/);
