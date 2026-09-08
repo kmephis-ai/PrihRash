@@ -1,0 +1,47 @@
+name: Publish numeric YDB query diagnostics
+
+on:
+  push:
+    branches:
+      - transport/publish-285g
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 44532df4752ee2a3037e9694fa95320548c851e7
+  TARGET_BRANCH: fix/r1-test-private-query-status-diagnostics
+  EXPECTED_SCRIPT_BLOB: bae7119511027e13970812e3b199ec3a1f8c8514
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic diagnostic transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/test-private-controlled-rebuild-smoke.mjs')
+          s = p.read_text()
+          old = "  wrapped.providerStatus = Number.isSafeInteger(error?.status) ? error.status : null;\n"
+          new = "  wrapped.providerStatus = Number.isSafeInteger(error?.status)\n    ? error.status\n    : (Number.isSafeInteger(error?.code) ? error.code : null);\n"
+          if old not in s:
+              raise SystemExit('EXPECTED_SOURCE_FRAGMENT_MISSING')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          test "$(git hash-object scripts/test-private-controlled-rebuild-smoke.mjs)" = "${EXPECTED_SCRIPT_BLOB}"
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs
+          git commit -m 'R1: expose numeric YDB query status'
+          git push origin "HEAD:${TARGET_BRANCH}"
