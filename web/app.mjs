@@ -1,4 +1,5 @@
 import { createIndexedDbReaderCache, createIndexedDbReaderFilterOptionsCache } from './reader-cache.mjs';
+import { operationCardsMarkup, operationTableRowsMarkup } from './operation-markup.mjs';
 import {
   buildRecentOperationsUrl,
   categoryOptionLabel,
@@ -9,7 +10,8 @@ import { createReaderFilterOptionsView, reconcileReaderFilterSelection } from '.
 import { createRecentOperationsView } from './reader-view.mjs';
 import { formatReaderSyncStatus, sanitizeReaderSyncStatus } from './reader-sync-status.mjs';
 
-const list = document.querySelector('[data-operations]');
+const cardList = document.querySelector('[data-operations-cards]');
+const tableBody = document.querySelector('[data-operations-table]');
 const state = document.querySelector('[data-state]');
 const syncState = document.querySelector('[data-sync-state]');
 const shadowSyncStatus = document.querySelector('[data-shadow-sync-status]');
@@ -24,34 +26,24 @@ const pageState = document.querySelector('[data-page-state]');
 const cache = createIndexedDbReaderCache();
 const filterOptionsCache = createIndexedDbReaderFilterOptionsCache();
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/gu, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char]);
-}
-
-function operationMarkup(items) {
-  return items.map((item) => `
-    <article class="operation-card">
-      <div class="operation-card__top"><strong>${escapeHtml(item.description)}</strong><span>${escapeHtml(item.amountLabel)}</span></div>
-      <div class="operation-card__meta">${escapeHtml(item.typeLabel)} · ${escapeHtml(item.dateLabel)}${item.meta ? ` · ${escapeHtml(item.meta)}` : ''}</div>
-      ${item.quality.length ? `<div class="badges">${item.quality.map((badge) => `<span>${escapeHtml(badge)}</span>`).join('')}</div>` : ''}
-    </article>`).join('');
-}
-
 function render(items) {
-  list.innerHTML = '';
+  cardList.innerHTML = '';
+  tableBody.innerHTML = '';
   if (!items.length) {
     state.textContent = 'Операций пока нет.';
     state.hidden = false;
     return;
   }
   state.hidden = true;
-  list.innerHTML = operationMarkup(items);
+  cardList.innerHTML = operationCardsMarkup(items);
+  tableBody.innerHTML = operationTableRowsMarkup(items);
 }
 
 function append(items) {
   if (!items.length) return;
   state.hidden = true;
-  list.insertAdjacentHTML('beforeend', operationMarkup(items));
+  cardList.insertAdjacentHTML('beforeend', operationCardsMarkup(items));
+  tableBody.insertAdjacentHTML('beforeend', operationTableRowsMarkup(items));
 }
 
 function savedLabel(savedAt) {
