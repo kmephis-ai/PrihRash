@@ -1,5 +1,10 @@
 import { createIndexedDbReaderCache } from './reader-cache.mjs';
-import { buildRecentOperationsUrl, hasActiveReaderFilters } from './reader-filters.mjs';
+import {
+  buildRecentOperationsUrl,
+  categoryOptionLabel,
+  hasActiveReaderFilters,
+  sanitizeReaderFilterOptions,
+} from './reader-filters.mjs';
 import { createRecentOperationsView } from './reader-view.mjs';
 
 const list = document.querySelector('[data-operations]');
@@ -7,6 +12,9 @@ const state = document.querySelector('[data-state]');
 const syncState = document.querySelector('[data-sync-state]');
 const typeFilter = document.querySelector('[data-filter-type]');
 const statusFilter = document.querySelector('[data-filter-status]');
+const accountFilter = document.querySelector('[data-filter-account]');
+const categoryFilter = document.querySelector('[data-filter-category]');
+const filterOptionsState = document.querySelector('[data-filter-options-state]');
 const resetFilters = document.querySelector('[data-reset-filters]');
 const loadMore = document.querySelector('[data-load-more]');
 const pageState = document.querySelector('[data-page-state]');
@@ -101,6 +109,8 @@ function selectedFilters() {
   return {
     type: typeFilter.value || null,
     status: statusFilter.value || null,
+    accountId: accountFilter.value || null,
+    categoryId: categoryFilter.value || null,
   };
 }
 
@@ -140,12 +150,44 @@ function applyFilters() {
 
 typeFilter.addEventListener('change', applyFilters);
 statusFilter.addEventListener('change', applyFilters);
+accountFilter.addEventListener('change', applyFilters);
+categoryFilter.addEventListener('change', applyFilters);
 loadMore.addEventListener('click', () => { view.loadMore(); });
 resetFilters.addEventListener('click', () => {
   typeFilter.value = '';
   statusFilter.value = '';
+  accountFilter.value = '';
+  categoryFilter.value = '';
   applyFilters();
 });
 
+
+async function loadFilterOptions() {
+  filterOptionsState.textContent = 'Счёт и категория · загрузка…';
+  try {
+    const response = await fetch('/api/v1/reader/filter-options', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error('REQUEST_FAILED');
+    const safe = sanitizeReaderFilterOptions(await response.json());
+
+    for (const option of safe.accounts) {
+      accountFilter.add(new Option(option.label, option.id));
+    }
+    for (const option of safe.categories) {
+      categoryFilter.add(new Option(categoryOptionLabel(option), option.id));
+    }
+    accountFilter.disabled = false;
+    categoryFilter.disabled = false;
+    filterOptionsState.textContent = '';
+  } catch {
+    accountFilter.disabled = true;
+    categoryFilter.disabled = true;
+    filterOptionsState.textContent = 'Счёт и категория недоступны';
+  }
+}
+
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+loadFilterOptions();
 applyFilters();

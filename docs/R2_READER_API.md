@@ -7,8 +7,8 @@
 Application boundary не является HTTP server. Будущий Yandex/provider handler обязан только:
 
 1. доказать `OWNER` auth;
-2. преобразовать transport query parameters в `ReaderApiQuery`;
-3. вызвать `executeReaderRecentOperationsApiRequest()`;
+2. для recent operations преобразовать transport query parameters в `ReaderApiQuery`;
+3. вызвать соответствующий application handler: `executeReaderRecentOperationsApiRequest()` или `executeReaderFilterOptionsApiRequest()`;
 4. сериализовать versioned response;
 5. безопасно отобразить transport/provider errors без private payload.
 
@@ -51,6 +51,32 @@ Unknown parameter, массив/duplicate-like значение, blank value, ma
 - `recordGranularity`, `datePrecision`, `aggregatePeriodMonth`, `periodAssignmentQuality` обязательны для честного отображения coarse/legacy history;
 - account/category/member представлены stable id + canonical display label;
 - malformed/orphaned provider evidence fail-closed через существующий Reader/`validateTransaction()` path.
+
+## Filter options v1
+
+Чтобы browser мог безопасно выбрать уже поддерживаемые `accountId/categoryId`, Reader application layer предоставляет отдельный read-only contract `executeReaderFilterOptionsApiRequest()` без query parameters:
+
+```text
+{
+  apiVersion: 1,
+  accounts: [{ id, label }],
+  categories: [{ id, label, kind }]
+}
+```
+
+Этот path использует ту же verified-shadow admission boundary до чтения canonical references. Он не читает reference-only Google sheets и не создаёт alias/mapping engine.
+
+Правила evidence:
+
+- account: canonical UUID + nonblank canonical `name` + exact `currency=RUB`;
+- category: canonical UUID + nonblank canonical `name` + `kind=EXPENSE|INCOME`;
+- `status` намеренно не используется как visibility predicate: historical/inactive reference может оставаться нужным для фильтрации существующей истории;
+- exact duplicate account display label считается ambiguous human choice и fail-closed;
+- exact duplicate category `(kind,label)` также fail-closed; category одинакового label в разных kind допустима и UI обязан различать kind;
+- никакого fuzzy merge/dedupe/normalized alias; malformed/non-RUB/unknown-kind evidence не попадает в response;
+- deterministic order: accounts `label,id`, categories `kind,label,id`.
+
+Provider/transport wiring этого contract остаётся отдельным item после разрешённых auth/provider gates.
 
 ## Paging
 

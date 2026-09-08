@@ -47,7 +47,13 @@ Cache не хранит OAuth/session identifiers. OWNER session остаётс�
 - `type`: `EXPENSE | INCOME | TRANSFER`;
 - `status`: `POSTED | VOIDED`.
 
-UI сериализует только эти canonical enum values вместе с fixed `limit=50`. Account/category filter controls пока не показываются: отдельного reference-list UX contract для их выбора ещё нет. Date-range, free-text и paging UI также не добавляются этим шагом.
+UI сериализует canonical enum values вместе с fixed `limit=50`. Дополнительно account/category controls используют stable UUID из Reader filter-options v1 contract:
+
+- `Счёт` → `accountId`;
+- `Категория` → `categoryId`; category label визуально получает prefix `Расход ·` или `Доход ·`, потому что одинаковый label в разных category kind является допустимым;
+- browser принимает только canonical UUID и exact known response shape; source labels, cached-operation guessing и fuzzy mapping запрещены.
+
+Filter options загружаются отдельно через same-origin `GET /api/v1/reader/filter-options` и **не** сохраняются в IndexedDB/Cache Storage. До valid network response `Счёт/Категория` disabled. Если options path недоступен или malformed, existing recent Reader и `Тип/Статус` продолжают работать, а UI честно показывает `Счёт и категория недоступны`.
 
 Filtered request является network-only browser view. Он проходит ту же fail-closed Reader response validation, но **не** читает и не пишет IndexedDB `recent-operations-v1`. Поэтому offline filtered view никогда не подменяется unfiltered cache и не выглядит как доказанный результат фильтра. При ошибке показывается отдельный safe filtered-error state.
 
@@ -55,7 +61,7 @@ Filtered request является network-only browser view. Он проходи
 
 ## Keyset pagination
 
-После **успешного network first-page response** UI может показать `Загрузить ещё`, только если Reader API вернул non-null `nextCursor`. Cursor остаётся opaque: browser проверяет лишь безопасную transport shape, не декодирует sort keys и не создаёт cursor самостоятельно. Next-page request сохраняет exact current `type/status`, fixed `limit=50` и передаёт returned cursor в existing Reader API v1.
+После **успешного network first-page response** UI может показать `Загрузить ещё`, только если Reader API вернул non-null `nextCursor`. Cursor остаётся opaque: browser проверяет лишь безопасную transport shape, не декодирует sort keys и не создаёт cursor самостоятельно. Next-page request сохраняет exact current `type/status/accountId/categoryId`, fixed `limit=50` и передаёт returned cursor в existing Reader API v1.
 
 Cached/offline first page сам по себе pagination не открывает, даже если сохранённый historical response содержит `nextCursor`: это не позволяет stale cursor выглядеть как свежая continuation boundary. Дополнительные страницы всегда network-only и никогда не читаются/не пишутся в bounded IndexedDB `recent-operations-v1`. Поэтому offline storage остаётся одной canonical first page, а не превращается в history cache.
 
@@ -71,6 +77,6 @@ Service Worker кэширует только shell assets. `/api/*` по-пре�
 
 ## Non-scope и следующий шаг
 
-Не входят hosting/provider deployment, history/pagination cache, filter matrix cache, login screen, Writer/outbox и authority change.
+Не входят hosting/provider deployment, reference-list cache, history/pagination cache, filter matrix cache, login screen, Writer/outbox и authority change.
 
-Следующая R2 boundary выбирается fresh discovery. После local-first filters + keyset paging наиболее полезные кандидаты: OWNER-authenticated browser integration/provider deploy, account/category reference-list UX либо date-range UX — без расширения к production writes до соответствующих gates.
+Следующая R2 boundary выбирается fresh discovery. OWNER-authenticated browser integration/provider deploy остаётся зависимым от canonical R1/auth provider gates; независимые UX-кандидаты выбираются только после fresh discovery.
