@@ -40,7 +40,7 @@ jobs:
           node-version: '22'
 
       - name: Install repository dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Install TEST_PRIVATE runtime-only YDB helpers
         run: npm install --no-save --ignore-scripts --no-audit --no-fund @ydbjs/query@6.3.0 @ydbjs/auth@6.3.1 @ydbjs/auth-yandex-cloud@0.2.0 @ydbjs/value@6.0.8
