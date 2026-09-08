@@ -6,6 +6,7 @@ name: TEST_PRIVATE controlled rebuild smoke
 # Harness cleanup/diagnostics fix merged; rerun trigger 4.
 # Create-case substage evidence added; rerun trigger 5.
 # Explicit YDB Uuid binding added; rerun trigger 6.
+# Privacy-safe provider stage diagnostics added; rerun trigger 7.
 on:
   workflow_dispatch:
   push:
