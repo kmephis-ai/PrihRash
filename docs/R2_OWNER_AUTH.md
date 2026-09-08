@@ -6,7 +6,7 @@ Initial production role остаётся только `OWNER`. `MEMBER` не а�
 
 Для входа пользователя PrihRash использует **backend-mediated Yandex ID OAuth authorization-code flow**. OAuth token Яндекс ID остаётся на backend и не становится Reader API credential, не хранится в IndexedDB/localStorage и не передаётся PWA как долгоживущий bearer token.
 
-Минимальная последовательность будущего transport item:
+Canonical browser-facing auth sequence:
 
 ```text
 PWA
@@ -18,7 +18,7 @@ PWA
 → OWNER Reader API
 ```
 
-Этот документ фиксирует только identity semantics. HTTP routes, session cookie/token format, CSRF handling и provider deployment являются следующими отдельными S-unit.
+Документ фиксирует identity, application-flow и transport semantics. Concrete durable persistence и provider deployment остаются отдельными S-unit.
 
 ## Почему не API Gateway JWT authorizer напрямую
 
@@ -90,15 +90,50 @@ Yandex ID OAuth для входа пользователя в сторонний
 
 Authorization redirect URL, callback code/state и session handle являются runtime-sensitive transport values и не считаются log-safe evidence.
 
-## Следующий S-unit
+## Browser transport boundary
 
-Следующий минимальный transport item должен реализовать поверх этой application boundary:
+Browser-facing OWNER auth использует только Yandex API Gateway → private Cloud Function integration с `payload_format_version: 2.0`. Direct HTTPS URL Cloud Functions не является допустимым auth ingress: Cloud Functions фильтрует входящий `Cookie`, поэтому такой transport не может корректно поддерживать server-side browser session.
 
-- HTTP begin/callback/logout routes;
-- server-side transaction/session persistence, совместимую с Cloud Functions runtime (не process-local memory);
-- secure `HttpOnly; Secure` session cookie и explicit `SameSite`/CSRF policy;
-- удаление browser cookie при logout вместе с `OwnerSessionRevoker`;
-- реальные Yandex OAuth network adapter semantics без публикации client secret/token/provider identifiers;
-- no OAuth/session token persistence в IndexedDB/localStorage.
+`yandexOwnerAuthTransport.ts` принимает только API Gateway v2 event с Yandex `requestContext.apiGateway` marker и exact routes:
 
-До этого transport item PWA/Reader transport не считается production-authenticated.
+```text
+GET  /auth/yandex/start
+GET  /auth/yandex/callback
+POST /auth/logout
+```
+
+Transport rules:
+
+- start вызывает canonical `beginYandexOwnerLogin()` и делает redirect на Yandex OAuth;
+- callback передаёт application layer только `state`, `code` или `error`; никакие дополнительные query-поля не расширяют contract;
+- после OWNER PASS opaque session handle кодируется только как cookie-safe base64url и выдаётся host-only cookie `__Host-prihrash_session`;
+- cookie имеет `HttpOnly; Secure; Path=/; SameSite=Lax`, bounded `Max-Age` из exact session expiry и не имеет `Domain`;
+- callback URI обязан exact-match `appOrigin + /auth/yandex/callback`;
+- logout разрешён только `POST`, требует exact HTTPS `Origin == appOrigin`, вызывает `OwnerSessionRevoker` и после успешного revoke очищает cookie;
+- malformed/non-v2/direct-function transport fail-closed до auth/provider mutations;
+- auth responses используют `Cache-Control: no-store` и не отражают callback code/state, OAuth token, session handle, `client_id`, `psuid` или provider error body.
+
+`yandexOAuthHttpProvider.ts` является concrete Yandex network adapter:
+
+- authorization code обменивается server-side через Yandex `/token`;
+- при PKCE передаётся exact stored `code_verifier`; `client_secret` не требуется и не добавляется в этот flow;
+- `/info` вызывается только через `Authorization: OAuth <token>`; token не помещается в URL/query;
+- access/refresh token не возвращается transport/session layer; provider failures collapse в value-free error.
+
+API Gateway должен вызывать private Function через отдельную provider identity/service account. Это provider deployment requirement, а не browser credential.
+
+## Persistence boundary и следующий S-unit
+
+`YandexOwnerOAuthTransactionStore`, `OwnerSessionIssuer` и `OwnerSessionRevoker` остаются injected durable ports. Process-local memory для них запрещён в production Cloud Functions runtime. До concrete durable implementation и provider deployment PWA/Reader **не** считается production-authenticated.
+
+R1 readiness сейчас требует financial `schema_migrations` ровно до version `2` и fail-closed отклоняет unexpected versions. Поэтому R2 auth transport не добавляет migration `3`, auth tables или иной schema mutation в этот S-unit и не обходит R1 #302.
+
+Следующий минимальный S-unit должен выбрать и доказать concrete durable transaction/session persistence lifecycle так, чтобы:
+
+- one-time transaction `consume` оставался atomic;
+- sessions имели server-enforced expiry и revoke;
+- auth persistence не создавала конфликт с canonical financial migration/readiness contract;
+- real OAuth/session identifiers не попадали в GitHub evidence;
+- после этого отдельный provider item мог связать API Gateway/private Function/custom domain/runtime secrets без изменения OWNER identity semantics.
+
+OAuth/session tokens по-прежнему не сохраняются в IndexedDB/localStorage.
