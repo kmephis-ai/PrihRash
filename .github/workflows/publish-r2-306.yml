@@ -1,0 +1,46 @@
+name: Publish R2 306 exact tree
+
+on:
+  push:
+    branches:
+      - transport/local-mirror-r2-306
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: e60ad04720ab949b9c1b93b4a7dd8a71811aad63
+  TARGET_BRANCH: feature/r2-owner-oauth-flow
+  EXPECTED_TREE: baccd57adc7b31da1357a057243ca670bdd0f717
+  PATCH_GZIP_SHA256: d6a8c4cad0afbb61379e66ee675812ff25a67844cdd5c4244133537153278556
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply verified patch to exact base and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp tools/transport/r2-306.patch.gz /tmp/r2-306.patch.gz
+          test "$(sha256sum /tmp/r2-306.patch.gz | awk '{print $1}')" = "${PATCH_GZIP_SHA256}"
+          git fetch origin "refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          test "$(git rev-parse "refs/remotes/origin/${TARGET_BRANCH}")" = "${BASE_SHA}"
+          git checkout --detach "${BASE_SHA}"
+          gunzip -c /tmp/r2-306.patch.gz > /tmp/r2-306.patch
+          git apply --index --check /tmp/r2-306.patch
+          git apply --index /tmp/r2-306.patch
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+          git config user.name "kmephis-ai"
+          git config user.email "kmephis@gmail.com"
+          git commit -m "R2: define OWNER OAuth callback lifecycle"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          git fetch origin "refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          test "$(git rev-parse "refs/remotes/origin/${TARGET_BRANCH}")" = "${BASE_SHA}"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
