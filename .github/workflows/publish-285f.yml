@@ -1,0 +1,73 @@
+name: Publish deterministic TEST_PRIVATE overload backoff
+
+on:
+  push:
+    branches:
+      - transport/publish-285f
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 31684ca696951df509954a9f9324bb613c5f6ab4
+  TARGET_BRANCH: fix/r1-test-private-overloaded-backoff
+  EXPECTED_SCRIPT_BLOB: db649588b99c4ee56c3d8132e999b213d4e17804
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic source transform
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${TARGET_BRANCH}"
+          git checkout -B "${TARGET_BRANCH}" "origin/${TARGET_BRANCH}"
+          test "$(git rev-parse HEAD)" = "${BASE_SHA}"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/test-private-controlled-rebuild-smoke.mjs')
+          s = p.read_text()
+          replacements = [
+              (
+                  "const SYNTHETIC_AMOUNT_MINOR = 12345;\n",
+                  "const SYNTHETIC_AMOUNT_MINOR = 12345;\nconst OVERLOADED_PROVIDER_STATUS = 400060;\nconst OVERLOADED_RETRY_DELAYS_MS = Object.freeze([250, 500, 1000]);\n",
+              ),
+              (
+                  "async function atStage(stage, work) {\n  try {\n    return await work();\n  } catch (error) {\n    throw safeStageError(error, stage);\n  }\n}\n",
+                  "async function atStage(stage, work) {\n  try {\n    return await work();\n  } catch (error) {\n    throw safeStageError(error, stage);\n  }\n}\n\nfunction sleep(ms) {\n  return new Promise((resolve) => setTimeout(resolve, ms));\n}\n\nasync function retryExplicitOverloaded(work) {\n  for (let attempt = 0; ; attempt += 1) {\n    try {\n      return await work();\n    } catch (error) {\n      const overloaded = Number.isSafeInteger(error?.status) && error.status === OVERLOADED_PROVIDER_STATUS;\n      if (!overloaded || attempt >= OVERLOADED_RETRY_DELAYS_MS.length) throw error;\n      await sleep(OVERLOADED_RETRY_DELAYS_MS[attempt]);\n    }\n  }\n}\n",
+              ),
+              (
+                  "    await scheme.ensureDirectory(paths.caseDirectory);\n    await scheme.ensureDirectory(paths.currentDirectory);\n    await scheme.ensureDirectory(paths.stagingDirectory);\n",
+                  "    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.caseDirectory));\n    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.currentDirectory));\n    await retryExplicitOverloaded(() => scheme.ensureDirectory(paths.stagingDirectory));\n",
+              ),
+              (
+                  "async function removeDirectoryRaw(driver, relativePath) {\n  const root = driver.database.replace(/\\/+$/u, '');\n  const client = driver.createClient(SchemeServiceDefinition);\n  const response = await client.removeDirectory({\n    operationParams: { operationMode: OperationParams_OperationMode.SYNC },\n    path: `${root}/${relativePath}`,\n  });\n  const operation = response.operation;\n  if (operation?.ready !== true || operation.status !== StatusIds_StatusCode.SUCCESS) {\n    failClosed('REMOVE_DIRECTORY_FAILED');\n  }\n}\n",
+                  "async function removeDirectoryRaw(driver, relativePath) {\n  const root = driver.database.replace(/\\/+$/u, '');\n  const client = driver.createClient(SchemeServiceDefinition);\n  await retryExplicitOverloaded(async () => {\n    const response = await client.removeDirectory({\n      operationParams: { operationMode: OperationParams_OperationMode.SYNC },\n      path: `${root}/${relativePath}`,\n    });\n    const operation = response.operation;\n    if (operation?.ready !== true || operation.status !== StatusIds_StatusCode.SUCCESS) {\n      const error = new Error('REMOVE_DIRECTORY_FAILED');\n      error.code = 'REMOVE_DIRECTORY_FAILED';\n      error.status = Number.isSafeInteger(operation?.status) ? operation.status : null;\n      throw error;\n    }\n  });\n}\n",
+              ),
+              (
+                  "  await atStage(`${name}_CREATE_ENSURE_CASE_DIRECTORY`, () => baseScheme.ensureDirectory(paths.caseDirectory));\n  await atStage(`${name}_CREATE_ENSURE_REBUILD_DIRECTORY`, () => baseScheme.ensureDirectory(paths.rebuildDirectory));\n  await atStage(`${name}_CREATE_ENSURE_STAGING_DIRECTORY`, () => baseScheme.ensureDirectory(paths.stagingDirectory));\n",
+                  "  await atStage(`${name}_CREATE_ENSURE_CASE_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.caseDirectory)));\n  await atStage(`${name}_CREATE_ENSURE_REBUILD_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.rebuildDirectory)));\n  await atStage(`${name}_CREATE_ENSURE_STAGING_DIRECTORY`, () => retryExplicitOverloaded(() => baseScheme.ensureDirectory(paths.stagingDirectory)));\n",
+              ),
+              (
+                  "    await baseScheme.ensureDirectory(runDirectory);\n",
+                  "    await retryExplicitOverloaded(() => baseScheme.ensureDirectory(runDirectory));\n",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit('EXPECTED_SOURCE_FRAGMENT_MISSING')
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          test "$(git hash-object scripts/test-private-controlled-rebuild-smoke.mjs)" = "${EXPECTED_SCRIPT_BLOB}"
+          git diff --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git add scripts/test-private-controlled-rebuild-smoke.mjs
+          git commit -m 'R1: bound TEST_PRIVATE overload retries'
+          git push origin "HEAD:${TARGET_BRANCH}"
