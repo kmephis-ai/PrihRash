@@ -6,10 +6,12 @@ import {
   sanitizeReaderFilterOptions,
 } from './reader-filters.mjs';
 import { createRecentOperationsView } from './reader-view.mjs';
+import { formatReaderSyncStatus, sanitizeReaderSyncStatus } from './reader-sync-status.mjs';
 
 const list = document.querySelector('[data-operations]');
 const state = document.querySelector('[data-state]');
 const syncState = document.querySelector('[data-sync-state]');
+const shadowSyncStatus = document.querySelector('[data-shadow-sync-status]');
 const typeFilter = document.querySelector('[data-filter-type]');
 const statusFilter = document.querySelector('[data-filter-status]');
 const accountFilter = document.querySelector('[data-filter-account]');
@@ -162,6 +164,20 @@ resetFilters.addEventListener('click', () => {
 });
 
 
+async function loadSyncStatus() {
+  shadowSyncStatus.textContent = 'Синхронизация: проверяем…';
+  try {
+    const response = await fetch('/api/v1/reader/sync-status', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) throw new Error('REQUEST_FAILED');
+    shadowSyncStatus.textContent = formatReaderSyncStatus(sanitizeReaderSyncStatus(await response.json()));
+  } catch {
+    shadowSyncStatus.textContent = 'Синхронизация: статус недоступен';
+  }
+}
+
 async function loadFilterOptions() {
   filterOptionsState.textContent = 'Счёт и категория · загрузка…';
   try {
@@ -189,5 +205,6 @@ async function loadFilterOptions() {
 }
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+loadSyncStatus();
 loadFilterOptions();
 applyFilters();

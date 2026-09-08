@@ -78,6 +78,33 @@ Unknown parameter, массив/duplicate-like значение, blank value, ma
 
 Provider/transport wiring этого contract остаётся отдельным item после разрешённых auth/provider gates.
 
+## Sync status v1
+
+Для owner-facing freshness Reader application layer предоставляет `executeReaderSyncStatusApiRequest()` без HTTP/server wiring. Единственный источник — existing `readScheduledSyncAdmissionEvidence()`; отдельный migration/scheduler truth не создаётся.
+
+Response содержит только privacy-safe состояние:
+
+```text
+{
+  apiVersion: 1,
+  state: READY | DEGRADED | UNAVAILABLE,
+  lastCommittedAt: string | null,
+  hasIncompleteRun: boolean
+}
+```
+
+Deterministic rules:
+
+- `READY` — существует verified `COMMITTED` baseline и нет `STAGING|VALIDATED`;
+- `DEGRADED` — verified `COMMITTED` baseline существует, но есть хотя бы один incomplete run;
+- `UNAVAILABLE` — доказанного `COMMITTED` baseline нет, независимо от наличия incomplete run;
+- `lastCommittedAt` берётся только из `finishedAt` latest committed baseline и равен `null` для `UNAVAILABLE`;
+- `hasIncompleteRun` — только boolean, без количества/identity incomplete runs.
+
+Response/error никогда не включает source snapshot digest, MigrationRun id/counters, provider identifiers, financial aggregates или raw evidence. Storage failure, malformed/duplicate MigrationRun evidence fail-closed как value-free `SYNC_STATUS_EVIDENCE_UNAVAILABLE`.
+
+HTTP route/provider wiring остаётся отдельным provider-capable item; этот contract сам по себе не меняет R1 runtime и не разрешает shadow writes.
+
 ## Paging
 
 Paging keyset-based, без `OFFSET`, по exact order:
