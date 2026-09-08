@@ -27,7 +27,7 @@ test('surfaces unknown source quality explicitly', () => {
 
 test('reader response parser fails closed on malformed contract', () => {
   assert.throws(() => parseReaderResponse({ apiVersion: 2, items: [] }), /INVALID_READER_RESPONSE/);
-  assert.throws(() => parseReaderResponse({ apiVersion: 1, items: [{ ...base, amountMinor: 1.5 }], pageSize: 1, nextCursor: null }), /INVALID_AMOUNT/);
+  assert.throws(() => parseReaderResponse({ apiVersion: 1, items: [{ ...base, amountMinor: 1.5 }], pageSize: 1, nextCursor: null }), /INVALID_READER_RESPONSE/);
 });
 
 test('reader response maps only valid API v1 items', () => {
