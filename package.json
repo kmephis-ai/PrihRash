@@ -18,7 +18,8 @@
     "test:migration-simulation": "npm run build --silent && node --test tests/migration-simulation/*.test.mjs",
     "test:schema": "node --test tests/schema/*.test.mjs",
     "test:ydb-adapter": "npm run build --silent && node --test tests/integration/*.test.mjs",
-    "privacy": "node scripts/privacy-smoke.mjs"
+    "privacy": "node scripts/privacy-smoke.mjs",
+    "check": "npm run privacy && npm run lint && npm run typecheck && npm test && npm run build && npm run package:function"
   },
   "devDependencies": {
     "typescript": "5.8.3"

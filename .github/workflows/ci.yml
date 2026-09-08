@@ -18,11 +18,4 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run privacy
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:source-normalizer
-      - run: npm run test:migration-simulation
-      - run: npm run build
-      - run: npm run package:function
+      - run: npm run check
