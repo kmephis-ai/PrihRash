@@ -31,6 +31,7 @@ function safeChildEnvironment(environment) {
     'TMP',
     'LANG',
     'LC_ALL',
+    'YC_IAM_TOKEN',
   ];
   return Object.fromEntries(
     allowed
