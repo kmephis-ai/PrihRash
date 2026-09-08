@@ -52,7 +52,9 @@ function safeStageError(error, stage) {
   wrapped.code = `TEST_PRIVATE_${stage}_FAILED`;
   wrapped.stage = stage;
   wrapped.innerCode = safeInternalCode(error?.code);
-  wrapped.providerStatus = Number.isSafeInteger(error?.status) ? error.status : null;
+  wrapped.providerStatus = Number.isSafeInteger(error?.status)
+    ? error.status
+    : (Number.isSafeInteger(error?.code) ? error.code : null);
   return wrapped;
 }
 
