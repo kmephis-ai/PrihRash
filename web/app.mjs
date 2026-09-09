@@ -68,7 +68,7 @@ function setStatus(status) {
   if (status.kind === 'refresh-error') {
     syncState.textContent = status.hasVisibleItems ? 'Не удалось обновить · показаны прежние данные' : '';
     if (!status.hasVisibleItems) {
-      state.textContent = 'Не удалось обновить операции.';
+      state.textContent = 'Не удалось обновить операции. Можно повторить.';
       state.hidden = false;
     }
     return;
@@ -101,12 +101,12 @@ function setStatus(status) {
   }
   if (status.kind === 'filtered-error') {
     syncState.textContent = '';
-    state.textContent = 'Не удалось загрузить выбранный фильтр.';
+    state.textContent = 'Не удалось загрузить выбранный фильтр. Нажмите «Обновить».';
     state.hidden = false;
     return;
   }
   syncState.textContent = '';
-  state.textContent = 'Не удалось загрузить операции. Попробуйте обновить экран.';
+  state.textContent = 'Не удалось загрузить операции. Нажмите «Обновить».';
   state.hidden = false;
 }
 
