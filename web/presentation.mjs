@@ -115,7 +115,11 @@ export function toOperationPresentation(item) {
     id: safe.id,
     typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : 'Перевод',
     amountLabel: formatRubMinor(safe.amountMinor),
-    dateLabel: safe.datePrecision === 'DAY' ? safe.occurredOn : safe.aggregatePeriodMonth ?? safe.occurredOn,
+    dateLabel: safe.datePrecision === 'DAY'
+      ? safe.occurredOn
+      : safe.datePrecision === 'MONTH'
+        ? safe.aggregatePeriodMonth?.slice(0, 7) ?? safe.occurredOn
+        : safe.aggregatePeriodMonth ?? safe.occurredOn,
     description: safe.description ?? safe.category?.label ?? 'Без описания',
     meta: [account, safe.category?.label, safe.paidByMember?.label].filter(Boolean).join(' · '),
     quality,
