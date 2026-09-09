@@ -104,6 +104,7 @@ export function toOperationPresentation(item) {
   const safe = sanitizeReaderOperation(item);
   const quality = [];
   if (safe.status === 'VOIDED') quality.push('Аннулировано');
+  if (safe.analyticsState === 'EXCLUDED') quality.push('Не учитывать в аналитике');
   if (safe.recordGranularity === 'PERIOD_AGGREGATE') quality.push('Исторический агрегат');
   if (safe.recordGranularity === 'UNKNOWN') quality.push('Неизвестная детализация');
   if (safe.datePrecision === 'MONTH') quality.push('Точность даты: месяц');

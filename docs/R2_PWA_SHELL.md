@@ -19,6 +19,7 @@ Browser boundary fail-closed валидирует transport shape и перед 
 UI обязан явно показывать качество факта:
 
 - `VOIDED` → `Аннулировано`;
+- `analyticsState=EXCLUDED` → `Не учитывать в аналитике`; financial fact остаётся видимым, browser не выводит этот state повторно из raw `note`;
 - `PERIOD_AGGREGATE` → `Исторический агрегат`;
 - `recordGranularity=UNKNOWN` → `Неизвестная детализация`;
 - `datePrecision=MONTH|UNKNOWN` не отображается как доказанная точная daily purchase.
