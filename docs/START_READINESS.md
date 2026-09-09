@@ -149,10 +149,11 @@ Reader должен появиться быстро после доказанн�
 
 - auth;
 - recent operations;
-- provisional `LegacyCurrentPeriodProjection` до R4;
 - IndexedDB cache;
 - быстрый warm open;
 - понятный offline/degraded state.
+
+`LegacyCurrentPeriodProjection` не входит в обязательный минимум R2. До R4 он допустим только как неавторитетный preview с явным provisional label, если post-close working set однозначно доказан; при ambiguity projection отсутствует, а не угадывается.
 
 ## До YDB-authoritative writes
 
