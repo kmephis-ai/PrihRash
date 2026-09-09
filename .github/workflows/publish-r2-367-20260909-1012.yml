@@ -1,0 +1,51 @@
+name: Publish R2
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-367-20260909-1012
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: 5747bf9f07a1e464842f314e14c9a9fbb221f562
+  EXPECTED_TREE: a0f2ff943dfcc54b0a513c45a9ee02b17124f452
+  PRODUCT_BRANCH: r2/367-filter-layout
+  PATCH_SHA256: bf8d08bde79cf1959366ab1c2e6c24bb5f7a1c5588cb938421cce681e9d037c9
+  GZIP_SHA256: 74bc08136f209e90b8094a1d26147c3fa433e5f0855c100cb8d16edf99aeed37
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Verify base and publish exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          test "$(git rev-parse origin/main)" = "${EXPECTED_BASE}"
+          git checkout --detach --quiet "${EXPECTED_BASE}"
+
+          cat > /tmp/feature.patch.gz.b64 <<'PAYLOAD'
+          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
+PAYLOAD
+          base64 -d /tmp/feature.patch.gz.b64 > /tmp/feature.patch.gz
+          test "$(sha256sum /tmp/feature.patch.gz | awk '{print $1}')" = "${GZIP_SHA256}"
+          gunzip -c /tmp/feature.patch.gz > /tmp/feature.patch
+          test "$(sha256sum /tmp/feature.patch | awk '{print $1}')" = "${PATCH_SHA256}"
+
+          git apply --index /tmp/feature.patch
+          git diff --cached --check
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: keep Reader filters readable on tablet widths' -m 'Closes #367.'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          git push origin "HEAD:refs/heads/${PRODUCT_BRANCH}"
