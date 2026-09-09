@@ -132,7 +132,7 @@ test('recent operations query performs verified-shadow admission before one boun
   assert.match(capture.statements[0].text, /FROM migration_runs WHERE state IN/);
   assert.match(capture.statements[1].text, /LEFT JOIN accounts AS fa/);
   assert.match(capture.statements[1].text, /LEFT JOIN categories AS c/);
-  assert.match(capture.statements[1].text, /ORDER BY t\.occurred_on DESC, t\.captured_at DESC, t\.id DESC LIMIT \$limit/);
+  assert.match(capture.statements[1].text, /ORDER BY t\.occurred_on DESC, CASE WHEN t\.captured_at IS NULL THEN 1 ELSE 0 END ASC, t\.captured_at DESC, t\.id DESC LIMIT \$limit/);
   assert.equal(capture.statements[1].parameters.limit.type, 'Uint64');
   assert.equal(capture.statements[1].parameters.limit.value, 25n);
 });
@@ -144,6 +144,7 @@ test('coarse and uncertain historical quality remains explicit in Reader project
     aggregate_period_month: '2024-02-01',
     period_assignment_quality: 'LEGACY_AMBIGUOUS',
     occurred_on: '2024-02-01',
+    captured_at: null,
   });
   const { adapter } = adapterWithRows([row]);
 
@@ -152,6 +153,7 @@ test('coarse and uncertain historical quality remains explicit in Reader project
   assert.equal(result.items[0].recordGranularity, 'PERIOD_AGGREGATE');
   assert.equal(result.items[0].datePrecision, 'MONTH');
   assert.equal(result.items[0].aggregatePeriodMonth, '2024-02-01');
+  assert.equal(result.items[0].capturedAt, null);
   assert.equal(result.items[0].periodAssignmentQuality, 'LEGACY_AMBIGUOUS');
 });
 
@@ -174,6 +176,7 @@ test('malformed provider evidence and orphaned display references fail closed', 
     baseRow({ aggregate_period_month: '2026-09-01' }),
     baseRow({ type: 'TRANSFER' }),
     baseRow({ version: 0n }),
+    baseRow({ captured_at: 'not-a-timestamp' }),
   ];
 
   for (const row of badRows) {

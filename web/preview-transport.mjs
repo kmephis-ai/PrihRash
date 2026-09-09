@@ -141,7 +141,7 @@ const OPERATIONS = Object.freeze([
   operation({
     id: '40000000-0000-0000-0000-000000000010',
     occurredOn: '2024-11-01',
-    capturedAt: '2024-12-01T00:00:00.000Z',
+    capturedAt: null,
     recordGranularity: 'PERIOD_AGGREGATE',
     datePrecision: 'MONTH',
     aggregatePeriodMonth: '2024-11',

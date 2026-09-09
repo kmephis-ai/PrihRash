@@ -31,6 +31,12 @@ test('keeps proven day precision unchanged', () => {
   assert.equal(view.dateLabel, '2026-09-08');
 });
 
+test('accepts canonical null capturedAt without inventing capture time', () => {
+  const view = toOperationPresentation({ ...base, capturedAt: null });
+  assert.equal(view.dateLabel, '2026-09-08');
+  assert.equal(view.description, 'Покупка');
+});
+
 test('surfaces unknown source quality explicitly', () => {
   const view = toOperationPresentation({ ...base, recordGranularity: 'UNKNOWN', datePrecision: 'UNKNOWN' });
   assert.deepEqual(view.quality, ['Неизвестная детализация', 'Точность даты неизвестна']);

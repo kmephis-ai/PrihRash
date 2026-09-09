@@ -32,7 +32,7 @@ export interface ReaderOperation {
   readonly id: string;
   readonly type: TransactionType;
   readonly occurredOn: string;
-  readonly capturedAt: string;
+  readonly capturedAt: string | null;
   readonly recordGranularity: RecordGranularity;
   readonly datePrecision: DatePrecision;
   readonly aggregatePeriodMonth: string | null;
@@ -124,7 +124,7 @@ interface MutableReaderRecentOperationsFilters {
 interface ReaderRecentOperationsCursorPayload {
   readonly v: 1;
   readonly o: string;
-  readonly c: string;
+  readonly c: string | null;
   readonly i: string;
 }
 
@@ -224,6 +224,10 @@ function timestamp(value: unknown): string {
   return parsed;
 }
 
+function optionalTimestamp(value: unknown): string | null {
+  return value === null ? null : timestamp(value);
+}
+
 function integer(value: unknown): number {
   if (typeof value === 'bigint') {
     if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) return fail();
@@ -264,7 +268,7 @@ function parseOperation(row: Readonly<ReaderOperationRow>): Readonly<ReaderOpera
   const id = uuid(row.id, false);
   const type = enumValue(row.type, TYPES);
   const occurredOn = date(row.occurred_on, false);
-  const capturedAt = timestamp(row.captured_at);
+  const capturedAt = optionalTimestamp(row.captured_at);
   const recordGranularity = enumValue(row.record_granularity, GRANULARITIES);
   const datePrecision = enumValue(row.date_precision, DATE_PRECISIONS);
   const aggregatePeriodMonth = date(row.aggregate_period_month, true);
@@ -341,20 +345,29 @@ function validateCursorPayload(value: unknown): Readonly<ReaderRecentOperationsC
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort();
   if (keys.join(',') !== 'c,i,o,v' || record.v !== 1) return invalidCursor();
+  let capturedAt: string | null;
+  if (record.c === null) {
+    capturedAt = null;
+  } else if (
+    typeof record.c === 'string'
+    && record.c.length > 0
+    && record.c === record.c.trim()
+    && Number.isFinite(Date.parse(record.c))
+  ) {
+    capturedAt = record.c;
+  } else {
+    return invalidCursor();
+  }
   if (
     typeof record.o !== 'string'
     || !DATE_PATTERN.test(record.o)
     || !Number.isFinite(Date.parse(`${record.o}T00:00:00.000Z`))
-    || typeof record.c !== 'string'
-    || record.c.length === 0
-    || record.c !== record.c.trim()
-    || !Number.isFinite(Date.parse(record.c))
     || typeof record.i !== 'string'
     || !UUID_PATTERN.test(record.i)
   ) {
     return invalidCursor();
   }
-  return Object.freeze({ v: 1, o: record.o, c: record.c, i: record.i.toLowerCase() });
+  return Object.freeze({ v: 1, o: record.o, c: capturedAt, i: record.i.toLowerCase() });
 }
 
 export function encodeRecentOperationsCursor(operation: Pick<ReaderOperation, 'occurredOn' | 'capturedAt' | 'id'>): string {
@@ -419,12 +432,18 @@ function buildRecentOperationsStatement(
     parameters.category_id = uuidParameter(filters.categoryId);
   }
   if (cursor !== null) {
-    clauses.push('(t.occurred_on < $cursor_occurred_on OR '
-      + '(t.occurred_on = $cursor_occurred_on AND t.captured_at < $cursor_captured_at) OR '
-      + '(t.occurred_on = $cursor_occurred_on AND t.captured_at = $cursor_captured_at AND t.id < $cursor_id))');
     parameters.cursor_occurred_on = dateParameter(cursor.o);
-    parameters.cursor_captured_at = timestampParameter(cursor.c);
     parameters.cursor_id = uuidParameter(cursor.i);
+    if (cursor.c === null) {
+      clauses.push('(t.occurred_on < $cursor_occurred_on OR '
+        + '(t.occurred_on = $cursor_occurred_on AND t.captured_at IS NULL AND t.id < $cursor_id))');
+    } else {
+      clauses.push('(t.occurred_on < $cursor_occurred_on OR '
+        + '(t.occurred_on = $cursor_occurred_on AND ('
+        + '(t.captured_at IS NOT NULL AND (t.captured_at < $cursor_captured_at OR '
+        + '(t.captured_at = $cursor_captured_at AND t.id < $cursor_id))) OR t.captured_at IS NULL)))');
+      parameters.cursor_captured_at = timestampParameter(cursor.c);
+    }
   }
 
   const where = clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')} `;
@@ -440,7 +459,8 @@ function buildRecentOperationsStatement(
       + 'LEFT JOIN categories AS c ON c.id = t.category_id '
       + 'LEFT JOIN family_members AS fm ON fm.id = t.paid_by_member_id '
       + where
-      + 'ORDER BY t.occurred_on DESC, t.captured_at DESC, t.id DESC LIMIT $limit',
+      + 'ORDER BY t.occurred_on DESC, CASE WHEN t.captured_at IS NULL THEN 1 ELSE 0 END ASC, '
+      + 't.captured_at DESC, t.id DESC LIMIT $limit',
     parameters,
   );
 }

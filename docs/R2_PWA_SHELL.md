@@ -149,7 +149,7 @@ SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не вхо�
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после legacy-period-ambiguity delivery fix — `prihrash-shell-v17`.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после nullable-capture Reader delivery fix — `prihrash-shell-v18`.
 
 ## Non-scope и следующий шаг
 
