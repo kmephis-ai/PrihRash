@@ -145,6 +145,7 @@ export function toOperationPresentation(item) {
   if (safe.periodAssignmentQuality === 'LEGACY_AMBIGUOUS') quality.push('Расчётный период неоднозначен');
 
   const account = accountContextLabel(safe);
+  const payer = safe.paidByMember === null ? '' : `Плательщик: ${safe.paidByMember.label}`;
   const note = safe.note === '' ? null : safe.note;
   return Object.freeze({
     id: safe.id,
@@ -156,7 +157,7 @@ export function toOperationPresentation(item) {
         ? safe.aggregatePeriodMonth?.slice(0, 7) ?? safe.occurredOn
         : safe.aggregatePeriodMonth ?? safe.occurredOn,
     description: safe.description ?? safe.category?.label ?? 'Без описания',
-    meta: [account, safe.category?.label, safe.paidByMember?.label].filter(Boolean).join(' · '),
+    meta: [account, safe.category?.label, payer].filter(Boolean).join(' · '),
     note,
     quality,
   });

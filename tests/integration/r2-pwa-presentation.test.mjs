@@ -102,6 +102,26 @@ test('surfaces canonical note literally and escapes it in both Reader surfaces',
   }
 });
 
+test('labels only proven canonical payer and escapes it in both Reader surfaces', () => {
+  const payerLabel = 'Вика <семья> & карта';
+  const withPayer = toOperationPresentation({
+    ...base,
+    paidByMember: { id: 'payer-member', label: payerLabel },
+  });
+  assert.equal(withPayer.meta, `Карта Visa · Продукты · Плательщик: ${payerLabel}`);
+
+  for (const markup of [operationCardsMarkup([withPayer]), operationTableRowsMarkup([withPayer])]) {
+    assert.match(markup, /Плательщик: Вика &lt;семья&gt; &amp; карта/u);
+    assert.equal(markup.includes(`Плательщик: ${payerLabel}`), false);
+  }
+
+  const withoutPayer = toOperationPresentation({ ...base, paidByMember: null });
+  assert.equal(withoutPayer.meta, 'Карта Visa · Продукты');
+  for (const markup of [operationCardsMarkup([withoutPayer]), operationTableRowsMarkup([withoutPayer])]) {
+    assert.doesNotMatch(markup, /Плательщик:/u);
+  }
+});
+
 test('maps directional account context without hiding transfer destination', () => {
   const expense = toOperationPresentation(base);
   assert.equal(expense.meta, 'Карта Visa · Продукты');

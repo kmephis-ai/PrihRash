@@ -25,6 +25,7 @@ UI обязан явно показывать качество факта:
 - `recordGranularity=UNKNOWN` → `Неизвестная детализация`;
 - `datePrecision=MONTH` отображается как owner-facing `YYYY-MM`: техническое canonical `aggregatePeriodMonth=YYYY-MM-01` не выдаётся за доказанное первое число месяца; `datePrecision=UNKNOWN` по-прежнему не отображается как доказанная точная daily purchase;
 - `periodAssignmentQuality=LEGACY_AMBIGUOUS` → `Расчётный период неоднозначен`; это сохранённая historical uncertainty, browser не вычисляет period membership. Штатные pre-R4 `UNASSIGNED`, а также `EXPLICIT|DERIVED`, не получают нового warning в R2.
+- non-null canonical `paidByMember` показывается как `Плательщик: <label>` отдельно по смыслу от payment account; `paidByMember=null` остаётся отсутствием доказанного payer evidence и не интерпретируется как «владелец», «не Вика» или другой участник.
 
 ## Local-first recent operations
 
@@ -157,7 +158,7 @@ Malformed network/cache response fail-closed как `INVALID_READER_RESPONSE`: �
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после browser Reader invariant-parity fix — `prihrash-shell-v20`.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после явного canonical payer presentation — `prihrash-shell-v21`.
 
 ## Non-scope и следующий шаг
 
