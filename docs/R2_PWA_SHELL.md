@@ -8,7 +8,7 @@ Canonical top-level navigation: `Главная / Операции / Анали�
 
 Текущее navigation state честно отражает эту границу: `Операции` — единственная интерактивная top-level destination и помечена `aria-current=page`; `Главная / Аналитика / Ещё` остаются видимыми как будущая IA, но рендерятся non-interactive elements с `aria-disabled=true` и accessible label `… — скоро`. Они не являются anchors/buttons, не меняют hash и не создают placeholder routes/screens. Synthetic UI preview получает тот же canonical shell markup.
 
-Header также остаётся честно read-only: в R2 нет disabled `＋`/`Добавить операцию` или другого placeholder create control. Рабочая секция явно помечена `Только чтение` и оставляет только Reader-действия вроде `Обновить`; create/edit affordance появляется не раньше R3A Writer boundary, когда за ним существует реальный write contract.
+Header production R2 shell остаётся честно read-only: в нём нет disabled `＋`/`Добавить операцию` или другого placeholder create control. Рабочая секция явно помечена `Только чтение` и оставляет только Reader-действия вроде `Обновить`. Первый R3A create affordance существует отдельно только в synthetic preview и описан в `R3A_PREVIEW_WRITER.md`; production `index.html` / `app.mjs` его не подключают.
 
 ## Reader boundary
 
@@ -128,7 +128,7 @@ Icons входят только в production shell precache вместе с man
 
 ## Owner UAT preview
 
-Для product-level Owner UAT используется существующий synthetic Reader preview без provider/runtime credentials и без production financial data. Из repository root достаточно выполнить:
+Для product-level Owner UAT используется synthetic UI preview без provider/runtime credentials и без production financial data. Он повторяет canonical Reader shell и дополнительно может подключать явно отделённые R3A synthetic-only UX proofs, которые не входят в production shell. Из repository root достаточно выполнить:
 
 ```bash
 npm run preview:r2
@@ -136,7 +136,7 @@ npm run preview:r2
 
 Команда сначала deterministic собирает `.artifacts/r2-ui-preview`, затем поднимает zero-dependency HTTP server только на loopback `http://127.0.0.1:4173/`. При необходимости локальный port можно переопределить через `R2_PREVIEW_PORT`; нечисловое значение, `0` и значение вне `1..65535` fail-closed. Server не слушает `0.0.0.0`, не становится public preview hosting и отдаёт только regular files внутри synthetic preview artifact с `Cache-Control: no-store`. Missing path возвращает `404`; raw/encoded path traversal отклоняется и не может читать repository files вне artifact root.
 
-Console и сам preview явно помечают эту поверхность как synthetic/non-production. Existing preview transport по-прежнему перехватывает Reader `/api/*` внутри browser и не отправляет реальные финансовые запросы; manifest, Service Worker и install icons в preview artifact не копируются. Для остановки достаточно обычного `Ctrl+C`.
+Console и сам preview явно помечают эту поверхность как synthetic/non-production. Existing preview transport по-прежнему перехватывает Reader `/api/*` внутри browser и не отправляет реальные финансовые запросы; R3A quick-EXPENSE preview сохраняет intent только в отдельный IndexedDB outbox и сам не выполняет network request. Manifest, Service Worker и install icons в preview artifact не копируются. Для остановки достаточно обычного `Ctrl+C`.
 
 Owner UAT здесь проверяет только продукт:
 
@@ -164,6 +164,6 @@ Service Worker кэширует только shell assets. `/api/*` по-пре�
 
 ## Non-scope и следующий шаг
 
-Не входят hosting/provider deployment, history/pagination cache, filter-result matrix cache, login screen, Writer/outbox и authority change.
+В production R2 shell не входят hosting/provider deployment, history/pagination cache, filter-result matrix cache, login screen, Writer/outbox и authority change. Отдельный synthetic-only R3A Writer/outbox proof не расширяет эту production boundary.
 
 Следующая R2 boundary выбирается fresh discovery. OWNER-authenticated browser integration/provider deploy остаётся зависимым от canonical R1/auth provider gates; независимые UX-кандидаты выбираются только после fresh discovery.
