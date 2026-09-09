@@ -1,3 +1,4 @@
+# Disposable exact-main mirror bootstrap for R2 #388.
 name: Local Git Mirror Bootstrap R2 388
 
 on:
