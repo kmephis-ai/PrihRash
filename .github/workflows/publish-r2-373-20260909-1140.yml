@@ -1,0 +1,48 @@
+name: Publish R2 #373 exact tree
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-373-20260909-1140
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: 10646e2a26df66148b22e70c8d0ee95eb3a878af
+  EXPECTED_TREE: 1de1d4212c19f239aa0b9c9cd3eee49c0fd5b8f7
+  FEATURE_BRANCH: r2/373-month-label
+  PATCH_GZ_SHA256: 8f1c5a24462c9e848ce0164e118995df9e0b3fcbd1e6f8a63f9e973b0d6effef
+  PATCH_GZ_B64: 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
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          test "$(git rev-parse origin/main)" = "${SOURCE_SHA}"
+          git checkout --detach "${SOURCE_SHA}"
+
+          printf '%s' "${PATCH_GZ_B64}" | base64 -d > /tmp/r2-373.patch.gz
+          echo "${PATCH_GZ_SHA256}  /tmp/r2-373.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/r2-373.patch.gz > /tmp/r2-373.patch
+          git apply --index /tmp/r2-373.patch
+
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: keep month precision coarse in Reader' -m 'Closes #373.'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+
+          git push origin "HEAD:refs/heads/${FEATURE_BRANCH}"
