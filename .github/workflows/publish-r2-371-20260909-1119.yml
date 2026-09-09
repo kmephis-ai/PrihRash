@@ -1,0 +1,48 @@
+name: Publish R2 #371 exact tree
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-371-20260909-1119
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: a4583f186cb71f589ecb3789be273692f02ba635
+  EXPECTED_TREE: 7d76151b070adddc5ad750cdf61b2ad01d62979e
+  FEATURE_BRANCH: r2/371-excluded-label
+  PATCH_GZ_SHA256: 8a6139fe3b3b58c7c4ef8704df990a9e1f2df9ddb9e6d91355a3bfc20399e29b
+  PATCH_GZ_B64: H4sICB0XoWoCA3IyLTM3MS5wYXRjaACVVlFPG0cQfvevmLezZfsMDpACchWaWASVACKQVEIIr+/2YBv77nq7V0PTSIS05CFtaftUtaoq9RcQgotDwJX6C/b+Qn9JZ/fOxga7wg8cvr2db2a+mW92beY4kM9vMwGkYHsWL6wWt1aezm09flheXDTrNlQHLqeYa9NdmLKdIiFF0yzesZy7VhHGx8amJiZS+Xx+CF4qm80Ow7x3D/Lj07kpyOLzLuDrJ4HX4DSAqhe6Ngn2wCGslrdqHqc2yBN5LD/IljyVrWg/eiWb0QGIgLjc9wIBfIf4FGQL5N/4ZV825WkK1hdAtuXb6EieofEl4I8TeSnbalNbnuPaWfRGAUcH0XegFqLXaP0yOsDFNkTf4I5zfDmeSUEK8lB5srzwoPygAv8e/gwV+SNiXWIkH1RECKgiRPTKbCqLe4lLanuCWfyxIIKWyp/dX1zvMf5dNiF6hf5a6LwniBPQKDpXdN3CqJqVWXCYS1yLkRqSYglMS0d5HP2EVi+jI0WPpkZeINhFDqoJlwjVxI/aQ1tzdwDR92jaxh9cRRaTcaKX9mN2WvIMAtKAiusJiumo1FfKqwvLD7bm5udXy/Nza+VOHr/oQJRpKyYPA27J9yqLd7oO71RmCUhALS+w57FqYY0ETOyV1pc+XVp+utTDivKOwcZlQCJUcqeq2kn9sZTRITo7SjBtzGEFgRlnnlt6tLy09vDrLmqcfltFiH2wjxB/4V+zQ5pqgXMFn3SDpj72qZN6nbzY2Ih74IeBtUM4NVN2r5AE5YIXmCvodkAEBlEIinm/QfJ+QDl1hV4z1S6z/jlHOYxmkIjPuTNtO5MTKL6xcWKRiX7xjQgZy3JEIyXY4pQSLD7HP1KKVd/SBg8DbErKIXSfuV7DBe4hUxS+CEkNawx0168xi4nanpGDdAZKH8PzFAAQjh0qTJtSv6z2pr9ktGEmVjnYMEZqB8Q25J9J0bQ8lJxOta7e6Ea4DmVsZrCFXqhHKnstFYu4nsss1FtXx5iHVQtVl0GDiR0vFBBQxV6AfAnmboOSS0+KWQDLc7kA5qKhjUOsBMJb9mnM9koPy+nnYJpmFZsrp1FmwBgyIQwdcHYAex0vPQyqBLNXcegEbh1H/wDDiDojzLiK8bfoB/kW1YN6byGt3+oZc4nRvlcCauL0RK6Hh9wJ6HrRbz0ZjW6GjhdAOk6zToJnoQ+eAxteJ8n7JLD5I/0hvdFxu5nJQXfHGqnW6CpOzZu7NjNxNbsZ1ImwdtKxnxwURgq5EMZkvEhlNS2pREV14nOwGU4yFY1qPMvCg1Co2gm6K7pNt8Ns1Wz67HNwxNtojqeDsurXV6foPnU5/Z+aq3IrEXTTo0lxtKFZp4Iobf2KWe0r3cETxgn8cwbyD33uneIZeK4SNxClbzQ2aLXQN0ziAThoORlz9mRxSjWEScamq9XJ8f4xN9AwHmYDP+k7xtiEvmTgP33LwLTUhcEJXU30UFaYoPVML5GcOIpFTlwm2Fd0lRKbBl3beP/s1fbO9CuhDPUycyCtMEx17IYcSqUSGPGNwsh0tpt+yHfSxrC7hRH3TheqX6MxZFemN0BHUlamP+gbR3fs7Pq14KbT210QbukuOdgHpnb7k+Kar74bROxHXyNuehl2vMyAvNCOj6JDhf4fR4gpa2kLAAA=
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          test "$(git rev-parse origin/main)" = "${SOURCE_SHA}"
+          git checkout --detach "${SOURCE_SHA}"
+
+          printf '%s' "${PATCH_GZ_B64}" | base64 -d > /tmp/r2-371.patch.gz
+          echo "${PATCH_GZ_SHA256}  /tmp/r2-371.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/r2-371.patch.gz > /tmp/r2-371.patch
+          git apply --index /tmp/r2-371.patch
+
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: surface analytics exclusion in Reader' -m 'Closes #371.'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+
+          git push origin "HEAD:refs/heads/${FEATURE_BRANCH}"
