@@ -22,7 +22,7 @@ UI обязан явно показывать качество факта:
 - `analyticsState=EXCLUDED` → `Не учитывать в аналитике`; financial fact остаётся видимым, browser не выводит этот state повторно из raw `note`;
 - `PERIOD_AGGREGATE` → `Исторический агрегат`;
 - `recordGranularity=UNKNOWN` → `Неизвестная детализация`;
-- `datePrecision=MONTH|UNKNOWN` не отображается как доказанная точная daily purchase.
+- `datePrecision=MONTH` отображается как owner-facing `YYYY-MM`: техническое canonical `aggregatePeriodMonth=YYYY-MM-01` не выдаётся за доказанное первое число месяца; `datePrecision=UNKNOWN` по-прежнему не отображается как доказанная точная daily purchase.
 
 ## Local-first recent operations
 
@@ -147,7 +147,7 @@ SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не вхо�
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после month-precision delivery fix — `prihrash-shell-v15`.
 
 ## Non-scope и следующий шаг
 

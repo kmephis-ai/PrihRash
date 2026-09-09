@@ -1,4 +1,4 @@
-const CACHE = 'prihrash-shell-v14';
+const CACHE = 'prihrash-shell-v15';
 const SHELL = [
   '/',
   '/index.html',

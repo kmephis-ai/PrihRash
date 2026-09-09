@@ -146,7 +146,7 @@ test('PWA exposes disabled account/category controls while API remains outside S
   assert.match(app, /Локальные справочники от/u);
   assert.match(app, /Офлайн · справочники от/u);
   assert.match(app, /Счёт и категория недоступны/u);
-  assert.match(sw, /prihrash-shell-v14/u);
+  assert.match(sw, /prihrash-shell-v15/u);
   assert.match(sw, /'\/reader-filter-options-view\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

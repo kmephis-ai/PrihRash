@@ -15,10 +15,20 @@ test('formats integer minor units as RUB in UI', () => {
   assert.match(formatRubMinor(12345), /123,45[\s\u00a0]*₽/u);
 });
 
-test('surfaces coarse and void quality explicitly', () => {
+test('surfaces month precision without inventing an exact first day', () => {
   const view = toOperationPresentation({ ...base, status: 'VOIDED', recordGranularity: 'PERIOD_AGGREGATE', datePrecision: 'MONTH', aggregatePeriodMonth: '2020-04-01' });
   assert.deepEqual(view.quality, ['Аннулировано', 'Исторический агрегат', 'Точность даты: месяц']);
-  assert.equal(view.dateLabel, '2020-04-01');
+  assert.equal(view.dateLabel, '2020-04');
+
+  for (const markup of [operationCardsMarkup([view]), operationTableRowsMarkup([view])]) {
+    assert.match(markup, /2020-04/u);
+    assert.doesNotMatch(markup, /2020-04-01/u);
+  }
+});
+
+test('keeps proven day precision unchanged', () => {
+  const view = toOperationPresentation(base);
+  assert.equal(view.dateLabel, '2026-09-08');
 });
 
 test('surfaces unknown source quality explicitly', () => {
