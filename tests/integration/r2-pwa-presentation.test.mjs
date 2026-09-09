@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { operationCardsMarkup, operationTableRowsMarkup } from '../../web/operation-markup.mjs';
 import { formatRubMinor, parseReaderResponse, toOperationPresentation } from '../../web/presentation.mjs';
 
 const base = {
@@ -23,6 +24,35 @@ test('surfaces coarse and void quality explicitly', () => {
 test('surfaces unknown source quality explicitly', () => {
   const view = toOperationPresentation({ ...base, recordGranularity: 'UNKNOWN', datePrecision: 'UNKNOWN' });
   assert.deepEqual(view.quality, ['Неизвестная детализация', 'Точность даты неизвестна']);
+});
+
+test('maps directional account context without hiding transfer destination', () => {
+  const expense = toOperationPresentation(base);
+  assert.equal(expense.meta, 'Карта Visa · Продукты');
+
+  const income = toOperationPresentation({
+    ...base,
+    type: 'INCOME',
+    fromAccount: null,
+    toAccount: { id: 'income-account', label: 'Основной счёт' },
+    category: { id: 'income-category', label: 'Зарплата' },
+  });
+  assert.equal(income.meta, 'Основной счёт · Зарплата');
+
+  const transfer = toOperationPresentation({
+    ...base,
+    type: 'TRANSFER',
+    fromAccount: { id: 'from-account', label: 'Карта <Visa>' },
+    toAccount: { id: 'to-account', label: 'Накопления & цели' },
+    category: null,
+    flowKind: 'OWN_FUNDS_TRANSFER',
+  });
+  assert.equal(transfer.meta, 'Карта <Visa> → Накопления & цели');
+
+  for (const markup of [operationCardsMarkup([transfer]), operationTableRowsMarkup([transfer])]) {
+    assert.match(markup, /Карта &lt;Visa&gt; → Накопления &amp; цели/u);
+    assert.doesNotMatch(markup, /Карта <Visa> → Накопления & цели/u);
+  }
 });
 
 test('reader response parser fails closed on malformed contract', () => {

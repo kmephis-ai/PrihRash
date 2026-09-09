@@ -91,6 +91,15 @@ export function formatRubMinor(amountMinor) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(amountMinor / 100);
 }
 
+function accountContextLabel(item) {
+  if (item.type === 'EXPENSE') return item.fromAccount?.label ?? '';
+  if (item.type === 'INCOME') return item.toAccount?.label ?? '';
+
+  const from = item.fromAccount?.label;
+  const to = item.toAccount?.label;
+  return from && to ? `${from} → ${to}` : '';
+}
+
 export function toOperationPresentation(item) {
   const safe = sanitizeReaderOperation(item);
   const quality = [];
@@ -100,7 +109,7 @@ export function toOperationPresentation(item) {
   if (safe.datePrecision === 'MONTH') quality.push('Точность даты: месяц');
   if (safe.datePrecision === 'UNKNOWN') quality.push('Точность даты неизвестна');
 
-  const account = safe.type === 'INCOME' ? safe.toAccount?.label : safe.fromAccount?.label;
+  const account = accountContextLabel(safe);
   return Object.freeze({
     id: safe.id,
     typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : 'Перевод',
