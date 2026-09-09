@@ -101,6 +101,8 @@ Load-more failure не очищает уже показанный список. 
 
 Desktop table имеет колонки `Дата / Операция / Тип / Контекст / Сумма / Качество`. Поле `Качество` сохраняет те же явные предупреждения `Аннулировано`, `Исторический агрегат`, unknown granularity/date precision, что и mobile cards; coarse history не становится визуально точнее из-за табличного вида. Description/context экранируются перед HTML render. Table горизонтально прокручивается внутри собственного desktop container при недостатке места и не создаёт mobile overflow. Сортировка, search, date-range, Saved Views, export и editor остаются отдельными rolling-wave items.
 
+Canonical `flowKind` у `TRANSFER` также сохраняется в этом общем presentation dataset и не выводится повторно из account names или description. Доказанные значения показываются как `Перевод · Между своими счетами`, `Перевод · Получение заёмных средств` или `Перевод · Погашение кредитных средств`; `flowKind=null` остаётся нейтральным `Перевод` без guessed subtype. Для `EXPENSE/INCOME` non-null `flowKind` browser boundary fail-closed отклоняет как неконсистентный Reader evidence.
+
 ## Manual refresh / recovery
 
 Экран `Операции` имеет явное действие `Обновить`, чтобы после временного offline/backend failure владелец мог восстановить Reader без полного reload PWA. Один manual refresh batch повторно использует ровно существующие boundaries: current operations view с exact текущими четырьмя filters, filter-options view и network-only sync-status. Новый API/data mapping при этом не создаётся.
@@ -149,7 +151,7 @@ SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не вхо�
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после nullable-capture Reader delivery fix — `prihrash-shell-v18`.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после transfer-flow presentation delivery fix — `prihrash-shell-v19`.
 
 ## Non-scope и следующий шаг
 

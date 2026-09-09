@@ -22,6 +22,8 @@ test('synthetic preview evidence contains no private/provider data and covers cu
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'EXPENSE'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'INCOME'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'TRANSFER'), true);
+  const ownFundsTransfer = syntheticPreviewEvidence.operations.find((item) => item.flowKind === 'OWN_FUNDS_TRANSFER');
+  assert.equal(toOperationPresentation(ownFundsTransfer).typeLabel, 'Перевод · Между своими счетами');
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.status === 'VOIDED'), true);
   const ambiguous = syntheticPreviewEvidence.operations.find((item) => item.periodAssignmentQuality === 'LEGACY_AMBIGUOUS');
   assert.equal(ambiguous?.recordGranularity, 'PERIOD_AGGREGATE');

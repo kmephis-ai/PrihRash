@@ -33,6 +33,7 @@ function sanitizeReaderOperation(item) {
   if (!GRANULARITIES.has(item.recordGranularity) || !DATE_PRECISIONS.has(item.datePrecision)) invalidReaderResponse();
   if (!PERIOD_QUALITIES.has(item.periodAssignmentQuality) || !ANALYTICS_STATES.has(item.analyticsState)) invalidReaderResponse();
   if (!(item.flowKind === null || FLOW_KINDS.has(item.flowKind))) invalidReaderResponse();
+  if (item.type !== 'TRANSFER' && item.flowKind !== null) invalidReaderResponse();
   if (item.currency !== 'RUB') invalidReaderResponse();
   if (!Number.isSafeInteger(item.amountMinor) || item.amountMinor < 0) invalidReaderResponse();
   if (!Number.isSafeInteger(item.version) || item.version < 1) invalidReaderResponse();
@@ -91,6 +92,13 @@ export function formatRubMinor(amountMinor) {
   return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB' }).format(amountMinor / 100);
 }
 
+function transferTypeLabel(flowKind) {
+  if (flowKind === 'OWN_FUNDS_TRANSFER') return 'Перевод · Между своими счетами';
+  if (flowKind === 'CREDIT_DRAW') return 'Перевод · Получение заёмных средств';
+  if (flowKind === 'CREDIT_REPAYMENT') return 'Перевод · Погашение кредитных средств';
+  return 'Перевод';
+}
+
 function accountContextLabel(item) {
   if (item.type === 'EXPENSE') return item.fromAccount?.label ?? '';
   if (item.type === 'INCOME') return item.toAccount?.label ?? '';
@@ -115,7 +123,7 @@ export function toOperationPresentation(item) {
   const note = safe.note === '' ? null : safe.note;
   return Object.freeze({
     id: safe.id,
-    typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : 'Перевод',
+    typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : transferTypeLabel(safe.flowKind),
     amountLabel: formatRubMinor(safe.amountMinor),
     dateLabel: safe.datePrecision === 'DAY'
       ? safe.occurredOn
