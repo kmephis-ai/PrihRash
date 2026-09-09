@@ -1,0 +1,48 @@
+name: Publish R2
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-377
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: a9777449b8daf486ee9b2576a23c47c68f6df9eb
+  EXPECTED_TREE: 1961bccdeaa47cb72960ffacec5849b542a417aa
+  TARGET_BRANCH: r2/377-period-quality
+  PATCH_GZIP_SHA256: 7f68abaafdcfd4202491f968d1c63542606f0b301582958c1269422a6b913617
+  PATCH_B64: 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
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_BASE="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "${REMOTE_BASE}" = "${EXPECTED_BASE}"
+          if git ls-remote --exit-code --heads origin "refs/heads/${TARGET_BRANCH}" >/dev/null 2>&1; then
+            echo "Target branch already exists" >&2
+            exit 1
+          fi
+          printf '%s' "${PATCH_B64}" | base64 -d > /tmp/r2.patch.gz
+          printf '%s  %s\n' "${PATCH_GZIP_SHA256}" /tmp/r2.patch.gz | sha256sum -c -
+          gzip -dc /tmp/r2.patch.gz > /tmp/r2.patch
+          git checkout --detach "${EXPECTED_BASE}"
+          git apply --index /tmp/r2.patch
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: show ambiguous financial period quality' -m 'Closes #377.'
+          git branch "${TARGET_BRANCH}" HEAD
+          git push origin "refs/heads/${TARGET_BRANCH}"
