@@ -22,6 +22,18 @@ test('future navigation items remain visible but explicitly unavailable', async 
   }
 });
 
+test('read-only R2 header exposes no Writer create affordance', async () => {
+  const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  const header = html.match(/<header class="app-header">[\s\S]*?<\/header>/u)?.[0];
+  assert.ok(header);
+  assert.match(header, /PrihRash/u);
+  assert.match(header, /<h1>Операции<\/h1>/u);
+  assert.doesNotMatch(header, /<button\b/u);
+  assert.doesNotMatch(html, /Добавить операцию|>＋</u);
+  assert.match(html, />Только чтение</u);
+  assert.match(html, /data-refresh-reader>Обновить<\/button>/u);
+});
+
 test('navigation styling preserves four-slot bottom layout and distinguishes future items', async () => {
   const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.match(css, /grid-template-columns: repeat\(4, 1fr\)/u);

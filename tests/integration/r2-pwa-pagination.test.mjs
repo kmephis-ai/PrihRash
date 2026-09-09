@@ -243,6 +243,6 @@ test('PWA exposes a dedicated load-more control and rolls shell cache version', 
   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.match(html, /data-load-more/u);
   assert.match(html, /data-page-state/u);
-  assert.match(sw, /prihrash-shell-v11/u);
+  assert.match(sw, /prihrash-shell-v12/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });
