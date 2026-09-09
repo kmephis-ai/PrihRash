@@ -60,7 +60,7 @@ test('PWA loads sync status independently and never routes it through browser pe
   assert.match(app, /Синхронизация: статус недоступен/u);
   assert.doesNotMatch(syncStatus, /indexedDB|localStorage|caches\./u);
   assert.doesNotMatch(cache, /sync-status/u);
-  assert.match(sw, /prihrash-shell-v12/u);
+  assert.match(sw, /prihrash-shell-v13/u);
   assert.match(sw, /'\/reader-sync-status\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

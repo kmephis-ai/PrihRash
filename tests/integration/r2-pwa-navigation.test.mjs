@@ -34,6 +34,15 @@ test('read-only R2 header exposes no Writer create affordance', async () => {
   assert.match(html, /data-refresh-reader>Обновить<\/button>/u);
 });
 
+test('primary Reader result state is announced as a polite atomic live status', async () => {
+  const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  const state = html.match(/<p data-state class="state"[^>]*>Загрузка…<\/p>/u)?.[0];
+  assert.ok(state);
+  assert.match(state, /role="status"/u);
+  assert.match(state, /aria-live="polite"/u);
+  assert.match(state, /aria-atomic="true"/u);
+});
+
 test('navigation styling preserves four-slot bottom layout and distinguishes future items', async () => {
   const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.match(css, /grid-template-columns: repeat\(4, 1fr\)/u);
