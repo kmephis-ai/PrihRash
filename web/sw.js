@@ -1,4 +1,4 @@
-const CACHE = 'prihrash-shell-v13';
+const CACHE = 'prihrash-shell-v14';
 const SHELL = [
   '/',
   '/index.html',
@@ -14,6 +14,8 @@ const SHELL = [
   '/reader-sync-status.mjs',
   '/reader-view.mjs',
   '/manifest.webmanifest',
+  '/icons/app-192.png',
+  '/icons/app-512.png',
 ];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL))));
 self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
