@@ -120,6 +120,28 @@ Production R2 shell завершает минимальный installable-PWA ma
 
 Icons входят только в production shell precache вместе с manifest. Synthetic UI preview намеренно не копирует manifest, Service Worker или install icons и поэтому не становится deploy/install surface. Custom install prompt, `beforeinstallprompt`, platform-specific instructions, favicon/apple-touch matrix и brand redesign этим S-unit не вводятся.
 
+## Owner UAT preview
+
+Для product-level Owner UAT используется существующий synthetic Reader preview без provider/runtime credentials и без production financial data. Из repository root достаточно выполнить:
+
+```bash
+npm run preview:r2
+```
+
+Команда сначала deterministic собирает `.artifacts/r2-ui-preview`, затем поднимает zero-dependency HTTP server только на loopback `http://127.0.0.1:4173/`. При необходимости локальный port можно переопределить через `R2_PREVIEW_PORT`; нечисловое значение, `0` и значение вне `1..65535` fail-closed. Server не слушает `0.0.0.0`, не становится public preview hosting и отдаёт только regular files внутри synthetic preview artifact с `Cache-Control: no-store`. Missing path возвращает `404`; raw/encoded path traversal отклоняется и не может читать repository files вне artifact root.
+
+Console и сам preview явно помечают эту поверхность как synthetic/non-production. Existing preview transport по-прежнему перехватывает Reader `/api/*` внутри browser и не отправляет реальные финансовые запросы; manifest, Service Worker и install icons в preview artifact не копируются. Для остановки достаточно обычного `Ctrl+C`.
+
+Owner UAT здесь проверяет только продукт:
+
+- быстро ли открывается и обновляется Reader;
+- понятно ли, что показано и насколько свежи данные;
+- удобно ли фильтровать, обновлять и догружать операции;
+- верно ли воспринимаются типы операций, суммы и честные quality labels;
+- достаточно ли мало действий для ежедневного просмотра.
+
+SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не входят. Synthetic preview не доказывает production YDB read path и не закрывает зависящие от R1/provider gates.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.

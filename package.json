@@ -20,7 +20,8 @@
     "test:ydb-adapter": "npm run build --silent && node --test tests/integration/*.test.mjs",
     "privacy": "node scripts/privacy-smoke.mjs",
     "check": "npm run privacy && npm run lint && npm run typecheck && npm test && npm run build && npm run package:function",
-    "preview:build": "node scripts/build-r2-ui-preview.mjs"
+    "preview:build": "node scripts/build-r2-ui-preview.mjs",
+    "preview:r2": "npm run preview:build --silent && node scripts/serve-r2-ui-preview.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3"
