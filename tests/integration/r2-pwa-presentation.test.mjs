@@ -26,6 +26,18 @@ test('surfaces unknown source quality explicitly', () => {
   assert.deepEqual(view.quality, ['Неизвестная детализация', 'Точность даты неизвестна']);
 });
 
+test('surfaces canonical analytics exclusion without reinterpreting note', () => {
+  const included = toOperationPresentation({ ...base, note: 'Не учитывать' });
+  assert.deepEqual(included.quality, []);
+
+  const excluded = toOperationPresentation({ ...base, analyticsState: 'EXCLUDED', note: 'Любой исходный текст' });
+  assert.deepEqual(excluded.quality, ['Не учитывать в аналитике']);
+
+  for (const markup of [operationCardsMarkup([excluded]), operationTableRowsMarkup([excluded])]) {
+    assert.match(markup, /Не учитывать в аналитике/u);
+  }
+});
+
 test('maps directional account context without hiding transfer destination', () => {
   const expense = toOperationPresentation(base);
   assert.equal(expense.meta, 'Карта Visa · Продукты');
