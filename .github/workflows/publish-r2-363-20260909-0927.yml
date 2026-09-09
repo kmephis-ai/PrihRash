@@ -1,0 +1,46 @@
+name: Publish R2
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-363-20260909-0927
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: 23bde6918864004ceccf37917b87d9607385b965
+  EXPECTED_TREE: 25250921ffe73e254d09da1617372193b7fb5ea2
+  EXPECTED_PATCH_SHA256: 2182a6e868f771a2d667d1f1e2c41ed71ec67a4006914773b68dabb6c8b86ea4
+  TARGET_BRANCH: r2/363-owner-preview
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Verify base and publish exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .github/transport/r2-363.patch.gz.b64 | gzip -d > /tmp/r2-363.patch
+          test "$(sha256sum /tmp/r2-363.patch | awk '{print $1}')" = "${EXPECTED_PATCH_SHA256}"
+
+          git fetch origin main --quiet
+          test "$(git rev-parse origin/main)" = "${EXPECTED_BASE}"
+          git cat-file -e "${EXPECTED_BASE}^{commit}"
+          git checkout --detach --quiet "${EXPECTED_BASE}"
+
+          git apply --index /tmp/r2-363.patch
+          git diff --cached --check
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+
+          git -c user.name='PrihRash AI' -c user.email='ai@localhost' commit -m 'R2: add one-command synthetic Reader preview' -m 'Closes #363.'
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          test "$(git rev-parse HEAD^)" = "${EXPECTED_BASE}"
+
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
