@@ -230,7 +230,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
   assert.match(app, /refreshSyncStatus: loadSyncStatus/u);
   assert.match(app, /refreshReader\.disabled = refreshing/u);
   assert.match(app, /refreshReader\.addEventListener\('click'/u);
-  assert.match(sw, /prihrash-shell-v8/u);
+  assert.match(sw, /prihrash-shell-v9/u);
   assert.match(sw, /'\/reader-refresh\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });
