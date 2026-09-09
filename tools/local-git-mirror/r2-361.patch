@@ -1,0 +1,248 @@
+diff --git a/docs/R2_PWA_SHELL.md b/docs/R2_PWA_SHELL.md
+index fd019ae..2a103c7 100644
+--- a/docs/R2_PWA_SHELL.md
++++ b/docs/R2_PWA_SHELL.md
+@@ -114,6 +114,12 @@ Refresh увеличивает existing operations generation и скрывае
+ 
+ Эта accessibility semantics не объединяет основной result state с `sync-state`, filter-options, shadow-sync или pagination statuses и не меняет их бизнес-смысл. Тексты `Операций пока нет.`, `По выбранным фильтрам операций нет.`, `Не удалось загрузить операции. Нажмите «Обновить».`, `Не удалось загрузить выбранный фильтр. Нажмите «Обновить».` и `Не удалось обновить операции. Можно повторить.` остаются теми же existing Reader states; меняется только способ их объявления.
+ 
++## PWA installability
++
++Production R2 shell завершает минимальный installable-PWA manifest contract локальными PNG icons `192×192` и `512×512`. Оба assets имеют opaque `#f5f5f4` background и один нейтральный геометрический ledger-mark без внешнего font/image dependency; важная геометрия ограничена центральным `28%..72%` square и остаётся внутри maskable safe zone. Manifest объявляет каждый icon как `image/png` с `purpose="any maskable"`; существующие `name/short_name/start_url/display/background_color/theme_color/lang` не меняют смысл.
++
++Icons входят только в production shell precache вместе с manifest. Synthetic UI preview намеренно не копирует manifest, Service Worker или install icons и поэтому не становится deploy/install surface. Custom install prompt, `beforeinstallprompt`, platform-specific instructions, favicon/apple-touch matrix и brand redesign этим S-unit не вводятся.
++
+ ## Service Worker boundary
+ 
+ Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
+diff --git a/tests/integration/r2-pwa-desktop-table.test.mjs b/tests/integration/r2-pwa-desktop-table.test.mjs
+index 851343d..084e597 100644
+--- a/tests/integration/r2-pwa-desktop-table.test.mjs
++++ b/tests/integration/r2-pwa-desktop-table.test.mjs
+@@ -63,7 +63,7 @@ test('PWA shell exposes responsive semantic table and mobile cards with one Read
+   assert.match(css, /overflow-x: auto/u);
+   assert.match(css, /font-variant-numeric: tabular-nums/u);
+ 
+-  assert.match(sw, /prihrash-shell-v13/u);
++  assert.match(sw, /prihrash-shell-v14/u);
+   assert.match(sw, /'\/operation-markup\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-filter-options.test.mjs b/tests/integration/r2-pwa-filter-options.test.mjs
+index f11720d..bcc79b6 100644
+--- a/tests/integration/r2-pwa-filter-options.test.mjs
++++ b/tests/integration/r2-pwa-filter-options.test.mjs
+@@ -146,7 +146,7 @@ test('PWA exposes disabled account/category controls while API remains outside S
+   assert.match(app, /Локальные справочники от/u);
+   assert.match(app, /Офлайн · справочники от/u);
+   assert.match(app, /Счёт и категория недоступны/u);
+-  assert.match(sw, /prihrash-shell-v13/u);
++  assert.match(sw, /prihrash-shell-v14/u);
+   assert.match(sw, /'\/reader-filter-options-view\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-installability.test.mjs b/tests/integration/r2-pwa-installability.test.mjs
+new file mode 100644
+index 0000000..b88a778
+--- /dev/null
++++ b/tests/integration/r2-pwa-installability.test.mjs
+@@ -0,0 +1,49 @@
++import assert from 'node:assert/strict';
++import { access, readFile } from 'node:fs/promises';
++import test from 'node:test';
++
++const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
++
++function pngHeader(bytes) {
++  assert.ok(bytes.subarray(0, 8).equals(PNG_SIGNATURE), 'expected PNG signature');
++  assert.equal(bytes.readUInt32BE(8), 13, 'IHDR must be 13 bytes');
++  assert.equal(bytes.subarray(12, 16).toString('ascii'), 'IHDR');
++  return {
++    width: bytes.readUInt32BE(16),
++    height: bytes.readUInt32BE(20),
++    bitDepth: bytes[24],
++    colorType: bytes[25],
++  };
++}
++
++test('PWA manifest exposes the minimum local install icons without changing existing shell identity', async () => {
++  const manifest = JSON.parse(await readFile(new URL('../../web/manifest.webmanifest', import.meta.url), 'utf8'));
++  assert.equal(manifest.name, 'PrihRash');
++  assert.equal(manifest.short_name, 'PrihRash');
++  assert.equal(manifest.start_url, '/');
++  assert.equal(manifest.display, 'standalone');
++  assert.equal(manifest.background_color, '#f5f5f4');
++  assert.equal(manifest.theme_color, '#f5f5f4');
++  assert.equal(manifest.lang, 'ru');
++  assert.deepEqual(manifest.icons, [
++    { src: '/icons/app-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
++    { src: '/icons/app-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
++  ]);
++});
++
++test('declared install icons are real opaque RGB PNGs with exact dimensions', async () => {
++  for (const size of [192, 512]) {
++    const url = new URL(`../../web/icons/app-${size}.png`, import.meta.url);
++    await access(url);
++    const header = pngHeader(await readFile(url));
++    assert.deepEqual(header, { width: size, height: size, bitDepth: 8, colorType: 2 });
++  }
++});
++
++test('service worker precaches install icons while API requests stay outside Cache Storage', async () => {
++  const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
++  assert.match(sw, /prihrash-shell-v14/u);
++  assert.match(sw, /'\/icons\/app-192\.png'/u);
++  assert.match(sw, /'\/icons\/app-512\.png'/u);
++  assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
++});
+diff --git a/tests/integration/r2-pwa-manual-refresh.test.mjs b/tests/integration/r2-pwa-manual-refresh.test.mjs
+index 7f6f9e1..32d6408 100644
+--- a/tests/integration/r2-pwa-manual-refresh.test.mjs
++++ b/tests/integration/r2-pwa-manual-refresh.test.mjs
+@@ -253,7 +253,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
+   assert.match(app, /Не удалось обновить операции\. Можно повторить\./u);
+   assert.match(app, /Не удалось обновить · показаны прежние данные/u);
+   assert.doesNotMatch(app, /обновить экран/iu);
+-  assert.match(sw, /prihrash-shell-v13/u);
++  assert.match(sw, /prihrash-shell-v14/u);
+   assert.match(sw, /'\/reader-refresh\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-pagination.test.mjs b/tests/integration/r2-pwa-pagination.test.mjs
+index 87b2455..f222c7e 100644
+--- a/tests/integration/r2-pwa-pagination.test.mjs
++++ b/tests/integration/r2-pwa-pagination.test.mjs
+@@ -243,6 +243,6 @@ test('PWA exposes a dedicated load-more control and rolls shell cache version',
+   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+   assert.match(html, /data-load-more/u);
+   assert.match(html, /data-page-state/u);
+-  assert.match(sw, /prihrash-shell-v13/u);
++  assert.match(sw, /prihrash-shell-v14/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-sync-status.test.mjs b/tests/integration/r2-pwa-sync-status.test.mjs
+index 4b370ab..4be538d 100644
+--- a/tests/integration/r2-pwa-sync-status.test.mjs
++++ b/tests/integration/r2-pwa-sync-status.test.mjs
+@@ -60,7 +60,7 @@ test('PWA loads sync status independently and never routes it through browser pe
+   assert.match(app, /Синхронизация: статус недоступен/u);
+   assert.doesNotMatch(syncStatus, /indexedDB|localStorage|caches\./u);
+   assert.doesNotMatch(cache, /sync-status/u);
+-  assert.match(sw, /prihrash-shell-v13/u);
++  assert.match(sw, /prihrash-shell-v14/u);
+   assert.match(sw, /'\/reader-sync-status\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-safe-ui-preview.test.mjs b/tests/integration/r2-safe-ui-preview.test.mjs
+index 2877322..8960ffa 100644
+--- a/tests/integration/r2-safe-ui-preview.test.mjs
++++ b/tests/integration/r2-safe-ui-preview.test.mjs
+@@ -1,5 +1,5 @@
+ import assert from 'node:assert/strict';
+-import { readFile, rm } from 'node:fs/promises';
++import { access, readFile, rm } from 'node:fs/promises';
+ import { spawnSync } from 'node:child_process';
+ import test from 'node:test';
+ 
+@@ -99,4 +99,7 @@ test('preview build emits static root without service worker or manifest deploym
+   assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
+   assert.match(bootstrap, /fetch\('\.\/app-shell\.html'/u);
+   assert.doesNotMatch(index, /manifest\.webmanifest/u);
++  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/manifest.webmanifest', import.meta.url)));
++  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-192.png', import.meta.url)));
++  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-512.png', import.meta.url)));
+ });
+diff --git a/web/icons/app-192.png b/web/icons/app-192.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..e2ac5cbfb2aeb9b5317ce05828ee173cac31bb73
+GIT binary patch
+literal 620
+zcmeAS@N?(olHy`uVBq!ia0vp^2SAvE2}s`E_d9@rfyvm@#WAGf*4w)W*RD1Ya0uL>
+z(c$`Qy#jYvW35yNgQ`kJ+PRevZts));&4rVd#>z*;Im>13M?%R0s<TyjEV{@EKE)g
+zKvpAA0LX$$F)@LpS{fWcQi=*-DGm;x0J0(s{d;E!t$Ap8zVQFY^QoMBe<t7g|INC@
+zJku-d)y73p!W!{b3*7^Q`%S|*S2)=|410CHB8w#?{m+r8{LQn&-U_xg2uye$esJq-
+zhniHaP3N|+FXykne|?{bpQTsy%__d%JN`^|`ojNSF7dm3*}gU;x0LLc-}~kCcfCM|
+z|JHA&<S$ZR7-C%{jO1>Z=L*{TS61KQHg2q1nO>mpV=E;D@-oC<0sVKlg#*gl-^R^o
+zGiXHiCL}CeMD3QnE7U*3@@nb4gL@6WW_Tb4jct*>kHhif+v?}MYn>bTH27G0`}4RN
+zoGw2bg6f>SHkW}N<G*pi>b$bcRknu&CMb#&FFkuM>aqE;+-T)@MW@P-2-eG;jf)OE
+x$~h%X%Jsi$3I|8O0nm@wA^;jU<VK+99)>I5>Ud+%)$V2h0#8>zmvv4FO#r>5%vJyZ
+
+literal 0
+HcmV?d00001
+
+diff --git a/web/icons/app-512.png b/web/icons/app-512.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..316d1e399038cd747d18612cade5704f712c6739
+GIT binary patch
+literal 1932
+zcmeAS@N?(olHy`uVBq!ia0y~yU;;9k7&t&wwUqN(1_t(EPZ!6Kid%2*8WycK5NQjv
+zT+F&M;lK8R3rRln^&U@BG;8}kKY0HkjYoBd=9$}UdwY}N#OGvA1{MYeMg|841_1`L
+zm;<XF=x9nDPq}s$3W5$C;=qvSxT4EgKh03bsj1Yj+adey#$5l^2``k{I2fMUc{MO3
+zd{JiRU~scHLSi16`?H>5nf(n{riR~QZ<ea;V=CHxC~hC$Czghn{dZd#9{f8Z=gd%$
+zp0r$%VTbz0`(Ue%8@{n(Vfe22O^&I-TEJQW6mkVW4%xYYB41|r25CWH5;)Mv{l*g%
+zsRdV<tc9V0>whz$9+>u+7#bKD6c}RK^dmNUgA{{8KVg3!r^Rur=jZAxZ%se(+y0X2
+z&uy~)3{z(Pdw%9=>ABth|Bb>M84`ZYztT|U9Ly%b@XF`^dD8_S7F=OqX$T5F8NkfQ
+zke(vm0W$eP$s0wC2nE}Ml0Y9^a*CV(TK6Ca$VrCFlaJSf)HKX6-t^d>y~Nugfmv&>
+z<>?ph3<`S8ZuU$JY#K5T&1s%e8uDLGYlwI~XZycDrzQS%a4@9w{=2?<0wW7UliPlt
+z4`Ox92fmbNg57-XgdRBb54^mQssu~`@Sw%c+z@|)d-EP~9#Cv3JS%zgqaPGl0>y4+
+zf1WqwadPB1EHzJ;{L8^`B=rE$*9RC{mH)5-RbV%bNKt~?Kj_{S63CwW`P%$?$;0x3
+zj16lp{;v`Rrc#FsFQzlzJCx5b<DVWc$jt{NZ?b~DX(7AY2QxY`ik@%Wm5I~7Hz|TV
+zaAZ!O?0-RqS3N4iyethz*lLn~iR*PmC^3l4^qnuAep=#aTIybHCx#Qb2RI+EId;M1
+z*U#m7oIBnWJ3Me_@`ndOOVsl%95<FCLfZ6aljv`x^qmfJV8ddu8<Rn59vomTTMP<h
+zi?YUA4Uj2(@d@l)4DTE^d<SKrGFebwcwo`?w~gV!yd!?#yw(rQYxWy=?`S%{&33Jm
+z=V=Ks#>Mjf4DTW~Oc!AIu6x6E%e5L-kwe!VCH`_W@HAZPXE?zi@s}w<G=-t3j?sbB
+z;JYBh5e8>@Mur7)|M`L8h7m9rc>|oUv5QiyU5Bv&6aqvh7c6SA2*HXFVhp8FJJ2dh
+e91qkk@J{@5YoOo!jQZUSK;Y@>=d#Wzp$P!R7-kFr
+
+literal 0
+HcmV?d00001
+
+diff --git a/web/manifest.webmanifest b/web/manifest.webmanifest
+index 3c72a33..07b27e8 100644
+--- a/web/manifest.webmanifest
++++ b/web/manifest.webmanifest
+@@ -1 +1,23 @@
+-{"name":"PrihRash","short_name":"PrihRash","start_url":"/","display":"standalone","background_color":"#f5f5f4","theme_color":"#f5f5f4","lang":"ru"}
++{
++  "name": "PrihRash",
++  "short_name": "PrihRash",
++  "start_url": "/",
++  "display": "standalone",
++  "background_color": "#f5f5f4",
++  "theme_color": "#f5f5f4",
++  "lang": "ru",
++  "icons": [
++    {
++      "src": "/icons/app-192.png",
++      "sizes": "192x192",
++      "type": "image/png",
++      "purpose": "any maskable"
++    },
++    {
++      "src": "/icons/app-512.png",
++      "sizes": "512x512",
++      "type": "image/png",
++      "purpose": "any maskable"
++    }
++  ]
++}
+diff --git a/web/sw.js b/web/sw.js
+index ab308ed..fa5bf6f 100644
+--- a/web/sw.js
++++ b/web/sw.js
+@@ -1,4 +1,4 @@
+-const CACHE = 'prihrash-shell-v13';
++const CACHE = 'prihrash-shell-v14';
+ const SHELL = [
+   '/',
+   '/index.html',
+@@ -14,6 +14,8 @@ const SHELL = [
+   '/reader-sync-status.mjs',
+   '/reader-view.mjs',
+   '/manifest.webmanifest',
++  '/icons/app-192.png',
++  '/icons/app-512.png',
+ ];
+ self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL))));
+ self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
