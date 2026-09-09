@@ -92,6 +92,8 @@ test('preview build emits static root without service worker or manifest deploym
   const bootstrap = await readFile(new URL('../../.artifacts/r2-ui-preview/preview-bootstrap.mjs', import.meta.url), 'utf8');
   assert.match(index, /preview-bootstrap\.mjs/u);
   assert.match(shell, /data-operations-cards/u);
+  assert.match(shell, /aria-label="Главная — скоро"/u);
+  assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
   assert.match(bootstrap, /fetch\('\.\/app-shell\.html'/u);
   assert.doesNotMatch(index, /manifest\.webmanifest/u);
 });
