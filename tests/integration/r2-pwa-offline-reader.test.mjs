@@ -83,7 +83,7 @@ test('malformed network response does not overwrite a previous valid cache', asy
   const statuses = [];
   await refreshRecentOperations({
     cache: { read: async () => cacheRecord(), write: async () => { writes += 1; } },
-    fetchRecent: async () => ({ apiVersion: 2, items: [] }),
+    fetchRecent: async () => response({ items: [{ ...base, amountMinor: 0 }] }),
     render: () => {},
     setStatus: (status) => statuses.push(status),
   });
@@ -118,6 +118,10 @@ test('cache record validation fails closed on unsupported or malformed cache', (
   assert.throws(() => parseReaderCacheRecord({ ...cacheRecord(), schemaVersion: 2 }), /INVALID_READER_CACHE/);
   assert.throws(() => parseReaderCacheRecord({ ...cacheRecord(), savedAt: 'not-a-date' }), /INVALID_READER_CACHE/);
   assert.throws(() => parseReaderCacheRecord({ ...cacheRecord(), response: { apiVersion: 2, items: [] } }), /INVALID_READER_RESPONSE/);
+  assert.throws(
+    () => parseReaderCacheRecord({ ...cacheRecord(), response: response({ items: [{ ...base, amountMinor: 0 }] }) }),
+    /INVALID_READER_RESPONSE/,
+  );
 });
 
 function createFakeIndexedDb(initialValue) {

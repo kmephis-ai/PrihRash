@@ -14,9 +14,12 @@ const base = {
 };
 
 function response(description = 'Покупка', overrides = {}) {
+  const topology = overrides.type === 'INCOME'
+    ? { fromAccount: null, toAccount: { id: 'income-account', label: 'Основной счёт' }, category: { id: 'income-category', label: 'Зарплата' } }
+    : {};
   return {
     apiVersion: 1,
-    items: [{ ...base, description, ...overrides }],
+    items: [{ ...base, description, ...topology, ...overrides }],
     pageSize: 1,
     nextCursor: null,
   };

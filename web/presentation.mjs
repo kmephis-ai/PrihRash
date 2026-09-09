@@ -27,6 +27,29 @@ function sanitizeEntityRef(value) {
   return Object.freeze({ id: requireString(value.id), label: requireString(value.label) });
 }
 
+function validateReaderOperationInvariants(item) {
+  if (item.recordGranularity === 'PERIOD_AGGREGATE') {
+    if (item.aggregatePeriodMonth === null || item.datePrecision !== 'MONTH') invalidReaderResponse();
+  } else if (item.aggregatePeriodMonth !== null) {
+    invalidReaderResponse();
+  }
+
+  if (item.type === 'EXPENSE') {
+    if (item.fromAccount === null || item.toAccount !== null || item.category === null) invalidReaderResponse();
+    return;
+  }
+  if (item.type === 'INCOME') {
+    if (item.fromAccount !== null || item.toAccount === null || item.category === null) invalidReaderResponse();
+    return;
+  }
+  if (
+    item.fromAccount === null
+    || item.toAccount === null
+    || item.fromAccount.id === item.toAccount.id
+    || item.category !== null
+  ) invalidReaderResponse();
+}
+
 function sanitizeReaderOperation(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) invalidReaderResponse();
   if (!TYPES.has(item.type) || !STATUSES.has(item.status)) invalidReaderResponse();
@@ -35,10 +58,10 @@ function sanitizeReaderOperation(item) {
   if (!(item.flowKind === null || FLOW_KINDS.has(item.flowKind))) invalidReaderResponse();
   if (item.type !== 'TRANSFER' && item.flowKind !== null) invalidReaderResponse();
   if (item.currency !== 'RUB') invalidReaderResponse();
-  if (!Number.isSafeInteger(item.amountMinor) || item.amountMinor < 0) invalidReaderResponse();
+  if (!Number.isSafeInteger(item.amountMinor) || item.amountMinor <= 0) invalidReaderResponse();
   if (!Number.isSafeInteger(item.version) || item.version < 1) invalidReaderResponse();
 
-  return Object.freeze({
+  const safe = {
     id: requireString(item.id),
     type: item.type,
     occurredOn: requireString(item.occurredOn),
@@ -60,7 +83,9 @@ function sanitizeReaderOperation(item) {
     analyticsState: item.analyticsState,
     flowKind: item.flowKind,
     version: item.version,
-  });
+  };
+  validateReaderOperationInvariants(safe);
+  return Object.freeze(safe);
 }
 
 export function sanitizeReaderResponse(value) {
