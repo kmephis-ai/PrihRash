@@ -39,12 +39,33 @@ test('surfaces unknown source quality explicitly', () => {
 test('surfaces canonical analytics exclusion without reinterpreting note', () => {
   const included = toOperationPresentation({ ...base, note: 'Не учитывать' });
   assert.deepEqual(included.quality, []);
+  assert.equal(included.note, 'Не учитывать');
 
   const excluded = toOperationPresentation({ ...base, analyticsState: 'EXCLUDED', note: 'Любой исходный текст' });
   assert.deepEqual(excluded.quality, ['Не учитывать в аналитике']);
 
   for (const markup of [operationCardsMarkup([excluded]), operationTableRowsMarkup([excluded])]) {
     assert.match(markup, /Не учитывать в аналитике/u);
+  }
+});
+
+test('surfaces canonical note literally and escapes it in both Reader surfaces', () => {
+  const note = 'Заказ <42> & https://example.invalid/orders/42?x=1&y=2';
+  const view = toOperationPresentation({ ...base, note });
+  assert.equal(view.note, note);
+
+  for (const markup of [operationCardsMarkup([view]), operationTableRowsMarkup([view])]) {
+    assert.match(markup, /Примечание:/u);
+    assert.match(markup, /Заказ &lt;42&gt; &amp; https:\/\/example\.invalid\/orders\/42\?x=1&amp;y=2/u);
+    assert.equal(markup.includes(note), false);
+  }
+
+  for (const missing of [null, '']) {
+    const withoutNote = toOperationPresentation({ ...base, note: missing });
+    assert.equal(withoutNote.note, null);
+    for (const markup of [operationCardsMarkup([withoutNote]), operationTableRowsMarkup([withoutNote])]) {
+      assert.doesNotMatch(markup, /Примечание:/u);
+    }
   }
 });
 

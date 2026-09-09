@@ -40,12 +40,20 @@ test('declared install icons are real opaque RGB PNGs with exact dimensions', as
   }
 });
 
-test('service worker v15 delivers changed shell assets while API requests stay outside Cache Storage', async () => {
+test('service worker v16 delivers changed shell assets while API requests stay outside Cache Storage', async () => {
   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
-  assert.match(sw, /prihrash-shell-v15/u);
+  assert.match(sw, /prihrash-shell-v16/u);
+  assert.match(sw, /'\/styles\.css'/u);
   assert.match(sw, /'\/presentation\.mjs'/u);
+  assert.match(sw, /'\/operation-markup\.mjs'/u);
   assert.match(sw, /'\/icons\/app-192\.png'/u);
   assert.match(sw, /'\/icons\/app-512\.png'/u);
   assert.match(sw, /key\.startsWith\('prihrash-shell-'\).*key !== CACHE/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+});
+
+test('note presentation wraps long literal context instead of widening the page', async () => {
+  const styles = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.match(styles, /\.operation-card__note \{[^}]*overflow-wrap: anywhere;/u);
+  assert.match(styles, /\.operation-table__note \{[^}]*overflow-wrap: anywhere;/u);
 });
