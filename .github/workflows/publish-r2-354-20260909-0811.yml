@@ -1,0 +1,39 @@
+name: Publish R2 #354
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-354-20260909-0811
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: b364ca3ad25545b250229a7ffa4edad7e3272c56
+  EXPECTED_TREE: a6c7a1eb649272c6f9189e1a891ad0e05301054b
+  TARGET_BRANCH: r2/354-recovery-copy
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Verify base and publish exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "${REMOTE_MAIN}" = "${SOURCE_SHA}"
+          git checkout --detach "${SOURCE_SHA}"
+          printf '%s' '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' | base64 -d | gzip -d > /tmp/r2.patch
+          git apply --check /tmp/r2.patch
+          git apply /tmp/r2.patch
+          git add -A
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+          git config user.name kmephis-ai
+          git config user.email kmephis@gmail.com
+          git commit -m 'R2: actionable recovery copy for in-app refresh' -m 'Closes #354.'
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
