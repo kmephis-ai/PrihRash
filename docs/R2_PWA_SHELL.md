@@ -108,6 +108,12 @@ Refresh увеличивает existing operations generation и скрывае�
 
 Повторные нажатия `Обновить`, пока batch активен, coalesce в один operations/reference/sync request batch; кнопка временно disabled. Automatic polling, push и background timer этим contract не вводятся. `/api/*` остаётся вне Service Worker Cache Storage.
 
+## Accessible Reader state
+
+Основной динамический `data-state`, через который Reader сообщает initial loading, empty result и generic/filtered/manual-refresh error без видимых rows, является отдельным polite atomic status surface: `role="status"`, `aria-live="polite"`, `aria-atomic="true"`. Поэтому изменение уже существующего owner-facing текста объявляется assistive technology без переноса фокуса и без создания нового recovery/state path.
+
+Эта accessibility semantics не объединяет основной result state с `sync-state`, filter-options, shadow-sync или pagination statuses и не меняет их бизнес-смысл. Тексты `Операций пока нет.`, `По выбранным фильтрам операций нет.`, `Не удалось загрузить операции. Нажмите «Обновить».`, `Не удалось загрузить выбранный фильтр. Нажмите «Обновить».` и `Не удалось обновить операции. Можно повторить.` остаются теми же existing Reader states; меняется только способ их объявления.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.

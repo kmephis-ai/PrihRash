@@ -93,6 +93,7 @@ test('preview build emits static root without service worker or manifest deploym
   assert.match(index, /preview-bootstrap\.mjs/u);
   assert.match(shell, /data-operations-cards/u);
   assert.match(shell, />Только чтение</u);
+  assert.match(shell, /data-state class="state" role="status" aria-live="polite" aria-atomic="true"/u);
   assert.doesNotMatch(shell, /Добавить операцию|>＋</u);
   assert.match(shell, /aria-label="Главная — скоро"/u);
   assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
