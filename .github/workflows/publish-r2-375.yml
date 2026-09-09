@@ -1,0 +1,50 @@
+name: Publish R2
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-375
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: c4d170b7b8d5193a4b9bcba6784ea1dd1b325723
+  EXPECTED_TREE: 59417b16edff657cfb34822937e4344e0d0e9a5b
+  TARGET_BRANCH: r2/375-note-visibility
+  PATCH_GZIP_SHA256: e20a75ad3f6832f54abfc9d79ca15a9b8eb0f64b2e662a41c91f8b4f6a14b690
+  PATCH_B64: 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
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "${REMOTE_MAIN}" = "${EXPECTED_BASE}"
+          if git ls-remote --exit-code origin "refs/heads/${TARGET_BRANCH}" >/dev/null 2>&1; then
+            echo "target branch already exists" >&2
+            exit 1
+          fi
+
+          git checkout --detach --quiet "${EXPECTED_BASE}"
+          printf '%s' "${PATCH_B64}" | base64 --decode > /tmp/r2.patch.gz
+          test "$(sha256sum /tmp/r2.patch.gz | awk '{print $1}')" = "${PATCH_GZIP_SHA256}"
+          gunzip -c /tmp/r2.patch.gz > /tmp/r2.patch
+          git apply --index /tmp/r2.patch
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m $'R2: show canonical note in Reader\n\nCloses #375.'
+          test "$(git rev-parse HEAD^1)" = "${EXPECTED_BASE}"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
