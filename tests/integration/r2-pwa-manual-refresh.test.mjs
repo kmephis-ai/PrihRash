@@ -18,9 +18,9 @@ const OPERATION = Object.freeze({
   periodAssignmentQuality: 'UNASSIGNED',
   amountMinor: 12345,
   currency: 'RUB',
-  fromAccount: { id: 'a', label: 'Карта Visa' },
+  fromAccount: { id: '10000000-0000-0000-0000-000000000001', label: 'Карта Visa' },
   toAccount: null,
-  category: { id: 'c', label: 'Продукты' },
+  category: { id: '20000000-0000-0000-0000-000000000001', label: 'Продукты' },
   paidByMember: null,
   description: 'Покупка',
   note: null,
@@ -253,7 +253,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
   assert.match(app, /Не удалось обновить операции\. Можно повторить\./u);
   assert.match(app, /Не удалось обновить · показаны прежние данные/u);
   assert.doesNotMatch(app, /обновить экран/iu);
-  assert.match(sw, /prihrash-shell-v21/u);
+  assert.match(sw, /prihrash-shell-v22/u);
   assert.match(sw, /'\/reader-refresh\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

@@ -8,8 +8,8 @@ import { sanitizeReaderResponse } from '../../web/presentation.mjs';
 const base = {
   id: '00000000-0000-0000-0000-000000000001', type: 'EXPENSE', occurredOn: '2026-09-08', capturedAt: '2026-09-08T08:00:00.000Z',
   recordGranularity: 'TRANSACTION', datePrecision: 'DAY', aggregatePeriodMonth: null, financialPeriodId: null,
-  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: 'a', label: 'Карта Visa' },
-  toAccount: null, category: { id: 'c', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
+  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: '10000000-0000-0000-0000-000000000001', label: 'Карта Visa' },
+  toAccount: null, category: { id: '20000000-0000-0000-0000-000000000001', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
   status: 'POSTED', analyticsState: 'INCLUDED', flowKind: null, version: 1,
 };
 
@@ -63,6 +63,24 @@ test('successful refresh writes validated cache before rendering fresh result', 
   assert.equal(events[1][0], 'render');
   assert.equal(events[1][1][0].description, 'Новая покупка');
   assert.deepEqual(events[2], ['status', { kind: 'fresh', savedAt: '2026-09-08T10:00:00.000Z' }]);
+});
+
+test('lexically malformed network/cache evidence stays fail-closed', async () => {
+  const malformed = response({
+    items: [{ ...base, fromAccount: { ...base.fromAccount, label: ' Карта Visa' } }],
+  });
+  assert.throws(() => createReaderCacheRecord(malformed, '2026-09-08T09:00:00.000Z'), /INVALID_READER_RESPONSE/u);
+
+  let writes = 0;
+  const statuses = [];
+  await refreshRecentOperations({
+    cache: { read: async () => cacheRecord(), write: async () => { writes += 1; } },
+    fetchRecent: async () => malformed,
+    render: () => {},
+    setStatus: (status) => statuses.push(status),
+  });
+  assert.equal(writes, 0);
+  assert.deepEqual(statuses.at(-1), { kind: 'offline', savedAt: '2026-09-08T09:00:00.000Z' });
 });
 
 test('network failure preserves valid cached data and marks it offline', async () => {

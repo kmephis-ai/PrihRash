@@ -152,13 +152,15 @@ SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не вхо�
 
 Browser не становится вторым financial semantics engine, но не имеет права отрисовывать structurally impossible Reader DTO. После whitelist/primitive validation он повторяет только те canonical `Transaction` invariants, которые полностью выражены в Reader response: positive `amountMinor`; допустимую account/category topology для `EXPENSE` / `INCOME` / `TRANSFER`; distinct transfer accounts; `flowKind` только у transfer; а также согласованность `PERIOD_AGGREGATE + MONTH + aggregatePeriodMonth`. Category kind в Reader DTO отсутствует и поэтому остаётся backend-only validation context — browser его не угадывает.
 
+Lexical evidence также не нормализуется в browser: operation/entity/financial-period ids должны уже быть canonical lowercase UUID; entity labels и non-null description/note — non-empty trimmed strings; dates — full `YYYY-MM-DD`; non-null `capturedAt` — trimmed parseable timestamp. Это parity с existing backend Reader parser: malformed cache/network value блокируется, а не чинится или повышается до новой точности. Synthetic monthly aggregate поэтому хранит canonical `aggregatePeriodMonth=YYYY-MM-01`, хотя owner-facing presentation показывает только `YYYY-MM`.
+
 Malformed network/cache response fail-closed как `INVALID_READER_RESPONSE`: он не рендерится и не заменяет ранее валидный IndexedDB cache. Это defensive parity с уже существующим backend `validateTransaction()`, а не отдельная финансовая модель.
 
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после явного canonical payer presentation — `prihrash-shell-v21`.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после browser lexical-evidence parity — `prihrash-shell-v22`.
 
 ## Non-scope и следующий шаг
 
