@@ -1,0 +1,40 @@
+name: Publish R2
+
+on:
+  push:
+    branches:
+      - transport/r2-empty-20260909-0739
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: d3ee9f41b8a365a51d29e5685ffd81f88fae0864
+  EXPECTED_TREE: 57186bc3dba7bdeed0c4ae2534341486c1d14a69
+  TARGET_BRANCH: r2/352-contextual-empty-state
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Verify base and publish exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_MAIN="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "${REMOTE_MAIN}" = "${SOURCE_SHA}"
+          git checkout --detach "${SOURCE_SHA}"
+          printf '%s' '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' | base64 -d | gzip -d > /tmp/r2.patch
+          git apply --check /tmp/r2.patch
+          git apply /tmp/r2.patch
+          git add -A
+          ACTUAL_TREE="$(git write-tree)"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+          git config user.name kmephis-ai
+          git config user.email kmephis@gmail.com
+          git commit -m 'R2: contextual empty state for filters' -m 'Closes #352.'
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
