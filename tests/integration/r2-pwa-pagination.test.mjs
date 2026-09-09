@@ -200,7 +200,7 @@ test('filter change makes an in-flight old page response inert', async () => {
     fetchRecent: async (filters, cursor) => {
       if (filters.type === 'EXPENSE' && cursor === null) return response([operation(BASE.id, 'Расход')], CURSOR_1);
       if (filters.type === 'EXPENSE') return oldPage.promise;
-      return response([operation(THIRD_ID, 'Доход', { type: 'INCOME' })], null);
+      return response([operation(THIRD_ID, 'Доход', { type: 'INCOME', fromAccount: null, toAccount: { id: 'income-account', label: 'Основной счёт' }, category: { id: 'income-category', label: 'Зарплата' } })], null);
     },
   });
 
@@ -243,6 +243,6 @@ test('PWA exposes a dedicated load-more control and rolls shell cache version', 
   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.match(html, /data-load-more/u);
   assert.match(html, /data-page-state/u);
-  assert.match(sw, /prihrash-shell-v19/u);
+  assert.match(sw, /prihrash-shell-v20/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

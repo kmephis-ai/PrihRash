@@ -164,6 +164,72 @@ test('browser Reader boundary rejects flow kind outside TRANSFER', () => {
   }
 });
 
+test('browser Reader boundary rejects non-positive amounts', () => {
+  for (const amountMinor of [0, -1]) {
+    assert.throws(() => toOperationPresentation({ ...base, amountMinor }), /INVALID_READER_RESPONSE/u);
+  }
+});
+
+test('browser Reader boundary enforces canonical account and category topology', () => {
+  for (const invalidExpense of [
+    { fromAccount: null },
+    { toAccount: { id: 'unexpected-to', label: 'Неожиданный счёт' } },
+    { category: null },
+  ]) {
+    assert.throws(() => toOperationPresentation({ ...base, ...invalidExpense }), /INVALID_READER_RESPONSE/u);
+  }
+
+  const income = {
+    ...base,
+    type: 'INCOME',
+    fromAccount: null,
+    toAccount: { id: 'income-account', label: 'Основной счёт' },
+    category: { id: 'income-category', label: 'Зарплата' },
+  };
+  assert.doesNotThrow(() => toOperationPresentation(income));
+  for (const invalidIncome of [
+    { fromAccount: { id: 'unexpected-from', label: 'Неожиданный счёт' } },
+    { toAccount: null },
+    { category: null },
+  ]) {
+    assert.throws(() => toOperationPresentation({ ...income, ...invalidIncome }), /INVALID_READER_RESPONSE/u);
+  }
+
+  const transfer = {
+    ...base,
+    type: 'TRANSFER',
+    fromAccount: { id: 'from-account', label: 'Карта Visa' },
+    toAccount: { id: 'to-account', label: 'Накопления' },
+    category: null,
+  };
+  assert.doesNotThrow(() => toOperationPresentation(transfer));
+  for (const invalidTransfer of [
+    { fromAccount: null },
+    { toAccount: null },
+    { toAccount: { id: 'from-account', label: 'Тот же счёт' } },
+    { category: { id: 'unexpected-category', label: 'Неожиданная категория' } },
+  ]) {
+    assert.throws(() => toOperationPresentation({ ...transfer, ...invalidTransfer }), /INVALID_READER_RESPONSE/u);
+  }
+});
+
+test('browser Reader boundary enforces canonical aggregate granularity shape', () => {
+  assert.throws(
+    () => toOperationPresentation({ ...base, recordGranularity: 'PERIOD_AGGREGATE', datePrecision: 'MONTH', aggregatePeriodMonth: null }),
+    /INVALID_READER_RESPONSE/u,
+  );
+  assert.throws(
+    () => toOperationPresentation({ ...base, recordGranularity: 'PERIOD_AGGREGATE', datePrecision: 'DAY', aggregatePeriodMonth: '2024-02-01' }),
+    /INVALID_READER_RESPONSE/u,
+  );
+  for (const recordGranularity of ['TRANSACTION', 'UNKNOWN']) {
+    assert.throws(
+      () => toOperationPresentation({ ...base, recordGranularity, aggregatePeriodMonth: '2024-02-01' }),
+      /INVALID_READER_RESPONSE/u,
+    );
+  }
+});
+
 test('reader response parser fails closed on malformed contract', () => {
   assert.throws(() => parseReaderResponse({ apiVersion: 2, items: [] }), /INVALID_READER_RESPONSE/);
   assert.throws(() => parseReaderResponse({ apiVersion: 1, items: [{ ...base, amountMinor: 1.5 }], pageSize: 1, nextCursor: null }), /INVALID_READER_RESPONSE/);
