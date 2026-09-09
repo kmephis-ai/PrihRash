@@ -40,9 +40,9 @@ test('declared install icons are real opaque RGB PNGs with exact dimensions', as
   }
 });
 
-test('service worker v16 delivers changed shell assets while API requests stay outside Cache Storage', async () => {
+test('service worker v17 delivers changed shell assets while API requests stay outside Cache Storage', async () => {
   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
-  assert.match(sw, /prihrash-shell-v16/u);
+  assert.match(sw, /prihrash-shell-v17/u);
   assert.match(sw, /'\/styles\.css'/u);
   assert.match(sw, /'\/presentation\.mjs'/u);
   assert.match(sw, /'\/operation-markup\.mjs'/u);
