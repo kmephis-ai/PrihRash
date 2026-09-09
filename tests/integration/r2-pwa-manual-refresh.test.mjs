@@ -253,7 +253,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
   assert.match(app, /Не удалось обновить операции\. Можно повторить\./u);
   assert.match(app, /Не удалось обновить · показаны прежние данные/u);
   assert.doesNotMatch(app, /обновить экран/iu);
-  assert.match(sw, /prihrash-shell-v11/u);
+  assert.match(sw, /prihrash-shell-v12/u);
   assert.match(sw, /'\/reader-refresh\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

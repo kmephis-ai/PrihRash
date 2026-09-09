@@ -8,6 +8,8 @@ Canonical top-level navigation: `Главная / Операции / Анали�
 
 Текущее navigation state честно отражает эту границу: `Операции` — единственная интерактивная top-level destination и помечена `aria-current=page`; `Главная / Аналитика / Ещё` остаются видимыми как будущая IA, но рендерятся non-interactive elements с `aria-disabled=true` и accessible label `… — скоро`. Они не являются anchors/buttons, не меняют hash и не создают placeholder routes/screens. Synthetic UI preview получает тот же canonical shell markup.
 
+Header также остаётся честно read-only: в R2 нет disabled `＋`/`Добавить операцию` или другого placeholder create control. Рабочая секция явно помечена `Только чтение` и оставляет только Reader-действия вроде `Обновить`; create/edit affordance появляется не раньше R3A Writer boundary, когда за ним существует реальный write contract.
+
 ## Reader boundary
 
 Shell делает same-origin `GET /api/v1/operations/recent?limit=50` и ожидает exact response `apiVersion=1` из `R2_READER_API.md`. Amount приходит только как integer minor units и форматируется в RUB исключительно presentation layer.
