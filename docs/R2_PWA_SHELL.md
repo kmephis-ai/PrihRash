@@ -114,6 +114,12 @@ Refresh увеличивает existing operations generation и скрывае�
 
 Эта accessibility semantics не объединяет основной result state с `sync-state`, filter-options, shadow-sync или pagination statuses и не меняет их бизнес-смысл. Тексты `Операций пока нет.`, `По выбранным фильтрам операций нет.`, `Не удалось загрузить операции. Нажмите «Обновить».`, `Не удалось загрузить выбранный фильтр. Нажмите «Обновить».` и `Не удалось обновить операции. Можно повторить.` остаются теми же existing Reader states; меняется только способ их объявления.
 
+## PWA installability
+
+Production R2 shell завершает минимальный installable-PWA manifest contract локальными PNG icons `192×192` и `512×512`. Оба assets имеют opaque `#f5f5f4` background и один нейтральный геометрический ledger-mark без внешнего font/image dependency; важная геометрия ограничена центральным `28%..72%` square и остаётся внутри maskable safe zone. Manifest объявляет каждый icon как `image/png` с `purpose="any maskable"`; существующие `name/short_name/start_url/display/background_color/theme_color/lang` не меняют смысл.
+
+Icons входят только в production shell precache вместе с manifest. Synthetic UI preview намеренно не копирует manifest, Service Worker или install icons и поэтому не становится deploy/install surface. Custom install prompt, `beforeinstallprompt`, platform-specific instructions, favicon/apple-touch matrix и brand redesign этим S-unit не вводятся.
+
 ## Service Worker boundary
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.

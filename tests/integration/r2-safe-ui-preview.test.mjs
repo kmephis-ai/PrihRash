@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, rm } from 'node:fs/promises';
+import { access, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
@@ -99,4 +99,7 @@ test('preview build emits static root without service worker or manifest deploym
   assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
   assert.match(bootstrap, /fetch\('\.\/app-shell\.html'/u);
   assert.doesNotMatch(index, /manifest\.webmanifest/u);
+  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/manifest.webmanifest', import.meta.url)));
+  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-192.png', import.meta.url)));
+  await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-512.png', import.meta.url)));
 });
