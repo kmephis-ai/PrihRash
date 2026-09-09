@@ -76,6 +76,8 @@ Sync status не читается и не пишется через IndexedDB, `
 
 Filtered request является network-only browser view. Он проходит ту же fail-closed Reader response validation, но **не** читает и не пишет IndexedDB `recent-operations-v1`. Поэтому offline filtered view никогда не подменяется unfiltered cache и не выглядит как доказанный результат фильтра. При ошибке показывается отдельный safe filtered-error state.
 
+Пустой successful result остаётся контекстным: unfiltered Reader показывает `Операций пока нет.`, а active normalized filters при valid `items=[]` показывают `По выбранным фильтрам операций нет.`. Это presentation-only distinction по existing `hasActiveReaderFilters`; loading/error/offline states не переименовываются в empty result и никакая финансовая семантика из содержимого rows не выводится.
+
 При сбросе всех filters приложение возвращается к canonical unfiltered local-first flow: валидный recent cache может быть показан сразу, затем выполняется background refresh. Generation guard запрещает более медленному старому request перерисовать UI после новой filter selection. Canonical unfiltered refresh может безопасно обновить только свой bounded cache даже если пользователь уже переключился на filtered view; его stale render/status при этом подавляются.
 
 ## Keyset pagination

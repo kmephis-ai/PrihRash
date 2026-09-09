@@ -34,8 +34,8 @@ export function createRecentOperationsView({
     return value === generation;
   }
 
-  function replaceVisible(items) {
-    render(items);
+  function replaceVisible(items, filters = currentFilters) {
+    render(items, { filtered: hasActiveReaderFilters(filters) });
     visibleIds = new Set(items.map((item) => item.id));
   }
 
@@ -62,7 +62,7 @@ export function createRecentOperationsView({
       await refreshRecentOperations({
         cache,
         fetchRecent: () => fetchRecent(filters, null),
-        render: (items) => { if (isCurrent(currentGeneration)) replaceVisible(items); },
+        render: (items) => { if (isCurrent(currentGeneration)) replaceVisible(items, filters); },
         setStatus: (status) => { if (isCurrent(currentGeneration)) setStatus(status); },
         onFreshResponse: (response) => { if (isCurrent(currentGeneration)) acceptFreshFirstPage(response); },
         clock,
@@ -71,7 +71,7 @@ export function createRecentOperationsView({
     }
 
     if (isCurrent(currentGeneration)) {
-      replaceVisible([]);
+      replaceVisible([], filters);
       setStatus({ kind: 'filter-loading' });
     }
 
@@ -80,7 +80,7 @@ export function createRecentOperationsView({
       const safeResponse = sanitizeReaderResponse(networkValue);
       const items = parseReaderResponse(safeResponse);
       if (!isCurrent(currentGeneration)) return;
-      replaceVisible(items);
+      replaceVisible(items, filters);
       setStatus({ kind: 'filtered-fresh' });
       acceptFreshFirstPage(safeResponse);
     } catch {
@@ -115,10 +115,10 @@ export function createRecentOperationsView({
           persisted = false;
         }
         if (!isCurrent(currentGeneration)) return false;
-        replaceVisible(items);
+        replaceVisible(items, filters);
         setStatus({ kind: persisted ? 'fresh' : 'fresh-uncached', savedAt });
       } else {
-        replaceVisible(items);
+        replaceVisible(items, filters);
         setStatus({ kind: 'filtered-fresh' });
       }
       acceptFreshFirstPage(safeResponse);

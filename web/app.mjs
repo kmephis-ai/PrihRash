@@ -28,11 +28,11 @@ const refreshReader = document.querySelector('[data-refresh-reader]');
 const cache = createIndexedDbReaderCache();
 const filterOptionsCache = createIndexedDbReaderFilterOptionsCache();
 
-function render(items) {
+function render(items, { filtered = false } = {}) {
   cardList.innerHTML = '';
   tableBody.innerHTML = '';
   if (!items.length) {
-    state.textContent = 'Операций пока нет.';
+    state.textContent = filtered ? 'По выбранным фильтрам операций нет.' : 'Операций пока нет.';
     state.hidden = false;
     return;
   }

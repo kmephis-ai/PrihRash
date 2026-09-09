@@ -137,6 +137,39 @@ test('out-of-order filtered responses cannot overwrite the latest selection', as
   assert.equal(statuses.at(-1).kind, 'filtered-fresh');
 });
 
+
+test('view marks empty result context from normalized Reader filters', async () => {
+  const emptyResponse = { apiVersion: 1, items: [], pageSize: 0, nextCursor: null };
+
+  const filteredRenders = [];
+  const filtered = createRecentOperationsView({
+    cache: {
+      read: async () => assert.fail('filtered path must not read cache'),
+      write: async () => assert.fail('filtered path must not write cache'),
+    },
+    fetchRecent: async () => emptyResponse,
+    render: (items, context) => filteredRenders.push({ items, context }),
+    setStatus: () => {},
+  });
+  await filtered.load({ type: 'INCOME' });
+  assert.deepEqual(filteredRenders.at(-1), { items: [], context: { filtered: true } });
+
+  const unfilteredRenders = [];
+  const unfiltered = createRecentOperationsView({
+    cache: { read: async () => null, write: async () => {} },
+    fetchRecent: async () => emptyResponse,
+    render: (items, context) => unfilteredRenders.push({ items, context }),
+    setStatus: () => {},
+  });
+  await unfiltered.load({});
+  assert.deepEqual(unfilteredRenders.at(-1), { items: [], context: { filtered: false } });
+});
+
+test('PWA empty-state wording distinguishes proven filtered zero results', async () => {
+  const app = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  assert.match(app, /filtered \? 'По выбранным фильтрам операций нет\.' : 'Операций пока нет\.'/u);
+});
+
 test('new filter modules are part of the offline shell while API stays excluded', async () => {
   const source = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.match(source, /'\/reader-filters\.mjs'/u);
