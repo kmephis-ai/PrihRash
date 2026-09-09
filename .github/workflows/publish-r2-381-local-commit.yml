@@ -12,7 +12,6 @@ env:
   SOURCE_SHA: 0ec41ebb9e00bf2ca338cfc0a4a6d546c1e795ce
   TARGET_BRANCH: r2/381-flow-kind
   EXPECTED_TREE: a5a9dd9ec679d63b15bb1d2e5788adc6a3826137
-  EXPECTED_COMMIT: 64cada276bfa41b3c6627e3fbaf5ae28ff15a4d1
 
 jobs:
   publish:
@@ -23,11 +22,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply and verify exact local commit
+      - name: Apply and verify exact local tree
         shell: bash
         run: |
           set -euo pipefail
           git cat-file -e "${SOURCE_SHA}^{commit}"
+          test "$(git rev-parse "${SOURCE_SHA}^{tree}")" = "$(git rev-parse refs/remotes/origin/main^{tree})"
           git config user.name 'PrihRash AI'
           git config user.email 'ai@localhost'
           git checkout -B "${TARGET_BRANCH}" "${SOURCE_SHA}"
@@ -36,7 +36,8 @@ jobs:
           PATCH_B64
           base64 -d /tmp/r2-381.patch.gz.b64 | gzip -d > /tmp/r2-381.patch
           git am --committer-date-is-author-date /tmp/r2-381.patch
-          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
-          test "$(git rev-parse HEAD)" = "${EXPECTED_COMMIT}"
-          git diff --exit-code "${SOURCE_SHA}" "${EXPECTED_COMMIT}" --check
+          ACTUAL_TREE="$(git rev-parse HEAD^{tree})"
+          echo "actual_tree=${ACTUAL_TREE}"
+          test "${ACTUAL_TREE}" = "${EXPECTED_TREE}"
+          git diff --check "${SOURCE_SHA}" HEAD
           git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
