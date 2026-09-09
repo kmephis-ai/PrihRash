@@ -9,8 +9,8 @@ import { sanitizeReaderResponse } from '../../web/presentation.mjs';
 const BASE = Object.freeze({
   id: '00000000-0000-0000-0000-000000000001', type: 'EXPENSE', occurredOn: '2026-09-08', capturedAt: '2026-09-08T08:00:00.000Z',
   recordGranularity: 'TRANSACTION', datePrecision: 'DAY', aggregatePeriodMonth: null, financialPeriodId: null,
-  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: 'a', label: 'Карта Visa' },
-  toAccount: null, category: { id: 'c', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
+  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: '10000000-0000-0000-0000-000000000001', label: 'Карта Visa' },
+  toAccount: null, category: { id: '20000000-0000-0000-0000-000000000001', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
   status: 'POSTED', analyticsState: 'INCLUDED', flowKind: null, version: 1,
 });
 
@@ -200,7 +200,7 @@ test('filter change makes an in-flight old page response inert', async () => {
     fetchRecent: async (filters, cursor) => {
       if (filters.type === 'EXPENSE' && cursor === null) return response([operation(BASE.id, 'Расход')], CURSOR_1);
       if (filters.type === 'EXPENSE') return oldPage.promise;
-      return response([operation(THIRD_ID, 'Доход', { type: 'INCOME', fromAccount: null, toAccount: { id: 'income-account', label: 'Основной счёт' }, category: { id: 'income-category', label: 'Зарплата' } })], null);
+      return response([operation(THIRD_ID, 'Доход', { type: 'INCOME', fromAccount: null, toAccount: { id: '10000000-0000-0000-0000-000000000002', label: 'Основной счёт' }, category: { id: '20000000-0000-0000-0000-000000000002', label: 'Зарплата' } })], null);
     },
   });
 
@@ -243,6 +243,6 @@ test('PWA exposes a dedicated load-more control and rolls shell cache version', 
   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.match(html, /data-load-more/u);
   assert.match(html, /data-page-state/u);
-  assert.match(sw, /prihrash-shell-v21/u);
+  assert.match(sw, /prihrash-shell-v22/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

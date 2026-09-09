@@ -8,14 +8,14 @@ import { createReaderCacheRecord } from '../../web/reader-cache.mjs';
 const base = {
   id: '00000000-0000-0000-0000-000000000001', type: 'EXPENSE', occurredOn: '2026-09-08', capturedAt: '2026-09-08T08:00:00.000Z',
   recordGranularity: 'TRANSACTION', datePrecision: 'DAY', aggregatePeriodMonth: null, financialPeriodId: null,
-  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: 'a', label: 'Карта Visa' },
-  toAccount: null, category: { id: 'c', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
+  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: '10000000-0000-0000-0000-000000000001', label: 'Карта Visa' },
+  toAccount: null, category: { id: '20000000-0000-0000-0000-000000000001', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
   status: 'POSTED', analyticsState: 'INCLUDED', flowKind: null, version: 1,
 };
 
 function response(description = 'Покупка', overrides = {}) {
   const topology = overrides.type === 'INCOME'
-    ? { fromAccount: null, toAccount: { id: 'income-account', label: 'Основной счёт' }, category: { id: 'income-category', label: 'Зарплата' } }
+    ? { fromAccount: null, toAccount: { id: '10000000-0000-0000-0000-000000000002', label: 'Основной счёт' }, category: { id: '20000000-0000-0000-0000-000000000002', label: 'Зарплата' } }
     : {};
   return {
     apiVersion: 1,

@@ -6,8 +6,8 @@ import { formatRubMinor, parseReaderResponse, toOperationPresentation } from '..
 const base = {
   id: '00000000-0000-0000-0000-000000000001', type: 'EXPENSE', occurredOn: '2026-09-08', capturedAt: '2026-09-08T08:00:00.000Z',
   recordGranularity: 'TRANSACTION', datePrecision: 'DAY', aggregatePeriodMonth: null, financialPeriodId: null,
-  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: 'a', label: 'Карта Visa' },
-  toAccount: null, category: { id: 'c', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
+  periodAssignmentQuality: 'UNASSIGNED', amountMinor: 12345, currency: 'RUB', fromAccount: { id: '10000000-0000-0000-0000-000000000001', label: 'Карта Visa' },
+  toAccount: null, category: { id: '20000000-0000-0000-0000-000000000001', label: 'Продукты' }, paidByMember: null, description: 'Покупка', note: null,
   status: 'POSTED', analyticsState: 'INCLUDED', flowKind: null, version: 1,
 };
 
@@ -93,12 +93,10 @@ test('surfaces canonical note literally and escapes it in both Reader surfaces',
     assert.equal(markup.includes(note), false);
   }
 
-  for (const missing of [null, '']) {
-    const withoutNote = toOperationPresentation({ ...base, note: missing });
-    assert.equal(withoutNote.note, null);
-    for (const markup of [operationCardsMarkup([withoutNote]), operationTableRowsMarkup([withoutNote])]) {
-      assert.doesNotMatch(markup, /Примечание:/u);
-    }
+  const withoutNote = toOperationPresentation({ ...base, note: null });
+  assert.equal(withoutNote.note, null);
+  for (const markup of [operationCardsMarkup([withoutNote]), operationTableRowsMarkup([withoutNote])]) {
+    assert.doesNotMatch(markup, /Примечание:/u);
   }
 });
 
@@ -106,7 +104,7 @@ test('labels only proven canonical payer and escapes it in both Reader surfaces'
   const payerLabel = 'Вика <семья> & карта';
   const withPayer = toOperationPresentation({
     ...base,
-    paidByMember: { id: 'payer-member', label: payerLabel },
+    paidByMember: { id: '30000000-0000-0000-0000-000000000001', label: payerLabel },
   });
   assert.equal(withPayer.meta, `Карта Visa · Продукты · Плательщик: ${payerLabel}`);
 
@@ -130,16 +128,16 @@ test('maps directional account context without hiding transfer destination', () 
     ...base,
     type: 'INCOME',
     fromAccount: null,
-    toAccount: { id: 'income-account', label: 'Основной счёт' },
-    category: { id: 'income-category', label: 'Зарплата' },
+    toAccount: { id: '10000000-0000-0000-0000-000000000002', label: 'Основной счёт' },
+    category: { id: '20000000-0000-0000-0000-000000000002', label: 'Зарплата' },
   });
   assert.equal(income.meta, 'Основной счёт · Зарплата');
 
   const transfer = toOperationPresentation({
     ...base,
     type: 'TRANSFER',
-    fromAccount: { id: 'from-account', label: 'Карта <Visa>' },
-    toAccount: { id: 'to-account', label: 'Накопления & цели' },
+    fromAccount: { id: '10000000-0000-0000-0000-000000000003', label: 'Карта <Visa>' },
+    toAccount: { id: '10000000-0000-0000-0000-000000000004', label: 'Накопления & цели' },
     category: null,
     flowKind: 'OWN_FUNDS_TRANSFER',
   });
@@ -163,8 +161,8 @@ test('surfaces proven transfer flow kind without guessing a subtype', () => {
     const transfer = toOperationPresentation({
       ...base,
       type: 'TRANSFER',
-      fromAccount: { id: 'from-account', label: 'Карта Visa' },
-      toAccount: { id: 'to-account', label: 'Накопления' },
+      fromAccount: { id: '10000000-0000-0000-0000-000000000003', label: 'Карта Visa' },
+      toAccount: { id: '10000000-0000-0000-0000-000000000004', label: 'Накопления' },
       category: null,
       flowKind,
     });
@@ -203,8 +201,8 @@ test('browser Reader boundary enforces canonical account and category topology',
     ...base,
     type: 'INCOME',
     fromAccount: null,
-    toAccount: { id: 'income-account', label: 'Основной счёт' },
-    category: { id: 'income-category', label: 'Зарплата' },
+    toAccount: { id: '10000000-0000-0000-0000-000000000002', label: 'Основной счёт' },
+    category: { id: '20000000-0000-0000-0000-000000000002', label: 'Зарплата' },
   };
   assert.doesNotThrow(() => toOperationPresentation(income));
   for (const invalidIncome of [
@@ -218,15 +216,15 @@ test('browser Reader boundary enforces canonical account and category topology',
   const transfer = {
     ...base,
     type: 'TRANSFER',
-    fromAccount: { id: 'from-account', label: 'Карта Visa' },
-    toAccount: { id: 'to-account', label: 'Накопления' },
+    fromAccount: { id: '10000000-0000-0000-0000-000000000003', label: 'Карта Visa' },
+    toAccount: { id: '10000000-0000-0000-0000-000000000004', label: 'Накопления' },
     category: null,
   };
   assert.doesNotThrow(() => toOperationPresentation(transfer));
   for (const invalidTransfer of [
     { fromAccount: null },
     { toAccount: null },
-    { toAccount: { id: 'from-account', label: 'Тот же счёт' } },
+    { toAccount: { id: '10000000-0000-0000-0000-000000000003', label: 'Тот же счёт' } },
     { category: { id: 'unexpected-category', label: 'Неожиданная категория' } },
   ]) {
     assert.throws(() => toOperationPresentation({ ...transfer, ...invalidTransfer }), /INVALID_READER_RESPONSE/u);
@@ -248,6 +246,43 @@ test('browser Reader boundary enforces canonical aggregate granularity shape', (
       /INVALID_READER_RESPONSE/u,
     );
   }
+});
+
+test('browser Reader boundary requires canonical lexical evidence', () => {
+  const invalidCases = [
+    { id: 'operation-1' },
+    { id: '00000000-0000-0000-0000-00000000000A' },
+    { financialPeriodId: 'period-1' },
+    { occurredOn: '2026-09' },
+    { occurredOn: ' 2026-09-08' },
+    { capturedAt: 'not-a-timestamp' },
+    { capturedAt: ' 2026-09-08T08:00:00.000Z' },
+    { description: '' },
+    { description: ' Покупка' },
+    { note: '' },
+    { note: 'Контекст ' },
+    { fromAccount: { ...base.fromAccount, id: 'account-1' } },
+    { fromAccount: { ...base.fromAccount, label: '' } },
+    { fromAccount: { ...base.fromAccount, label: ' Карта Visa' } },
+  ];
+
+  for (const invalid of invalidCases) {
+    assert.throws(() => toOperationPresentation({ ...base, ...invalid }), /INVALID_READER_RESPONSE/u);
+  }
+
+  assert.throws(() => toOperationPresentation({
+    ...base,
+    recordGranularity: 'PERIOD_AGGREGATE',
+    datePrecision: 'MONTH',
+    aggregatePeriodMonth: '2024-11',
+  }), /INVALID_READER_RESPONSE/u);
+
+  const withPeriod = toOperationPresentation({
+    ...base,
+    financialPeriodId: '50000000-0000-0000-0000-000000000001',
+    note: 'Контекст',
+  });
+  assert.equal(withPeriod.dateLabel, '2026-09-08');
 });
 
 test('reader response parser fails closed on malformed contract', () => {

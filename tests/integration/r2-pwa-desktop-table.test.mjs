@@ -63,7 +63,7 @@ test('PWA shell exposes responsive semantic table and mobile cards with one Read
   assert.match(css, /overflow-x: auto/u);
   assert.match(css, /font-variant-numeric: tabular-nums/u);
 
-  assert.match(sw, /prihrash-shell-v21/u);
+  assert.match(sw, /prihrash-shell-v22/u);
   assert.match(sw, /'\/operation-markup\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });

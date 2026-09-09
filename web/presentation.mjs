@@ -6,26 +6,55 @@ const STATUSES = new Set(['POSTED', 'VOIDED']);
 const ANALYTICS_STATES = new Set(['INCLUDED', 'EXCLUDED']);
 const FLOW_KINDS = new Set(['OWN_FUNDS_TRANSFER', 'CREDIT_DRAW', 'CREDIT_REPAYMENT']);
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 
 function invalidReaderResponse() {
   throw new Error('INVALID_READER_RESPONSE');
 }
 
-function requireString(value) {
-  if (typeof value !== 'string') invalidReaderResponse();
+function requireCanonicalString(value) {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) invalidReaderResponse();
   return value;
 }
 
-function nullableString(value) {
-  if (!(value === null || typeof value === 'string')) invalidReaderResponse();
-  return value;
+function nullableCanonicalString(value) {
+  return value === null ? null : requireCanonicalString(value);
+}
+
+function requireCanonicalUuid(value) {
+  const parsed = requireCanonicalString(value);
+  if (!UUID_PATTERN.test(parsed)) invalidReaderResponse();
+  return parsed;
+}
+
+function nullableCanonicalUuid(value) {
+  return value === null ? null : requireCanonicalUuid(value);
+}
+
+function requireCanonicalDate(value) {
+  const parsed = requireCanonicalString(value);
+  if (!DATE_PATTERN.test(parsed) || !Number.isFinite(Date.parse(`${parsed}T00:00:00.000Z`))) invalidReaderResponse();
+  return parsed;
+}
+
+function nullableCanonicalDate(value) {
+  return value === null ? null : requireCanonicalDate(value);
+}
+
+function nullableCanonicalTimestamp(value) {
+  if (value === null) return null;
+  const parsed = requireCanonicalString(value);
+  if (!Number.isFinite(Date.parse(parsed))) invalidReaderResponse();
+  return parsed;
 }
 
 function sanitizeEntityRef(value) {
   if (value === null) return null;
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalidReaderResponse();
-  return Object.freeze({ id: requireString(value.id), label: requireString(value.label) });
+  return Object.freeze({ id: requireCanonicalUuid(value.id), label: requireCanonicalString(value.label) });
 }
+
 
 function validateReaderOperationInvariants(item) {
   if (item.recordGranularity === 'PERIOD_AGGREGATE') {
@@ -62,14 +91,14 @@ function sanitizeReaderOperation(item) {
   if (!Number.isSafeInteger(item.version) || item.version < 1) invalidReaderResponse();
 
   const safe = {
-    id: requireString(item.id),
+    id: requireCanonicalUuid(item.id),
     type: item.type,
-    occurredOn: requireString(item.occurredOn),
-    capturedAt: nullableString(item.capturedAt),
+    occurredOn: requireCanonicalDate(item.occurredOn),
+    capturedAt: nullableCanonicalTimestamp(item.capturedAt),
     recordGranularity: item.recordGranularity,
     datePrecision: item.datePrecision,
-    aggregatePeriodMonth: nullableString(item.aggregatePeriodMonth),
-    financialPeriodId: nullableString(item.financialPeriodId),
+    aggregatePeriodMonth: nullableCanonicalDate(item.aggregatePeriodMonth),
+    financialPeriodId: nullableCanonicalUuid(item.financialPeriodId),
     periodAssignmentQuality: item.periodAssignmentQuality,
     amountMinor: item.amountMinor,
     currency: 'RUB',
@@ -77,8 +106,8 @@ function sanitizeReaderOperation(item) {
     toAccount: sanitizeEntityRef(item.toAccount),
     category: sanitizeEntityRef(item.category),
     paidByMember: sanitizeEntityRef(item.paidByMember),
-    description: nullableString(item.description),
-    note: nullableString(item.note),
+    description: nullableCanonicalString(item.description),
+    note: nullableCanonicalString(item.note),
     status: item.status,
     analyticsState: item.analyticsState,
     flowKind: item.flowKind,
@@ -146,7 +175,7 @@ export function toOperationPresentation(item) {
 
   const account = accountContextLabel(safe);
   const payer = safe.paidByMember === null ? '' : `Плательщик: ${safe.paidByMember.label}`;
-  const note = safe.note === '' ? null : safe.note;
+  const note = safe.note;
   return Object.freeze({
     id: safe.id,
     typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : transferTypeLabel(safe.flowKind),

@@ -144,7 +144,7 @@ const OPERATIONS = Object.freeze([
     capturedAt: null,
     recordGranularity: 'PERIOD_AGGREGATE',
     datePrecision: 'MONTH',
-    aggregatePeriodMonth: '2024-11',
+    aggregatePeriodMonth: '2024-11-01',
     periodAssignmentQuality: 'LEGACY_AMBIGUOUS',
     amountMinor: 4825000,
     fromAccount: account(0),
