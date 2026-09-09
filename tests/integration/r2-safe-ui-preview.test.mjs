@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { createSyntheticPreviewFetch, syntheticPreviewEvidence } from '../../web/preview-transport.mjs';
-import { sanitizeReaderResponse } from '../../web/presentation.mjs';
+import { sanitizeReaderResponse, toOperationPresentation } from '../../web/presentation.mjs';
 import { sanitizeReaderFilterOptions } from '../../web/reader-filters.mjs';
 import { sanitizeReaderSyncStatus } from '../../web/reader-sync-status.mjs';
 
@@ -23,7 +23,10 @@ test('synthetic preview evidence contains no private/provider data and covers cu
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'INCOME'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'TRANSFER'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.status === 'VOIDED'), true);
-  assert.equal(syntheticPreviewEvidence.operations.some((item) => item.recordGranularity === 'PERIOD_AGGREGATE' && item.datePrecision === 'MONTH'), true);
+  const ambiguous = syntheticPreviewEvidence.operations.find((item) => item.periodAssignmentQuality === 'LEGACY_AMBIGUOUS');
+  assert.equal(ambiguous?.recordGranularity, 'PERIOD_AGGREGATE');
+  assert.equal(ambiguous?.datePrecision, 'MONTH');
+  assert.equal(toOperationPresentation(ambiguous).quality.includes('Расчётный период неоднозначен'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.note?.includes('https://example.invalid/')), true);
   assert.equal(JSON.stringify(syntheticPreviewEvidence).includes('mepnet'), false);
   assert.equal(JSON.stringify(syntheticPreviewEvidence).includes('89.125.'), false);

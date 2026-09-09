@@ -36,6 +36,33 @@ test('surfaces unknown source quality explicitly', () => {
   assert.deepEqual(view.quality, ['Неизвестная детализация', 'Точность даты неизвестна']);
 });
 
+test('surfaces only proven legacy period ambiguity as Reader quality', () => {
+  const ambiguous = toOperationPresentation({
+    ...base,
+    status: 'VOIDED',
+    analyticsState: 'EXCLUDED',
+    recordGranularity: 'PERIOD_AGGREGATE',
+    datePrecision: 'MONTH',
+    aggregatePeriodMonth: '2024-02-01',
+    periodAssignmentQuality: 'LEGACY_AMBIGUOUS',
+  });
+  assert.deepEqual(ambiguous.quality, [
+    'Аннулировано',
+    'Не учитывать в аналитике',
+    'Исторический агрегат',
+    'Точность даты: месяц',
+    'Расчётный период неоднозначен',
+  ]);
+  for (const markup of [operationCardsMarkup([ambiguous]), operationTableRowsMarkup([ambiguous])]) {
+    assert.match(markup, /Расчётный период неоднозначен/u);
+  }
+
+  for (const periodAssignmentQuality of ['UNASSIGNED', 'EXPLICIT', 'DERIVED']) {
+    const ordinary = toOperationPresentation({ ...base, periodAssignmentQuality });
+    assert.doesNotMatch(ordinary.quality.join(' · '), /Расчётный период/u);
+  }
+});
+
 test('surfaces canonical analytics exclusion without reinterpreting note', () => {
   const included = toOperationPresentation({ ...base, note: 'Не учитывать' });
   assert.deepEqual(included.quality, []);

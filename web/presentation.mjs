@@ -109,6 +109,7 @@ export function toOperationPresentation(item) {
   if (safe.recordGranularity === 'UNKNOWN') quality.push('Неизвестная детализация');
   if (safe.datePrecision === 'MONTH') quality.push('Точность даты: месяц');
   if (safe.datePrecision === 'UNKNOWN') quality.push('Точность даты неизвестна');
+  if (safe.periodAssignmentQuality === 'LEGACY_AMBIGUOUS') quality.push('Расчётный период неоднозначен');
 
   const account = accountContextLabel(safe);
   const note = safe.note === '' ? null : safe.note;

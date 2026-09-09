@@ -23,7 +23,8 @@ UI обязан явно показывать качество факта:
 - non-empty canonical `note` показывается буквально отдельной строкой `Примечание: …`; browser не нормализует note, не превращает его в tags/analytics truth и не linkify-ит содержимое;
 - `PERIOD_AGGREGATE` → `Исторический агрегат`;
 - `recordGranularity=UNKNOWN` → `Неизвестная детализация`;
-- `datePrecision=MONTH` отображается как owner-facing `YYYY-MM`: техническое canonical `aggregatePeriodMonth=YYYY-MM-01` не выдаётся за доказанное первое число месяца; `datePrecision=UNKNOWN` по-прежнему не отображается как доказанная точная daily purchase.
+- `datePrecision=MONTH` отображается как owner-facing `YYYY-MM`: техническое canonical `aggregatePeriodMonth=YYYY-MM-01` не выдаётся за доказанное первое число месяца; `datePrecision=UNKNOWN` по-прежнему не отображается как доказанная точная daily purchase;
+- `periodAssignmentQuality=LEGACY_AMBIGUOUS` → `Расчётный период неоднозначен`; это сохранённая historical uncertainty, browser не вычисляет period membership. Штатные pre-R4 `UNASSIGNED`, а также `EXPLICIT|DERIVED`, не получают нового warning в R2.
 
 ## Local-first recent operations
 
@@ -148,7 +149,7 @@ SHA, CI logs, schema/API proof и provider diagnostics в Owner UAT не вхо�
 
 Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
 
-При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после literal-note delivery fix — `prihrash-shell-v16`.
+При смене shell cache version старые `prihrash-shell-*` entries удаляются при activation. Это не затрагивает IndexedDB financial cache. Поскольку production Service Worker использует cache-first для перечисленных `SHELL` assets, любое изменение содержимого precached asset требует новой `prihrash-shell-v*` версии; иначе уже установленная PWA может продолжить отдавать старые bytes. Текущая версия после legacy-period-ambiguity delivery fix — `prihrash-shell-v17`.
 
 ## Non-scope и следующий шаг
 
