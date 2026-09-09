@@ -1,0 +1,39 @@
+name: Publish R2 #359
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-359-20260909-0838
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: e47ba6c1ff656d233f14acf7383c42e1de1fb184
+  EXPECTED_TREE: 08570bd4639dec825888963b7a5ff2700f17f1ce
+  FEATURE_BRANCH: r2/359-reader-live-status
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Verify base and publish exact tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp tools/local-git-mirror/r2-359.patch /tmp/r2-359.patch
+          git fetch origin main --quiet
+          ACTUAL_BASE="$(git rev-parse origin/main)"
+          test "$ACTUAL_BASE" = "$EXPECTED_BASE"
+          git checkout --detach --quiet "$EXPECTED_BASE"
+          git apply --index /tmp/r2-359.patch
+          ACTUAL_TREE="$(git write-tree)"
+          test "$ACTUAL_TREE" = "$EXPECTED_TREE"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: announce Reader result state' -m 'Closes #359.'
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git push origin "HEAD:refs/heads/$FEATURE_BRANCH"
