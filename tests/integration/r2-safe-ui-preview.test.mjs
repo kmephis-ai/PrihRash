@@ -7,6 +7,13 @@ import { createSyntheticPreviewFetch, syntheticPreviewEvidence } from '../../web
 import { sanitizeReaderResponse, toOperationPresentation } from '../../web/presentation.mjs';
 import { sanitizeReaderFilterOptions } from '../../web/reader-filters.mjs';
 import { sanitizeReaderSyncStatus } from '../../web/reader-sync-status.mjs';
+import {
+  createIndexedDbPreviewOutbox,
+  createPreviewExpenseIntent,
+  parsePreviewExpenseAmountMinor,
+  parsePreviewExpenseIntent,
+  previewOutboxContract,
+} from '../../web/preview-writer-outbox.mjs';
 
 function createTransport() {
   const outbound = [];
@@ -109,8 +116,206 @@ test('preview build emits static root without service worker or manifest deploym
   assert.match(shell, /aria-label="Главная — скоро"/u);
   assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
   assert.match(bootstrap, /fetch\('\.\/app-shell\.html'/u);
+  assert.match(bootstrap, /preview-writer\.mjs/u);
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.mjs', import.meta.url));
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-writer-outbox.mjs', import.meta.url));
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.css', import.meta.url));
+  assert.doesNotMatch(shell, /Новый расход|data-preview-writer|Сохранить локально/u);
   assert.doesNotMatch(index, /manifest\.webmanifest/u);
   await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/manifest.webmanifest', import.meta.url)));
   await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-192.png', import.meta.url)));
   await assert.rejects(access(new URL('../../.artifacts/r2-ui-preview/icons/app-512.png', import.meta.url)));
+});
+
+
+function createPreviewOutboxFakeIndexedDb(initialRows = []) {
+  const rows = [...initialRows];
+  let hasStore = false;
+  const objectStoreNames = { contains: (name) => hasStore && name === previewOutboxContract.storeName };
+
+  function makeRequest(run, transaction) {
+    const request = {};
+    queueMicrotask(() => {
+      try {
+        request.result = run();
+        request.onsuccess?.();
+        queueMicrotask(() => transaction.oncomplete?.());
+      } catch {
+        request.onerror?.();
+        queueMicrotask(() => transaction.onerror?.());
+      }
+    });
+    return request;
+  }
+
+  const db = {
+    objectStoreNames,
+    createObjectStore(name) {
+      assert.equal(name, previewOutboxContract.storeName);
+      hasStore = true;
+    },
+    close() {},
+    transaction(name) {
+      assert.equal(name, previewOutboxContract.storeName);
+      const transaction = {};
+      transaction.objectStore = () => ({
+        add: (value) => makeRequest(() => {
+          if (rows.some((row) => row?.intentId === value.intentId)) throw new Error('duplicate');
+          rows.push(value);
+          return value.intentId;
+        }, transaction),
+        getAll: () => makeRequest(() => [...rows], transaction),
+      });
+      return transaction;
+    },
+  };
+
+  return {
+    indexedDb: {
+      open(name, version) {
+        assert.equal(name, previewOutboxContract.dbName);
+        assert.equal(version, previewOutboxContract.dbVersion);
+        const request = { result: db };
+        queueMicrotask(() => {
+          if (!hasStore) request.onupgradeneeded?.();
+          request.onsuccess?.();
+        });
+        return request;
+      },
+    },
+    rows,
+  };
+}
+
+function previewExpenseInput(overrides = {}) {
+  return {
+    amount: '125,40',
+    occurredOn: '2026-09-09',
+    accountId: syntheticPreviewEvidence.accounts[0].id,
+    categoryId: syntheticPreviewEvidence.categories.find((item) => item.kind === 'EXPENSE').id,
+    description: 'Кофе · демо',
+    note: '',
+    ...overrides,
+  };
+}
+
+function previewExpenseIntent(overrides = {}) {
+  return createPreviewExpenseIntent(previewExpenseInput(), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '50000000-0000-0000-0000-000000000001',
+    now: () => '2026-09-09T12:00:00.000Z',
+    ...overrides,
+  });
+}
+
+test('R3A preview amount parser uses exact RUB minor units without float rounding', () => {
+  assert.equal(parsePreviewExpenseAmountMinor('1'), 100);
+  assert.equal(parsePreviewExpenseAmountMinor('1,2'), 120);
+  assert.equal(parsePreviewExpenseAmountMinor('1.23'), 123);
+  assert.equal(parsePreviewExpenseAmountMinor('0,01'), 1);
+  for (const value of ['0', '0.00', '-1', '1.234', '1e2', ' 1', '01']) {
+    assert.throws(() => parsePreviewExpenseAmountMinor(value), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+  }
+});
+
+test('R3A preview creates one immutable PENDING EXPENSE intent from exact synthetic references', () => {
+  const intent = previewExpenseIntent();
+  assert.equal(intent.schemaVersion, 1);
+  assert.equal(intent.kind, 'CREATE_EXPENSE');
+  assert.equal(intent.state, 'PENDING');
+  assert.equal(intent.payload.type, 'EXPENSE');
+  assert.equal(intent.payload.amountMinor, 12540);
+  assert.equal(intent.payload.currency, 'RUB');
+  assert.equal(intent.payload.fromAccount.id, syntheticPreviewEvidence.accounts[0].id);
+  assert.equal(intent.payload.category.kind, 'EXPENSE');
+  assert.equal(intent.payload.note, null);
+  assert.equal(Object.isFrozen(intent), true);
+  assert.equal(Object.isFrozen(intent.payload), true);
+});
+
+test('R3A preview accepts only the selected EXPENSE category and required canonical input', () => {
+  const income = syntheticPreviewEvidence.categories.find((item) => item.kind === 'INCOME');
+  assert.throws(() => previewExpenseIntent({ categories: undefined }), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+  assert.throws(
+    () => createPreviewExpenseIntent(previewExpenseInput({ categoryId: income.id }), {
+      accounts: syntheticPreviewEvidence.accounts,
+      categories: syntheticPreviewEvidence.categories,
+      randomUuid: () => '50000000-0000-0000-0000-000000000002',
+      now: () => '2026-09-09T12:00:00.000Z',
+    }),
+    /INVALID_PREVIEW_EXPENSE_INPUT/u,
+  );
+  assert.throws(() => createPreviewExpenseIntent(previewExpenseInput({ occurredOn: '2026-02-31' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '50000000-0000-0000-0000-000000000003',
+    now: () => '2026-09-09T12:00:00.000Z',
+  }), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+  assert.throws(() => createPreviewExpenseIntent(previewExpenseInput({ accountId: 'not-a-uuid' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '50000000-0000-0000-0000-000000000004',
+    now: () => '2026-09-09T12:00:00.000Z',
+  }), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+});
+
+test('R3A preview preserves literal optional text while empty form values become null', () => {
+  const literal = createPreviewExpenseIntent(previewExpenseInput({ description: '  literal  ', note: 'заметка' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '50000000-0000-0000-0000-000000000005',
+    now: () => '2026-09-09T12:00:00.000Z',
+  });
+  assert.equal(literal.payload.description, '  literal  ');
+  assert.equal(literal.payload.note, 'заметка');
+  const absent = previewExpenseIntent();
+  assert.equal(absent.payload.note, null);
+});
+
+test('R3A preview durable record validation fails closed on malformed evidence', () => {
+  const valid = previewExpenseIntent();
+  assert.equal(parsePreviewExpenseIntent(valid).intentId, valid.intentId);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, intentId: 'NOT-CANONICAL' }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, amountMinor: 0 } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, occurredOn: '2026-02-31' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, note: '   ' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, category: { ...valid.payload.category, kind: 'INCOME' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+});
+
+test('R3A preview IndexedDB outbox is separate, durable, and excludes malformed rows from pending count', async () => {
+  const malformed = { ...previewExpenseIntent(), intentId: 'bad-id' };
+  const fake = createPreviewOutboxFakeIndexedDb([malformed]);
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  assert.equal(previewOutboxContract.dbName, 'prihrash-r3a-preview');
+  assert.notEqual(previewOutboxContract.dbName, 'prihrash-reader');
+  assert.equal(await outbox.countPending(), 0);
+  const intent = previewExpenseIntent();
+  await outbox.enqueue(intent);
+  assert.equal(await outbox.countPending(), 1);
+  assert.equal((await outbox.listPending())[0].intentId, intent.intentId);
+});
+
+test('R3A preview enqueue is local-only and contains no network/provider write path', async () => {
+  const outboxSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
+  const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
+  for (const source of [outboxSource, writerSource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /YDB_WRITE_ENABLED|@ydb|ydbjs|google-auth-library|spreadsheets\./iu);
+  }
+  assert.match(writerSource, /Сохранено локально · демо · не отправлено/u);
+});
+
+test('R3A Writer is injected by synthetic preview only; production Reader stays read-only', async () => {
+  const bootstrap = await readFile(new URL('../../web/preview-bootstrap.mjs', import.meta.url), 'utf8');
+  const productionShell = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  assert.match(bootstrap, /preview-writer\.mjs/u);
+  assert.match(productionShell, />Только чтение</u);
+  assert.doesNotMatch(productionShell, /Новый расход|data-preview-writer|Сохранить локально/u);
+  assert.doesNotMatch(productionApp, /preview-writer|CREATE_EXPENSE|Сохранить локально/u);
+  const productionStyles = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionStyles, /preview-writer/u);
 });
