@@ -1,0 +1,41 @@
+name: Publish R2 #361
+
+on:
+  push:
+    branches:
+      - transport/r2-publish-361-20260909-0850
+
+permissions:
+  contents: write
+
+env:
+  EXPECTED_BASE: 380bb67c6fc21f5b89034bb64b6869434fdad71f
+  EXPECTED_TREE: 2c8066e1bf3e79841a1d74dfce9acd5b1f395470
+  FEATURE_BRANCH: r2/361-pwa-installability
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Verify base and publish exact binary tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp tools/local-git-mirror/r2-361.patch /tmp/r2-361.patch
+          git fetch origin main --quiet
+          ACTUAL_BASE="$(git rev-parse origin/main)"
+          test "$ACTUAL_BASE" = "$EXPECTED_BASE"
+          git checkout --detach --quiet "$EXPECTED_BASE"
+          git apply --index --binary /tmp/r2-361.patch
+          ACTUAL_TREE="$(git write-tree)"
+          test "$ACTUAL_TREE" = "$EXPECTED_TREE"
+          test "$(git hash-object web/icons/app-192.png)" = "e2ac5cbfb2aeb9b5317ce05828ee173cac31bb73"
+          test "$(git hash-object web/icons/app-512.png)" = "316d1e399038cd747d18612cade5704f712c6739"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git commit -m 'R2: complete PWA installability icons' -m 'Closes #361.'
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git push origin "HEAD:refs/heads/$FEATURE_BRANCH"
