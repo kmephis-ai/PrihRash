@@ -131,6 +131,39 @@ test('maps directional account context without hiding transfer destination', () 
   }
 });
 
+test('surfaces proven transfer flow kind without guessing a subtype', () => {
+  const cases = [
+    ['OWN_FUNDS_TRANSFER', 'Перевод · Между своими счетами'],
+    ['CREDIT_DRAW', 'Перевод · Получение заёмных средств'],
+    ['CREDIT_REPAYMENT', 'Перевод · Погашение кредитных средств'],
+    [null, 'Перевод'],
+  ];
+
+  for (const [flowKind, expected] of cases) {
+    const transfer = toOperationPresentation({
+      ...base,
+      type: 'TRANSFER',
+      fromAccount: { id: 'from-account', label: 'Карта Visa' },
+      toAccount: { id: 'to-account', label: 'Накопления' },
+      category: null,
+      flowKind,
+    });
+    assert.equal(transfer.typeLabel, expected);
+    for (const markup of [operationCardsMarkup([transfer]), operationTableRowsMarkup([transfer])]) {
+      assert.match(markup, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'));
+    }
+  }
+});
+
+test('browser Reader boundary rejects flow kind outside TRANSFER', () => {
+  for (const type of ['EXPENSE', 'INCOME']) {
+    assert.throws(
+      () => toOperationPresentation({ ...base, type, flowKind: 'CREDIT_DRAW' }),
+      /INVALID_READER_RESPONSE/u,
+    );
+  }
+});
+
 test('reader response parser fails closed on malformed contract', () => {
   assert.throws(() => parseReaderResponse({ apiVersion: 2, items: [] }), /INVALID_READER_RESPONSE/);
   assert.throws(() => parseReaderResponse({ apiVersion: 1, items: [{ ...base, amountMinor: 1.5 }], pageSize: 1, nextCursor: null }), /INVALID_READER_RESPONSE/);
