@@ -1,0 +1,136 @@
+diff --git a/docs/R2_PWA_SHELL.md b/docs/R2_PWA_SHELL.md
+index eff1151..fd019ae 100644
+--- a/docs/R2_PWA_SHELL.md
++++ b/docs/R2_PWA_SHELL.md
+@@ -108,6 +108,12 @@ Refresh увеличивает existing operations generation и скрывае
+ 
+ Повторные нажатия `Обновить`, пока batch активен, coalesce в один operations/reference/sync request batch; кнопка временно disabled. Automatic polling, push и background timer этим contract не вводятся. `/api/*` остаётся вне Service Worker Cache Storage.
+ 
++## Accessible Reader state
++
++Основной динамический `data-state`, через который Reader сообщает initial loading, empty result и generic/filtered/manual-refresh error без видимых rows, является отдельным polite atomic status surface: `role="status"`, `aria-live="polite"`, `aria-atomic="true"`. Поэтому изменение уже существующего owner-facing текста объявляется assistive technology без переноса фокуса и без создания нового recovery/state path.
++
++Эта accessibility semantics не объединяет основной result state с `sync-state`, filter-options, shadow-sync или pagination statuses и не меняет их бизнес-смысл. Тексты `Операций пока нет.`, `По выбранным фильтрам операций нет.`, `Не удалось загрузить операции. Нажмите «Обновить».`, `Не удалось загрузить выбранный фильтр. Нажмите «Обновить».` и `Не удалось обновить операции. Можно повторить.` остаются теми же existing Reader states; меняется только способ их объявления.
++
+ ## Service Worker boundary
+ 
+ Service Worker кэширует только shell assets. `/api/*` по-прежнему исключён из Cache Storage handling: financial API persistence существует только в explicit IndexedDB Reader adapter, а не как неявный cache-first HTTP слой.
+diff --git a/tests/integration/r2-pwa-desktop-table.test.mjs b/tests/integration/r2-pwa-desktop-table.test.mjs
+index 349f5f2..851343d 100644
+--- a/tests/integration/r2-pwa-desktop-table.test.mjs
++++ b/tests/integration/r2-pwa-desktop-table.test.mjs
+@@ -63,7 +63,7 @@ test('PWA shell exposes responsive semantic table and mobile cards with one Read
+   assert.match(css, /overflow-x: auto/u);
+   assert.match(css, /font-variant-numeric: tabular-nums/u);
+ 
+-  assert.match(sw, /prihrash-shell-v12/u);
++  assert.match(sw, /prihrash-shell-v13/u);
+   assert.match(sw, /'\/operation-markup\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-filter-options.test.mjs b/tests/integration/r2-pwa-filter-options.test.mjs
+index 06c223d..f11720d 100644
+--- a/tests/integration/r2-pwa-filter-options.test.mjs
++++ b/tests/integration/r2-pwa-filter-options.test.mjs
+@@ -146,7 +146,7 @@ test('PWA exposes disabled account/category controls while API remains outside S
+   assert.match(app, /Локальные справочники от/u);
+   assert.match(app, /Офлайн · справочники от/u);
+   assert.match(app, /Счёт и категория недоступны/u);
+-  assert.match(sw, /prihrash-shell-v12/u);
++  assert.match(sw, /prihrash-shell-v13/u);
+   assert.match(sw, /'\/reader-filter-options-view\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-manual-refresh.test.mjs b/tests/integration/r2-pwa-manual-refresh.test.mjs
+index f6ce4b0..7f6f9e1 100644
+--- a/tests/integration/r2-pwa-manual-refresh.test.mjs
++++ b/tests/integration/r2-pwa-manual-refresh.test.mjs
+@@ -253,7 +253,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
+   assert.match(app, /Не удалось обновить операции\. Можно повторить\./u);
+   assert.match(app, /Не удалось обновить · показаны прежние данные/u);
+   assert.doesNotMatch(app, /обновить экран/iu);
+-  assert.match(sw, /prihrash-shell-v12/u);
++  assert.match(sw, /prihrash-shell-v13/u);
+   assert.match(sw, /'\/reader-refresh\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-navigation.test.mjs b/tests/integration/r2-pwa-navigation.test.mjs
+index 4739b51..f684c9e 100644
+--- a/tests/integration/r2-pwa-navigation.test.mjs
++++ b/tests/integration/r2-pwa-navigation.test.mjs
+@@ -34,6 +34,15 @@ test('read-only R2 header exposes no Writer create affordance', async () => {
+   assert.match(html, /data-refresh-reader>Обновить<\/button>/u);
+ });
+ 
++test('primary Reader result state is announced as a polite atomic live status', async () => {
++  const html = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
++  const state = html.match(/<p data-state class="state"[^>]*>Загрузка…<\/p>/u)?.[0];
++  assert.ok(state);
++  assert.match(state, /role="status"/u);
++  assert.match(state, /aria-live="polite"/u);
++  assert.match(state, /aria-atomic="true"/u);
++});
++
+ test('navigation styling preserves four-slot bottom layout and distinguishes future items', async () => {
+   const css = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
+   assert.match(css, /grid-template-columns: repeat\(4, 1fr\)/u);
+diff --git a/tests/integration/r2-pwa-pagination.test.mjs b/tests/integration/r2-pwa-pagination.test.mjs
+index 932fed6..87b2455 100644
+--- a/tests/integration/r2-pwa-pagination.test.mjs
++++ b/tests/integration/r2-pwa-pagination.test.mjs
+@@ -243,6 +243,6 @@ test('PWA exposes a dedicated load-more control and rolls shell cache version',
+   const sw = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+   assert.match(html, /data-load-more/u);
+   assert.match(html, /data-page-state/u);
+-  assert.match(sw, /prihrash-shell-v12/u);
++  assert.match(sw, /prihrash-shell-v13/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-pwa-sync-status.test.mjs b/tests/integration/r2-pwa-sync-status.test.mjs
+index f14f15d..4b370ab 100644
+--- a/tests/integration/r2-pwa-sync-status.test.mjs
++++ b/tests/integration/r2-pwa-sync-status.test.mjs
+@@ -60,7 +60,7 @@ test('PWA loads sync status independently and never routes it through browser pe
+   assert.match(app, /Синхронизация: статус недоступен/u);
+   assert.doesNotMatch(syncStatus, /indexedDB|localStorage|caches\./u);
+   assert.doesNotMatch(cache, /sync-status/u);
+-  assert.match(sw, /prihrash-shell-v12/u);
++  assert.match(sw, /prihrash-shell-v13/u);
+   assert.match(sw, /'\/reader-sync-status\.mjs'/u);
+   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
+ });
+diff --git a/tests/integration/r2-safe-ui-preview.test.mjs b/tests/integration/r2-safe-ui-preview.test.mjs
+index 244d1b8..2877322 100644
+--- a/tests/integration/r2-safe-ui-preview.test.mjs
++++ b/tests/integration/r2-safe-ui-preview.test.mjs
+@@ -93,6 +93,7 @@ test('preview build emits static root without service worker or manifest deploym
+   assert.match(index, /preview-bootstrap\.mjs/u);
+   assert.match(shell, /data-operations-cards/u);
+   assert.match(shell, />Только чтение</u);
++  assert.match(shell, /data-state class="state" role="status" aria-live="polite" aria-atomic="true"/u);
+   assert.doesNotMatch(shell, /Добавить операцию|>＋</u);
+   assert.match(shell, /aria-label="Главная — скоро"/u);
+   assert.doesNotMatch(shell, /href="#(?:home|analytics|more)"/u);
+diff --git a/web/index.html b/web/index.html
+index 73d76a1..f51a593 100644
+--- a/web/index.html
++++ b/web/index.html
+@@ -21,7 +21,7 @@
+       <button class="filter-reset" type="button" data-reset-filters hidden>Сбросить</button>
+       <span class="filter-options-state" data-filter-options-state aria-live="polite"></span>
+     </div>
+-    <p data-shadow-sync-status class="shadow-sync-status" aria-live="polite">Синхронизация: проверяем…</p><p data-sync-state class="sync-state" aria-live="polite"></p><p data-state class="state">Загрузка…</p>
++    <p data-shadow-sync-status class="shadow-sync-status" aria-live="polite">Синхронизация: проверяем…</p><p data-sync-state class="sync-state" aria-live="polite"></p><p data-state class="state" role="status" aria-live="polite" aria-atomic="true">Загрузка…</p>
+     <div data-operations-cards class="operations operations--cards"></div>
+     <div class="operations-table-wrap">
+       <table class="operations-table">
+diff --git a/web/sw.js b/web/sw.js
+index 2e04b94..ab308ed 100644
+--- a/web/sw.js
++++ b/web/sw.js
+@@ -1,4 +1,4 @@
+-const CACHE = 'prihrash-shell-v12';
++const CACHE = 'prihrash-shell-v13';
+ const SHELL = [
+   '/',
+   '/index.html',
