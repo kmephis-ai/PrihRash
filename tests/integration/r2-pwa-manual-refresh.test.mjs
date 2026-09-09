@@ -120,6 +120,24 @@ test('filtered manual refresh preserves visible rows while network retry fails',
   assert.deepEqual(statuses.at(-1), { kind: 'refresh-error', hasVisibleItems: true });
 });
 
+test('filtered manual refresh keeps contextual empty-result render state on valid zero response', async () => {
+  const renders = [];
+  const statuses = [];
+  const view = createRecentOperationsView({
+    cache: {
+      read: async () => assert.fail('filtered refresh must not read cache'),
+      write: async () => assert.fail('filtered refresh must not write cache'),
+    },
+    fetchRecent: async () => response([]),
+    render: (items, context) => renders.push({ items, context }),
+    setStatus: (value) => statuses.push(value),
+  });
+
+  assert.equal(await view.refresh({ type: 'EXPENSE' }), true);
+  assert.deepEqual(renders.at(-1), { items: [], context: { filtered: true } });
+  assert.deepEqual(statuses.at(-1), { kind: 'filtered-fresh' });
+});
+
 test('unfiltered manual refresh is network-only, validates response and replaces bounded cache', async () => {
   const writes = [];
   const renders = [];
@@ -230,7 +248,7 @@ test('PWA wires one accessible refresh action to existing operations/reference/s
   assert.match(app, /refreshSyncStatus: loadSyncStatus/u);
   assert.match(app, /refreshReader\.disabled = refreshing/u);
   assert.match(app, /refreshReader\.addEventListener\('click'/u);
-  assert.match(sw, /prihrash-shell-v9/u);
+  assert.match(sw, /prihrash-shell-v10/u);
   assert.match(sw, /'\/reader-refresh\.mjs'/u);
   assert.match(sw, /url\.pathname\.startsWith\('\/api\/'\)/u);
 });
