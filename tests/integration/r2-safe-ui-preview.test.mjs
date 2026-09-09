@@ -26,6 +26,7 @@ test('synthetic preview evidence contains no private/provider data and covers cu
   const ambiguous = syntheticPreviewEvidence.operations.find((item) => item.periodAssignmentQuality === 'LEGACY_AMBIGUOUS');
   assert.equal(ambiguous?.recordGranularity, 'PERIOD_AGGREGATE');
   assert.equal(ambiguous?.datePrecision, 'MONTH');
+  assert.equal(ambiguous?.capturedAt, null);
   assert.equal(toOperationPresentation(ambiguous).quality.includes('Расчётный период неоднозначен'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.note?.includes('https://example.invalid/')), true);
   assert.equal(JSON.stringify(syntheticPreviewEvidence).includes('mepnet'), false);

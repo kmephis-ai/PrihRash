@@ -99,6 +99,20 @@ test('cursor round-trips only stable sort keys', () => {
   assert.equal(raw.includes('note'), false);
 });
 
+test('cursor round-trips canonical null capturedAt without inventing a timestamp', () => {
+  const cursor = encodeRecentOperationsCursor({
+    occurredOn: '2026-09-07',
+    capturedAt: null,
+    id: IDS.first,
+  });
+  assert.deepEqual(decodeRecentOperationsCursor(cursor), {
+    v: 1,
+    o: '2026-09-07',
+    c: null,
+    i: IDS.first,
+  });
+});
+
 test('page statement uses limit+1 and exact DESC keyset predicate with typed parameters', () => {
   const cursor = encodeRecentOperationsCursor({
     occurredOn: '2026-09-07',
@@ -115,8 +129,26 @@ test('page statement uses limit+1 and exact DESC keyset predicate with typed par
   assert.equal(statement.parameters.cursor_id.type, 'Uuid');
   assert.equal(statement.parameters.cursor_id.value, IDS.first);
   assert.match(statement.text, /t\.type = \$type AND \(t\.occurred_on < \$cursor_occurred_on OR/);
-  assert.match(statement.text, /t\.id < \$cursor_id\)\)/);
+  assert.match(statement.text, /t\.captured_at IS NOT NULL/);
+  assert.match(statement.text, /OR t\.captured_at IS NULL/);
+  assert.match(statement.text, /CASE WHEN t\.captured_at IS NULL THEN 1 ELSE 0 END ASC/);
+  assert.match(statement.text, /t\.id < \$cursor_id/);
   assert.equal(statement.text.includes('OFFSET'), false);
+});
+
+test('null-capture cursor uses null-only same-day keyset without timestamp parameter', () => {
+  const cursor = encodeRecentOperationsCursor({
+    occurredOn: '2026-09-07',
+    capturedAt: null,
+    id: IDS.second,
+  });
+  const statement = recentOperationsPageStatement(20, undefined, cursor);
+
+  assert.equal('cursor_captured_at' in statement.parameters, false);
+  assert.equal(statement.parameters.cursor_occurred_on.value, '2026-09-07');
+  assert.equal(statement.parameters.cursor_id.value, IDS.second);
+  assert.match(statement.text, /t\.occurred_on = \$cursor_occurred_on AND t\.captured_at IS NULL AND t\.id < \$cursor_id/);
+  assert.match(statement.text, /CASE WHEN t\.captured_at IS NULL THEN 1 ELSE 0 END ASC/);
 });
 
 test('page returns at most requested items and cursor from last returned row', async () => {
@@ -144,6 +176,25 @@ test('page returns at most requested items and cursor from last returned row', a
   assert.equal(capture[1].parameters.limit.value, 3n);
 });
 
+test('page cursor preserves canonical null capturedAt from last returned row', async () => {
+  const rows = [
+    row(IDS.first, '2026-09-07', '2026-09-07T12:34:58.000Z'),
+    row(IDS.second, '2026-09-07', null),
+    row(IDS.third, '2026-09-07', null),
+  ];
+  const result = await readRecentOperationsPage(adapterWithRows(rows), 2);
+
+  assert.equal(result.items.length, 2);
+  assert.equal(result.items[1].capturedAt, null);
+  assert.notEqual(result.nextCursor, null);
+  assert.deepEqual(decodeRecentOperationsCursor(result.nextCursor), {
+    v: 1,
+    o: '2026-09-07',
+    c: null,
+    i: IDS.second,
+  });
+});
+
 test('page returns null cursor when provider has no extra row', async () => {
   const result = await readRecentOperationsPage(adapterWithRows([
     row(IDS.first, '2026-09-07', '2026-09-07T12:34:58.000Z'),
@@ -161,6 +212,7 @@ test('malformed cursors fail before provider read', async () => {
     Buffer.from(JSON.stringify({ v: 2, o: '2026-09-07', c: '2026-09-07T12:34:56.000Z', i: IDS.first }), 'utf8').toString('base64url'),
     Buffer.from(JSON.stringify({ v: 1, o: 'bad', c: '2026-09-07T12:34:56.000Z', i: IDS.first }), 'utf8').toString('base64url'),
     Buffer.from(JSON.stringify({ v: 1, o: '2026-09-07', c: 'bad', i: IDS.first }), 'utf8').toString('base64url'),
+    Buffer.from(JSON.stringify({ v: 1, o: '2026-09-07', c: 0, i: IDS.first }), 'utf8').toString('base64url'),
     Buffer.from(JSON.stringify({ v: 1, o: '2026-09-07', c: '2026-09-07T12:34:56.000Z', i: 'bad' }), 'utf8').toString('base64url'),
     Buffer.from(JSON.stringify({ v: 1, o: '2026-09-07', c: '2026-09-07T12:34:56.000Z', i: IDS.first, extra: 1 }), 'utf8').toString('base64url'),
   ];

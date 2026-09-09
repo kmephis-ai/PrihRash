@@ -49,6 +49,7 @@ Unknown parameter, массив/duplicate-like значение, blank value, ma
 - amount — integer minor units + `RUB`;
 - `VOIDED` возвращается явным status, а не скрывается;
 - `recordGranularity`, `datePrecision`, `aggregatePeriodMonth`, `periodAssignmentQuality` обязательны для честного отображения coarse/legacy history;
+- `capturedAt` — доказанное capture time или `null`; legacy `null` не повышается до guessed timestamp;
 - account/category/member представлены stable id + canonical display label;
 - malformed/orphaned provider evidence fail-closed через существующий Reader/`validateTransaction()` path.
 
@@ -110,10 +111,13 @@ HTTP route/provider wiring остаётся отдельным provider-capable 
 Paging keyset-based, без `OFFSET`, по exact order:
 
 ```text
-occurred_on DESC, captured_at DESC, id DESC
+occurred_on DESC,
+CASE WHEN captured_at IS NULL THEN 1 ELSE 0 END ASC,
+captured_at DESC,
+id DESC
 ```
 
-Cursor opaque для клиента и содержит только эти три sort keys. Он не содержит amount, description, note или provider identifiers.
+Cursor opaque для клиента и содержит только эти три logical sort keys; `captured_at` внутри cursor может быть `null`. Non-null capture timestamps идут перед `null`, а keyset predicate имеет отдельные ветки для timestamp/null и никогда не сравнивает `NULL` с guessed timestamp. Cursor не содержит amount, description, note или provider identifiers.
 
 ## Не является частью v1
 

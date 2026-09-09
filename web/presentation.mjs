@@ -41,7 +41,7 @@ function sanitizeReaderOperation(item) {
     id: requireString(item.id),
     type: item.type,
     occurredOn: requireString(item.occurredOn),
-    capturedAt: requireString(item.capturedAt),
+    capturedAt: nullableString(item.capturedAt),
     recordGranularity: item.recordGranularity,
     datePrecision: item.datePrecision,
     aggregatePeriodMonth: nullableString(item.aggregatePeriodMonth),
