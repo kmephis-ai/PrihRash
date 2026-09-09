@@ -111,6 +111,7 @@ export function toOperationPresentation(item) {
   if (safe.datePrecision === 'UNKNOWN') quality.push('Точность даты неизвестна');
 
   const account = accountContextLabel(safe);
+  const note = safe.note === '' ? null : safe.note;
   return Object.freeze({
     id: safe.id,
     typeLabel: safe.type === 'EXPENSE' ? 'Расход' : safe.type === 'INCOME' ? 'Доход' : 'Перевод',
@@ -122,6 +123,7 @@ export function toOperationPresentation(item) {
         : safe.aggregatePeriodMonth ?? safe.occurredOn,
     description: safe.description ?? safe.category?.label ?? 'Без описания',
     meta: [account, safe.category?.label, safe.paidByMember?.label].filter(Boolean).join(' · '),
+    note,
     quality,
   });
 }

@@ -59,6 +59,7 @@ const OPERATIONS = Object.freeze([
     amountMinor: 428750,
     description: 'Супермаркет · демо',
     category: category(0),
+    note: 'Заказ · демо: https://example.invalid/orders/42?source=preview&kind=synthetic',
   }),
   operation({
     id: '40000000-0000-0000-0000-000000000002',

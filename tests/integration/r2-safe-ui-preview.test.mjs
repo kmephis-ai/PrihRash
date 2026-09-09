@@ -24,6 +24,7 @@ test('synthetic preview evidence contains no private/provider data and covers cu
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.type === 'TRANSFER'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.status === 'VOIDED'), true);
   assert.equal(syntheticPreviewEvidence.operations.some((item) => item.recordGranularity === 'PERIOD_AGGREGATE' && item.datePrecision === 'MONTH'), true);
+  assert.equal(syntheticPreviewEvidence.operations.some((item) => item.note?.includes('https://example.invalid/')), true);
   assert.equal(JSON.stringify(syntheticPreviewEvidence).includes('mepnet'), false);
   assert.equal(JSON.stringify(syntheticPreviewEvidence).includes('89.125.'), false);
 });
