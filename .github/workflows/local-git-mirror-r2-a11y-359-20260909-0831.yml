@@ -1,0 +1,45 @@
+name: Local Git Mirror Bootstrap
+
+on:
+  push:
+    branches:
+      - transport/r2-a11y-359-20260909-0831
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_SHA: e47ba6c1ff656d233f14acf7383c42e1de1fb184
+  ARTIFACT_NAME: prihrash-r2-a11y-359-20260909-0831
+
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build exact source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git update-ref refs/heads/source-exact "${SOURCE_SHA}"
+          git bundle create repository.bundle refs/heads/source-exact
+          BUNDLE_SHA256="$(sha256sum repository.bundle | awk '{print $1}')"
+          TREE_SHA="$(git rev-parse "${SOURCE_SHA}^{tree}")"
+          cat > manifest.json <<JSON
+          {"schema_version":1,"source_repository":"${GITHUB_REPOSITORY}","source_sha":"${SOURCE_SHA}","tree_sha":"${TREE_SHA}","bundle_sha256":"${BUNDLE_SHA256}"}
+          JSON
+          sha256sum repository.bundle manifest.json > SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            repository.bundle
+            manifest.json
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
