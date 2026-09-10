@@ -1,0 +1,51 @@
+name: Publish exact local R3A 412 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-412-publish-20260910-1442
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: dc297a4a66d8658f7eec9a7015f4d5ea13789a6a
+          TARGET_BRANCH: r3a/412-transfer-create-api
+          EXPECTED_HEAD: c5a7cc2400c118ce84bb56caf794363ab7dc2492
+          EXPECTED_TREE: 99bbb0b9802d3f554ad6b7bb63946eb42cba2336
+          EXPECTED_PATCH_SHA: 7385600c07f2ec81e1330631ee176d971719bf35a77c42b8dbb64da2fd15e1ab
+        run: |
+          set -euo pipefail
+          test "$(sha256sum .transport/r3a-412.patch | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
+          cp .transport/r3a-412.patch /tmp/412.patch
+
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/$TARGET_BRANCH)" = "$SOURCE_SHA"
+
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/412.patch
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          printf '%s\n' \
+            docs/R3A_WRITER_API.md \
+            src/writer/transferCreateApi.ts \
+            tests/domain/writer-transfer-create-api.test.mjs \
+            > /tmp/expected-files.txt
+          git diff --name-only "$SOURCE_SHA" HEAD | sort > /tmp/actual-files.txt
+          sort /tmp/expected-files.txt -o /tmp/expected-files.txt
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
+          git diff --check "$SOURCE_SHA" HEAD
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
