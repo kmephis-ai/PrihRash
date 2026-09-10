@@ -1,0 +1,296 @@
+From c5a7cc2400c118ce84bb56caf794363ab7dc2492 Mon Sep 17 00:00:00 2001
+From: PrihRash AI <ai@localhost>
+Date: Thu, 10 Sep 2026 11:43:17 +0000
+Subject: [PATCH] R3A: add TRANSFER create API envelope
+
+---
+ docs/R3A_WRITER_API.md                        |  24 ++-
+ src/writer/transferCreateApi.ts               |  35 ++++
+ .../writer-transfer-create-api.test.mjs       | 193 ++++++++++++++++++
+ 3 files changed, 250 insertions(+), 2 deletions(-)
+ create mode 100644 src/writer/transferCreateApi.ts
+ create mode 100644 tests/domain/writer-transfer-create-api.test.mjs
+
+diff --git a/docs/R3A_WRITER_API.md b/docs/R3A_WRITER_API.md
+index c769d3a..012392d 100644
+--- a/docs/R3A_WRITER_API.md
++++ b/docs/R3A_WRITER_API.md
+@@ -231,14 +231,34 @@ Idempotency guarantees совпадают с уже доказанными EXPEN
+ 
+ Safe application codes этого contract: `INVALID_REQUEST`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_READ_FAILED`, `INVALID_GENERATED_TRANSACTION_ID`, `IDEMPOTENCY_CONFLICT`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw reference/store/random-id diagnostics наружу не отражаются.
+ 
+-Public TRANSFER API envelope, browser validated-ACK delivery и выбор `flow_kind` остаются отдельными work items. Наличие этого application contract само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
++## Public TRANSFER create API envelope v1
++
++`transferCreateApi.ts` добавляет только framework/provider-neutral public projection поверх `executeIdempotentTransferCreate()`. Request parsing, exact two-account reference validation, FIN-TRUTH projection и idempotency/store semantics не дублируются.
++
++Успешный response имеет тот же минимальный acknowledgement shape, что и доказанные EXPENSE/INCOME create API:
++
++```text
++{
++  apiVersion: 1,
++  outcome: CREATED | REPLAY,
++  idempotencyKey: canonical lowercase UUID,
++  transactionId: canonical lowercase UUID,
++  version: 1
++}
++```
++
++`transactionId` остаётся отдельной canonical Transaction identity и не равен `idempotencyKey`; exact replay возвращает original `transactionId/version` из application contract. Envelope не возвращает full `CanonicalTransaction`, amount/date, source/destination account ids, description/note, `flowKind`, reference evidence или store/provider diagnostics.
++
++Ошибки не получают отдельный API vocabulary: наружу проходит существующий stable value-free `TransferCreateError.code`. Этот слой намеренно не определяет HTTP status/path/body wrapping, headers/CORS, cookie/session verification, browser `fetch`, API Gateway/private Function или YDB/provider binding. Реальный OWNER/provider wiring остаётся за canonical provider gate #302.
++
++Browser TRANSFER ACK/delete delivery и выбор `flow_kind` остаются отдельными work items. Наличие public envelope само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
+ 
+ ## Non-scope
+ 
+ - HTTP status/body mapping и OWNER session binding;
+ - YDB idempotency table/transaction implementation;
+ - outbox POST/retry worker;
+-- TRANSFER public API envelope/browser ACK delivery и выбор `flow_kind`;
++- TRANSFER browser ACK delivery и выбор `flow_kind`;
+ - `paid_by`;
+ - optimistic edit / VOID;
+ - Google Form/GAS intake parity;
+diff --git a/src/writer/transferCreateApi.ts b/src/writer/transferCreateApi.ts
+new file mode 100644
+index 0000000..e8c37ab
+--- /dev/null
++++ b/src/writer/transferCreateApi.ts
+@@ -0,0 +1,35 @@
++import {
++  executeIdempotentTransferCreate,
++  type IdempotentTransferCreateStore,
++  type TransferCreateReferenceReader,
++} from './idempotentTransferCreate.js';
++
++export const WRITER_TRANSFER_CREATE_API_VERSION = 1 as const;
++
++export interface WriterTransferCreateApiResponse {
++  readonly apiVersion: typeof WRITER_TRANSFER_CREATE_API_VERSION;
++  readonly outcome: 'CREATED' | 'REPLAY';
++  readonly idempotencyKey: string;
++  readonly transactionId: string;
++  readonly version: 1;
++}
++
++export interface WriterTransferCreateApiDependencies {
++  readonly references: TransferCreateReferenceReader;
++  readonly store: IdempotentTransferCreateStore;
++  readonly randomUuid?: () => string;
++}
++
++export async function executeWriterTransferCreateApiRequest(
++  dependencies: Readonly<WriterTransferCreateApiDependencies>,
++  body: unknown,
++): Promise<Readonly<WriterTransferCreateApiResponse>> {
++  const response = await executeIdempotentTransferCreate(dependencies, body);
++  return Object.freeze({
++    apiVersion: WRITER_TRANSFER_CREATE_API_VERSION,
++    outcome: response.outcome,
++    idempotencyKey: response.idempotencyKey,
++    transactionId: response.result.id,
++    version: response.result.version,
++  });
++}
+diff --git a/tests/domain/writer-transfer-create-api.test.mjs b/tests/domain/writer-transfer-create-api.test.mjs
+new file mode 100644
+index 0000000..871ebb4
+--- /dev/null
++++ b/tests/domain/writer-transfer-create-api.test.mjs
+@@ -0,0 +1,193 @@
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { readFile } from 'node:fs/promises';
++import {
++  TransferCreateError,
++} from '../../dist/writer/idempotentTransferCreate.js';
++import {
++  WRITER_TRANSFER_CREATE_API_VERSION,
++  executeWriterTransferCreateApiRequest,
++} from '../../dist/writer/transferCreateApi.js';
++
++const KEY = 'a0000000-0000-0000-0000-000000000001';
++const TX_ID = 'b0000000-0000-0000-0000-000000000001';
++const FROM_ACCOUNT_ID = 'c0000000-0000-0000-0000-000000000001';
++const TO_ACCOUNT_ID = 'd0000000-0000-0000-0000-000000000001';
++
++const REQUEST = Object.freeze({
++  idempotencyKey: KEY,
++  occurredOn: '2026-09-10',
++  amountMinor: 12345,
++  currency: 'RUB',
++  fromAccountId: FROM_ACCOUNT_ID,
++  toAccountId: TO_ACCOUNT_ID,
++  description: 'Между счетами',
++  note: null,
++});
++
++function sameRequest(left, right) {
++  return JSON.stringify(left) === JSON.stringify(right);
++}
++
++class MemoryStore {
++  records = new Map();
++  creates = 0;
++
++  async readCommitted(idempotencyKey) {
++    return this.records.get(idempotencyKey) ?? null;
++  }
++
++  async createOrReplay(input) {
++    const existing = this.records.get(input.request.idempotencyKey);
++    if (existing === undefined) {
++      this.creates += 1;
++      const committed = Object.freeze({ request: input.request, result: input.candidate });
++      this.records.set(input.request.idempotencyKey, committed);
++      return Object.freeze({ outcome: 'CREATED', ...committed });
++    }
++    if (!sameRequest(existing.request, input.request)) return Object.freeze({ outcome: 'CONFLICT' });
++    return Object.freeze({ outcome: 'REPLAY', request: existing.request, result: existing.result });
++  }
++}
++
++function references({ missing = false, mismatch = false, error = null } = {}) {
++  return {
++    async readTransferCreateReferenceEvidence(request) {
++      if (error) throw error;
++      if (missing) return null;
++      return {
++        fromAccountId: mismatch ? TO_ACCOUNT_ID : request.fromAccountId,
++        toAccountId: request.toAccountId,
++      };
++    },
++  };
++}
++
++async function expectCode(promise, code) {
++  await assert.rejects(promise, (error) => {
++    assert.ok(error instanceof TransferCreateError);
++    assert.equal(error.code, code);
++    assert.equal(error.message, code);
++    const serialized = JSON.stringify(error);
++    assert.equal(serialized.includes('private-provider-diagnostic'), false);
++    assert.equal(serialized.includes('Между счетами'), false);
++    return true;
++  });
++}
++
++function assertMinimalResponse(response, outcome) {
++  assert.deepEqual(response, {
++    apiVersion: WRITER_TRANSFER_CREATE_API_VERSION,
++    outcome,
++    idempotencyKey: KEY,
++    transactionId: TX_ID,
++    version: 1,
++  });
++  assert.deepEqual(Object.keys(response).sort(), [
++    'apiVersion',
++    'idempotencyKey',
++    'outcome',
++    'transactionId',
++    'version',
++  ]);
++  assert.ok(Object.isFrozen(response));
++  assert.notEqual(response.transactionId, response.idempotencyKey);
++
++  const serialized = JSON.stringify(response);
++  assert.equal(Object.hasOwn(response, 'transaction'), false);
++  for (const forbidden of [
++    '"transaction":',
++    'amountMinor',
++    'occurredOn',
++    'fromAccountId',
++    'toAccountId',
++    'categoryId',
++    'flowKind',
++    'description',
++    'note',
++    'Между счетами',
++  ]) {
++    assert.equal(serialized.includes(forbidden), false, `public response leaked ${forbidden}`);
++  }
++}
++
++test('TRANSFER Writer API first create exposes only minimal immutable CREATED acknowledgement', async () => {
++  const store = new MemoryStore();
++  const response = await executeWriterTransferCreateApiRequest({
++    references: references(),
++    store,
++    randomUuid: () => TX_ID,
++  }, REQUEST);
++
++  assertMinimalResponse(response, 'CREATED');
++  assert.equal(store.creates, 1);
++});
++
++test('TRANSFER Writer API exact replay exposes the same transaction identity with REPLAY and no second create', async () => {
++  const store = new MemoryStore();
++  const dependencies = {
++    references: references(),
++    store,
++    randomUuid: () => TX_ID,
++  };
++
++  const created = await executeWriterTransferCreateApiRequest(dependencies, REQUEST);
++  const replay = await executeWriterTransferCreateApiRequest(dependencies, { ...REQUEST });
++
++  assertMinimalResponse(created, 'CREATED');
++  assertMinimalResponse(replay, 'REPLAY');
++  assert.equal(replay.transactionId, created.transactionId);
++  assert.equal(replay.version, created.version);
++  assert.equal(store.creates, 1);
++});
++
++test('TRANSFER Writer API preserves application idempotency conflict semantics without replacing the committed create', async () => {
++  const store = new MemoryStore();
++  const dependencies = {
++    references: references(),
++    store,
++    randomUuid: () => TX_ID,
++  };
++
++  await executeWriterTransferCreateApiRequest(dependencies, REQUEST);
++  await expectCode(
++    executeWriterTransferCreateApiRequest(dependencies, { ...REQUEST, amountMinor: REQUEST.amountMinor + 1 }),
++    'IDEMPOTENCY_CONFLICT',
++  );
++  assert.equal(store.creates, 1);
++  assert.equal(store.records.get(KEY).result.id, TX_ID);
++});
++
++test('TRANSFER Writer API preserves value-free request/reference/dependency errors from the application contract', async (t) => {
++  const cases = [
++    ['invalid request', { body: { ...REQUEST, flowKind: null }, refs: references(), code: 'INVALID_REQUEST' }],
++    ['missing reference', { body: REQUEST, refs: references({ missing: true }), code: 'REFERENCE_NOT_FOUND' }],
++    ['mismatched reference', { body: REQUEST, refs: references({ mismatch: true }), code: 'REFERENCE_MISMATCH' }],
++    ['reference failure', {
++      body: REQUEST,
++      refs: references({ error: new Error('private-provider-diagnostic') }),
++      code: 'REFERENCE_READ_FAILED',
++    }],
++  ];
++
++  for (const [name, input] of cases) {
++    await t.test(name, async () => {
++      const store = new MemoryStore();
++      await expectCode(executeWriterTransferCreateApiRequest({
++        references: input.refs,
++        store,
++        randomUuid: () => TX_ID,
++      }, input.body), input.code);
++      assert.equal(store.creates, 0);
++    });
++  }
++});
++
++test('TRANSFER Writer API source is framework/provider-neutral and delegates only to the existing application contract', async () => {
++  const source = await readFile(new URL('../../src/writer/transferCreateApi.ts', import.meta.url), 'utf8');
++
++  assert.match(source, /executeIdempotentTransferCreate/u);
++  assert.match(source, /\.\/idempotentTransferCreate\.js/u);
++  assert.doesNotMatch(source, /integration\/ydb|YdbAdapter|fetch\(|indexedDB|requestContext|apiGateway|OWNER_SESSION|cookie|Cloud Function|Yandex/u);
++  assert.doesNotMatch(source, /validateTransaction|amountMinor\s*<=|UUID_PATTERN|DATE_PATTERN|flowKind\s*:/u);
++});
+-- 
+2.47.3
