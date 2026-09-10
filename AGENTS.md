@@ -99,6 +99,15 @@ Work item должен иметь:
 
 Никаких реальных финансовых fixtures в GitHub.
 
+## 9.1. Progressive Engineering Policy
+
+- Усложняй pipeline/tooling только в ответ на фактически появившийся product/runtime/security risk или измеримый developer pain; не строить engineering infrastructure «на будущее».
+- Для каждого stage-specific workflow/check заранее понимать retirement condition и удалять/отключать его, когда риск исчез или проверка заменена постоянным gate.
+- Не оптимизировать уже быстрый и стабильный pipeline без измеримого сигнала: устойчивого роста CI time, flakiness, стоимости или задержки feedback loop.
+- Если managed capability GitHub покрывает задачу с меньшей поддержкой и достаточной least-authority моделью, предпочитать её custom infrastructure.
+- Multi-browser matrix, visual regression, coverage thresholds, mutation testing, hard performance gates, IaC и дополнительные scanners вводить только по отдельному evidence/trigger.
+- Сохранять canonical `npm run check` быстрым; тяжёлые browser/security/provider проверки держать отдельными и параллельными, если нет доказанной причины включать их в основной check.
+
 ## 10. Performance
 
 Performance входит в Definition of Done.
