@@ -1,0 +1,47 @@
+name: Local Git Publish R3A 420
+
+on:
+  push:
+    branches:
+      - ai/publish-r3a-420-20260910-1732
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify and publish exact local commit
+        shell: bash
+        env:
+          BASE_SHA: 886c86ca39a5e46007fcc2562a10451413382f73
+          PATCH_SHA: a2074e361957d66106e785eb4a0910eebc15cf4c
+          PATCH_TREE: cca337477b2a997a7237ae01d465afc61e67efa7
+          TARGET_BRANCH: r3a/420-preview-expense-conflict
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "${BASE_SHA}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git bundle verify transport/r3a420-patch.bundle
+          git fetch transport/r3a420-patch.bundle refs/heads/local-mirror-source:refs/remotes/local-patch/source
+          test "$(git rev-parse refs/remotes/local-patch/source)" = "${PATCH_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^")" = "${BASE_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^{tree}")" = "${PATCH_TREE}"
+          EXPECTED_FILES=$'docs/R3A_PREVIEW_WRITER.md\ndocs/R3A_WRITER_API.md\nscripts/build-r2-ui-preview.mjs\ntests/integration/r3a-preview-expense-edit-conflict.test.mjs\nweb/preview-bootstrap.mjs\nweb/preview-expense-edit.mjs\nweb/preview-writer.css'
+          test "$(git diff --name-only "${BASE_SHA}" "${PATCH_SHA}")" = "${EXPECTED_FILES}"
+          git worktree add --detach /tmp/r3a420-publish-check "${PATCH_SHA}"
+          cd /tmp/r3a420-publish-check
+          node --test tests/integration/r3a-preview-expense-edit-conflict.test.mjs tests/integration/r2-safe-ui-preview.test.mjs
+          npm run privacy
+          npm run lint
+          npm run preview:build --silent
+          git diff --check "${BASE_SHA}" "${PATCH_SHA}"
+          cd "${GITHUB_WORKSPACE}"
+          git push origin "${PATCH_SHA}:refs/heads/${TARGET_BRANCH}"
