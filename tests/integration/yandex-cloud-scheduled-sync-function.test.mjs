@@ -52,7 +52,7 @@ test('readiness entrypoint sanitizes unknown provider failure without retaining 
 });
 
 test('readiness entrypoint preserves only already-sanitized readiness errors', async () => {
-  const safeFailure = new ScheduledSyncReadinessError('YDB_SCHEMA_READ_FAILED');
+  const safeFailure = new ScheduledSyncReadinessError('YDB_MIGRATION_EVIDENCE_READ_FAILED');
 
   await assert.rejects(
     () => executeYandexScheduledSyncReadinessFunction(
@@ -60,7 +60,7 @@ test('readiness entrypoint preserves only already-sanitized readiness errors', a
       async () => { throw safeFailure; },
     ),
     (error) => error === safeFailure
-      && error.message === 'YDB_SCHEMA_READ_FAILED'
+      && error.message === 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
       && !Object.hasOwn(error, 'cause'),
   );
 });

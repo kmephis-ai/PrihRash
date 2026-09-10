@@ -56,7 +56,9 @@ export type ScheduledSyncReadinessErrorCode =
   | 'GOOGLE_SOURCE_VALUE_UNSUPPORTED'
   | 'GOOGLE_SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
-  | 'YDB_SCHEMA_READ_FAILED'
+  | 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
+  | 'YDB_ACCOUNTS_SCHEMA_READ_FAILED'
+  | 'YDB_CATEGORIES_SCHEMA_READ_FAILED'
   | 'MALFORMED_SCHEMA_MIGRATION_EVIDENCE'
   | 'MISSING_REQUIRED_SCHEMA_MIGRATION'
   | 'UNEXPECTED_SCHEMA_MIGRATION'
@@ -178,17 +180,26 @@ export async function runScheduledSyncReadinessProbe(
     throw classifyGoogleSourceFailure(error);
   }
 
+  let migrationEvidence;
   try {
-    const migrationEvidence = await adapter.read<SchemaMigrationEvidenceRow>(readStatement(
+    migrationEvidence = await adapter.read<SchemaMigrationEvidenceRow>(readStatement(
       'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC',
     ));
-    validateSchemaMigrationEvidence(migrationEvidence.rows);
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_MIGRATION_EVIDENCE_READ_FAILED');
+  }
+  validateSchemaMigrationEvidence(migrationEvidence.rows);
 
+  try {
     await adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0'));
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_ACCOUNTS_SCHEMA_READ_FAILED');
+  }
+
+  try {
     await adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0'));
-  } catch (error) {
-    if (error instanceof ScheduledSyncReadinessError) throw error;
-    throw new ScheduledSyncReadinessError('YDB_SCHEMA_READ_FAILED');
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_CATEGORIES_SCHEMA_READ_FAILED');
   }
 
   return Object.freeze({
