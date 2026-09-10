@@ -281,7 +281,7 @@ Store boundary состоит из двух операций:
 1. `readCurrent(transactionId)` возвращает exact versioned current EXPENSE либо `null`; malformed/wrong-type/coarse/VOIDED evidence → fail-closed `STORE_CONTRACT_INVALID`.
 2. `replaceIfVersion({transactionId, expectedVersion, candidate})` атомарно заменяет запись только при exact version match. `UPDATED` обязан read-back-like результатом доказать exact candidate и `version=expectedVersion+1`; concurrent race возвращает `VERSION_CONFLICT` с более новой `currentVersion`.
 
-Stale `expectedVersion`, обнаруженный уже на pre-read, также возвращает normal `VERSION_CONFLICT` outcome до reference lookup/mutation. Это не exception и не last-write-wins. Browser comparison UI пока не определён; current financial payload не публикуется в GitHub evidence.
+Stale `expectedVersion`, обнаруженный уже на pre-read, также возвращает normal `VERSION_CONFLICT` outcome до reference lookup/mutation. Это не exception и не last-write-wins. Preview-only browser comparison flow доказан отдельно через injected edit/current-read ports; production browser transport остаётся вне этого contract. Current financial payload не публикуется в GitHub evidence.
 
 ### Public EXPENSE edit API envelope v1
 
@@ -290,6 +290,8 @@ Stale `expectedVersion`, обнаруженный уже на pre-read, такж
 `UPDATED` возвращает только `apiVersion=1`, `outcome=UPDATED`, canonical `transactionId` и promoted `version`. `VERSION_CONFLICT` возвращает только `apiVersion=1`, `outcome=VERSION_CONFLICT`, тот же `transactionId` и `currentVersion`. Full `CanonicalTransaction`, amount/date, account/category/member ids, description/note и provider/store diagnostics в public envelope не возвращаются.
 
 Application exceptions сохраняют существующий stable value-free `ExpenseEditError.code`; отдельный API error vocabulary не вводится. HTTP status/path/body wrapping, headers/CORS, cookie/session verification, browser `fetch`, API Gateway/private Function и YDB/provider binding этим слоем не определяются.
+
+Preview browser conflict proof не расширяет public ACK финансовыми данными: `VERSION_CONFLICT` остаётся minimal version metadata, а актуальная financial запись читается отдельным injected `readCurrentExpense(transactionId)` port. Browser обязан проверить exact id/version и ordinary EXPENSE semantics до показа comparison. Ни accept-current, ни keep-local-rebase не выполняют автоматический повторный submit; overwrite возможен только новым явным user save с обновлённым `expectedVersion`.
 
 Safe exception codes: `INVALID_REQUEST`, `TRANSACTION_NOT_FOUND`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `CATEGORY_KIND_INVALID`, `REFERENCE_READ_FAILED`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw provider/store/reference diagnostics наружу не отражаются.
 
@@ -300,7 +302,7 @@ Safe exception codes: `INVALID_REQUEST`, `TRANSACTION_NOT_FOUND`, `REFERENCE_NOT
 - outbox POST/retry worker;
 - real TRANSFER HTTP sender и выбор `flow_kind`;
 - create-time `paid_by` UX/API/delivery;
-- browser EXPENSE edit/conflict comparison UI;
+- real production browser EXPENSE edit/current-record transport;
 - INCOME/TRANSFER edit;
 - VOID;
 - Google Form/GAS intake parity;
