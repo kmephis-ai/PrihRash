@@ -1,0 +1,375 @@
+From 3d863bcb3bb97db5b3f35b0529292d059dcc6785 Mon Sep 17 00:00:00 2001
+From: PrihRash AI <ai@localhost>
+Date: Thu, 10 Sep 2026 11:57:39 +0000
+Subject: [PATCH] R3A: add TRANSFER validated ACK delivery
+
+---
+ docs/R3A_PREVIEW_WRITER.md                    |  10 +-
+ tests/integration/r2-safe-ui-preview.test.mjs | 225 ++++++++++++++++++
+ web/preview-transfer-writer-delivery.mjs      |  76 ++++++
+ 3 files changed, 307 insertions(+), 4 deletions(-)
+ create mode 100644 web/preview-transfer-writer-delivery.mjs
+
+diff --git a/docs/R3A_PREVIEW_WRITER.md b/docs/R3A_PREVIEW_WRITER.md
+index 871c0f9..6d4ab0a 100644
+--- a/docs/R3A_PREVIEW_WRITER.md
++++ b/docs/R3A_PREVIEW_WRITER.md
+@@ -165,13 +165,13 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
+ 
+ - EXPENSE имеет отдельные application/API/idempotency и injected ACK-delivery proofs;
+ - INCOME также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
+-- TRANSFER в этом item имеет только synthetic durable draft/outbox UX proof; application/API/delivery для него ещё не заявлены;
+-- реальный browser HTTP sender для EXPENSE/INCOME всё ещё не подключён; TRANSFER sender отсутствует полностью;
++- TRANSFER также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs; `flowKind` при этом остаётся literal `null` и не inferred;
++- реальный browser HTTP sender для EXPENSE/INCOME/TRANSFER всё ещё не подключён; все delivery proofs используют injected sender ports;
+ - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
+ - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
+ - R1 #302 и production R2 auth/YDB wiring не обходятся.
+ 
+-## EXPENSE outbox delivery / ACK boundary
++## EXPENSE/INCOME/TRANSFER outbox delivery / ACK boundary
+ 
+ Существующий preview-only delivery layer относится только к `CREATE_EXPENSE / PENDING` и связывает его с public EXPENSE create API envelope без реального HTTP transport.
+ 
+@@ -185,13 +185,15 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
+ 
+ INCOME использует отдельный type-specific preview delivery module с теми же crash/retry invariants, но с `toAccountId` и injected `sendIncomeCreate(request)`. Он не рефакторит доказанный EXPENSE path: malformed/mismatched ACK не удаляет local intent, valid `CREATED|REPLAY` ACK предшествует `acknowledge()`, а local delete failure оставляет тот же idempotency key для безопасного `REPLAY` при следующем явном вызове. Automatic retry cadence/backoff здесь не определяются.
+ 
++TRANSFER использует отдельный type-specific preview delivery module и existing strict `CREATE_TRANSFER / PENDING` parser. `intentId` становится `idempotencyKey`; request содержит exact `fromAccountId`/`toAccountId`, но **не** local labels/metadata и не передаёт `flowKind`. Injected `sendTransferCreate(request)` делает не более одной попытки за invocation. Только exact API v1 `CREATED|REPLAY` ACK с тем же idempotency key и отдельным canonical transaction id разрешает `acknowledge()`. Sender failure или malformed/mismatched ACK оставляет row PENDING; local delete failure после server commit сохраняет тот же key для безопасного `REPLAY` и cleanup при следующем явном delivery. Automatic retry cadence/backoff/scheduling здесь также не определяются.
++
+ ## Не входит
+ 
+ - production Writer UI;
+ - Google Form/GAS intake parity;
+ - real browser HTTP sender / API Gateway / private Function;
+ - real INCOME HTTP sender / provider-bound delivery;
+-- TRANSFER application/idempotency contract, API envelope и browser ACK delivery;
++- real TRANSFER HTTP sender / provider-bound delivery;
+ - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
+ - automatic retry/sync scheduler;
+ - `paid_by_member`;
+diff --git a/tests/integration/r2-safe-ui-preview.test.mjs b/tests/integration/r2-safe-ui-preview.test.mjs
+index 6ec6e76..d832f18 100644
+--- a/tests/integration/r2-safe-ui-preview.test.mjs
++++ b/tests/integration/r2-safe-ui-preview.test.mjs
+@@ -18,6 +18,11 @@ import {
+   deliverPreviewIncomeIntent,
+   parsePreviewIncomeCreateAck,
+ } from '../../web/preview-income-writer-delivery.mjs';
++import {
++  createPreviewTransferCreateApiRequest,
++  deliverPreviewTransferIntent,
++  parsePreviewTransferCreateAck,
++} from '../../web/preview-transfer-writer-delivery.mjs';
+ import {
+   createIndexedDbPreviewDraftStore,
+   createIndexedDbPreviewIncomeDraftStore,
+@@ -1180,3 +1185,223 @@ test('R3A preview INCOME delivery remains transport-neutral and EXPENSE delivery
+   assert.doesNotMatch(productionApp, /preview-income-writer-delivery|sendIncomeCreate/u);
+   assert.doesNotMatch(productionServiceWorker, /preview-income-writer-delivery|sendIncomeCreate/u);
+ });
++
++
++test('R3A preview TRANSFER delivery maps PENDING intent to minimal create request without local labels/metadata or flowKind', () => {
++  const intent = previewTransferIntent();
++  const request = createPreviewTransferCreateApiRequest(intent);
++  assert.deepEqual(request, {
++    idempotencyKey: intent.intentId,
++    occurredOn: intent.payload.occurredOn,
++    amountMinor: intent.payload.amountMinor,
++    currency: 'RUB',
++    fromAccountId: intent.payload.fromAccount.id,
++    toAccountId: intent.payload.toAccount.id,
++    description: intent.payload.description,
++    note: intent.payload.note,
++  });
++  assert.equal(Object.isFrozen(request), true);
++  assert.equal('createdAt' in request, false);
++  assert.equal('fromAccount' in request, false);
++  assert.equal('toAccount' in request, false);
++  assert.equal('flowKind' in request, false);
++  assert.equal(JSON.stringify(request).includes(intent.payload.fromAccount.label), false);
++  assert.equal(JSON.stringify(request).includes(intent.payload.toAccount.label), false);
++});
++
++test('R3A preview TRANSFER delivery validates CREATED and REPLAY ACK before local acknowledge', async () => {
++  const intent = previewTransferIntent();
++  for (const outcome of ['CREATED', 'REPLAY']) {
++    const events = [];
++    const ack = await deliverPreviewTransferIntent({
++      intent,
++      sender: {
++        async sendTransferCreate(request) {
++          events.push(['send', request.idempotencyKey]);
++          return {
++            apiVersion: 1,
++            outcome,
++            idempotencyKey: request.idempotencyKey,
++            transactionId: '62000000-0000-0000-0000-000000000001',
++            version: 1,
++          };
++        },
++      },
++      outbox: {
++        async acknowledge(intentId) {
++          events.push(['acknowledge', intentId]);
++        },
++      },
++    });
++    assert.equal(ack.outcome, outcome);
++    assert.equal(Object.isFrozen(ack), true);
++    assert.deepEqual(events, [
++      ['send', intent.intentId],
++      ['acknowledge', intent.intentId],
++    ]);
++  }
++});
++
++test('R3A preview TRANSFER delivery removes the exact IndexedDB row only after valid ACK', async () => {
++  const intent = previewTransferIntent();
++  const other = previewExpenseIntent({
++    randomUuid: () => '50000000-0000-0000-0000-000000000099',
++  });
++  const fake = createPreviewOutboxFakeIndexedDb();
++  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
++  await outbox.enqueue(intent);
++  await outbox.enqueue(other);
++  assert.equal(await outbox.countPending(), 2);
++  let sendCount = 0;
++  await deliverPreviewTransferIntent({
++    intent,
++    outbox,
++    sender: {
++      async sendTransferCreate(request) {
++        sendCount += 1;
++        assert.equal(await outbox.countPending(), 2);
++        return {
++          apiVersion: 1,
++          outcome: 'CREATED',
++          idempotencyKey: request.idempotencyKey,
++          transactionId: '62000000-0000-0000-0000-000000000001',
++          version: 1,
++        };
++      },
++    },
++  });
++  assert.equal(sendCount, 1);
++  const pending = await outbox.listPending();
++  assert.deepEqual(pending.map((item) => item.intentId), [other.intentId]);
++});
++
++test('R3A preview TRANSFER delivery fails closed when delivery port is unavailable and sanitizes sender failure', async () => {
++  const intent = previewTransferIntent();
++  let acknowledged = false;
++  let sendCount = 0;
++
++  await assert.rejects(
++    deliverPreviewTransferIntent({ intent, outbox: { acknowledge: async () => { acknowledged = true; } }, sender: {} }),
++    /PREVIEW_TRANSFER_DELIVERY_UNAVAILABLE/u,
++  );
++  await assert.rejects(
++    deliverPreviewTransferIntent({ intent, outbox: {}, sender: { sendTransferCreate: async () => { sendCount += 1; } } }),
++    /PREVIEW_TRANSFER_DELIVERY_UNAVAILABLE/u,
++  );
++  assert.equal(sendCount, 0);
++  assert.equal(acknowledged, false);
++
++  await assert.rejects(
++    deliverPreviewTransferIntent({
++      intent,
++      sender: {
++        async sendTransferCreate() {
++          sendCount += 1;
++          throw new Error('private-provider-diagnostic');
++        },
++      },
++      outbox: { acknowledge: async () => { acknowledged = true; } },
++    }),
++    (error) => error?.message === 'PREVIEW_TRANSFER_SEND_FAILED' && !String(error).includes('private-provider-diagnostic'),
++  );
++  assert.equal(sendCount, 1);
++  assert.equal(acknowledged, false);
++});
++
++test('R3A preview TRANSFER delivery rejects malformed or mismatched ACK without acknowledging local intent', async () => {
++  const intent = previewTransferIntent();
++  const valid = {
++    apiVersion: 1,
++    outcome: 'CREATED',
++    idempotencyKey: intent.intentId,
++    transactionId: '62000000-0000-0000-0000-000000000001',
++    version: 1,
++  };
++  const badAcks = [
++    null,
++    { ...valid, apiVersion: 2 },
++    { ...valid, outcome: 'POSTED' },
++    { ...valid, idempotencyKey: '52000000-0000-0000-0000-000000000002' },
++    { ...valid, transactionId: intent.intentId },
++    { ...valid, transactionId: 'A2000000-0000-0000-0000-000000000001' },
++    { ...valid, version: 2 },
++    { ...valid, extra: true },
++    { apiVersion: 1, outcome: 'CREATED', idempotencyKey: intent.intentId, version: 1 },
++  ];
++  for (const response of badAcks) {
++    let acknowledged = false;
++    await assert.rejects(deliverPreviewTransferIntent({
++      intent,
++      sender: { sendTransferCreate: async () => response },
++      outbox: { acknowledge: async () => { acknowledged = true; } },
++    }), /INVALID_PREVIEW_TRANSFER_ACK/u);
++    assert.equal(acknowledged, false);
++  }
++  assert.throws(
++    () => parsePreviewTransferCreateAck(valid, 'A2000000-0000-0000-0000-000000000001'),
++    /INVALID_PREVIEW_TRANSFER_ACK/u,
++  );
++});
++
++test('R3A preview TRANSFER retry after server commit but local ACK failure reuses same key and clears on REPLAY', async () => {
++  const intent = previewTransferIntent();
++  const sentKeys = [];
++  let sendCount = 0;
++  const sender = {
++    async sendTransferCreate(request) {
++      sentKeys.push(request.idempotencyKey);
++      sendCount += 1;
++      return {
++        apiVersion: 1,
++        outcome: sendCount === 1 ? 'CREATED' : 'REPLAY',
++        idempotencyKey: request.idempotencyKey,
++        transactionId: '62000000-0000-0000-0000-000000000001',
++        version: 1,
++      };
++    },
++  };
++  let ackAttempts = 0;
++  const outbox = {
++    async acknowledge(intentId) {
++      assert.equal(intentId, intent.intentId);
++      ackAttempts += 1;
++      if (ackAttempts === 1) throw new Error('local-delete-failed');
++    },
++  };
++  await assert.rejects(
++    deliverPreviewTransferIntent({ outbox, sender, intent }),
++    (error) => error?.message === 'PREVIEW_TRANSFER_LOCAL_ACK_FAILED' && !String(error).includes('local-delete-failed'),
++  );
++  assert.equal(sendCount, 1);
++  const replay = await deliverPreviewTransferIntent({ outbox, sender, intent });
++  assert.equal(replay.outcome, 'REPLAY');
++  assert.deepEqual(sentKeys, [intent.intentId, intent.intentId]);
++  assert.equal(ackAttempts, 2);
++});
++
++test('R3A preview TRANSFER delivery remains transport-neutral and existing delivery/production paths stay byte-unchanged', async () => {
++  const transferDeliverySource = await readFile(new URL('../../web/preview-transfer-writer-delivery.mjs', import.meta.url), 'utf8');
++  const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
++  const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
++  assert.match(transferDeliverySource, /parsePreviewTransferIntent/u);
++  assert.match(transferDeliverySource, /sendTransferCreate/u);
++  assert.match(transferDeliverySource, /fromAccountId/u);
++  assert.match(transferDeliverySource, /toAccountId/u);
++  assert.doesNotMatch(transferDeliverySource, /flowKind\s*:/u);
++  assert.doesNotMatch(transferDeliverySource, /\bfetch\s*\(/u);
++  assert.doesNotMatch(transferDeliverySource, /https?:\/\//u);
++  assert.doesNotMatch(transferDeliverySource, /\/api\//u);
++  assert.doesNotMatch(transferDeliverySource, /API Gateway|Yandex|YDB_WRITE_ENABLED|@ydb|ydbjs|cookie|Authorization/iu);
++  assert.equal(
++    createHash('sha256').update(expenseDeliverySource).digest('hex'),
++    '576ba33637e3d983ee21fb3eb88a173918a9cbd493763142ce356a383a02ed77',
++  );
++  assert.equal(
++    createHash('sha256').update(incomeDeliverySource).digest('hex'),
++    'c2fc6b587bef992c84660fb1d1205378c94ae987f2b997e723f514e438516ccb',
++  );
++  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
++  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
++  assert.doesNotMatch(productionApp, /preview-transfer-writer-delivery|sendTransferCreate/u);
++  assert.doesNotMatch(productionServiceWorker, /preview-transfer-writer-delivery|sendTransferCreate/u);
++});
++diff --git a/web/preview-transfer-writer-delivery.mjs b/web/preview-transfer-writer-delivery.mjs
++new file mode 100644
++index 0000000..2f17be7
++--- /dev/null
+++++ b/web/preview-transfer-writer-delivery.mjs
++@@ -0,0 +1,76 @@
+++import { parsePreviewTransferIntent } from './preview-writer-outbox.mjs';
+++
+++const API_VERSION = 1;
+++const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+++
+++function exactKeys(value, keys) {
+++  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+++  const actual = Object.keys(value).sort();
+++  const expected = [...keys].sort();
+++  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+++}
+++
+++function canonicalUuid(value) {
+++  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+++    throw new Error('INVALID_PREVIEW_TRANSFER_ACK');
+++  }
+++  return value;
+++}
+++
+++export function createPreviewTransferCreateApiRequest(intent) {
+++  const safe = parsePreviewTransferIntent(intent);
+++  return Object.freeze({
+++    idempotencyKey: safe.intentId,
+++    occurredOn: safe.payload.occurredOn,
+++    amountMinor: safe.payload.amountMinor,
+++    currency: 'RUB',
+++    fromAccountId: safe.payload.fromAccount.id,
+++    toAccountId: safe.payload.toAccount.id,
+++    description: safe.payload.description,
+++    note: safe.payload.note,
+++  });
+++}
+++
+++export function parsePreviewTransferCreateAck(value, expectedIntentId) {
+++  const expected = canonicalUuid(expectedIntentId);
+++  if (!exactKeys(value, ['apiVersion', 'outcome', 'idempotencyKey', 'transactionId', 'version'])) {
+++    throw new Error('INVALID_PREVIEW_TRANSFER_ACK');
+++  }
+++  if (value.apiVersion !== API_VERSION || (value.outcome !== 'CREATED' && value.outcome !== 'REPLAY')) {
+++    throw new Error('INVALID_PREVIEW_TRANSFER_ACK');
+++  }
+++  const idempotencyKey = canonicalUuid(value.idempotencyKey);
+++  const transactionId = canonicalUuid(value.transactionId);
+++  if (idempotencyKey !== expected || transactionId === idempotencyKey || value.version !== 1) {
+++    throw new Error('INVALID_PREVIEW_TRANSFER_ACK');
+++  }
+++  return Object.freeze({
+++    apiVersion: API_VERSION,
+++    outcome: value.outcome,
+++    idempotencyKey,
+++    transactionId,
+++    version: 1,
+++  });
+++}
+++
+++export async function deliverPreviewTransferIntent({ outbox, sender, intent }) {
+++  if (!outbox || typeof outbox.acknowledge !== 'function' || !sender || typeof sender.sendTransferCreate !== 'function') {
+++    throw new Error('PREVIEW_TRANSFER_DELIVERY_UNAVAILABLE');
+++  }
+++  const request = createPreviewTransferCreateApiRequest(intent);
+++  let response;
+++  try {
+++    response = await sender.sendTransferCreate(request);
+++  } catch {
+++    throw new Error('PREVIEW_TRANSFER_SEND_FAILED');
+++  }
+++  const ack = parsePreviewTransferCreateAck(response, request.idempotencyKey);
+++  try {
+++    await outbox.acknowledge(request.idempotencyKey);
+++  } catch {
+++    throw new Error('PREVIEW_TRANSFER_LOCAL_ACK_FAILED');
+++  }
+++  return ack;
+++}
+++
+++export const previewTransferDeliveryContract = Object.freeze({ apiVersion: API_VERSION });
++-- 
++2.47.3
++
