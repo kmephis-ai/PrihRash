@@ -196,7 +196,9 @@ TRANSFER использует отдельный type-specific preview delivery 
 - real TRANSFER HTTP sender / provider-bound delivery;
 - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
-- `paid_by_member`;
-- edit / VOID / optimistic conflict;
+- create-time `paid_by_member` UX/delivery;
+- browser edit/conflict UI и public edit API envelope;
+- INCOME/TRANSFER edit;
+- VOID;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.
