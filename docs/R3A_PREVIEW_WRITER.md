@@ -1,8 +1,8 @@
-# R3A Writer preview — local-only EXPENSE/INCOME/TRANSFER outbox
+# R3A Writer preview — local-first create + EXPENSE conflict UX
 
 ## Назначение
 
-R3A synthetic preview доказывает local-first UX и offline-write механику без изменения production authority. Сейчас preview поддерживает локальное создание EXPENSE, INCOME и базового TRANSFER; production `index.html` / `app.mjs` остаются read-only.
+R3A synthetic preview доказывает local-first UX и offline-write механику без изменения production authority. Сейчас preview поддерживает локальное создание EXPENSE, INCOME и базового TRANSFER, а также preview-only optimistic EXPENSE edit/conflict flow; production `index.html` / `app.mjs` остаются read-only.
 
 До CUTOVER сохраняется:
 
@@ -187,6 +187,21 @@ INCOME использует отдельный type-specific preview delivery mo
 
 TRANSFER использует отдельный type-specific preview delivery module с injected `sendTransferCreate(request)`. Request содержит только `idempotencyKey`, `occurredOn`, `amountMinor`, `currency=RUB`, exact `fromAccountId`, exact `toAccountId`, `description`, `note`: local labels/metadata и `flowKind=null` в transport envelope не передаются. Valid `CREATED|REPLAY` ACK проверяется до exact-key `acknowledge()`, sender/local-ACK failures санитизируются, а crash после server commit безопасно завершается повтором того же key и `REPLAY`. Automatic retry cadence/backoff здесь не определяются.
 
+## EXPENSE optimistic edit/conflict preview
+
+Preview-only `preview-expense-edit.mjs` доказывает browser conflict UX поверх уже определённого public EXPENSE edit envelope, но не подключает реальный HTTP/provider transport. Начальная запись берётся только из exact synthetic ordinary `EXPENSE / TRANSACTION / DAY / POSTED` evidence и хранит independent `paidByMemberId`.
+
+Форма отправляет full edit request с exact `expectedVersion`. `submitExpenseEdit(request)` и `readCurrentExpense(transactionId)` являются injected ports; сам browser module не содержит `fetch`, API URL, auth/cookie, YDB или provider binding. Default preview ports детерминированно создают первый synthetic version conflict только для Owner UAT демонстрации.
+
+При `UPDATED` UI принимает только exact minimal ACK и переводит baseline на promoted version. При `VERSION_CONFLICT` UI **не повторяет submit**: выполняется ровно один отдельный current-read, его transaction id/version/type/granularity/status/reference evidence валидируется fail-closed, после чего показывается side-by-side `Мои изменения` / `Актуальная версия` по date, amount, account, category, payer, description и note. Unknown account/category/member refs не fuzzy-map-ятся и не получают guessed label.
+
+Разрешение конфликта всегда explicit:
+
+- `Принять актуальную версию` заменяет form values и baseline на доказанную current version;
+- `Оставить мои изменения поверх актуальной` сохраняет local form values и только переводит `expectedVersion` на current version; повторный submit возможен лишь отдельным нажатием `Сохранить изменения`.
+
+Malformed/mismatched current-read или ACK оставляет локальные значения нетронутыми и переводит UI в degraded state без rebase/overwrite. Production Reader/PWA/Service Worker этот module не импортируют.
+
 ## Не входит
 
 - production Writer UI;
@@ -197,7 +212,7 @@ TRANSFER использует отдельный type-specific preview delivery 
 - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
 - create-time `paid_by_member` UX/delivery;
-- browser edit/conflict UI;
+- real production browser edit/current-record transport;
 - INCOME/TRANSFER edit;
 - VOID;
 - FinancialPeriod membership;

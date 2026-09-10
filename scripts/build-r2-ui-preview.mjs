@@ -14,6 +14,7 @@ const files = [
   'operation-markup.mjs',
   'presentation.mjs',
   'preview-transport.mjs',
+  'preview-expense-edit.mjs',
   'preview-writer.mjs',
   'preview-writer-outbox.mjs',
   'preview-writer.css',
