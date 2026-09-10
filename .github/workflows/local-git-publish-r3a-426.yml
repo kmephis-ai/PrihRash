@@ -1,0 +1,45 @@
+name: Local Git Publish R3A 426
+
+on:
+  push:
+    branches:
+      - ai/publish-r3a-426-20260910-2058
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify and publish exact local commit
+        shell: bash
+        env:
+          BASE_SHA: 038b2bc3c258a712a61117b90918e1b4099dbb2c
+          PATCH_SHA: 4660b4af9debb13a06fd878cff3ace7e08546c0d
+          PATCH_TREE: d00863f77bbb997e284811b131dcdea7f6c007ae
+          TARGET_BRANCH: r3a/426-optimistic-transaction-void
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "${BASE_SHA}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git bundle verify transport/r3a426-patch.bundle
+          git fetch transport/r3a426-patch.bundle refs/heads/r3a/426-optimistic-transaction-void:refs/remotes/local-patch/source
+          test "$(git rev-parse refs/remotes/local-patch/source)" = "${PATCH_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^")" = "${BASE_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^{tree}")" = "${PATCH_TREE}"
+          EXPECTED_FILES=$'docs/R3A_PREVIEW_WRITER.md\ndocs/R3A_WRITER_API.md\nsrc/writer/optimisticTransactionVoid.ts\ntests/domain/optimistic-transaction-void.test.mjs'
+          test "$(git diff --name-only "${BASE_SHA}" "${PATCH_SHA}")" = "${EXPECTED_FILES}"
+          git worktree add --detach /tmp/r3a426-publish-check "${PATCH_SHA}"
+          cd /tmp/r3a426-publish-check
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+          git diff --check "${BASE_SHA}" "${PATCH_SHA}"
+          cd "${GITHUB_WORKSPACE}"
+          git push origin "${PATCH_SHA}:refs/heads/${TARGET_BRANCH}"
