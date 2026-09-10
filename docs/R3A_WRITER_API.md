@@ -160,14 +160,36 @@ Projection проходит существующий `validateTransaction(..., {
 
 Idempotency semantics совпадают по гарантиям с EXPENSE, но не реализованы через новый universal abstraction: exact committed pre-read → `REPLAY` без current reference lookup/new identity; changed request на том же key → `IDEMPOTENCY_CONFLICT`; atomic `createOrReplay()` закрывает race после miss. Stored request/result и race response валидируются fail-closed против expected INCOME transaction; wrong type/direction/version/payload → `STORE_CONTRACT_INVALID`.
 
-INCOME application использует тот же stable value-free error vocabulary (`INVALID_REQUEST`, reference errors, identity error, `IDEMPOTENCY_CONFLICT`, store errors). Public INCOME API envelope, browser ACK delivery и provider persistence этим work item не определяются.
+INCOME application использует тот же stable value-free error vocabulary (`INVALID_REQUEST`, reference errors, identity error, `IDEMPOTENCY_CONFLICT`, store errors).
+
+## Public INCOME create API envelope v1
+
+`incomeCreateApi.ts` добавляет только framework/provider-neutral public projection поверх `executeIdempotentIncomeCreate()`. Request parsing, reference resolution, FIN-TRUTH projection и idempotency/store semantics не дублируются.
+
+Успешный response имеет тот же минимальный acknowledgement shape, что и доказанный EXPENSE create API:
+
+```text
+{
+  apiVersion: 1,
+  outcome: CREATED | REPLAY,
+  idempotencyKey: canonical lowercase UUID,
+  transactionId: canonical lowercase UUID,
+  version: 1
+}
+```
+
+`transactionId` остаётся отдельной canonical Transaction identity и не равен `idempotencyKey`; exact replay возвращает original `transactionId/version` из application contract. Envelope не возвращает full `CanonicalTransaction`, amount/date, destination account/category ids, description/note, reference evidence или store/provider diagnostics.
+
+Ошибки не получают отдельный API vocabulary: наружу проходит существующий stable value-free `IncomeCreateError.code`. Этот слой намеренно не определяет HTTP status/path/body wrapping, headers/CORS, cookie/session verification, browser `fetch`, API Gateway/private Function или YDB/provider binding. Реальный OWNER/provider wiring остаётся за canonical provider gate #302.
+
+Browser INCOME ACK/delete delivery также остаётся отдельным work item: наличие public envelope само по себе не подключает network transport и не меняет authority. Production `YDB_WRITE_ENABLED=false`.
 
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
-- INCOME public API envelope / browser delivery;
+- INCOME browser ACK delivery;
 - TRANSFER / `paid_by`;
 - optimistic edit / VOID;
 - Google Form/GAS intake parity;
