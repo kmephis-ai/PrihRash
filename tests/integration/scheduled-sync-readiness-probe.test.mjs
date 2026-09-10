@@ -169,23 +169,40 @@ test('Google source provider failure is sanitized and prevents every YDB readine
   assert.equal(capture.transactions, 0);
 });
 
-test('YDB provider read failure is sanitized and never opens a transaction', async () => {
-  const capture = { statements: [], transactions: 0 };
-  const { adapter } = adapterForReads([
-    validMigrationRows,
-    new Error('private-ydb-endpoint synthetic-accounts-column-missing'),
-  ], capture);
+test('YDB readiness read failures are stage-specific, sanitized, and never open a transaction', async () => {
+  const cases = [
+    {
+      reads: [new Error('private-ydb-endpoint synthetic-migration-table-missing')],
+      expectedCode: 'YDB_MIGRATION_EVIDENCE_READ_FAILED',
+      expectedStatements: 1,
+    },
+    {
+      reads: [validMigrationRows, new Error('private-ydb-endpoint synthetic-accounts-column-missing')],
+      expectedCode: 'YDB_ACCOUNTS_SCHEMA_READ_FAILED',
+      expectedStatements: 2,
+    },
+    {
+      reads: [validMigrationRows, [], new Error('private-ydb-endpoint synthetic-categories-column-missing')],
+      expectedCode: 'YDB_CATEGORIES_SCHEMA_READ_FAILED',
+      expectedStatements: 3,
+    },
+  ];
 
-  await assert.rejects(
-    () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), adapter),
-    (error) => error instanceof ScheduledSyncReadinessError
-      && error.code === 'YDB_SCHEMA_READ_FAILED'
-      && error.message === 'YDB_SCHEMA_READ_FAILED'
-      && !JSON.stringify(error).includes('private-ydb-endpoint')
-      && !Object.hasOwn(error, 'cause'),
-  );
-  assert.equal(capture.statements.length, 2);
-  assert.equal(capture.transactions, 0);
+  for (const { reads, expectedCode, expectedStatements } of cases) {
+    const capture = { statements: [], transactions: 0 };
+    const { adapter } = adapterForReads(reads, capture);
+
+    await assert.rejects(
+      () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), adapter),
+      (error) => error instanceof ScheduledSyncReadinessError
+        && error.code === expectedCode
+        && error.message === expectedCode
+        && !JSON.stringify(error).includes('private-ydb-endpoint')
+        && !Object.hasOwn(error, 'cause'),
+    );
+    assert.equal(capture.statements.length, expectedStatements);
+    assert.equal(capture.transactions, 0);
+  }
 });
 
 function runtimeForLifecycle(options = {}) {

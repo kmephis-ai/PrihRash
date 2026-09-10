@@ -220,7 +220,7 @@ Malformed/non-exact success payload, spawn/timeout/buffer error или provider 
 - `READINESS_GOOGLE_SOURCE_VALUE_UNSUPPORTED` — source содержит cell representation, которую canonical adapter обязан отклонить fail-closed;
 - `READINESS_GOOGLE_SOURCE_READ_FAILED` — unknown/untyped Google source failure.
 
-Для YDB/readiness lifecycle разрешены `READINESS_YDB_CLIENT_CREATE_FAILED`, `READINESS_YDB_SCHEMA_READ_FAILED`, `READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE`, `READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION`, `READINESS_UNEXPECTED_SCHEMA_MIGRATION`, `READINESS_YDB_CLIENT_CLOSE_FAILED`, а для generic runtime wrapper — `READINESS_RUNTIME_CONFIG_INVALID` и `READINESS_RUNTIME_FAILED`.
+Для YDB/readiness lifecycle разрешены `READINESS_YDB_CLIENT_CREATE_FAILED`, `READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED`, `READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED`, `READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED`, `READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE`, `READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION`, `READINESS_UNEXPECTED_SCHEMA_MIGRATION`, `READINESS_YDB_CLIENT_CLOSE_FAILED`, а для generic runtime wrapper — `READINESS_RUNTIME_CONFIG_INVALID` и `READINESS_RUNTIME_FAILED`. Три schema-read кода различают только этап read-only probe и не содержат YDB endpoint, database path, provider error text или query result.
 
 Отсутствующая/пустая function identity →
 
