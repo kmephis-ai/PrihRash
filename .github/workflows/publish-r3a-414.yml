@@ -36,7 +36,7 @@ jobs:
           git apply --check /tmp/r3a-414.patch
           git apply /tmp/r3a-414.patch
           git diff --check
-          test "$(git diff --name-only | sort | tr '\n' ' ')" = "docs/R3A_PREVIEW_WRITER.md tests/integration/r2-safe-ui-preview.test.mjs web/preview-transfer-writer-delivery.mjs "
+          test "$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort | tr '\n' ' ')" = "docs/R3A_PREVIEW_WRITER.md tests/integration/r2-safe-ui-preview.test.mjs web/preview-transfer-writer-delivery.mjs "
           node --test tests/integration/r2-safe-ui-preview.test.mjs
           npm run privacy
           npm run lint
