@@ -8,6 +8,11 @@ import { sanitizeReaderResponse, toOperationPresentation } from '../../web/prese
 import { sanitizeReaderFilterOptions } from '../../web/reader-filters.mjs';
 import { sanitizeReaderSyncStatus } from '../../web/reader-sync-status.mjs';
 import {
+  createPreviewExpenseCreateApiRequest,
+  deliverPreviewExpenseIntent,
+  parsePreviewExpenseCreateAck,
+} from '../../web/preview-writer-delivery.mjs';
+import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewOutbox,
   createPreviewExpenseDraft,
@@ -470,4 +475,165 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer/u);
   assert.doesNotMatch(productionApp, /drafts|preview-writer/u);
   assert.doesNotMatch(productionServiceWorker, /preview-writer|drafts/u);
+});
+
+test('R3A preview delivery maps PENDING intent to minimal create request without local labels/metadata', () => {
+  const intent = previewExpenseIntent();
+  const request = createPreviewExpenseCreateApiRequest(intent);
+  assert.deepEqual(request, {
+    idempotencyKey: intent.intentId,
+    occurredOn: intent.payload.occurredOn,
+    amountMinor: intent.payload.amountMinor,
+    currency: 'RUB',
+    fromAccountId: intent.payload.fromAccount.id,
+    categoryId: intent.payload.category.id,
+    description: intent.payload.description,
+    note: intent.payload.note,
+  });
+  assert.equal(Object.isFrozen(request), true);
+  assert.equal('createdAt' in request, false);
+  assert.equal('fromAccount' in request, false);
+  assert.equal('category' in request, false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.fromAccount.label), false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.category.label), false);
+});
+
+test('R3A preview IndexedDB acknowledge removes only the exact canonical pending key', async () => {
+  const intent = previewExpenseIntent();
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  assert.equal(await outbox.countPending(), 1);
+  await outbox.acknowledge(intent.intentId);
+  assert.equal(await outbox.countPending(), 0);
+  await assert.rejects(outbox.acknowledge('A0000000-0000-0000-0000-000000000001'), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+});
+
+test('R3A preview delivery validates CREATED and REPLAY ACK before local acknowledge', async () => {
+  const intent = previewExpenseIntent();
+  for (const outcome of ['CREATED', 'REPLAY']) {
+    const events = [];
+    const ack = await deliverPreviewExpenseIntent({
+      intent,
+      sender: {
+        async sendExpenseCreate(request) {
+          events.push(['send', request.idempotencyKey]);
+          return {
+            apiVersion: 1,
+            outcome,
+            idempotencyKey: request.idempotencyKey,
+            transactionId: '60000000-0000-0000-0000-000000000001',
+            version: 1,
+          };
+        },
+      },
+      outbox: {
+        async acknowledge(intentId) {
+          events.push(['acknowledge', intentId]);
+        },
+      },
+    });
+    assert.equal(ack.outcome, outcome);
+    assert.equal(Object.isFrozen(ack), true);
+    assert.deepEqual(events, [
+      ['send', intent.intentId],
+      ['acknowledge', intent.intentId],
+    ]);
+  }
+});
+
+test('R3A preview delivery keeps PENDING when sender fails and sanitizes raw sender diagnostics', async () => {
+  const intent = previewExpenseIntent();
+  let acknowledged = false;
+  await assert.rejects(
+    deliverPreviewExpenseIntent({
+      intent,
+      sender: { sendExpenseCreate: async () => { throw new Error('private-provider-diagnostic'); } },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }),
+    (error) => error?.message === 'PREVIEW_EXPENSE_SEND_FAILED' && !String(error).includes('private-provider-diagnostic'),
+  );
+  assert.equal(acknowledged, false);
+});
+
+test('R3A preview delivery rejects malformed or mismatched ACK without acknowledging local intent', async () => {
+  const intent = previewExpenseIntent();
+  const valid = {
+    apiVersion: 1,
+    outcome: 'CREATED',
+    idempotencyKey: intent.intentId,
+    transactionId: '60000000-0000-0000-0000-000000000001',
+    version: 1,
+  };
+  const badAcks = [
+    { ...valid, apiVersion: 2 },
+    { ...valid, outcome: 'POSTED' },
+    { ...valid, idempotencyKey: '50000000-0000-0000-0000-000000000002' },
+    { ...valid, transactionId: intent.intentId },
+    { ...valid, transactionId: 'A0000000-0000-0000-0000-000000000001' },
+    { ...valid, version: 2 },
+    { ...valid, extra: true },
+  ];
+  for (const response of badAcks) {
+    let acknowledged = false;
+    await assert.rejects(deliverPreviewExpenseIntent({
+      intent,
+      sender: { sendExpenseCreate: async () => response },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }), /INVALID_PREVIEW_EXPENSE_ACK/u);
+    assert.equal(acknowledged, false);
+  }
+  assert.throws(() => parsePreviewExpenseCreateAck(valid, 'A0000000-0000-0000-0000-000000000001'), /INVALID_PREVIEW_EXPENSE_ACK/u);
+});
+
+test('R3A preview retry after server commit but local ACK failure reuses same key and clears on REPLAY', async () => {
+  const intent = previewExpenseIntent();
+  const sentKeys = [];
+  let sendCount = 0;
+  const sender = {
+    async sendExpenseCreate(request) {
+      sentKeys.push(request.idempotencyKey);
+      sendCount += 1;
+      return {
+        apiVersion: 1,
+        outcome: sendCount === 1 ? 'CREATED' : 'REPLAY',
+        idempotencyKey: request.idempotencyKey,
+        transactionId: '60000000-0000-0000-0000-000000000001',
+        version: 1,
+      };
+    },
+  };
+  let ackAttempts = 0;
+  const outbox = {
+    async acknowledge(intentId) {
+      assert.equal(intentId, intent.intentId);
+      ackAttempts += 1;
+      if (ackAttempts === 1) throw new Error('local-delete-failed');
+    },
+  };
+  await assert.rejects(
+    deliverPreviewExpenseIntent({ outbox, sender, intent }),
+    (error) => error?.message === 'PREVIEW_EXPENSE_LOCAL_ACK_FAILED' && !String(error).includes('local-delete-failed'),
+  );
+  const replay = await deliverPreviewExpenseIntent({ outbox, sender, intent });
+  assert.equal(replay.outcome, 'REPLAY');
+  assert.deepEqual(sentKeys, [intent.intentId, intent.intentId]);
+  assert.equal(ackAttempts, 2);
+});
+
+test('R3A preview delivery remains transport-neutral and production Reader stays untouched', async () => {
+  const deliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
+  const storageSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
+  assert.match(deliverySource, /sendExpenseCreate/u);
+  assert.match(storageSource, /acknowledge\(intentId\)/u);
+  for (const source of [deliverySource, storageSource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /https?:\/\//u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /API Gateway|Yandex|YDB_WRITE_ENABLED|@ydb|ydbjs|cookie|Authorization/iu);
+  }
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionApp, /preview-writer-delivery|sendExpenseCreate/u);
+  assert.doesNotMatch(productionServiceWorker, /preview-writer-delivery|sendExpenseCreate/u);
 });

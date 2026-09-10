@@ -305,6 +305,14 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
     async countPending() {
       return (await listPending()).length;
     },
+    async acknowledge(intentId) {
+      const safeIntentId = canonicalUuid(intentId, invalidRecord);
+      try {
+        await withStore(OUTBOX_STORE_NAME, 'readwrite', (store) => requestResult(store.delete(safeIntentId)));
+      } catch {
+        throw new Error('PREVIEW_OUTBOX_ACK_FAILED');
+      }
+    },
   });
 }
 

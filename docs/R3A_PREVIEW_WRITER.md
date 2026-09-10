@@ -111,3 +111,20 @@ Save path не содержит `fetch`, Reader API mutation, YDB/Google endpoin
 - edit / VOID / optimistic conflict;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.
+
+## Outbox delivery / ACK boundary
+
+Следующий preview-only слой связывает локальный `CREATE_EXPENSE / PENDING` intent с public create API envelope, но всё ещё **не** задаёт реальный HTTP transport.
+
+- `intentId` передаётся как `idempotencyKey`; новая client identity не создаётся;
+- в sender request уходят только canonical поля create contract: date, amount minor units, account/category ids и optional literal text;
+- локальные `createdAt` и reference labels в request не уходят;
+- sender является injected `sendExpenseCreate(request)` port: URL, `fetch`, HTTP status, cookies, auth и provider binding здесь отсутствуют;
+- valid ACK обязан точно соответствовать create API v1: `apiVersion=1`, `CREATED|REPLAY`, тот же `idempotencyKey`, отдельный canonical `transactionId`, `version=1`;
+- malformed/mismatched ACK fail-closed и не удаляет local intent;
+- IndexedDB outbox удаляет row только после valid ACK;
+- sender failure также оставляет `PENDING` для будущего retry;
+- если server успел commit, но локальный `acknowledge()` не удался, row остаётся. Следующий delivery повторяет тот же idempotency key и поэтому может получить `REPLAY`, после чего безопасно удалить row;
+- один delivery invocation делает не более одной sender попытки; retry cadence/backoff/scheduling здесь не определяются.
+
+Это crash/retry mechanics proof. Реальный browser HTTP sender, OWNER session transport, API Gateway/private Function и YDB persistence остаются отдельными gates; production `YDB_WRITE_ENABLED=false`.
