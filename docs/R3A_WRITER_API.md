@@ -29,6 +29,28 @@ note            null | non-empty already-trimmed text
 
 Unknown fields и malformed lexical evidence fail-closed как `INVALID_REQUEST`. Никакой normalization, fuzzy reference matching или inference нет.
 
+## Public create API envelope v1
+
+`expenseCreateApi.ts` добавляет только framework/provider-neutral API projection поверх `executeIdempotentExpenseCreate()`. Он не повторяет request parsing, reference resolution, FIN-TRUTH или idempotency semantics.
+
+Успешный публичный response намеренно минимален:
+
+```text
+{
+  apiVersion: 1,
+  outcome: CREATED | REPLAY,
+  idempotencyKey: canonical lowercase UUID,
+  transactionId: canonical lowercase UUID,
+  version: 1
+}
+```
+
+`transactionId` — canonical identity созданной Transaction и не равен `idempotencyKey`. Exact replay возвращает ту же `transactionId/version`, что и первый create.
+
+Envelope **не** возвращает full `CanonicalTransaction`, amount/date, account/category ids или labels, description/note, reference evidence, storage/provider diagnostics. Browser outbox для подтверждения доставки должен нуждаться только в stable identity/outcome, а не получать второй financial payload через acknowledgement.
+
+Ошибки не переводятся в новый параллельный vocabulary: наружу остаются stable value-free `ExpenseCreateError.code` из application contract ниже. HTTP status/body wrapping, route path, headers, CORS, cookie/session verification и API Gateway/private Function binding этим срезом не определяются. Real OWNER/provider wiring всё ещё разрешается только после canonical R1 readiness #302 и fresh provider discovery.
+
 ## Reference evidence
 
 Для **нового** create после idempotency miss application dependency должна вернуть exact evidence для requested account/category ids. Missing evidence → `REFERENCE_NOT_FOUND`; malformed/лишние поля или возвращённые другие ids → `REFERENCE_MISMATCH`; category kind, отличный от `EXPENSE`, → `CATEGORY_KIND_INVALID`. Dependency exception санитизируется в `REFERENCE_READ_FAILED` без provider diagnostics.
