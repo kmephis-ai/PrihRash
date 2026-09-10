@@ -1,0 +1,60 @@
+name: Publish exact local R3A 406 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-406-publish-20260910-1135
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        shell: bash
+        env:
+          SOURCE_SHA: 23c36403d3025d782b3733db885cb9d93493818a
+          TARGET_BRANCH: r3a/406-income-validated-ack
+          EXPECTED_HEAD: 369b39b0fd5734b6ae42ca573d3a2227308b4ba7
+          EXPECTED_TREE: 0a4d3f2298ec13a7f04573d84c394f72c26dd6c1
+          B64_SHA256: 335fb102c8e7d312ad43738e07ce47dc208bac137723f7393e31f2e96e60542f
+          GZIP_SHA256: 5208eaf2cab5e71f6e10a3b3eb50d7385fe0e327e4707e40fcc1b969d107a6df
+          PATCH_SHA256: 451be78fd286e608957fe85a8368fd6f649a4d50cda07cf9ac33d44ff29aa327
+        run: |
+          set -euo pipefail
+          cat .transport/r3a-406-00.b64 .transport/r3a-406-01.b64 | tr -d '\r\n' > /tmp/406.patch.gz.b64
+          echo "${B64_SHA256}  /tmp/406.patch.gz.b64" | sha256sum -c -
+          base64 -d /tmp/406.patch.gz.b64 > /tmp/406.patch.gz
+          echo "${GZIP_SHA256}  /tmp/406.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/406.patch.gz > /tmp/406.patch
+          echo "${PATCH_SHA256}  /tmp/406.patch" | sha256sum -c -
+
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          test "$(git rev-parse refs/remotes/origin/main)" = "${SOURCE_SHA}"
+          test "$(git rev-parse refs/remotes/origin/${TARGET_BRANCH})" = "${SOURCE_SHA}"
+
+          git switch -C "${TARGET_BRANCH}" "${SOURCE_SHA}"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/406.patch
+
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          test "$(git rev-parse HEAD^)" = "${SOURCE_SHA}"
+          git diff --check "${SOURCE_SHA}" HEAD
+
+          actual_files="$(git diff --name-only "${SOURCE_SHA}" HEAD | LC_ALL=C sort)"
+          expected_files="$(printf '%s\n' \
+            docs/R3A_PREVIEW_WRITER.md \
+            tests/integration/r2-safe-ui-preview.test.mjs \
+            web/preview-income-writer-delivery.mjs | LC_ALL=C sort)"
+          test "${actual_files}" = "${expected_files}"
+
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
