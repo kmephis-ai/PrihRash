@@ -23,7 +23,8 @@ jobs:
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           mkdir -p /tmp/prihrash-mirror
-          git bundle create /tmp/prihrash-mirror/repository.bundle "$SOURCE_SHA"
+          git branch --force mirror-source "$SOURCE_SHA"
+          git bundle create /tmp/prihrash-mirror/repository.bundle mirror-source
           BUNDLE_SHA=$(sha256sum /tmp/prihrash-mirror/repository.bundle | awk '{print $1}')
           TREE_SHA=$(git rev-parse "$SOURCE_SHA^{tree}")
           printf '{"sourceSha":"%s","treeSha":"%s","bundleSha256":"%s"}\n' "$SOURCE_SHA" "$TREE_SHA" "$BUNDLE_SHA" > /tmp/prihrash-mirror/manifest.json
