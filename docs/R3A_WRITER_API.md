@@ -231,14 +231,34 @@ Idempotency guarantees совпадают с уже доказанными EXPEN
 
 Safe application codes этого contract: `INVALID_REQUEST`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_READ_FAILED`, `INVALID_GENERATED_TRANSACTION_ID`, `IDEMPOTENCY_CONFLICT`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw reference/store/random-id diagnostics наружу не отражаются.
 
-Public TRANSFER API envelope, browser validated-ACK delivery и выбор `flow_kind` остаются отдельными work items. Наличие этого application contract само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
+## Public TRANSFER create API envelope v1
+
+`transferCreateApi.ts` добавляет только framework/provider-neutral public projection поверх `executeIdempotentTransferCreate()`. Request parsing, exact two-account reference validation, FIN-TRUTH projection и idempotency/store semantics не дублируются.
+
+Успешный response имеет тот же минимальный acknowledgement shape, что и доказанные EXPENSE/INCOME create API:
+
+```text
+{
+  apiVersion: 1,
+  outcome: CREATED | REPLAY,
+  idempotencyKey: canonical lowercase UUID,
+  transactionId: canonical lowercase UUID,
+  version: 1
+}
+```
+
+`transactionId` остаётся отдельной canonical Transaction identity и не равен `idempotencyKey`; exact replay возвращает original `transactionId/version` из application contract. Envelope не возвращает full `CanonicalTransaction`, amount/date, source/destination account ids, description/note, `flowKind`, reference evidence или store/provider diagnostics.
+
+Ошибки не получают отдельный API vocabulary: наружу проходит существующий stable value-free `TransferCreateError.code`. Этот слой намеренно не определяет HTTP status/path/body wrapping, headers/CORS, cookie/session verification, browser `fetch`, API Gateway/private Function или YDB/provider binding. Реальный OWNER/provider wiring остаётся за canonical provider gate #302.
+
+Browser TRANSFER ACK/delete delivery и выбор `flow_kind` остаются отдельными work items. Наличие public envelope само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
 
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
-- TRANSFER public API envelope/browser ACK delivery и выбор `flow_kind`;
+- TRANSFER browser ACK delivery и выбор `flow_kind`;
 - `paid_by`;
 - optimistic edit / VOID;
 - Google Form/GAS intake parity;
