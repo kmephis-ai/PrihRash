@@ -317,7 +317,21 @@ expectedVersion   positive safe integer
 
 Atomic store port `voidIfVersion({transactionId, expectedVersion, candidate})` обязан либо вернуть `VOIDED` с exact promoted candidate, либо race `VERSION_CONFLICT` с более новой version. Successful result повторно проверяется: id, version и каждый canonical field должны совпасть с candidate; changed financial payload, unchanged `POSTED`, impossible version или malformed outcome → `STORE_CONTRACT_INVALID`. Store exceptions санитизируются как `STORE_OPERATION_FAILED`; missing transaction — `TRANSACTION_NOT_FOUND`; malformed request — `INVALID_REQUEST`.
 
-Application response vocabulary: `VOIDED | ALREADY_VOIDED | VERSION_CONFLICT`. Public API envelope, browser confirmation, local outbox/retry и provider/YDB persistence этим contract ещё не определены. FIN-TRUTH остаётся прежним: `VOIDED` видим как historical fact, но исключён из normal analytics/PeriodClose.
+Application response vocabulary: `VOIDED | ALREADY_VOIDED | VERSION_CONFLICT`. Browser confirmation, local outbox/retry и provider/YDB persistence этим contract ещё не определены. FIN-TRUTH остаётся прежним: `VOIDED` видим как historical fact, но исключён из normal analytics/PeriodClose.
+
+## Public Transaction VOID API v1
+
+`transactionVoidApi.ts` — thin provider-neutral projection поверх `executeOptimisticTransactionVoid()`. Wrapper не повторяет parsing, optimistic checks или store transition и принимает только существующий `OptimisticTransactionVoidStore`. Body без normalization передаётся application contract.
+
+Public response намеренно минимален:
+
+```text
+VOIDED          { apiVersion: 1, outcome, transactionId, version }
+ALREADY_VOIDED  { apiVersion: 1, outcome, transactionId, version }
+VERSION_CONFLICT { apiVersion: 1, outcome, transactionId, currentVersion }
+```
+
+Full `CanonicalTransaction`, `contractVersion`, amount/date/account/category/payer/note/analytics/flow и provider/store diagnostics в public ACK не входят. Typed application errors сохраняют существующий safe vocabulary без отдельного API-specific error layer. HTTP method/path/status mapping, OWNER auth/session binding, browser confirmation/outbox и provider persistence остаются отдельными work items.
 
 ## Non-scope
 
@@ -327,6 +341,6 @@ Application response vocabulary: `VOIDED | ALREADY_VOIDED | VERSION_CONFLICT`. P
 - real TRANSFER HTTP sender и выбор `flow_kind`;
 - real production browser EXPENSE edit/current-record transport;
 - INCOME/TRANSFER edit;
-- public VOID API envelope, browser confirmation/outbox/retry и provider persistence;
+- HTTP/router/auth binding для VOID, browser confirmation/outbox/retry и provider persistence;
 - Google Form/GAS intake parity;
 - production Writer, R4, CUTOVER.
