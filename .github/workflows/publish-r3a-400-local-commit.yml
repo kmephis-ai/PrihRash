@@ -1,0 +1,43 @@
+name: Publish exact local R3A 400 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-400-publish-20260910-0834
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: ea3c887c9ab718cfe4e8fe71ccfc2164dbdd2f5c
+          EXPECTED_COMMIT: c48a2b4a4675c7cd2ab539cf3b862779eda56905
+          EXPECTED_TREE: 7c64ce5fce60af4b65c23d7f2f964d852e4cf693
+          TARGET_BRANCH: r3a/400-quick-income-outbox
+          B64_SHA256: 153306e677d2f152c4ff9798e1f8ac02c5fc0090d47b44d2c2ab6f433dca9078
+          PATCH_SHA256: 6e19465fbc72b83ccbff01a6d599fc7738fe6fc1d1db85ca9ec0393191c7f5bd
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$SOURCE_SHA"
+          cat .transport/r3a400.b64.part.00 .transport/r3a400.b64.part.01 .transport/r3a400.b64.part.02 .transport/r3a400.b64.part.03 > /tmp/400.patch.gz.b64
+          test "$(sha256sum /tmp/400.patch.gz.b64 | awk '{print $1}')" = "$B64_SHA256"
+          base64 -d /tmp/400.patch.gz.b64 | gzip -d > /tmp/400.patch
+          test "$(sha256sum /tmp/400.patch | awk '{print $1}')" = "$PATCH_SHA256"
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/400.patch
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git diff --check "$SOURCE_SHA"...HEAD
+          git push origin HEAD:"refs/heads/$TARGET_BRANCH"
