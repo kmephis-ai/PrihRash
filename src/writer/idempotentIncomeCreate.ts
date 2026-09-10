@@ -1,0 +1,402 @@
+import {
+  validateTransaction,
+  type CanonicalTransaction,
+  type CategoryKind,
+} from '../domain/transaction.js';
+
+export const WRITER_INCOME_CREATE_CONTRACT_VERSION = 1 as const;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const CANONICAL_TRANSACTION_KEYS = [
+  'type',
+  'occurredOn',
+  'recordGranularity',
+  'datePrecision',
+  'aggregatePeriodMonth',
+  'financialPeriodId',
+  'periodAssignmentQuality',
+  'amountMinor',
+  'currency',
+  'fromAccountId',
+  'toAccountId',
+  'categoryId',
+  'paidByMemberId',
+  'description',
+  'note',
+  'status',
+  'analyticsState',
+  'flowKind',
+] as const;
+
+export interface IncomeCreateRequest {
+  readonly idempotencyKey: string;
+  readonly occurredOn: string;
+  readonly amountMinor: number;
+  readonly currency: 'RUB';
+  readonly toAccountId: string;
+  readonly categoryId: string;
+  readonly description: string | null;
+  readonly note: string | null;
+}
+
+export interface IncomeCreateReferenceEvidence {
+  readonly accountId: string;
+  readonly categoryId: string;
+  readonly categoryKind: CategoryKind;
+}
+
+export interface IncomeCreateReferenceReader {
+  readIncomeCreateReferenceEvidence(
+    request: Readonly<Pick<IncomeCreateRequest, 'toAccountId' | 'categoryId'>>,
+  ): Promise<Readonly<IncomeCreateReferenceEvidence> | null>;
+}
+
+export interface CreatedIncomeTransaction {
+  readonly id: string;
+  readonly version: 1;
+  readonly transaction: Readonly<CanonicalTransaction>;
+}
+
+export interface CommittedIncomeCreate {
+  readonly request: Readonly<IncomeCreateRequest>;
+  readonly result: Readonly<CreatedIncomeTransaction>;
+}
+
+export type IdempotentIncomeCreateStoreResult =
+  | Readonly<{
+    outcome: 'CREATED' | 'REPLAY';
+    request: Readonly<IncomeCreateRequest>;
+    result: Readonly<CreatedIncomeTransaction>;
+  }>
+  | Readonly<{ outcome: 'CONFLICT' }>;
+
+export interface IdempotentIncomeCreateStore {
+  /** Returns the original committed request/result for this key, or null. */
+  readCommitted(idempotencyKey: string): Promise<Readonly<CommittedIncomeCreate> | null>;
+
+  /**
+   * Atomically creates the candidate when idempotencyKey is unseen, replays the
+   * original request/result for an exact request match, or returns CONFLICT when
+   * the same key was already committed with a different canonical request.
+   */
+  createOrReplay(input: Readonly<{
+    request: Readonly<IncomeCreateRequest>;
+    candidate: Readonly<CreatedIncomeTransaction>;
+  }>): Promise<IdempotentIncomeCreateStoreResult>;
+}
+
+export type IncomeCreateErrorCode =
+  | 'INVALID_REQUEST'
+  | 'REFERENCE_NOT_FOUND'
+  | 'REFERENCE_MISMATCH'
+  | 'CATEGORY_KIND_INVALID'
+  | 'REFERENCE_READ_FAILED'
+  | 'INVALID_GENERATED_TRANSACTION_ID'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'STORE_OPERATION_FAILED'
+  | 'STORE_CONTRACT_INVALID';
+
+export class IncomeCreateError extends Error {
+  readonly code: IncomeCreateErrorCode;
+
+  constructor(code: IncomeCreateErrorCode) {
+    super(code);
+    this.name = 'IncomeCreateError';
+    this.code = code;
+  }
+}
+
+export interface IncomeCreateResponse {
+  readonly contractVersion: typeof WRITER_INCOME_CREATE_CONTRACT_VERSION;
+  readonly outcome: 'CREATED' | 'REPLAY';
+  readonly idempotencyKey: string;
+  readonly result: Readonly<CreatedIncomeTransaction>;
+}
+
+function fail(code: IncomeCreateErrorCode): never {
+  throw new IncomeCreateError(code);
+}
+
+function exactKeys(value: unknown, expected: readonly string[]): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function canonicalUuid(value: unknown, code: IncomeCreateErrorCode = 'INVALID_REQUEST'): string {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) return fail(code);
+  return value;
+}
+
+function canonicalDate(value: unknown): string {
+  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) return fail('INVALID_REQUEST');
+  const parts = value.split('-').map(Number);
+  const year = parts[0];
+  const month = parts[1];
+  const day = parts[2];
+  if (year === undefined || month === undefined || day === undefined) return fail('INVALID_REQUEST');
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) return fail('INVALID_REQUEST');
+  return value;
+}
+
+function optionalCanonicalText(value: unknown): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.trim().length === 0
+    || value !== value.trim()
+  ) return fail('INVALID_REQUEST');
+  return value;
+}
+
+export function parseIncomeCreateRequest(value: unknown): Readonly<IncomeCreateRequest> {
+  if (!exactKeys(value, [
+    'idempotencyKey',
+    'occurredOn',
+    'amountMinor',
+    'currency',
+    'toAccountId',
+    'categoryId',
+    'description',
+    'note',
+  ])) return fail('INVALID_REQUEST');
+
+  if (value.currency !== 'RUB') return fail('INVALID_REQUEST');
+  if (!Number.isSafeInteger(value.amountMinor) || (value.amountMinor as number) <= 0) {
+    return fail('INVALID_REQUEST');
+  }
+
+  return Object.freeze({
+    idempotencyKey: canonicalUuid(value.idempotencyKey),
+    occurredOn: canonicalDate(value.occurredOn),
+    amountMinor: value.amountMinor as number,
+    currency: 'RUB',
+    toAccountId: canonicalUuid(value.toAccountId),
+    categoryId: canonicalUuid(value.categoryId),
+    description: optionalCanonicalText(value.description),
+    note: optionalCanonicalText(value.note),
+  });
+}
+
+function parseReferenceEvidence(
+  value: Readonly<IncomeCreateReferenceEvidence> | null,
+  request: Readonly<IncomeCreateRequest>,
+): void {
+  if (value === null) return fail('REFERENCE_NOT_FOUND');
+  if (!exactKeys(value, ['accountId', 'categoryId', 'categoryKind'])) return fail('REFERENCE_MISMATCH');
+  const accountId = canonicalUuid(value.accountId, 'REFERENCE_MISMATCH');
+  const categoryId = canonicalUuid(value.categoryId, 'REFERENCE_MISMATCH');
+  if (accountId !== request.toAccountId || categoryId !== request.categoryId) {
+    return fail('REFERENCE_MISMATCH');
+  }
+  if (value.categoryKind !== 'INCOME') return fail('CATEGORY_KIND_INVALID');
+}
+
+function buildCanonicalIncome(request: Readonly<IncomeCreateRequest>): Readonly<CanonicalTransaction> {
+  const transaction: Readonly<CanonicalTransaction> = Object.freeze({
+    type: 'INCOME',
+    occurredOn: request.occurredOn,
+    recordGranularity: 'TRANSACTION',
+    datePrecision: 'DAY',
+    aggregatePeriodMonth: null,
+    financialPeriodId: null,
+    periodAssignmentQuality: 'UNASSIGNED',
+    amountMinor: request.amountMinor,
+    currency: 'RUB',
+    fromAccountId: null,
+    toAccountId: request.toAccountId,
+    categoryId: request.categoryId,
+    paidByMemberId: null,
+    description: request.description,
+    note: request.note,
+    status: 'POSTED',
+    analyticsState: 'INCLUDED',
+    flowKind: null,
+  });
+  if (validateTransaction(transaction, { categoryKind: 'INCOME' }).length !== 0) {
+    return fail('INVALID_REQUEST');
+  }
+  return transaction;
+}
+
+function sameRequest(left: Readonly<IncomeCreateRequest>, right: Readonly<IncomeCreateRequest>): boolean {
+  return left.idempotencyKey === right.idempotencyKey
+    && left.occurredOn === right.occurredOn
+    && left.amountMinor === right.amountMinor
+    && left.currency === right.currency
+    && left.toAccountId === right.toAccountId
+    && left.categoryId === right.categoryId
+    && left.description === right.description
+    && left.note === right.note;
+}
+
+function sameTransaction(
+  left: Readonly<CanonicalTransaction>,
+  right: Readonly<CanonicalTransaction>,
+): boolean {
+  return left.type === right.type
+    && left.occurredOn === right.occurredOn
+    && left.recordGranularity === right.recordGranularity
+    && left.datePrecision === right.datePrecision
+    && left.aggregatePeriodMonth === right.aggregatePeriodMonth
+    && left.financialPeriodId === right.financialPeriodId
+    && left.periodAssignmentQuality === right.periodAssignmentQuality
+    && left.amountMinor === right.amountMinor
+    && left.currency === right.currency
+    && left.fromAccountId === right.fromAccountId
+    && left.toAccountId === right.toAccountId
+    && left.categoryId === right.categoryId
+    && left.paidByMemberId === right.paidByMemberId
+    && left.description === right.description
+    && left.note === right.note
+    && left.status === right.status
+    && left.analyticsState === right.analyticsState
+    && left.flowKind === right.flowKind;
+}
+
+function validateCommittedRecord(
+  value: unknown,
+  request: Readonly<IncomeCreateRequest>,
+  expectedTransaction: Readonly<CanonicalTransaction>,
+  requestMismatchCode: IncomeCreateErrorCode,
+): Readonly<CreatedIncomeTransaction> {
+  if (!exactKeys(value, ['request', 'result'])) return fail('STORE_CONTRACT_INVALID');
+
+  let storedRequest: Readonly<IncomeCreateRequest>;
+  try {
+    storedRequest = parseIncomeCreateRequest(value.request);
+  } catch {
+    return fail('STORE_CONTRACT_INVALID');
+  }
+  if (!sameRequest(storedRequest, request)) return fail(requestMismatchCode);
+
+  const result = value.result;
+  if (!exactKeys(result, ['id', 'version', 'transaction'])) return fail('STORE_CONTRACT_INVALID');
+  const id = canonicalUuid(result.id, 'STORE_CONTRACT_INVALID');
+  if (!exactKeys(result.transaction, CANONICAL_TRANSACTION_KEYS)) return fail('STORE_CONTRACT_INVALID');
+  const storedTransaction = result.transaction as unknown as CanonicalTransaction;
+  if (result.version !== 1 || !sameTransaction(storedTransaction, expectedTransaction)) {
+    return fail('STORE_CONTRACT_INVALID');
+  }
+  if (validateTransaction(storedTransaction, { categoryKind: 'INCOME' }).length !== 0) {
+    return fail('STORE_CONTRACT_INVALID');
+  }
+
+  return Object.freeze({
+    id,
+    version: 1,
+    transaction: storedTransaction,
+  });
+}
+
+function validateStoreResult(
+  storeResult: unknown,
+  request: Readonly<IncomeCreateRequest>,
+  expectedTransaction: Readonly<CanonicalTransaction>,
+): Readonly<{ outcome: 'CREATED' | 'REPLAY'; result: Readonly<CreatedIncomeTransaction> }> {
+  if (!exactKeys(storeResult, ['outcome']) && !exactKeys(storeResult, ['outcome', 'request', 'result'])) {
+    return fail('STORE_CONTRACT_INVALID');
+  }
+  if (storeResult.outcome === 'CONFLICT') {
+    if (!exactKeys(storeResult, ['outcome'])) return fail('STORE_CONTRACT_INVALID');
+    return fail('IDEMPOTENCY_CONFLICT');
+  }
+  if (storeResult.outcome !== 'CREATED' && storeResult.outcome !== 'REPLAY') {
+    return fail('STORE_CONTRACT_INVALID');
+  }
+  if (!exactKeys(storeResult, ['outcome', 'request', 'result'])) return fail('STORE_CONTRACT_INVALID');
+
+  const result = validateCommittedRecord(
+    { request: storeResult.request, result: storeResult.result },
+    request,
+    expectedTransaction,
+    'STORE_CONTRACT_INVALID',
+  );
+  return Object.freeze({ outcome: storeResult.outcome, result });
+}
+
+export async function executeIdempotentIncomeCreate(
+  dependencies: Readonly<{
+    references: IncomeCreateReferenceReader;
+    store: IdempotentIncomeCreateStore;
+    randomUuid?: () => string;
+  }>,
+  input: unknown,
+): Promise<Readonly<IncomeCreateResponse>> {
+  const request = parseIncomeCreateRequest(input);
+  const transaction = buildCanonicalIncome(request);
+
+  let committed: Readonly<CommittedIncomeCreate> | null;
+  try {
+    committed = await dependencies.store.readCommitted(request.idempotencyKey);
+  } catch {
+    return fail('STORE_OPERATION_FAILED');
+  }
+  if (committed !== null) {
+    const result = validateCommittedRecord(
+      committed,
+      request,
+      transaction,
+      'IDEMPOTENCY_CONFLICT',
+    );
+    return Object.freeze({
+      contractVersion: WRITER_INCOME_CREATE_CONTRACT_VERSION,
+      outcome: 'REPLAY',
+      idempotencyKey: request.idempotencyKey,
+      result,
+    });
+  }
+
+  let referenceEvidence: Readonly<IncomeCreateReferenceEvidence> | null;
+  try {
+    referenceEvidence = await dependencies.references.readIncomeCreateReferenceEvidence({
+      toAccountId: request.toAccountId,
+      categoryId: request.categoryId,
+    });
+  } catch {
+    return fail('REFERENCE_READ_FAILED');
+  }
+  parseReferenceEvidence(referenceEvidence, request);
+
+  let generatedTransactionId: unknown;
+  try {
+    generatedTransactionId = dependencies.randomUuid?.() ?? globalThis.crypto?.randomUUID?.();
+  } catch {
+    return fail('INVALID_GENERATED_TRANSACTION_ID');
+  }
+  const transactionId = canonicalUuid(
+    generatedTransactionId,
+    'INVALID_GENERATED_TRANSACTION_ID',
+  );
+  if (transactionId === request.idempotencyKey) {
+    return fail('INVALID_GENERATED_TRANSACTION_ID');
+  }
+
+  const candidate: Readonly<CreatedIncomeTransaction> = Object.freeze({
+    id: transactionId,
+    version: 1,
+    transaction,
+  });
+  let storeResult: IdempotentIncomeCreateStoreResult;
+  try {
+    storeResult = await dependencies.store.createOrReplay({ request, candidate });
+  } catch {
+    return fail('STORE_OPERATION_FAILED');
+  }
+  const validated = validateStoreResult(storeResult, request, transaction);
+
+  return Object.freeze({
+    contractVersion: WRITER_INCOME_CREATE_CONTRACT_VERSION,
+    outcome: validated.outcome,
+    idempotencyKey: request.idempotencyKey,
+    result: validated.result,
+  });
+}
