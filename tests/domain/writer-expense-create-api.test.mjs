@@ -13,6 +13,7 @@ const KEY = 'a0000000-0000-0000-0000-000000000001';
 const TX_ID = 'b0000000-0000-0000-0000-000000000001';
 const ACCOUNT_ID = 'c0000000-0000-0000-0000-000000000001';
 const CATEGORY_ID = 'd0000000-0000-0000-0000-000000000001';
+const MEMBER_ID = 'e0000000-0000-0000-0000-000000000001';
 
 const REQUEST = Object.freeze({
   idempotencyKey: KEY,
@@ -21,6 +22,7 @@ const REQUEST = Object.freeze({
   currency: 'RUB',
   fromAccountId: ACCOUNT_ID,
   categoryId: CATEGORY_ID,
+  paidByMemberId: null,
   description: 'Продукты',
   note: null,
 });
@@ -59,6 +61,7 @@ function references({ missing = false, categoryKind = 'EXPENSE', error = null } 
         accountId: request.fromAccountId,
         categoryId: request.categoryId,
         categoryKind,
+        memberId: request.paidByMemberId,
       };
     },
   };
@@ -102,6 +105,7 @@ function assertMinimalResponse(response, outcome) {
     'occurredOn',
     'fromAccountId',
     'categoryId',
+    'paidByMemberId',
     'description',
     'note',
     'Продукты',
@@ -120,6 +124,19 @@ test('Writer API first create exposes only minimal immutable CREATED acknowledge
 
   assertMinimalResponse(response, 'CREATED');
   assert.equal(store.creates, 1);
+});
+
+test('Writer API accepts paidByMemberId while keeping the public acknowledgement payer-free', async () => {
+  const store = new MemoryStore();
+  const response = await executeWriterExpenseCreateApiRequest({
+    references: references(),
+    store,
+    randomUuid: () => TX_ID,
+  }, { ...REQUEST, paidByMemberId: MEMBER_ID });
+
+  assertMinimalResponse(response, 'CREATED');
+  assert.equal(store.records.get(KEY).request.paidByMemberId, MEMBER_ID);
+  assert.equal(store.records.get(KEY).result.transaction.paidByMemberId, MEMBER_ID);
 });
 
 test('Writer API exact replay exposes the same transaction identity with REPLAY and no second create', async () => {

@@ -21,6 +21,7 @@ amountMinor     positive safe integer
 currency        RUB
 fromAccountId   canonical lowercase UUID
 categoryId      canonical lowercase UUID
+paidByMemberId  canonical lowercase UUID | null
 description     null | non-empty already-trimmed text
 note            null | non-empty already-trimmed text
 ```
@@ -53,7 +54,9 @@ Envelope **не** возвращает full `CanonicalTransaction`, amount/date,
 
 ## Reference evidence
 
-Для **нового** create после idempotency miss application dependency должна вернуть exact evidence для requested account/category ids. Missing evidence → `REFERENCE_NOT_FOUND`; malformed/лишние поля или возвращённые другие ids → `REFERENCE_MISMATCH`; category kind, отличный от `EXPENSE`, → `CATEGORY_KIND_INVALID`. Dependency exception санитизируется в `REFERENCE_READ_FAILED` без provider diagnostics.
+Для **нового** create после idempotency miss application dependency должна вернуть exact evidence для requested account/category и optional member ids. `paidByMemberId` проверяется независимо от `fromAccountId`: payment account не определяет payer и не ограничивает допустимый member. Если payer не выбран, request и evidence содержат `paidByMemberId/memberId=null`; это означает отсутствие выбранного/доказанного payer, а не inference другого member. Для non-null payer reference reader обязан вернуть exact тот же canonical member id; отсутствие/неоднозначность exact member evidence представляется как no exact evidence и fail-closed `REFERENCE_NOT_FOUND`, другой или malformed member id → `REFERENCE_MISMATCH`.
+
+Missing aggregate reference evidence → `REFERENCE_NOT_FOUND`; malformed/лишние поля или возвращённые другие account/category/member ids → `REFERENCE_MISMATCH`; category kind, отличный от `EXPENSE`, → `CATEGORY_KIND_INVALID`. Dependency exception санитизируется в `REFERENCE_READ_FAILED` без provider diagnostics. Никакого fuzzy member lookup или account→member inference нет.
 
 Уже committed replay не зависит от текущего mutable reference state: если `readCommitted(idempotencyKey)` вернул исходный request/result и request совпадает exact, application возвращает replay без повторного account/category lookup и без генерации новой Transaction identity. Это нужно, чтобы безопасный retry не ломался только потому, что reference позже был скрыт/изменён. Stored request/result при этом всё равно проходят fail-closed contract validation.
 
@@ -72,14 +75,14 @@ financialPeriodId       null
 periodAssignmentQuality UNASSIGNED
 currency                RUB
 toAccountId             null
-paidByMemberId          null
+paidByMemberId          exact request value (canonical member UUID | null)
 status                  POSTED
 analyticsState          INCLUDED
 flowKind                null
 version                 1 (create result envelope)
 ```
 
-`occurredOn`, `amountMinor`, `fromAccountId`, `categoryId`, `description`, `note` приходят из canonical request. Результат обязан пройти `validateTransaction(..., { categoryKind: 'EXPENSE' })`.
+`occurredOn`, `amountMinor`, `fromAccountId`, `categoryId`, `paidByMemberId`, `description`, `note` приходят из canonical request. `paidByMemberId` не выводится из payment account. Результат обязан пройти `validateTransaction(..., { categoryKind: 'EXPENSE' })`.
 
 ## Idempotency store port
 
@@ -87,6 +90,8 @@ Port состоит из двух операций с разными ролям�
 
 1. `readCommitted(idempotencyKey)` — безопасный pre-read уже committed request/result. Exact same request возвращается как `REPLAY` без current reference lookup и без генерации новой Transaction identity. Different request для того же key → `IDEMPOTENCY_CONFLICT`. Miss продолжает create path.
 2. `createOrReplay({ request, candidate })` — **atomic race-closure** после pre-read miss и reference validation. Между pre-read и commit другой caller мог уже использовать key, поэтому store обязан атомарно вернуть один из трёх исходов.
+
+Canonical idempotency equality включает `paidByMemberId`: тот же key с другим member или переходом `null ↔ member` считается другим request и даёт `IDEMPOTENCY_CONFLICT`. Уже committed exact replay сохраняет исходный payer и, как и раньше, не требует повторного чтения mutable references.
 
 Atomic `createOrReplay` outcomes:
 
