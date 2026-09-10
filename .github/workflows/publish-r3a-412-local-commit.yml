@@ -21,7 +21,7 @@ jobs:
           TARGET_BRANCH: r3a/412-transfer-create-api
           EXPECTED_HEAD: c5a7cc2400c118ce84bb56caf794363ab7dc2492
           EXPECTED_TREE: 99bbb0b9802d3f554ad6b7bb63946eb42cba2336
-          EXPECTED_PATCH_SHA: 7385600c07f2ec81e1330631ee176d971719bf35a77c42b8dbb64da2fd15e1ab
+          EXPECTED_PATCH_SHA: 5da8fad99a904d5632886e4ae9f812bcefcc9c0111bf199b90f1d7a66e12ee4c
         run: |
           set -euo pipefail
           test "$(sha256sum .transport/r3a-412.patch | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
