@@ -56,6 +56,8 @@ export type ScheduledSyncReadinessErrorCode =
   | 'GOOGLE_SOURCE_VALUE_UNSUPPORTED'
   | 'GOOGLE_SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
+  | 'YDB_QUERY_HEALTH_READ_FAILED'
+  | 'YDB_MIGRATION_SCHEMA_READ_FAILED'
   | 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
   | 'YDB_ACCOUNTS_SCHEMA_READ_FAILED'
   | 'YDB_CATEGORIES_SCHEMA_READ_FAILED'
@@ -178,6 +180,20 @@ export async function runScheduledSyncReadinessProbe(
     await source.readFullSnapshotObservation();
   } catch (error) {
     throw classifyGoogleSourceFailure(error);
+  }
+
+  try {
+    await adapter.read(readStatement('SELECT 1 AS readiness_probe'));
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_QUERY_HEALTH_READ_FAILED');
+  }
+
+  try {
+    await adapter.read(readStatement(
+      'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0',
+    ));
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
   }
 
   let migrationEvidence;
