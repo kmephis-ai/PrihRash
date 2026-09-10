@@ -1,0 +1,40 @@
+name: Local Git Mirror Bootstrap R3A 414
+
+on:
+  push:
+    branches:
+      - agent/r3a-mirror-414-20260910-1453
+
+permissions:
+  contents: read
+
+jobs:
+  build-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 063e1a801c41a7ce8764d4103ee3b22eb05c74e0
+          fetch-depth: 0
+      - name: Build exact-source bundle
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "063e1a801c41a7ce8764d4103ee3b22eb05c74e0"
+          git bundle create prihrash.bundle HEAD
+          git bundle verify prihrash.bundle
+          sha256sum prihrash.bundle > prihrash.bundle.sha256
+          printf '%s\n' \
+            'source_sha=063e1a801c41a7ce8764d4103ee3b22eb05c74e0' \
+            "tree_sha=$(git rev-parse HEAD^{tree})" \
+            "package_json_sha256=$(sha256sum package.json | awk '{print $1}')" \
+            "package_lock_sha256=$(sha256sum package-lock.json | awk '{print $1}')" \
+            > manifest.txt
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-git-mirror-r3a-414
+          path: |
+            prihrash.bundle
+            prihrash.bundle.sha256
+            manifest.txt
+          retention-days: 1
