@@ -1,0 +1,57 @@
+name: Publish exact local R3A 410 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-410-publish-20260910-1308
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: f483c74fd8ddd594151af3c4079405660c34aef9
+          TARGET_BRANCH: r3a/410-transfer-idempotent
+          EXPECTED_HEAD: 60cd156b9b6e68d0428f7dd2abe60124bea4c89c
+          EXPECTED_TREE: c7f4d1c68b04399bef04cfbe0c19a89d9f942479
+          EXPECTED_PATCH_SHA: c3510f5d0e5e23bee0509d8f6a4cbc07ae99f618017a7a7deed882183b01ec52
+          EXPECTED_GZIP_SHA: cdc8596158f199b884eb76f7704a8b1c1f2db629c8da1e746c0bbeb5b420cf1e
+          EXPECTED_B64_SHA: 5d416d49d05db26716817d16a57a603dbbeaa9e689b2daa4e76bc75e8bddbffa
+        run: |
+          set -euo pipefail
+          cat .transport/r3a-410-01.txt .transport/r3a-410-02.txt .transport/r3a-410-03.txt > /tmp/410.patch.gz.b64
+          test "$(sha256sum /tmp/410.patch.gz.b64 | awk '{print $1}')" = "$EXPECTED_B64_SHA"
+          base64 -d /tmp/410.patch.gz.b64 > /tmp/410.patch.gz
+          test "$(sha256sum /tmp/410.patch.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA"
+          gzip -dc /tmp/410.patch.gz > /tmp/410.patch
+          test "$(sha256sum /tmp/410.patch | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
+
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/$TARGET_BRANCH)" = "$SOURCE_SHA"
+
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/410.patch
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          printf '%s\n' \
+            docs/R3A_WRITER_API.md \
+            src/writer/idempotentTransferCreate.ts \
+            tests/domain/idempotent-transfer-create.test.mjs \
+            > /tmp/expected-files.txt
+          git diff --name-only "$SOURCE_SHA" HEAD | sort > /tmp/actual-files.txt
+          sort /tmp/expected-files.txt -o /tmp/expected-files.txt
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
+          git diff --check "$SOURCE_SHA" HEAD
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
