@@ -184,13 +184,62 @@ INCOME application использует тот же stable value-free error voca
 
 Browser INCOME ACK/delete delivery также остаётся отдельным work item: наличие public envelope само по себе не подключает network transport и не меняет authority. Production `YDB_WRITE_ENABLED=false`.
 
+## Create TRANSFER v1
+
+`idempotentTransferCreate.ts` добавляет отдельный type-specific application contract для plain TRANSFER без рефакторинга проверенных EXPENSE/INCOME paths. `WRITER_TRANSFER_CREATE_CONTRACT_VERSION = 1`.
+
+Request:
+
+```text
+idempotencyKey  canonical lowercase UUID
+occurredOn      valid full YYYY-MM-DD
+amountMinor     positive safe integer
+currency        RUB
+fromAccountId   canonical lowercase UUID
+toAccountId     canonical lowercase UUID, distinct from fromAccountId
+description     null | non-empty already-trimmed text
+note            null | non-empty already-trimmed text
+```
+
+Unknown fields и malformed lexical evidence fail-closed как `INVALID_REQUEST`; normalization/fuzzy matching отсутствуют. `flowKind` намеренно **не входит** в request этого среза: application не угадывает `OWN_FUNDS_TRANSFER`, `CREDIT_DRAW` или `CREDIT_REPAYMENT`. `idempotencyKey` отделён от canonical Transaction id.
+
+На new-create miss dependency `readTransferCreateReferenceEvidence({fromAccountId, toAccountId})` обязана вернуть exact evidence для обоих requested account ids. Missing → `REFERENCE_NOT_FOUND`; mismatched/malformed/extra evidence → `REFERENCE_MISMATCH`; dependency exception → `REFERENCE_READ_FAILED` без raw diagnostics. Эта boundary не определяет provider/YDB query implementation.
+
+Canonical TRANSFER projection:
+
+```text
+type                    TRANSFER
+recordGranularity       TRANSACTION
+datePrecision           DAY
+aggregatePeriodMonth    null
+financialPeriodId       null
+periodAssignmentQuality UNASSIGNED
+currency                RUB
+fromAccountId           request.fromAccountId
+toAccountId             request.toAccountId
+categoryId              null
+paidByMemberId          null
+status                  POSTED
+analyticsState          INCLUDED
+flowKind                null
+version                 1 (create result envelope)
+```
+
+Projection проходит существующий `validateTransaction(..., { categoryKind: null })`. Distinct-account invariant проверяется ещё на strict request boundary и затем повторно защищается canonical FIN-TRUTH validator.
+
+Idempotency guarantees совпадают с уже доказанными EXPENSE/INCOME contracts, но universal create abstraction не вводится: exact committed pre-read → `REPLAY` без current reference lookup/new identity; changed canonical request на том же key → `IDEMPOTENCY_CONFLICT`; atomic `createOrReplay()` закрывает race после miss. Stored request/result и race response валидируются fail-closed против expected plain TRANSFER transaction; wrong type/direction/category/non-null `flowKind`/version/payload → `STORE_CONTRACT_INVALID`.
+
+Safe application codes этого contract: `INVALID_REQUEST`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_READ_FAILED`, `INVALID_GENERATED_TRANSACTION_ID`, `IDEMPOTENCY_CONFLICT`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw reference/store/random-id diagnostics наружу не отражаются.
+
+Public TRANSFER API envelope, browser validated-ACK delivery и выбор `flow_kind` остаются отдельными work items. Наличие этого application contract само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
+
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
-- INCOME browser ACK delivery;
-- TRANSFER / `paid_by`;
+- TRANSFER public API envelope/browser ACK delivery и выбор `flow_kind`;
+- `paid_by`;
 - optimistic edit / VOID;
 - Google Form/GAS intake parity;
 - production Writer, R4, CUTOVER.
