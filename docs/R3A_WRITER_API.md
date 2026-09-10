@@ -1,12 +1,12 @@
-# R3A Writer create/idempotency contract
+# R3A Writer application contracts
 
 Status: R3A synthetic/test application contract. Он **не** является production HTTP/YDB deployment contract и не меняет authority: до отдельного доказанного cutover остаётся `Google authoritative → YDB shadow`, production `YDB_WRITE_ENABLED=false`.
 
 ## Цель текущего среза
 
-Минимально доказать create/idempotency semantics по типам без premature universal API: repeated create одного и того же manual EXPENSE или INCOME не должен порождать вторую Transaction. EXPENSE и INCOME пока имеют отдельные type-specific application contracts; общий create framework не вводится без доказанной необходимости.
+Минимально доказать Writer application semantics небольшими type-specific срезами без premature universal API. Create/idempotency path уже покрывает EXPENSE, INCOME и TRANSFER; optimistic edit начинается отдельно с EXPENSE. Общий Writer framework не вводится без доказанной необходимости.
 
-Контракты transport-independent. HTTP route, OWNER auth binding, YDB persistence schema и browser sync worker добавляются отдельными work items после доказанного application behavior.
+Контракты transport-independent. HTTP route, OWNER auth binding, YDB persistence schema, browser conflict UI и sync worker добавляются отдельными work items после доказанного application behavior.
 
 ## Create EXPENSE v1
 
@@ -251,15 +251,49 @@ Safe application codes этого contract: `INVALID_REQUEST`, `REFERENCE_NOT_FO
 
 Ошибки не получают отдельный API vocabulary: наружу проходит существующий stable value-free `TransferCreateError.code`. Этот слой намеренно не определяет HTTP status/path/body wrapping, headers/CORS, cookie/session verification, browser `fetch`, API Gateway/private Function или YDB/provider binding. Реальный OWNER/provider wiring остаётся за canonical provider gate #302.
 
-Browser TRANSFER ACK/delete delivery и выбор `flow_kind` остаются отдельными work items. Наличие public envelope само по себе не подключает network transport и не меняет authority; production `YDB_WRITE_ENABLED=false`.
+Browser TRANSFER ACK/delete delivery уже доказан отдельным injected preview delivery module с validated ACK-before-delete и replay-safe cleanup; реальный HTTP/provider sender по-прежнему не подключён. Выбор `flow_kind` остаётся отдельным будущим work item. Наличие public envelope/delivery proof не меняет authority; production `YDB_WRITE_ENABLED=false`.
+
+## Optimistic EXPENSE edit v1
+
+`optimisticExpenseEdit.ts` добавляет первый type-specific edit application contract. Он работает только с ordinary `EXPENSE / TRANSACTION / DAY / POSTED` и не превращает historical `PERIOD_AGGREGATE`, VOIDED record или другой transaction type в editable purchase.
+
+Request — полное canonical представление редактируемых полей, а не partial merge:
+
+```text
+transactionId     canonical lowercase UUID
+expectedVersion   positive safe integer
+occurredOn        valid full YYYY-MM-DD
+amountMinor       positive safe integer
+currency          RUB
+fromAccountId     canonical lowercase UUID
+categoryId        canonical lowercase UUID
+paidByMemberId    canonical lowercase UUID | null
+description       null | non-empty already-trimmed text
+note              null | non-empty already-trimmed text
+```
+
+Identity/type/granularity/date precision/period assignment/status/analytics state/`flowKind` не входят в request и потому не могут молча меняться этим edit path. Candidate копирует эти поля из exact current record, заменяет только перечисленные mutable fields и обязан снова пройти FIN-TRUTH `validateTransaction(..., {categoryKind: "EXPENSE"})`. `paidByMemberId` хранится независимо от payment account; `null` означает отсутствие доказанного/выбранного payer, а не inference другого member.
+
+Reference dependency принимает exact requested `fromAccountId`, `categoryId` и optional `paidByMemberId` и возвращает exact account/category/member evidence. Unknown/mismatched member не угадывается. Category kind обязан быть `EXPENSE`.
+
+Store boundary состоит из двух операций:
+
+1. `readCurrent(transactionId)` возвращает exact versioned current EXPENSE либо `null`; malformed/wrong-type/coarse/VOIDED evidence → fail-closed `STORE_CONTRACT_INVALID`.
+2. `replaceIfVersion({transactionId, expectedVersion, candidate})` атомарно заменяет запись только при exact version match. `UPDATED` обязан read-back-like результатом доказать exact candidate и `version=expectedVersion+1`; concurrent race возвращает `VERSION_CONFLICT` с более новой `currentVersion`.
+
+Stale `expectedVersion`, обнаруженный уже на pre-read, также возвращает normal `VERSION_CONFLICT` outcome до reference lookup/mutation. Это не exception и не last-write-wins. Browser comparison UI и public edit API envelope пока не определены; current financial payload не публикуется в GitHub evidence.
+
+Safe exception codes: `INVALID_REQUEST`, `TRANSACTION_NOT_FOUND`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `CATEGORY_KIND_INVALID`, `REFERENCE_READ_FAILED`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw provider/store/reference diagnostics наружу не отражаются.
 
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
-- TRANSFER browser ACK delivery и выбор `flow_kind`;
-- `paid_by`;
-- optimistic edit / VOID;
+- real TRANSFER HTTP sender и выбор `flow_kind`;
+- create-time `paid_by` UX/API/delivery;
+- public EXPENSE edit API envelope и browser conflict comparison UI;
+- INCOME/TRANSFER edit;
+- VOID;
 - Google Form/GAS intake parity;
 - production Writer, R4, CUTOVER.
