@@ -26,7 +26,17 @@ jobs:
           EXPECTED_B64_SHA: 5d416d49d05db26716817d16a57a603dbbeaa9e689b2daa4e76bc75e8bddbffa
         run: |
           set -euo pipefail
-          cat .transport/r3a-410-01.txt .transport/r3a-410-02.txt .transport/r3a-410-03.txt > /tmp/410.patch.gz.b64
+          cat \
+            .transport/r3a-410-v2-01.txt \
+            .transport/r3a-410-v2-02.txt \
+            .transport/r3a-410-v2-03.txt \
+            .transport/r3a-410-v2-04.txt \
+            .transport/r3a-410-v2-05.txt \
+            .transport/r3a-410-v3-06a.txt \
+            > /tmp/410.patch.gz.b64
+          head -c 503 .transport/r3a-410-v3-06b.txt >> /tmp/410.patch.gz.b64
+          printf 'Q' >> /tmp/410.patch.gz.b64
+          tail -c +504 .transport/r3a-410-v3-06b.txt >> /tmp/410.patch.gz.b64
           test "$(sha256sum /tmp/410.patch.gz.b64 | awk '{print $1}')" = "$EXPECTED_B64_SHA"
           base64 -d /tmp/410.patch.gz.b64 > /tmp/410.patch.gz
           test "$(sha256sum /tmp/410.patch.gz | awk '{print $1}')" = "$EXPECTED_GZIP_SHA"
