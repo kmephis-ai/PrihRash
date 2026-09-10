@@ -1,0 +1,39 @@
+name: Publish exact local R3A 394 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-394-publish-20260910-0652
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: 83cebc03dd53dbd642dbb48e1b4f4ccfeee91cde
+          TARGET_BRANCH: r3a/394-idempotent-expense-create
+          EXPECTED_COMMIT: 07e0c572aa28713488e8317d418cc6d17141f5e4
+          EXPECTED_TREE: 3567234a7ffa4ccb4bfbd711d301e6b6ee2a8e27
+        run: |
+          set -euo pipefail
+          cp .github/transport/r3a-394.patch.b64 /tmp/local.patch.b64
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/$TARGET_BRANCH)" = "$SOURCE_SHA"
+          git checkout --detach "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          base64 -d /tmp/local.patch.b64 | gzip -d > /tmp/local.patch
+          git am --committer-date-is-author-date /tmp/local.patch
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git diff --check "$SOURCE_SHA" "$EXPECTED_COMMIT"
+          git push origin "$EXPECTED_COMMIT:refs/heads/$TARGET_BRANCH"
