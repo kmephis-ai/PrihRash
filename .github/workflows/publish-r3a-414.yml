@@ -1,0 +1,51 @@
+name: Publish exact local R3A 414 tree
+
+on:
+  push:
+    branches:
+      - ai/local-mirror-r3a-414-20260910-1506
+    paths:
+      - '.github/workflows/publish-r3a-414.yml'
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: 063e1a801c41a7ce8764d4103ee3b22eb05c74e0
+  TARGET_BRANCH: r3a/414-transfer-delivery
+  EXPECTED_TREE: cccd6250bb05bf66461e87cd574e72b4553ae366
+  PATCH_PATH: tools/local-git-mirror/r3a-414.patch
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Materialize exact verified local tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${PATCH_PATH}" /tmp/r3a-414.patch
+          git fetch origin "refs/heads/${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${SOURCE_SHA}"
+          git checkout --detach "${SOURCE_SHA}"
+          git apply --check /tmp/r3a-414.patch
+          git apply /tmp/r3a-414.patch
+          git diff --check
+          test "$(git diff --name-only | sort | tr '\n' ' ')" = "docs/R3A_PREVIEW_WRITER.md tests/integration/r2-safe-ui-preview.test.mjs web/preview-transfer-writer-delivery.mjs "
+          node --test tests/integration/r2-safe-ui-preview.test.mjs
+          npm run privacy
+          npm run lint
+          npm run preview:build --silent
+          git add docs/R3A_PREVIEW_WRITER.md tests/integration/r2-safe-ui-preview.test.mjs web/preview-transfer-writer-delivery.mjs
+          test "$(git write-tree)" = "${EXPECTED_TREE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "R3A: TRANSFER outbox удаляется после validated ACK (#414)"
+          test "$(git rev-parse HEAD^1)" = "${SOURCE_SHA}"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}" --force-with-lease="refs/heads/${TARGET_BRANCH}:${SOURCE_SHA}"
