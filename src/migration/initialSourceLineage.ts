@@ -2,7 +2,7 @@ import { SOURCE_SHEET_NAME } from '../integration/google/sourceSchema.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import {
   RawPayloadProvenanceError,
-  serializeRawPayloadV2,
+  serializeRawPayload,
 } from './rawPayloadProvenance.js';
 
 export interface InitialSourcePayloadObservation {
@@ -66,7 +66,7 @@ export class InitialSourceLineageError extends Error {
 
 function serializePayload(payload: Readonly<Record<string, unknown>>): string {
   try {
-    return serializeRawPayloadV2(payload);
+    return serializeRawPayload(payload);
   } catch (error) {
     if (error instanceof RawPayloadProvenanceError) {
       throw new InitialSourceLineageError(error.code);

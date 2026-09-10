@@ -6,7 +6,7 @@ import {
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
 import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initialSourceLineagePersistence.js';
-import { serializeRawPayloadV2 } from '../../dist/migration/rawPayloadProvenance.js';
+import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
 const RUN_ID = '00000000-0000-0000-0000-000000009501';
 const SOURCE_ID_1 = '00000000-0000-0000-0000-000000009502';
@@ -41,7 +41,7 @@ function revision(sourceRecordId, rowHint, rowDigest, description) {
     rowHint,
     rowDigest,
     changeClass: null,
-    rawPayload: serializeRawPayloadV2(payload(description)),
+    rawPayload: serializeRawPayload(payload(description)),
   });
 }
 

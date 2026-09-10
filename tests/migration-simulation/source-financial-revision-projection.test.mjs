@@ -42,6 +42,13 @@ test('projects exact expense-side financial revision and keeps inactive income s
   assert.equal(Object.isFrozen(revision), true);
 });
 
+test('current adapter schema v3 projects the same canonical financial revision', () => {
+  const revision = projectSourceFinancialRevision(payload({ adapter_schema_version: 3 }));
+  assert.equal(revision.operationType, 'Расход');
+  assert.equal(revision.expenseAmountMinor, 12345);
+  assert.equal(revision.sourceDate, '2024-07-27');
+});
+
 test('projects exact income-side financial revision independently of expense side', () => {
   const revision = projectSourceFinancialRevision(payload({
     operation_type: { kind: 'STRING', value: 'Доход' },

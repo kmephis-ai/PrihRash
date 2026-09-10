@@ -3,10 +3,11 @@ import type { LegacyPeriodCloseSourceRow } from '../classification/legacyPeriodC
 import type { SourceCellPayloadV2 } from '../integration/google/sourceValueCodec.js';
 import {
   decodeRawPayloadAmountMinor,
+  isSupportedAdapterSchemaVersion,
   decodeRawPayloadOccurredOn,
   decodeRawPayloadTextCell,
   type RawPayloadDecodeFailure,
-  type RawPayloadV2,
+  type RawPayload,
 } from './rawPayloadDecoder.js';
 
 export interface DecodedSourceClassificationFields {
@@ -44,9 +45,9 @@ function decodeOptionalAmount(
 }
 
 export function decodeRawPayloadForSourceClassification(
-  payload: RawPayloadV2,
+  payload: RawPayload,
 ): SourceClassificationDecodeResult {
-  if (payload.adapter_schema_version !== 2) {
+  if (!isSupportedAdapterSchemaVersion(payload.adapter_schema_version)) {
     return Object.freeze({
       ok: false as const,
       errorCode: 'INVALID_PAYLOAD_SCHEMA' as const,

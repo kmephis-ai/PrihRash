@@ -6,7 +6,7 @@ import {
   verifySourceHeaders,
 } from '../../dist/integration/google/sourceSchema.js';
 
-test('exact A-K header passes including leading space in first header', () => {
+test('exact current A-K header passes with the proven timestamp label', () => {
   assert.deepEqual(verifySourceHeaders([...EXPECTED_SOURCE_HEADERS]), {
     ok: true,
     errorCode: null,
@@ -14,16 +14,16 @@ test('exact A-K header passes including leading space in first header', () => {
   });
 });
 
-test('trimmed first header fails closed', () => {
+test('previous v2 first header fails closed instead of acting as an alias', () => {
   const headers = [...EXPECTED_SOURCE_HEADERS];
-  headers[0] = 'Дата';
+  headers[0] = ' Дата';
   const result = verifySourceHeaders(headers);
   assert.equal(result.ok, false);
   assert.equal(result.errorCode, 'SOURCE_SCHEMA_MISMATCH');
   assert.deepEqual(result.mismatches[0], {
     position: 1,
-    expected: ' Дата',
-    actual: 'Дата',
+    expected: 'Отметка времени',
+    actual: ' Дата',
   });
 });
 

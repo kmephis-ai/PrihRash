@@ -1,7 +1,8 @@
 export const SOURCE_SHEET_NAME = 'Ответы на форму (11)';
+export const CURRENT_SOURCE_ADAPTER_SCHEMA_VERSION = 3 as const;
 
 export const EXPECTED_SOURCE_HEADERS = [
-  ' Дата',
+  'Отметка времени',
   'Тип операции',
   'Счет',
   'Категория',

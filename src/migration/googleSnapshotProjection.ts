@@ -1,8 +1,11 @@
 import type { GoogleSheetsImmutableSnapshot } from '../integration/google/googleSheetsFullSnapshotReader.js';
-import { ADAPTER_KEYS } from '../integration/google/sourceSchema.js';
+import {
+  ADAPTER_KEYS,
+  CURRENT_SOURCE_ADAPTER_SCHEMA_VERSION,
+} from '../integration/google/sourceSchema.js';
 import { encodeGoogleExtendedValue } from '../integration/google/sourceValueCodec.js';
-import type { RawPayloadV2 } from './rawPayloadDecoder.js';
-import { normalizeRawPayloadV2, serializeRawPayloadV2 } from './rawPayloadProvenance.js';
+import type { RawPayload } from './rawPayloadDecoder.js';
+import { normalizeRawPayload, serializeRawPayloadForLineageDigest } from './rawPayloadProvenance.js';
 import type { CurrentSequenceRow } from './sequenceDiff.js';
 
 export interface CanonicalSourceRowDigest {
@@ -10,7 +13,7 @@ export interface CanonicalSourceRowDigest {
 }
 
 export interface IncrementalSourceObservationRow extends CurrentSequenceRow {
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
 }
 
 export interface GoogleSnapshotMigrationProjection {
@@ -35,12 +38,14 @@ export class GoogleSnapshotProjectionError extends Error {
 
 function projectRawPayload(
   values: Readonly<GoogleSheetsImmutableSnapshot['rows'][number]['values']>,
-): RawPayloadV2 {
+): RawPayload {
   if (values.length !== ADAPTER_KEYS.length) {
     throw new GoogleSnapshotProjectionError('SOURCE_ROW_WIDTH_MISMATCH');
   }
 
-  const payload: Record<string, unknown> = { adapter_schema_version: 2 };
+  const payload: Record<string, unknown> = {
+    adapter_schema_version: CURRENT_SOURCE_ADAPTER_SCHEMA_VERSION,
+  };
   for (let index = 0; index < ADAPTER_KEYS.length; index += 1) {
     const key = ADAPTER_KEYS[index];
     if (key === undefined) {
@@ -48,7 +53,7 @@ function projectRawPayload(
     }
     payload[key] = encodeGoogleExtendedValue(values[index]);
   }
-  return normalizeRawPayloadV2(payload);
+  return normalizeRawPayload(payload);
 }
 
 export function projectGoogleSnapshotForIncrementalMigration(
@@ -68,7 +73,7 @@ export function projectGoogleSnapshotForIncrementalMigration(
     rowHints.add(row.rowHint);
 
     const rawPayload = projectRawPayload(row.values);
-    const canonicalRow = serializeRawPayloadV2(rawPayload);
+    const canonicalRow = serializeRawPayloadForLineageDigest(rawPayload);
     const rowDigest = digest.digestCanonicalRow(canonicalRow);
     if (typeof rowDigest !== 'string' || rowDigest.trim().length === 0) {
       throw new GoogleSnapshotProjectionError('INVALID_ROW_DIGEST');

@@ -7,7 +7,7 @@ import {
   projectInitialFinancialTransaction,
   type InitialFinancialProjectionErrorCode,
 } from './initialFinancialProjection.js';
-import type { RawPayloadDecodeErrorCode, RawPayloadV2 } from './rawPayloadDecoder.js';
+import type { RawPayloadDecodeErrorCode, RawPayload } from './rawPayloadDecoder.js';
 import {
   classifySourceSnapshot,
   SourceSnapshotClassificationStructuralError,
@@ -15,7 +15,7 @@ import {
 
 export interface SourceSnapshotSemanticRowInput {
   readonly sourceOrdinal: number;
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
   readonly aggregatePeriodMonth: string | null;
 }
 

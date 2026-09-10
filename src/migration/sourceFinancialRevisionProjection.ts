@@ -2,10 +2,11 @@ import type { AdapterKey } from '../integration/google/sourceSchema.js';
 import type { SourceFinancialRevision } from './changeClassification.js';
 import {
   decodeRawPayloadAmountMinor,
+  isSupportedAdapterSchemaVersion,
   decodeRawPayloadOccurredOn,
   decodeRawPayloadTextCell,
   type RawPayloadDecodeErrorCode,
-  type RawPayloadV2,
+  type RawPayload,
 } from './rawPayloadDecoder.js';
 
 export type SourceFinancialRevisionProjectionErrorCode = RawPayloadDecodeErrorCode;
@@ -34,22 +35,22 @@ function valueOrThrow<T>(
 }
 
 function nullableAmount(
-  payload: RawPayloadV2,
+  payload: RawPayload,
   field: 'expense_amount' | 'income_amount',
 ): number | null {
   if (payload[field] === null) return null;
   return valueOrThrow(decodeRawPayloadAmountMinor(payload[field], field));
 }
 
-function nullableSourceDate(payload: RawPayloadV2): string | null {
+function nullableSourceDate(payload: RawPayload): string | null {
   if (payload.date === null) return null;
   return valueOrThrow(decodeRawPayloadOccurredOn(payload.date));
 }
 
 export function projectSourceFinancialRevision(
-  payload: RawPayloadV2,
+  payload: RawPayload,
 ): Readonly<SourceFinancialRevision> {
-  if (payload.adapter_schema_version !== 2) {
+  if (!isSupportedAdapterSchemaVersion(payload.adapter_schema_version)) {
     throw new SourceFinancialRevisionProjectionError('INVALID_PAYLOAD_SCHEMA', 'adapter_schema_version');
   }
 

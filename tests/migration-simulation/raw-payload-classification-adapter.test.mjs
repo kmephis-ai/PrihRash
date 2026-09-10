@@ -49,6 +49,14 @@ test('decodes classification fields without locale coercion', () => {
   });
 });
 
+test('current adapter schema v3 preserves classification decode semantics', () => {
+  const result = decodeRawPayloadForSourceClassification(payload({ adapter_schema_version: 3 }));
+  assert.equal(result.ok, true);
+  assert.equal(result.value.operationType, 'Расход');
+  assert.equal(result.value.sourceDate, '2024-01-01');
+  assert.equal(result.value.expenseAmountMinor, 12345);
+});
+
 test('inactive string amount preserves physical presence but is never parsed as money', () => {
   const decoded = decodeRawPayloadForSourceClassification(payload({ income_amount: S('legacy inactive text') }));
   assert.equal(decoded.ok, true);

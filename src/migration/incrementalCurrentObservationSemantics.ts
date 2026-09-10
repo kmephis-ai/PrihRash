@@ -9,7 +9,7 @@ import {
   type FinancialProjectionErrorCode,
 } from './financialProjection.js';
 import type { IncrementalSourceDeltaIntentPlan } from './incrementalSourceDeltaIntent.js';
-import type { RawPayloadDecodeErrorCode, RawPayloadV2 } from './rawPayloadDecoder.js';
+import type { RawPayloadDecodeErrorCode, RawPayload } from './rawPayloadDecoder.js';
 import {
   classifySourceSnapshot,
   type SourceSnapshotClassificationOutcome,
@@ -18,7 +18,7 @@ import {
 export interface IncrementalCurrentObservationInput {
   readonly currentRowHint: number;
   readonly sourceOrdinal: number;
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
 }
 
 export interface IncrementalPreviousFinancialQualityEvidence {

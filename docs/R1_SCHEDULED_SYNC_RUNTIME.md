@@ -42,7 +42,9 @@
 
 ## Google read boundary
 
-Concrete Google Sheets reader запрашивает только canonical `Ответы на форму (11)` range `A:K`, использует `userEnteredValue`, проверяет exact spreadsheet/sheet metadata и source schema fail-closed, затем строит immutable observation. Typed A–K rows преобразуются одним canonical projection в `RawPayloadV2 + row digest`, поэтому sequence lineage и revision evidence используют один и тот же source fact.
+Concrete Google Sheets reader запрашивает только canonical `Ответы на форму (11)` range `A:K`, использует `userEnteredValue`, проверяет exact spreadsheet/sheet metadata и source schema fail-closed, затем строит immutable observation. Typed A–K rows преобразуются одним canonical projection в `RawPayloadV3 + row digest`, поэтому sequence lineage и revision evidence используют один и тот же source fact.
+
+Для доказанного header-only source-schema перехода v2→v3 full snapshot digest меняется вместе с exact header vector, но row lineage digest сохраняет v2-compatible framing при неизменённых A–K cells. Это предотвращает массовые ложные revisions только из-за `adapter_schema_version`; новые/реально изменённые observations сохраняют v3 provenance.
 
 ## Atomic run claim
 

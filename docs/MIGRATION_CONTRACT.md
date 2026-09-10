@@ -67,15 +67,15 @@ raw_payload
 
 Revision создаётся только при first sight или digest change. Обычный повторный sync без изменений не плодит историю.
 
-### Raw payload schema v2
+### Raw payload schema v3
 
-`raw_payload` — приватный diagnostic/provenance payload с **всеми 11 source fields** через stable adapter keys и с сохранением физического cell kind. Schema v1 (`string | null`) заменена **до первого production shadow bootstrap**, потому что она стирала различие между numeric cell и numeric-looking source string.
+`raw_payload` — приватный diagnostic/provenance payload с **всеми 11 source fields** через stable adapter keys и с сохранением физического cell kind. Schema v1 (`string | null`) была заменена v2 **до первого production shadow bootstrap**, потому что v1 стирала различие между numeric cell и numeric-looking source string. После live physical-header drift 2026-09-10 current source observations используют **v3**: cell encoding и stable adapter keys не меняются, но новый `adapter_schema_version` явно фиксирует новый exact physical source contract вместо тихого переиспользования v2.
 
 Synthetic example:
 
 ```json
 {
-  "adapter_schema_version": 2,
+  "adapter_schema_version": 3,
   "date": {"kind":"NUMBER","value":"45292.5"},
   "operation_type": {"kind":"STRING","value":"Расход"},
   "expense_account": {"kind":"STRING","value":"Synthetic Account"},
@@ -99,10 +99,11 @@ Synthetic example:
 - numeric-looking `STRING` **никогда** не повышается до `NUMBER`;
 - formula/bool/error в authoritative A–K → fail-closed source review; formula не вычисляется importer-ом как финансовое значение;
 - source date/datetime сохраняется как typed Google Sheets serial number, включая fractional time component;
+- v2 и v3 используют одинаковые stable adapter keys и typed cell encoding; decoder обязан читать оба доказанных provenance schema, но concrete current Google projection после 2026-09-10 emit только v3;
 - изменение physical source schema **или** provenance encoding требует нового `adapter_schema_version`, а не тихого переиспользования старого payload contract;
 - payload никогда не публикуется в GitHub/log evidence.
 
-#### Decoder contract v2
+#### Decoder contract v2/v3
 
 - financial operation определяется только exact `Расход` / `Доход` из typed `STRING`;
 - active amount — только `expense_amount` для `Расход` и `income_amount` для `Доход`; inactive amount column не интерпретируется как financial value;
@@ -118,6 +119,10 @@ Synthetic example:
 Deterministic digest строится из нормализованного технического представления всех source columns.
 
 Нормализация включает cell kind и canonical value: `NUMBER 123` и `STRING "123"` обязаны иметь разные digest inputs. Допускаются только стабильное представление blank, typed numbers, typed strings, dates, line endings и Unicode.
+
+`adapter_schema_version` не является source column и сам по себе не должен фабриковать revision существующей строки. Для доказанного header-only перехода v2→v3, где A–K stable keys, cell encoding и финансовая интерпретация не изменились, lineage `row_digest` сохраняет v2-compatible canonical framing. Поэтому unchanged A–K row получает тот же row digest, а новая/реально изменённая observation сохраняет уже v3 `raw_payload`. Это правило ограничено доказанным v2→v3 переходом и не является разрешением автоматически переиспользовать digest framing для будущей schema evolution.
+
+Full `source_snapshot_digest` включает exact current header vector, поэтому физическая смена header всё равно меняет snapshot digest и проходит обычный admission/reconciliation lifecycle; она лишь не превращает все неизменённые rows в ложные revisions.
 
 Digest не является Transaction ID.
 
