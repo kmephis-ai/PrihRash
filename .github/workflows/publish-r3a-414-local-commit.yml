@@ -1,0 +1,64 @@
+name: Publish exact local R3A 414 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-414-publish-20260910-1459
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and publish exact local commit
+        env:
+          SOURCE_SHA: 063e1a801c41a7ce8764d4103ee3b22eb05c74e0
+          TARGET_BRANCH: r3a/414-transfer-validated-ack
+          EXPECTED_HEAD: 3d863bcb3bb97db5b3f35b0529292d059dcc6785
+          EXPECTED_TREE: 1ff53adab4bab6de68d4d685eb7bc8a417493277
+          EXPECTED_PATCH_SHA: 7b43867c9298a700ac6a68d04880eeda90c5ea2df8605f929601c9423245f812
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          raw = Path('.transport/r3a-414.patch').read_bytes()
+          marker = b'+diff --git a/web/preview-transfer-writer-delivery.mjs b/web/preview-transfer-writer-delivery.mjs\n'
+          position = raw.find(marker)
+          if position < 0 or raw.find(marker, position + 1) >= 0:
+              raise SystemExit('transport marker mismatch')
+          head = raw[:position]
+          tail = raw[position:].splitlines(keepends=True)
+          if any(not line.startswith(b'+') for line in tail):
+              raise SystemExit('transport tail shape mismatch')
+          fixed = head + b''.join(line[1:] for line in tail)
+          Path('/tmp/414.patch').write_bytes(fixed)
+          PY
+          test "$(sha256sum /tmp/414.patch | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
+
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/$TARGET_BRANCH)" = "$SOURCE_SHA"
+
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/414.patch
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          printf '%s\n' \
+            docs/R3A_PREVIEW_WRITER.md \
+            tests/integration/r2-safe-ui-preview.test.mjs \
+            web/preview-transfer-writer-delivery.mjs \
+            > /tmp/expected-files.txt
+          git diff --name-only "$SOURCE_SHA" HEAD | sort > /tmp/actual-files.txt
+          sort /tmp/expected-files.txt -o /tmp/expected-files.txt
+          diff -u /tmp/expected-files.txt /tmp/actual-files.txt
+          git diff --check "$SOURCE_SHA" HEAD
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
