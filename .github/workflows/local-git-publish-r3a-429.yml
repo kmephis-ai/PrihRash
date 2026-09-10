@@ -1,0 +1,45 @@
+name: Local Git Publish R3A 429
+
+on:
+  push:
+    branches:
+      - ai/publish-r3a-429-20260910-2112
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify and publish exact local commit
+        shell: bash
+        env:
+          BASE_SHA: d5136e92faa0524b23bce66fe9a6e0ee9a899b0f
+          PATCH_SHA: 76e07461dd73299c2d6e51fefc51a14fd25b31f7
+          PATCH_TREE: 2754ba4659a3e79488f8ce6e184c75d193f0bc62
+          TARGET_BRANCH: r3a/429-transaction-void-api
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "${BASE_SHA}"
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git bundle verify transport/r3a429-patch.bundle
+          git fetch transport/r3a429-patch.bundle refs/heads/r3a/429-transaction-void-api:refs/remotes/local-patch/source
+          test "$(git rev-parse refs/remotes/local-patch/source)" = "${PATCH_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^")" = "${BASE_SHA}"
+          test "$(git rev-parse "${PATCH_SHA}^{tree}")" = "${PATCH_TREE}"
+          EXPECTED_FILES=$'docs/R3A_WRITER_API.md\nsrc/writer/transactionVoidApi.ts\ntests/domain/writer-transaction-void-api.test.mjs'
+          test "$(git diff --name-only "${BASE_SHA}" "${PATCH_SHA}")" = "${EXPECTED_FILES}"
+          git worktree add --detach /tmp/r3a429-publish-check "${PATCH_SHA}"
+          cd /tmp/r3a429-publish-check
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+          git diff --check "${BASE_SHA}" "${PATCH_SHA}"
+          cd "${GITHUB_WORKSPACE}"
+          git push origin "${PATCH_SHA}:refs/heads/${TARGET_BRANCH}"
