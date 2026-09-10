@@ -1,8 +1,8 @@
-# R3A Writer preview — local-only EXPENSE/INCOME outbox
+# R3A Writer preview — local-only EXPENSE/INCOME/TRANSFER outbox
 
 ## Назначение
 
-R3A synthetic preview доказывает local-first UX и offline-write механику без изменения production authority. Сейчас preview поддерживает локальное создание EXPENSE и INCOME; production `index.html` / `app.mjs` остаются read-only.
+R3A synthetic preview доказывает local-first UX и offline-write механику без изменения production authority. Сейчас preview поддерживает локальное создание EXPENSE, INCOME и базового TRANSFER; production `index.html` / `app.mjs` остаются read-only.
 
 До CUTOVER сохраняется:
 
@@ -10,7 +10,7 @@ R3A synthetic preview доказывает local-first UX и offline-write ме�
 Google authoritative → YDB shadow
 ```
 
-Writer подключается только через synthetic `preview-bootstrap.mjs`. Панели явно помечены `Новый расход · демо` и `Новый доход · демо`; реальные финансовые данные и production Writer path не используются.
+Writer подключается только через synthetic `preview-bootstrap.mjs`. Панели явно помечены `Новый расход · демо`, `Новый доход · демо` и `Новый перевод · демо`; реальные финансовые данные и production Writer path не используются.
 
 ## Quick EXPENSE preview contract
 
@@ -34,7 +34,19 @@ Writer подключается только через synthetic `preview-boots
 
 Пустые optional form values сохраняются как `null`. Непустой текст не классифицируется, не тегируется и не используется для financial inference.
 
-Обе формы — **preview UX contract**, а не доказанная копия Google Form/GAS. Legacy intake defaults/validation/triggers должны быть отдельно инвентаризированы до production Writer.
+## Quick TRANSFER preview contract
+
+Базовая форма TRANSFER использует тот же exact amount/date/text contract, но не приписывает переводу недоказанный subtype:
+
+- source account выбирается как exact `fromAccount` из `syntheticPreviewEvidence.accounts`;
+- destination account выбирается как exact `toAccount` из того же списка;
+- source и destination обязаны различаться;
+- category отсутствует;
+- durable payload хранит `flowKind=null` **явно**; ни labels счетов, ни направление, ни description/note не превращаются в `OWN_FUNDS_TRANSFER`, `CREDIT_DRAW` или `CREDIT_REPAYMENT`;
+- до отдельного доказанного UX/semantics item preview показывает обычный «Перевод» без guessed classification.
+
+
+Все три формы — **preview UX contract**, а не доказанная копия Google Form/GAS. Legacy intake defaults/validation/triggers должны быть отдельно инвентаризированы до production Writer.
 
 ## Local outbox
 
@@ -55,6 +67,7 @@ Outbox принимает только strict known union:
 ```text
 CREATE_EXPENSE / PENDING
 CREATE_INCOME / PENDING
+CREATE_TRANSFER / PENDING
 ```
 
 Unknown kind/schema/state и malformed durable rows fail-closed и не считаются валидными pending intents. Browser ничего не normalizes/fixes при чтении повреждённого evidence.
@@ -103,30 +116,57 @@ INCOME durable intent:
 }
 ```
 
+TRANSFER durable intent:
+
+```text
+{
+  schemaVersion: 1,
+  intentId: canonical lowercase UUID,
+  kind: CREATE_TRANSFER,
+  state: PENDING,
+  createdAt: timestamp,
+  payload: {
+    type: TRANSFER,
+    occurredOn,
+    amountMinor,
+    currency: RUB,
+    fromAccount: { id, label },
+    toAccount: { id, label },
+    flowKind: null,
+    description: string | null,
+    note: string | null
+  }
+}
+```
+
+`category` в TRANSFER payload отсутствует. Non-null `flowKind`, одинаковые source/destination accounts или лишние поля считаются malformed durable evidence и fail-closed.
+
 ## Local drafts
 
-Незавершённая форма хранится отдельно от `PENDING` intent. EXPENSE и INCOME используют разные keys в одном `drafts` store:
+Незавершённая форма хранится отдельно от `PENDING` intent. EXPENSE, INCOME и TRANSFER используют разные keys в одном `drafts` store:
 
 ```text
 quick-expense
 quick-income
+quick-transfer
 ```
 
-Оба draft envelope имеют `schemaVersion=1`, `savedAt` и literal поля `amount`, `occurredOn`, `accountId`, `categoryId`, `description`, `note`.
+EXPENSE/INCOME draft envelope имеют `schemaVersion=1`, `savedAt` и literal поля `amount`, `occurredOn`, `accountId`, `categoryId`, `description`, `note`. TRANSFER draft использует те же metadata/text fields, но вместо category содержит два literal reference fields: `fromAccountId` и `toAccountId`.
 
-Draft — **не финансовый факт и не CanonicalTransaction**. Поля могут быть пустыми или ещё невалидными. При restore malformed envelope fail-closed игнорируется; stale/unknown account/category id не нормализуется и не fuzzy-map-ится, а восстанавливается пустым выбором. Для category дополнительно требуется exact текущий kind формы: EXPENSE или INCOME.
+Draft — **не финансовый факт и не CanonicalTransaction**. Поля могут быть пустыми или ещё невалидными. При restore malformed envelope fail-closed игнорируется; stale/unknown account/category id не нормализуется и не fuzzy-map-ится, а восстанавливается пустым выбором. Для category дополнительно требуется exact текущий kind формы: EXPENSE или INCOME. В TRANSFER source/destination refs восстанавливаются независимо; draft может оставаться incomplete/invalid до submit, включая одинаковые выбранные счета.
 
-Изменения формы сохраняют соответствующий draft локально без network round-trip. При submit Writer сначала ждёт уже поставленные draft writes, затем валидирует форму и durable commit-ит соответствующий `PENDING` intent в `outbox`. Только после успешного outbox commit удаляется **draft этой формы**. Ошибка enqueue не очищает draft. Income cleanup не удаляет expense draft и наоборот.
+Изменения формы сохраняют соответствующий draft локально без network round-trip. При submit Writer сначала ждёт уже поставленные draft writes, затем валидирует форму и durable commit-ит соответствующий `PENDING` intent в `outbox`. Только после успешного outbox commit удаляется **draft этой формы**. Ошибка enqueue не очищает draft. Cleanup одной формы не удаляет draft любой другой формы.
 
 После successful local commit и cleanup UI показывает `Сохранено локально · демо · не отправлено`. Если outbox committed, но draft cleanup не удался, UI честно показывает degraded local status.
 
 ## Network и authority boundary
 
-EXPENSE/INCOME local save path не содержит `fetch`, Reader API mutation, YDB/Google endpoint или provider credential.
+EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader API mutation, YDB/Google endpoint или provider credential.
 
 - EXPENSE имеет отдельные application/API/idempotency и injected ACK-delivery proofs;
-- INCOME также имеет отдельные application/idempotency и minimal public API envelope proofs; этот S-unit добавляет только injected ACK-delivery proof;
-- реальный browser HTTP sender для EXPENSE/INCOME всё ещё не подключён;
+- INCOME также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
+- TRANSFER в этом item имеет только synthetic durable draft/outbox UX proof; application/API/delivery для него ещё не заявлены;
+- реальный browser HTTP sender для EXPENSE/INCOME всё ещё не подключён; TRANSFER sender отсутствует полностью;
 - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
 - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
 - R1 #302 и production R2 auth/YDB wiring не обходятся.
@@ -151,9 +191,10 @@ INCOME использует отдельный type-specific preview delivery mo
 - Google Form/GAS intake parity;
 - real browser HTTP sender / API Gateway / private Function;
 - real INCOME HTTP sender / provider-bound delivery;
+- TRANSFER application/idempotency contract, API envelope и browser ACK delivery;
+- TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
 - `paid_by_member`;
-- TRANSFER;
 - edit / VOID / optimistic conflict;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.

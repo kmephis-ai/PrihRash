@@ -1,15 +1,20 @@
 import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewIncomeDraftStore,
+  createIndexedDbPreviewTransferDraftStore,
   createIndexedDbPreviewOutbox,
   createPreviewExpenseDraft,
   createPreviewExpenseIntent,
   createPreviewIncomeDraft,
   createPreviewIncomeIntent,
+  createPreviewTransferDraft,
+  createPreviewTransferIntent,
   enqueuePreviewExpenseThenClearDraft,
   enqueuePreviewIncomeThenClearDraft,
+  enqueuePreviewTransferThenClearDraft,
   restorePreviewExpenseDraft,
   restorePreviewIncomeDraft,
+  restorePreviewTransferDraft,
 } from './preview-writer-outbox.mjs';
 import { syntheticPreviewEvidence } from './preview-transport.mjs';
 
@@ -78,6 +83,31 @@ function panelMarkup(config) {
     </section>`;
 }
 
+function transferPanelMarkup() {
+  const accounts = syntheticPreviewEvidence.accounts;
+  return `
+    <section class="panel preview-writer" data-preview-writer="transfer">
+      <div class="section-head">
+        <div><span class="eyebrow">R3A · synthetic only</span><h2>Новый перевод · демо</h2></div>
+        <span>Только локально</span>
+      </div>
+      <p class="preview-writer__notice">Эта форма проверяет local-first перевод между выбранными демо-счетами. Вид перевода не угадывается и остаётся не задан.</p>
+      <form class="preview-writer__form" data-preview-transfer-form novalidate>
+        <label class="preview-writer__field"><span>Сумма, ₽</span><input name="amount" inputmode="decimal" autocomplete="off" placeholder="0,00" required></label>
+        <label class="preview-writer__field"><span>Дата</span><input name="occurredOn" type="date" required></label>
+        <label class="preview-writer__field"><span>Счёт списания</span><select name="fromAccountId" required><option value="">Выберите счёт</option>${optionMarkup(accounts)}</select></label>
+        <label class="preview-writer__field"><span>Счёт зачисления</span><select name="toAccountId" required><option value="">Выберите счёт</option>${optionMarkup(accounts)}</select></label>
+        <label class="preview-writer__field preview-writer__field--wide"><span>Описание</span><input name="description" autocomplete="off" placeholder="Необязательно"></label>
+        <label class="preview-writer__field preview-writer__field--wide"><span>Заметка</span><textarea name="note" rows="2" placeholder="Необязательно"></textarea></label>
+        <div class="preview-writer__actions">
+          <button type="submit" data-preview-transfer-save>Сохранить локально</button>
+          <span data-preview-transfer-pending-count>Локальная очередь переводов: проверяем…</span>
+        </div>
+        <p class="preview-writer__status" data-preview-transfer-writer-status role="status" aria-live="polite" aria-atomic="true">${DRAFT_STATUS}</p>
+      </form>
+    </section>`;
+}
+
 function formValue(form, name) {
   const field = form.elements.namedItem(name);
   if (!field || typeof field.value !== 'string') throw new Error('PREVIEW_WRITER_FORM_INVALID');
@@ -103,6 +133,23 @@ function setFormValue(form, name, value) {
 
 function restoreForm(form, values) {
   for (const name of ['amount', 'occurredOn', 'accountId', 'categoryId', 'description', 'note']) {
+    setFormValue(form, name, values[name]);
+  }
+}
+
+function transferFormInput(form) {
+  return {
+    amount: formValue(form, 'amount'),
+    occurredOn: formValue(form, 'occurredOn'),
+    fromAccountId: formValue(form, 'fromAccountId'),
+    toAccountId: formValue(form, 'toAccountId'),
+    description: formValue(form, 'description'),
+    note: formValue(form, 'note'),
+  };
+}
+
+function restoreTransferForm(form, values) {
+  for (const name of ['amount', 'occurredOn', 'fromAccountId', 'toAccountId', 'description', 'note']) {
     setFormValue(form, name, values[name]);
   }
 }
@@ -191,6 +238,94 @@ async function mountSyntheticPreviewWriter(config, {
     } catch (error) {
       status.textContent = error?.message === config.invalidInputCode
         ? 'Проверьте сумму, дату, счёт и категорию.'
+        : 'Не удалось сохранить локально.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+export async function mountSyntheticPreviewTransferWriter({
+  document = globalThis.document,
+  indexedDb = globalThis.indexedDB,
+  randomUuid = () => globalThis.crypto?.randomUUID?.(),
+  now = () => new Date().toISOString(),
+} = {}) {
+  if (!document?.querySelector) throw new Error('PREVIEW_WRITER_DOCUMENT_REQUIRED');
+  if (document.querySelector('[data-preview-writer="transfer"]')) return;
+  const main = document.querySelector('main');
+  if (!main) throw new Error('PREVIEW_WRITER_MAIN_REQUIRED');
+
+  const incomePanel = document.querySelector('[data-preview-writer="income"]');
+  const expensePanel = document.querySelector('[data-preview-writer="expense"]');
+  if (incomePanel) incomePanel.insertAdjacentHTML('afterend', transferPanelMarkup());
+  else if (expensePanel) expensePanel.insertAdjacentHTML('afterend', transferPanelMarkup());
+  else main.insertAdjacentHTML('afterbegin', transferPanelMarkup());
+
+  const panel = document.querySelector('[data-preview-writer="transfer"]');
+  const form = panel.querySelector('[data-preview-transfer-form]');
+  const button = panel.querySelector('[data-preview-transfer-save]');
+  const pending = panel.querySelector('[data-preview-transfer-pending-count]');
+  const status = panel.querySelector('[data-preview-transfer-writer-status]');
+  const outbox = createIndexedDbPreviewOutbox(indexedDb);
+  const draftStore = createIndexedDbPreviewTransferDraftStore(indexedDb);
+
+  async function refreshPending() {
+    try {
+      const intents = await outbox.listPending();
+      const count = intents.filter((intent) => intent.kind === 'CREATE_TRANSFER').length;
+      pending.textContent = `Локальная очередь переводов: ${count}`;
+    } catch {
+      pending.textContent = 'Локальная очередь переводов недоступна';
+    }
+  }
+
+  try {
+    const draft = await draftStore.load();
+    if (draft) {
+      restoreTransferForm(form, restorePreviewTransferDraft(draft, { accounts: syntheticPreviewEvidence.accounts }));
+      status.textContent = 'Черновик восстановлен локально · демо';
+    }
+  } catch {
+    status.textContent = 'Локальный черновик недоступен';
+  }
+
+  await refreshPending();
+
+  let draftWrite = Promise.resolve();
+  const saveDraft = () => {
+    const snapshot = transferFormInput(form);
+    draftWrite = draftWrite.then(async () => {
+      try {
+        await draftStore.save(createPreviewTransferDraft(snapshot, { now }));
+        status.textContent = 'Черновик сохранён локально · демо';
+      } catch {
+        status.textContent = 'Не удалось сохранить черновик локально.';
+      }
+    });
+  };
+
+  form.addEventListener('input', saveDraft);
+  form.addEventListener('change', saveDraft);
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    button.disabled = true;
+    try {
+      await draftWrite;
+      const intent = createPreviewTransferIntent(transferFormInput(form), {
+        accounts: syntheticPreviewEvidence.accounts,
+        randomUuid,
+        now,
+      });
+      const result = await enqueuePreviewTransferThenClearDraft({ outbox, draftStore, intent });
+      status.textContent = result.draftCleared
+        ? 'Сохранено локально · демо · не отправлено'
+        : 'Сохранено локально · демо · не отправлено · черновик не очищен';
+      await refreshPending();
+    } catch (error) {
+      status.textContent = error?.message === 'INVALID_PREVIEW_TRANSFER_INPUT'
+        ? 'Проверьте сумму, дату и счета. Счета должны различаться.'
         : 'Не удалось сохранить локально.';
     } finally {
       button.disabled = false;

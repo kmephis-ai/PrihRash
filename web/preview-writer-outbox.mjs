@@ -4,6 +4,7 @@ const OUTBOX_STORE_NAME = 'outbox';
 const DRAFT_STORE_NAME = 'drafts';
 const EXPENSE_DRAFT_KEY = 'quick-expense';
 const INCOME_DRAFT_KEY = 'quick-income';
+const TRANSFER_DRAFT_KEY = 'quick-transfer';
 const RECORD_SCHEMA_VERSION = 1;
 const DRAFT_SCHEMA_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -18,6 +19,10 @@ function invalidIncomeInput() {
   throw new Error('INVALID_PREVIEW_INCOME_INPUT');
 }
 
+function invalidTransferInput() {
+  throw new Error('INVALID_PREVIEW_TRANSFER_INPUT');
+}
+
 function invalidRecord() {
   throw new Error('INVALID_PREVIEW_OUTBOX_RECORD');
 }
@@ -28,6 +33,10 @@ function invalidExpenseDraft() {
 
 function invalidIncomeDraft() {
   throw new Error('INVALID_PREVIEW_INCOME_DRAFT');
+}
+
+function invalidTransferDraft() {
+  throw new Error('INVALID_PREVIEW_TRANSFER_DRAFT');
 }
 
 function canonicalUuid(value, fail = invalidExpenseInput) {
@@ -130,6 +139,10 @@ export function parsePreviewIncomeAmountMinor(value) {
   return parsePreviewAmountMinor(value, invalidIncomeInput);
 }
 
+export function parsePreviewTransferAmountMinor(value) {
+  return parsePreviewAmountMinor(value, invalidTransferInput);
+}
+
 function createIntentBase(input, { randomUuid, now, fail }) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail();
   const intentId = canonicalUuid(randomUuid(), fail);
@@ -194,6 +207,38 @@ export function createPreviewIncomeIntent(input, {
       currency: 'RUB',
       toAccount,
       category,
+      description,
+      note,
+    },
+  });
+}
+
+export function createPreviewTransferIntent(input, {
+  accounts,
+  randomUuid = () => globalThis.crypto?.randomUUID?.(),
+  now = () => new Date().toISOString(),
+} = {}) {
+  const { intentId, createdAt } = createIntentBase(input, { randomUuid, now, fail: invalidTransferInput });
+  const fromAccount = resolveUniqueRef(input.fromAccountId, accounts, invalidTransferInput);
+  const toAccount = resolveUniqueRef(input.toAccountId, accounts, invalidTransferInput);
+  if (fromAccount.id === toAccount.id) invalidTransferInput();
+  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidTransferInput);
+  const note = input.note === '' ? null : optionalLiteralText(input.note, invalidTransferInput);
+
+  return parsePreviewTransferIntent({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'CREATE_TRANSFER',
+    state: 'PENDING',
+    createdAt,
+    payload: {
+      type: 'TRANSFER',
+      occurredOn: canonicalDate(input.occurredOn, invalidTransferInput),
+      amountMinor: parsePreviewTransferAmountMinor(input.amount),
+      currency: 'RUB',
+      fromAccount,
+      toAccount,
+      flowKind: null,
       description,
       note,
     },
@@ -266,9 +311,45 @@ export function parsePreviewIncomeIntent(value) {
   });
 }
 
+export function parsePreviewTransferIntent(value) {
+  if (!exactKeys(value, ['schemaVersion', 'intentId', 'kind', 'state', 'createdAt', 'payload'])) invalidRecord();
+  if (value.schemaVersion !== RECORD_SCHEMA_VERSION || value.kind !== 'CREATE_TRANSFER' || value.state !== 'PENDING') invalidRecord();
+  const intentId = canonicalUuid(value.intentId, invalidRecord);
+  const createdAt = canonicalTimestamp(value.createdAt, invalidRecord);
+  if (!exactKeys(value.payload, ['type', 'occurredOn', 'amountMinor', 'currency', 'fromAccount', 'toAccount', 'flowKind', 'description', 'note'])) invalidRecord();
+  if (value.payload.type !== 'TRANSFER' || value.payload.currency !== 'RUB' || value.payload.flowKind !== null) invalidRecord();
+  if (!Number.isSafeInteger(value.payload.amountMinor) || value.payload.amountMinor <= 0) invalidRecord();
+  const occurredOn = canonicalDate(value.payload.occurredOn, invalidRecord);
+  const fromAccount = entityRef(value.payload.fromAccount, invalidRecord);
+  const toAccount = entityRef(value.payload.toAccount, invalidRecord);
+  if (fromAccount.id === toAccount.id) invalidRecord();
+  const description = optionalLiteralText(value.payload.description, invalidRecord);
+  const note = optionalLiteralText(value.payload.note, invalidRecord);
+
+  return Object.freeze({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'CREATE_TRANSFER',
+    state: 'PENDING',
+    createdAt,
+    payload: Object.freeze({
+      type: 'TRANSFER',
+      occurredOn,
+      amountMinor: value.payload.amountMinor,
+      currency: 'RUB',
+      fromAccount,
+      toAccount,
+      flowKind: null,
+      description,
+      note,
+    }),
+  });
+}
+
 export function parsePreviewIntent(value) {
   if (value?.kind === 'CREATE_EXPENSE') return parsePreviewExpenseIntent(value);
   if (value?.kind === 'CREATE_INCOME') return parsePreviewIncomeIntent(value);
+  if (value?.kind === 'CREATE_TRANSFER') return parsePreviewTransferIntent(value);
   invalidRecord();
 }
 
@@ -337,6 +418,49 @@ function restorePreviewDraft(draft, { accounts, categories, categoryKind, parseD
     occurredOn: safe.occurredOn,
     accountId: restorableAccountId(safe.accountId, accounts),
     categoryId: restorableCategoryId(safe.categoryId, categories, categoryKind),
+    description: safe.description,
+    note: safe.note,
+  });
+}
+
+export function createPreviewTransferDraft(input, { now = () => new Date().toISOString() } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) invalidTransferDraft();
+  return parsePreviewTransferDraft({
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    draftKey: TRANSFER_DRAFT_KEY,
+    savedAt: now(),
+    amount: input.amount,
+    occurredOn: input.occurredOn,
+    fromAccountId: input.fromAccountId,
+    toAccountId: input.toAccountId,
+    description: input.description,
+    note: input.note,
+  });
+}
+
+export function parsePreviewTransferDraft(value) {
+  if (!exactKeys(value, ['schemaVersion', 'draftKey', 'savedAt', 'amount', 'occurredOn', 'fromAccountId', 'toAccountId', 'description', 'note'])) invalidTransferDraft();
+  if (value.schemaVersion !== DRAFT_SCHEMA_VERSION || value.draftKey !== TRANSFER_DRAFT_KEY) invalidTransferDraft();
+  return Object.freeze({
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    draftKey: TRANSFER_DRAFT_KEY,
+    savedAt: canonicalTimestamp(value.savedAt, invalidTransferDraft),
+    amount: literalDraftField(value.amount, invalidTransferDraft),
+    occurredOn: literalDraftField(value.occurredOn, invalidTransferDraft),
+    fromAccountId: literalDraftField(value.fromAccountId, invalidTransferDraft),
+    toAccountId: literalDraftField(value.toAccountId, invalidTransferDraft),
+    description: literalDraftField(value.description, invalidTransferDraft),
+    note: literalDraftField(value.note, invalidTransferDraft),
+  });
+}
+
+export function restorePreviewTransferDraft(draft, { accounts } = {}) {
+  const safe = parsePreviewTransferDraft(draft);
+  return Object.freeze({
+    amount: safe.amount,
+    occurredOn: safe.occurredOn,
+    fromAccountId: restorableAccountId(safe.fromAccountId, accounts),
+    toAccountId: restorableAccountId(safe.toAccountId, accounts),
     description: safe.description,
     note: safe.note,
   });
@@ -502,6 +626,13 @@ export function createIndexedDbPreviewIncomeDraftStore(indexedDb = globalThis.in
   });
 }
 
+export function createIndexedDbPreviewTransferDraftStore(indexedDb = globalThis.indexedDB) {
+  return createIndexedDbPreviewDraftStoreFor(indexedDb, {
+    draftKey: TRANSFER_DRAFT_KEY,
+    parseDraft: parsePreviewTransferDraft,
+  });
+}
+
 async function enqueuePreviewIntentThenClearDraft({ outbox, draftStore, intent }) {
   const saved = await outbox.enqueue(intent);
   try {
@@ -520,6 +651,10 @@ export async function enqueuePreviewIncomeThenClearDraft(args) {
   return enqueuePreviewIntentThenClearDraft(args);
 }
 
+export async function enqueuePreviewTransferThenClearDraft(args) {
+  return enqueuePreviewIntentThenClearDraft(args);
+}
+
 export const previewOutboxContract = Object.freeze({
   dbName: DB_NAME,
   dbVersion: DB_VERSION,
@@ -529,5 +664,6 @@ export const previewOutboxContract = Object.freeze({
   draftKey: EXPENSE_DRAFT_KEY,
   expenseDraftKey: EXPENSE_DRAFT_KEY,
   incomeDraftKey: INCOME_DRAFT_KEY,
+  transferDraftKey: TRANSFER_DRAFT_KEY,
   draftSchemaVersion: DRAFT_SCHEMA_VERSION,
 });

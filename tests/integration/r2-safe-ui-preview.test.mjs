@@ -21,23 +21,31 @@ import {
 import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewIncomeDraftStore,
+  createIndexedDbPreviewTransferDraftStore,
   createIndexedDbPreviewOutbox,
   createPreviewExpenseDraft,
   createPreviewExpenseIntent,
   createPreviewIncomeDraft,
   createPreviewIncomeIntent,
+  createPreviewTransferDraft,
+  createPreviewTransferIntent,
   enqueuePreviewExpenseThenClearDraft,
   enqueuePreviewIncomeThenClearDraft,
+  enqueuePreviewTransferThenClearDraft,
   parsePreviewExpenseAmountMinor,
   parsePreviewExpenseDraft,
   parsePreviewExpenseIntent,
   parsePreviewIncomeAmountMinor,
   parsePreviewIncomeDraft,
   parsePreviewIncomeIntent,
+  parsePreviewTransferAmountMinor,
+  parsePreviewTransferDraft,
+  parsePreviewTransferIntent,
   parsePreviewIntent,
   previewOutboxContract,
   restorePreviewExpenseDraft,
   restorePreviewIncomeDraft,
+  restorePreviewTransferDraft,
 } from '../../web/preview-writer-outbox.mjs';
 
 function createTransport() {
@@ -282,6 +290,27 @@ function previewIncomeIntent(overrides = {}) {
   });
 }
 
+function previewTransferInput(overrides = {}) {
+  return {
+    amount: '500,00',
+    occurredOn: '2026-09-10',
+    fromAccountId: syntheticPreviewEvidence.accounts[0].id,
+    toAccountId: syntheticPreviewEvidence.accounts[2].id,
+    description: 'В другой счёт · демо',
+    note: '',
+    ...overrides,
+  };
+}
+
+function previewTransferIntent(overrides = {}) {
+  return createPreviewTransferIntent(previewTransferInput(), {
+    accounts: syntheticPreviewEvidence.accounts,
+    randomUuid: () => '52000000-0000-0000-0000-000000000001',
+    now: () => '2026-09-10T05:45:00.000Z',
+    ...overrides,
+  });
+}
+
 test('R3A preview amount parser uses exact RUB minor units without float rounding', () => {
   assert.equal(parsePreviewExpenseAmountMinor('1'), 100);
   assert.equal(parsePreviewExpenseAmountMinor('1,2'), 120);
@@ -384,24 +413,86 @@ test('R3A preview INCOME accepts only exact destination account and INCOME categ
   }), /INVALID_PREVIEW_INCOME_INPUT/u);
 });
 
-test('R3A preview strict outbox union accepts EXPENSE and INCOME while unknown kinds fail closed', async () => {
+test('R3A preview TRANSFER amount parser reuses exact RUB minor-unit semantics', () => {
+  assert.equal(parsePreviewTransferAmountMinor('1'), 100);
+  assert.equal(parsePreviewTransferAmountMinor('1,2'), 120);
+  assert.equal(parsePreviewTransferAmountMinor('500.75'), 50075);
+  assert.equal(parsePreviewTransferAmountMinor('0,01'), 1);
+  for (const value of ['0', '0.00', '-1', '1.234', '1e2', ' 1', '01']) {
+    assert.throws(() => parsePreviewTransferAmountMinor(value), /INVALID_PREVIEW_TRANSFER_INPUT/u);
+  }
+});
+
+test('R3A preview creates one immutable PENDING TRANSFER intent with distinct exact accounts and no category', () => {
+  const intent = previewTransferIntent();
+  assert.equal(intent.schemaVersion, 1);
+  assert.equal(intent.kind, 'CREATE_TRANSFER');
+  assert.equal(intent.state, 'PENDING');
+  assert.equal(intent.payload.type, 'TRANSFER');
+  assert.equal(intent.payload.amountMinor, 50000);
+  assert.equal(intent.payload.currency, 'RUB');
+  assert.equal(intent.payload.fromAccount.id, syntheticPreviewEvidence.accounts[0].id);
+  assert.equal(intent.payload.toAccount.id, syntheticPreviewEvidence.accounts[2].id);
+  assert.notEqual(intent.payload.fromAccount.id, intent.payload.toAccount.id);
+  assert.equal(intent.payload.flowKind, null);
+  assert.equal('category' in intent.payload, false);
+  assert.equal(intent.payload.note, null);
+  assert.equal(Object.isFrozen(intent), true);
+  assert.equal(Object.isFrozen(intent.payload), true);
+});
+
+test('R3A preview TRANSFER fails closed for same or unresolved accounts and never infers flow kind', () => {
+  const options = {
+    accounts: syntheticPreviewEvidence.accounts,
+    randomUuid: () => '52000000-0000-0000-0000-000000000002',
+    now: () => '2026-09-10T05:45:00.000Z',
+  };
+  assert.throws(
+    () => createPreviewTransferIntent(previewTransferInput({ toAccountId: previewTransferInput().fromAccountId }), options),
+    /INVALID_PREVIEW_TRANSFER_INPUT/u,
+  );
+  assert.throws(
+    () => createPreviewTransferIntent(previewTransferInput({ fromAccountId: 'not-a-uuid' }), options),
+    /INVALID_PREVIEW_TRANSFER_INPUT/u,
+  );
+  assert.throws(
+    () => createPreviewTransferIntent(previewTransferInput({ toAccountId: '92000000-0000-0000-0000-000000000099' }), options),
+    /INVALID_PREVIEW_TRANSFER_INPUT/u,
+  );
+  assert.throws(
+    () => createPreviewTransferIntent(previewTransferInput({ occurredOn: '2026-02-31' }), options),
+    /INVALID_PREVIEW_TRANSFER_INPUT/u,
+  );
+  const intent = previewTransferIntent();
+  assert.throws(() => parsePreviewTransferIntent({ ...intent, payload: { ...intent.payload, flowKind: 'OWN_FUNDS_TRANSFER' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+});
+
+test('R3A preview strict outbox union accepts EXPENSE, INCOME and TRANSFER while unknown kinds fail closed', async () => {
   const expense = previewExpenseIntent();
   const income = previewIncomeIntent();
+  const transfer = previewTransferIntent();
   assert.equal(parsePreviewIntent(expense).kind, 'CREATE_EXPENSE');
   assert.equal(parsePreviewIntent(income).kind, 'CREATE_INCOME');
+  assert.equal(parsePreviewIntent(transfer).kind, 'CREATE_TRANSFER');
   assert.equal(parsePreviewIncomeIntent(income).payload.toAccount.id, income.payload.toAccount.id);
+  assert.equal(parsePreviewTransferIntent(transfer).payload.flowKind, null);
   assert.throws(() => parsePreviewIncomeIntent({ ...income, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
   assert.throws(() => parsePreviewIncomeIntent({ ...income, payload: { ...income.payload, category: { ...income.payload.category, kind: 'EXPENSE' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
-  assert.throws(() => parsePreviewIntent({ ...income, kind: 'CREATE_TRANSFER' }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewTransferIntent({ ...transfer, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewTransferIntent({ ...transfer, payload: { ...transfer.payload, currency: 'USD' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewTransferIntent({ ...transfer, payload: { ...transfer.payload, category: null } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewTransferIntent({ ...transfer, payload: { ...transfer.payload, toAccount: transfer.payload.fromAccount } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewIntent({ ...transfer, kind: 'CREATE_VOID' }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
 
-  const unknown = { ...income, intentId: '51000000-0000-0000-0000-000000000099', kind: 'CREATE_TRANSFER' };
+  const unknown = { ...transfer, intentId: '52000000-0000-0000-0000-000000000099', kind: 'CREATE_VOID' };
   const fake = createPreviewOutboxFakeIndexedDb([unknown]);
   const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
   assert.equal(await outbox.countPending(), 0);
   await outbox.enqueue(expense);
   await outbox.enqueue(income);
-  assert.equal(await outbox.countPending(), 2);
-  assert.deepEqual((await outbox.listPending()).map((item) => item.kind).sort(), ['CREATE_EXPENSE', 'CREATE_INCOME']);
+  await outbox.enqueue(transfer);
+  assert.equal(await outbox.countPending(), 3);
+  assert.deepEqual((await outbox.listPending()).map((item) => item.kind).sort(), ['CREATE_EXPENSE', 'CREATE_INCOME', 'CREATE_TRANSFER']);
 });
 
 test('R3A preview preserves literal optional text while empty form values become null', () => {
@@ -458,8 +549,9 @@ test('R3A Writer is injected by synthetic preview only; production Reader stays 
   const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
   assert.match(bootstrap, /preview-writer\.mjs/u);
   assert.match(bootstrap, /mountSyntheticPreviewIncomeWriter/u);
+  assert.match(bootstrap, /mountSyntheticPreviewTransferWriter/u);
   assert.match(productionShell, />Только чтение</u);
-  assert.doesNotMatch(productionShell, /Новый расход|Новый доход|data-preview-writer|Сохранить локально/u);
+  assert.doesNotMatch(productionShell, /Новый расход|Новый доход|Новый перевод|data-preview-writer|Сохранить локально/u);
   assert.doesNotMatch(productionApp, /preview-writer|CREATE_EXPENSE|Сохранить локально/u);
   const productionStyles = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(productionStyles, /preview-writer/u);
@@ -555,19 +647,49 @@ test('R3A preview INCOME draft preserves incomplete literals and restores only e
   assert.equal(current.categoryId, previewIncomeInput().categoryId);
 });
 
-test('R3A preview EXPENSE and INCOME drafts use isolated keys and income clear never deletes expense draft', async () => {
+test('R3A preview TRANSFER draft preserves incomplete literals and restores source/destination refs independently', () => {
+  const draft = createPreviewTransferDraft({
+    amount: '9,',
+    occurredOn: '2026-0',
+    fromAccountId: syntheticPreviewEvidence.accounts[0].id,
+    toAccountId: '92000000-0000-0000-0000-000000000099',
+    description: '  literal transfer draft  ',
+    note: 'unfinished',
+  }, { now: () => '2026-09-10T05:46:00.000Z' });
+  assert.equal(draft.draftKey, previewOutboxContract.transferDraftKey);
+  assert.equal(parsePreviewTransferDraft(draft).amount, '9,');
+  assert.throws(() => parsePreviewTransferDraft({ ...draft, fromAccountId: null }), /INVALID_PREVIEW_TRANSFER_DRAFT/u);
+
+  const restored = restorePreviewTransferDraft(draft, { accounts: syntheticPreviewEvidence.accounts });
+  assert.equal(restored.fromAccountId, syntheticPreviewEvidence.accounts[0].id);
+  assert.equal(restored.toAccountId, '');
+  assert.equal(restored.description, '  literal transfer draft  ');
+
+  const bothCurrent = restorePreviewTransferDraft(createPreviewTransferDraft(previewTransferInput(), {
+    now: () => '2026-09-10T05:46:00.000Z',
+  }), { accounts: syntheticPreviewEvidence.accounts });
+  assert.equal(bothCurrent.fromAccountId, previewTransferInput().fromAccountId);
+  assert.equal(bothCurrent.toAccountId, previewTransferInput().toAccountId);
+});
+
+test('R3A preview EXPENSE, INCOME and TRANSFER drafts use isolated keys and clears stay type-local', async () => {
   const fake = createPreviewWriterFakeIndexedDb({ version: 2 });
   const expenseStore = createIndexedDbPreviewDraftStore(fake.indexedDb);
   const incomeStore = createIndexedDbPreviewIncomeDraftStore(fake.indexedDb);
+  const transferStore = createIndexedDbPreviewTransferDraftStore(fake.indexedDb);
   const expenseDraft = createPreviewExpenseDraft(previewExpenseInput(), { now: () => '2026-09-10T05:32:00.000Z' });
   const incomeDraft = createPreviewIncomeDraft(previewIncomeInput(), { now: () => '2026-09-10T05:32:00.000Z' });
+  const transferDraft = createPreviewTransferDraft(previewTransferInput(), { now: () => '2026-09-10T05:32:00.000Z' });
   await expenseStore.save(expenseDraft);
   await incomeStore.save(incomeDraft);
+  await transferStore.save(transferDraft);
   assert.equal((await expenseStore.load()).draftKey, previewOutboxContract.expenseDraftKey);
   assert.equal((await incomeStore.load()).draftKey, previewOutboxContract.incomeDraftKey);
-  await incomeStore.clear();
-  assert.equal(await incomeStore.load(), null);
+  assert.equal((await transferStore.load()).draftKey, previewOutboxContract.transferDraftKey);
+  await transferStore.clear();
+  assert.equal(await transferStore.load(), null);
   assert.equal((await expenseStore.load()).draftKey, previewOutboxContract.expenseDraftKey);
+  assert.equal((await incomeStore.load()).draftKey, previewOutboxContract.incomeDraftKey);
 });
 
 test('R3A preview IndexedDB v1 to v2 upgrade adds drafts without losing existing outbox intents', async () => {
@@ -631,6 +753,33 @@ test('R3A preview INCOME commits outbox before clearing only its draft and prese
   assert.deepEqual(events, ['enqueue']);
 });
 
+test('R3A preview TRANSFER commits outbox before clearing only its draft and preserves draft on enqueue failure', async () => {
+  const intent = previewTransferIntent();
+  const events = [];
+  const success = await enqueuePreviewTransferThenClearDraft({
+    outbox: { enqueue: async (value) => { events.push('enqueue'); return value; } },
+    draftStore: { clear: async () => { events.push('clear-transfer'); } },
+    intent,
+  });
+  assert.deepEqual(events, ['enqueue', 'clear-transfer']);
+  assert.equal(success.draftCleared, true);
+
+  events.length = 0;
+  await assert.rejects(enqueuePreviewTransferThenClearDraft({
+    outbox: { enqueue: async () => { events.push('enqueue'); throw new Error('failed'); } },
+    draftStore: { clear: async () => { events.push('clear-transfer'); } },
+    intent,
+  }), /failed/u);
+  assert.deepEqual(events, ['enqueue']);
+
+  const degraded = await enqueuePreviewTransferThenClearDraft({
+    outbox: { enqueue: async (value) => value },
+    draftStore: { clear: async () => { throw new Error('failed'); } },
+    intent,
+  });
+  assert.equal(degraded.draftCleared, false);
+});
+
 test('R3A draft mechanics remain preview-only and contain no network/provider write path', async () => {
   const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
   const storageSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
@@ -639,8 +788,11 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   assert.match(writerSource, /Черновик сохранён локально · демо/u);
   assert.match(writerSource, /enqueuePreviewExpenseThenClearDraft/u);
   assert.match(writerSource, /enqueuePreviewIncomeThenClearDraft/u);
+  assert.match(writerSource, /enqueuePreviewTransferThenClearDraft/u);
   assert.match(writerSource, /Новый доход · демо/u);
+  assert.match(writerSource, /Новый перевод · демо/u);
   assert.equal(previewOutboxContract.incomeDraftKey, 'quick-income');
+  assert.equal(previewOutboxContract.transferDraftKey, 'quick-transfer');
   assert.match(storageSource, /createObjectStore\(DRAFT_STORE_NAME/u);
   for (const source of [writerSource, storageSource]) {
     assert.doesNotMatch(source, /\bfetch\s*\(/u);
@@ -650,9 +802,27 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   const productionShell = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
   const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer|Новый доход/u);
+  assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer|Новый доход|Новый перевод/u);
   assert.doesNotMatch(productionApp, /drafts|preview-writer/u);
   assert.doesNotMatch(productionServiceWorker, /preview-writer|drafts/u);
+});
+
+test('R3A synthetic TRANSFER panel has two account selectors, no category selector, and no flow-kind inference', async () => {
+  const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
+  const start = writerSource.indexOf('function transferPanelMarkup()');
+  const end = writerSource.indexOf('function formValue(', start);
+  assert.notEqual(start, -1);
+  assert.equal(end > start, true);
+  const transferPanel = writerSource.slice(start, end);
+  assert.match(transferPanel, /name="fromAccountId"/u);
+  assert.match(transferPanel, /name="toAccountId"/u);
+  assert.doesNotMatch(transferPanel, /categoryId|Категория/u);
+  assert.match(transferPanel, /Вид перевода не угадывается и остаётся не задан/u);
+
+  const outboxSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
+  assert.match(outboxSource, /flowKind:\s*null/u);
+  assert.doesNotMatch(outboxSource, /OWN_FUNDS_TRANSFER|CREDIT_DRAW|CREDIT_REPAYMENT/u);
+  assert.doesNotMatch(writerSource, /OWN_FUNDS_TRANSFER|CREDIT_DRAW|CREDIT_REPAYMENT/u);
 });
 
 test('R3A preview delivery maps PENDING intent to minimal create request without local labels/metadata', () => {
