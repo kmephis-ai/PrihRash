@@ -26,6 +26,7 @@ export function createPreviewExpenseCreateApiRequest(intent) {
     currency: 'RUB',
     fromAccountId: safe.payload.fromAccount.id,
     categoryId: safe.payload.category.id,
+    paidByMemberId: safe.schemaVersion === 1 ? null : safe.payload.paidByMember?.id ?? null,
     description: safe.payload.description,
     note: safe.payload.note,
   });

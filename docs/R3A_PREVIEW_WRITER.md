@@ -20,6 +20,7 @@ Writer подключается только через synthetic `preview-boots
 - `occurred_on` как valid full `YYYY-MM-DD`;
 - source account из exact `syntheticPreviewEvidence.accounts`;
 - category из exact `syntheticPreviewEvidence.categories` только при `kind=EXPENSE`;
+- optional payer из exact synthetic member references, независимо от payment account; `Не указан` сохраняется как `null`, без inference другого member;
 - optional literal description;
 - optional literal note.
 
@@ -72,11 +73,11 @@ CREATE_TRANSFER / PENDING
 
 Unknown kind/schema/state и malformed durable rows fail-closed и не считаются валидными pending intents. Browser ничего не normalizes/fixes при чтении повреждённого evidence.
 
-EXPENSE durable intent:
+EXPENSE durable intent для новых local saves:
 
 ```text
 {
-  schemaVersion: 1,
+  schemaVersion: 2,
   intentId: canonical lowercase UUID,
   kind: CREATE_EXPENSE,
   state: PENDING,
@@ -88,11 +89,14 @@ EXPENSE durable intent:
     currency: RUB,
     fromAccount: { id, label },
     category: { id, label, kind: EXPENSE },
+    paidByMember: { id, label } | null,
     description: string | null,
     note: string | null
   }
 }
 ```
+
+Legacy EXPENSE `schemaVersion=1` остаётся строгим читаемым форматом: его payload не имеет `paidByMember`. Read/list не переписывает такой durable row. При delivery отсутствие поля в доказанном старом local schema переводится в обязательный application request `paidByMemberId=null`; это compatibility mapping локального preview-формата, а не вывод плательщика из финансовых данных. `schemaVersion=1` с самовольно добавленным payer-полем и `schemaVersion=2` без payer-поля fail-closed.
 
 INCOME durable intent:
 
@@ -151,9 +155,9 @@ quick-income
 quick-transfer
 ```
 
-EXPENSE/INCOME draft envelope имеют `schemaVersion=1`, `savedAt` и literal поля `amount`, `occurredOn`, `accountId`, `categoryId`, `description`, `note`. TRANSFER draft использует те же metadata/text fields, но вместо category содержит два literal reference fields: `fromAccountId` и `toAccountId`.
+Новый EXPENSE draft имеет `schemaVersion=2`, `savedAt` и literal поля `amount`, `occurredOn`, `accountId`, `categoryId`, `paidByMemberId`, `description`, `note`. Legacy EXPENSE draft `schemaVersion=1` без payer-поля остаётся читаемым и восстанавливает `Кто оплатил = Не указан` без rewrite. INCOME draft остаётся `schemaVersion=1` с полями `amount`, `occurredOn`, `accountId`, `categoryId`, `description`, `note`. TRANSFER draft использует те же metadata/text fields, но вместо category содержит два literal reference fields: `fromAccountId` и `toAccountId`.
 
-Draft — **не финансовый факт и не CanonicalTransaction**. Поля могут быть пустыми или ещё невалидными. При restore malformed envelope fail-closed игнорируется; stale/unknown account/category id не нормализуется и не fuzzy-map-ится, а восстанавливается пустым выбором. Для category дополнительно требуется exact текущий kind формы: EXPENSE или INCOME. В TRANSFER source/destination refs восстанавливаются независимо; draft может оставаться incomplete/invalid до submit, включая одинаковые выбранные счета.
+Draft — **не финансовый факт и не CanonicalTransaction**. Поля могут быть пустыми или ещё невалидными. При restore malformed envelope fail-closed игнорируется; stale/unknown account/category/member id не нормализуется и не fuzzy-map-ится, а восстанавливается пустым выбором. Для payer дополнительно требуется ровно один exact member reference; ambiguous duplicate evidence также восстанавливается как `Не указан`. Для category дополнительно требуется exact текущий kind формы: EXPENSE или INCOME. В TRANSFER source/destination refs восстанавливаются независимо; draft может оставаться incomplete/invalid до submit, включая одинаковые выбранные счета.
 
 Изменения формы сохраняют соответствующий draft локально без network round-trip. При submit Writer сначала ждёт уже поставленные draft writes, затем валидирует форму и durable commit-ит соответствующий `PENDING` intent в `outbox`. Только после успешного outbox commit удаляется **draft этой формы**. Ошибка enqueue не очищает draft. Cleanup одной формы не удаляет draft любой другой формы.
 
@@ -176,6 +180,7 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
 Существующий preview-only delivery layer относится только к `CREATE_EXPENSE / PENDING` и связывает его с public EXPENSE create API envelope без реального HTTP transport.
 
 - `intentId` передаётся как `idempotencyKey`;
+- `paidByMemberId` всегда присутствует в create request: exact selected member id для EXPENSE v2 либо `null` для `Не указан`/strict legacy v1; local member label наружу не передаётся;
 - sender является injected `sendExpenseCreate(request)` port;
 - valid ACK обязан точно соответствовать create API v1: `apiVersion=1`, `CREATED|REPLAY`, тот же `idempotencyKey`, отдельный canonical `transactionId`, `version=1`;
 - malformed/mismatched ACK или sender failure не удаляет local intent;
@@ -211,7 +216,6 @@ Malformed/mismatched current-read или ACK оставляет локальны
 - real TRANSFER HTTP sender / provider-bound delivery;
 - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
-- create-time `paid_by_member` UX/delivery;
 - real production browser edit/current-record transport;
 - INCOME/TRANSFER edit;
 - VOID;
