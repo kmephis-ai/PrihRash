@@ -218,6 +218,6 @@ Malformed/mismatched current-read или ACK оставляет локальны
 - automatic retry/sync scheduler;
 - real production browser edit/current-record transport;
 - INCOME/TRANSFER edit;
-- VOID;
+- browser/local VOID confirmation, outbox и delivery;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.

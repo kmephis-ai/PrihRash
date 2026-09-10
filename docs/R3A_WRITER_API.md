@@ -300,15 +300,33 @@ Preview browser conflict proof не расширяет public ACK финансо
 
 Safe exception codes: `INVALID_REQUEST`, `TRANSACTION_NOT_FOUND`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `CATEGORY_KIND_INVALID`, `REFERENCE_READ_FAILED`, `STORE_OPERATION_FAILED`, `STORE_CONTRACT_INVALID`. Raw provider/store/reference diagnostics наружу не отражаются.
 
+## Optimistic Transaction VOID v1
+
+`optimisticTransactionVoid.ts` добавляет provider-neutral application transition `POSTED → VOIDED` для ordinary `EXPENSE | INCOME | TRANSFER`. Это status transition существующей exact Transaction, а не delete: contract не содержит delete/remove port и не создаёт новую transaction identity.
+
+Request имеет ровно два поля:
+
+```text
+transactionId     canonical lowercase UUID
+expectedVersion   positive safe integer
+```
+
+`readCurrent(transactionId)` обязан вернуть exact versioned canonical Transaction либо `null`. Contract принимает только `recordGranularity=TRANSACTION`, `datePrecision=DAY`, `aggregatePeriodMonth=null`, valid RUB/domain shape и strict canonical fields. `PERIOD_AGGREGATE`, `UNKNOWN`, malformed ids/version/status/analytics/flow и другие невозможные store states fail-closed как `STORE_CONTRACT_INVALID`. VOID не выполняет reference lookup и не пытается повторно вывести category kind, payer или другой финансовый смысл: существующие account/category/payer/date/amount/note/type/flow/analytics/period fields сохраняются value-equivalent.
+
+Если pre-read version отличается от `expectedVersion`, normal outcome — `VERSION_CONFLICT` с текущей version и без mutation. Если version совпадает, но current status уже `VOIDED`, normal outcome — `ALREADY_VOIDED`, также без mutation. Для exact `POSTED` строится candidate с единственным domain изменением `status=VOIDED` и `version=expectedVersion+1`.
+
+Atomic store port `voidIfVersion({transactionId, expectedVersion, candidate})` обязан либо вернуть `VOIDED` с exact promoted candidate, либо race `VERSION_CONFLICT` с более новой version. Successful result повторно проверяется: id, version и каждый canonical field должны совпасть с candidate; changed financial payload, unchanged `POSTED`, impossible version или malformed outcome → `STORE_CONTRACT_INVALID`. Store exceptions санитизируются как `STORE_OPERATION_FAILED`; missing transaction — `TRANSACTION_NOT_FOUND`; malformed request — `INVALID_REQUEST`.
+
+Application response vocabulary: `VOIDED | ALREADY_VOIDED | VERSION_CONFLICT`. Public API envelope, browser confirmation, local outbox/retry и provider/YDB persistence этим contract ещё не определены. FIN-TRUTH остаётся прежним: `VOIDED` видим как historical fact, но исключён из normal analytics/PeriodClose.
+
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
 - real TRANSFER HTTP sender и выбор `flow_kind`;
-- create-time `paid_by` UX/API/delivery;
 - real production browser EXPENSE edit/current-record transport;
 - INCOME/TRANSFER edit;
-- VOID;
+- public VOID API envelope, browser confirmation/outbox/retry и provider persistence;
 - Google Form/GAS intake parity;
 - production Writer, R4, CUTOVER.
