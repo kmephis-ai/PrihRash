@@ -33,11 +33,35 @@ Preview Writer использует отдельный IndexedDB namespace:
 
 ```text
 DB: prihrash-r3a-preview
-version: 1
-store: outbox
+version: 2
+stores:
+  - outbox
+  - drafts
 ```
 
-Он намеренно не использует Reader cache DB `prihrash-reader`.
+Он намеренно не использует Reader cache DB `prihrash-reader`. DB `v2` — additive migration: при upgrade с `v1` существующий `outbox` не удаляется и не переписывается, добавляется только отсутствующий store `drafts`.
+
+## Local draft
+
+Незавершённая форма хранится отдельно от `PENDING` intent:
+
+```text
+{
+  schemaVersion: 1,
+  draftKey: quick-expense,
+  savedAt: timestamp,
+  amount: string,
+  occurredOn: string,
+  accountId: string,
+  categoryId: string,
+  description: string,
+  note: string
+}
+```
+
+Draft — **не финансовый факт и не CanonicalTransaction**. Поэтому его поля могут быть пустыми или ещё невалидными: это literal состояние формы. При restore malformed envelope fail-closed игнорируется; stale/unknown account/category id не нормализуется и не fuzzy-map-ится, а восстанавливается пустым выбором. Остальные literal поля сохраняются без классификации/inference.
+
+Изменения формы сохраняют draft локально без network round-trip. При submit Writer сначала ждёт уже поставленные draft writes, затем валидирует форму как EXPENSE intent и durable commit-ит `PENDING` в `outbox`. Только после успешного outbox commit выполняется удаление draft. Ошибка enqueue не очищает draft. Если outbox уже committed, но cleanup draft не удался, UI честно показывает degraded local status вместо утверждения о полном cleanup.
 
 Versioned durable intent:
 
@@ -61,7 +85,7 @@ Versioned durable intent:
 }
 ```
 
-Enqueue заканчивается после IndexedDB commit. После успешного local commit UI показывает `Сохранено локально · демо · не отправлено` и обновляет durable pending count.
+Enqueue заканчивается после IndexedDB commit. После успешного local commit и successful draft cleanup UI показывает `Сохранено локально · демо · не отправлено` и обновляет durable pending count.
 
 Malformed durable rows fail-closed и не считаются валидными pending intents. Browser ничего не normalizes/fixes при чтении повреждённого outbox evidence.
 
@@ -71,7 +95,7 @@ Save path не содержит `fetch`, Reader API mutation, YDB/Google endpoin
 
 Следовательно:
 
-- offline local save уже можно проверять как UX/mechanics proof;
+- offline local save и reload-safe draft уже можно проверять как UX/mechanics proof;
 - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
 - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
 - R1 #302 и production R2 auth/YDB wiring этим S-unit не обходятся.

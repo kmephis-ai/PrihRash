@@ -1,7 +1,10 @@
 const DB_NAME = 'prihrash-r3a-preview';
-const DB_VERSION = 1;
-const STORE_NAME = 'outbox';
+const DB_VERSION = 2;
+const OUTBOX_STORE_NAME = 'outbox';
+const DRAFT_STORE_NAME = 'drafts';
+const DRAFT_KEY = 'quick-expense';
 const RECORD_SCHEMA_VERSION = 1;
+const DRAFT_SCHEMA_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:[.,]\d{1,2})?$/u;
@@ -12,6 +15,10 @@ function invalidInput() {
 
 function invalidRecord() {
   throw new Error('INVALID_PREVIEW_OUTBOX_RECORD');
+}
+
+function invalidDraft() {
+  throw new Error('INVALID_PREVIEW_EXPENSE_DRAFT');
 }
 
 function canonicalUuid(value, fail = invalidInput) {
@@ -56,6 +63,11 @@ function optionalLiteralText(value, fail = invalidRecord) {
   return value;
 }
 
+function literalDraftField(value) {
+  if (typeof value !== 'string') invalidDraft();
+  return value;
+}
+
 function exactKeys(value, keys) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const actual = Object.keys(value).sort();
@@ -77,6 +89,17 @@ function resolveUniqueExpenseCategory(id, values) {
   const matches = values.filter((item) => item?.id === id);
   if (matches.length !== 1) invalidInput();
   return expenseCategoryRef(matches[0], invalidInput);
+}
+
+function restorableAccountId(id, accounts) {
+  if (typeof id !== 'string' || !Array.isArray(accounts)) return '';
+  return accounts.filter((item) => item?.id === id).length === 1 ? id : '';
+}
+
+function restorableExpenseCategoryId(id, categories) {
+  if (typeof id !== 'string' || !Array.isArray(categories)) return '';
+  const matches = categories.filter((item) => item?.id === id && item?.kind === 'EXPENSE');
+  return matches.length === 1 ? id : '';
 }
 
 export function parsePreviewExpenseAmountMinor(value) {
@@ -157,53 +180,102 @@ export function parsePreviewExpenseIntent(value) {
   });
 }
 
+export function createPreviewExpenseDraft(input, { now = () => new Date().toISOString() } = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) invalidDraft();
+  return parsePreviewExpenseDraft({
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    draftKey: DRAFT_KEY,
+    savedAt: now(),
+    amount: input.amount,
+    occurredOn: input.occurredOn,
+    accountId: input.accountId,
+    categoryId: input.categoryId,
+    description: input.description,
+    note: input.note,
+  });
+}
+
+export function parsePreviewExpenseDraft(value) {
+  if (!exactKeys(value, ['schemaVersion', 'draftKey', 'savedAt', 'amount', 'occurredOn', 'accountId', 'categoryId', 'description', 'note'])) invalidDraft();
+  if (value.schemaVersion !== DRAFT_SCHEMA_VERSION || value.draftKey !== DRAFT_KEY) invalidDraft();
+  const savedAt = canonicalTimestamp(value.savedAt, invalidDraft);
+  return Object.freeze({
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    draftKey: DRAFT_KEY,
+    savedAt,
+    amount: literalDraftField(value.amount),
+    occurredOn: literalDraftField(value.occurredOn),
+    accountId: literalDraftField(value.accountId),
+    categoryId: literalDraftField(value.categoryId),
+    description: literalDraftField(value.description),
+    note: literalDraftField(value.note),
+  });
+}
+
+export function restorePreviewExpenseDraft(draft, { accounts, categories } = {}) {
+  const safe = parsePreviewExpenseDraft(draft);
+  return Object.freeze({
+    amount: safe.amount,
+    occurredOn: safe.occurredOn,
+    accountId: restorableAccountId(safe.accountId, accounts),
+    categoryId: restorableExpenseCategoryId(safe.categoryId, categories),
+    description: safe.description,
+    note: safe.note,
+  });
+}
+
 function requestResult(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error('PREVIEW_OUTBOX_REQUEST_FAILED'));
+    request.onerror = () => reject(new Error('PREVIEW_WRITER_REQUEST_FAILED'));
   });
 }
 
 function transactionFinished(transaction) {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(new Error('PREVIEW_OUTBOX_TRANSACTION_FAILED'));
-    transaction.onabort = () => reject(new Error('PREVIEW_OUTBOX_TRANSACTION_FAILED'));
+    transaction.onerror = () => reject(new Error('PREVIEW_WRITER_TRANSACTION_FAILED'));
+    transaction.onabort = () => reject(new Error('PREVIEW_WRITER_TRANSACTION_FAILED'));
   });
 }
 
 function openDatabase(indexedDb) {
-  if (!indexedDb || typeof indexedDb.open !== 'function') return Promise.reject(new Error('PREVIEW_OUTBOX_UNAVAILABLE'));
+  if (!indexedDb || typeof indexedDb.open !== 'function') return Promise.reject(new Error('PREVIEW_WRITER_STORAGE_UNAVAILABLE'));
   return new Promise((resolve, reject) => {
     const request = indexedDb.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'intentId' });
+      if (!db.objectStoreNames.contains(OUTBOX_STORE_NAME)) db.createObjectStore(OUTBOX_STORE_NAME, { keyPath: 'intentId' });
+      if (!db.objectStoreNames.contains(DRAFT_STORE_NAME)) db.createObjectStore(DRAFT_STORE_NAME, { keyPath: 'draftKey' });
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error('PREVIEW_OUTBOX_OPEN_FAILED'));
-    request.onblocked = () => reject(new Error('PREVIEW_OUTBOX_OPEN_FAILED'));
+    request.onerror = () => reject(new Error('PREVIEW_WRITER_STORAGE_OPEN_FAILED'));
+    request.onblocked = () => reject(new Error('PREVIEW_WRITER_STORAGE_OPEN_FAILED'));
   });
 }
 
-export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
-  async function withStore(mode, action) {
+function createStoreAccess(indexedDb) {
+  return async function withStore(storeName, mode, action) {
     const db = await openDatabase(indexedDb);
     try {
-      const transaction = db.transaction(STORE_NAME, mode);
+      const transaction = db.transaction(storeName, mode);
       const finished = transactionFinished(transaction);
-      const result = await action(transaction.objectStore(STORE_NAME));
+      const result = await action(transaction.objectStore(storeName));
       await finished;
       return result;
     } finally {
       db.close();
     }
-  }
+  };
+}
+
+export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
+  const withStore = createStoreAccess(indexedDb);
 
   async function listPending() {
     let rows;
     try {
-      rows = await withStore('readonly', (store) => requestResult(store.getAll()));
+      rows = await withStore(OUTBOX_STORE_NAME, 'readonly', (store) => requestResult(store.getAll()));
     } catch {
       throw new Error('PREVIEW_OUTBOX_READ_FAILED');
     }
@@ -223,7 +295,7 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
     async enqueue(intent) {
       const safe = parsePreviewExpenseIntent(intent);
       try {
-        await withStore('readwrite', (store) => requestResult(store.add(safe)));
+        await withStore(OUTBOX_STORE_NAME, 'readwrite', (store) => requestResult(store.add(safe)));
       } catch {
         throw new Error('PREVIEW_OUTBOX_WRITE_FAILED');
       }
@@ -236,9 +308,58 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
   });
 }
 
+export function createIndexedDbPreviewDraftStore(indexedDb = globalThis.indexedDB) {
+  const withStore = createStoreAccess(indexedDb);
+  return Object.freeze({
+    async save(draft) {
+      const safe = parsePreviewExpenseDraft(draft);
+      try {
+        await withStore(DRAFT_STORE_NAME, 'readwrite', (store) => requestResult(store.put(safe)));
+      } catch {
+        throw new Error('PREVIEW_DRAFT_WRITE_FAILED');
+      }
+      return safe;
+    },
+    async load() {
+      let row;
+      try {
+        row = await withStore(DRAFT_STORE_NAME, 'readonly', (store) => requestResult(store.get(DRAFT_KEY)));
+      } catch {
+        throw new Error('PREVIEW_DRAFT_READ_FAILED');
+      }
+      if (row === undefined) return null;
+      try {
+        return parsePreviewExpenseDraft(row);
+      } catch {
+        return null;
+      }
+    },
+    async clear() {
+      try {
+        await withStore(DRAFT_STORE_NAME, 'readwrite', (store) => requestResult(store.delete(DRAFT_KEY)));
+      } catch {
+        throw new Error('PREVIEW_DRAFT_CLEAR_FAILED');
+      }
+    },
+  });
+}
+
+export async function enqueuePreviewExpenseThenClearDraft({ outbox, draftStore, intent }) {
+  const saved = await outbox.enqueue(intent);
+  try {
+    await draftStore.clear();
+    return Object.freeze({ intent: saved, draftCleared: true });
+  } catch {
+    return Object.freeze({ intent: saved, draftCleared: false });
+  }
+}
+
 export const previewOutboxContract = Object.freeze({
   dbName: DB_NAME,
   dbVersion: DB_VERSION,
-  storeName: STORE_NAME,
+  storeName: OUTBOX_STORE_NAME,
   recordSchemaVersion: RECORD_SCHEMA_VERSION,
+  draftStoreName: DRAFT_STORE_NAME,
+  draftKey: DRAFT_KEY,
+  draftSchemaVersion: DRAFT_SCHEMA_VERSION,
 });
