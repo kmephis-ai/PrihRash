@@ -26,10 +26,10 @@ jobs:
           git fetch origin main "$TARGET_BRANCH"
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$SOURCE_SHA"
+          base64 -d .transport/r3a-396.patch.gz.b64 | gzip -d > /tmp/396.patch
           git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
           git config user.name 'PrihRash AI'
           git config user.email 'ai@localhost'
-          base64 -d .transport/r3a-396.patch.gz.b64 | gzip -d > /tmp/396.patch
           git am --committer-date-is-author-date /tmp/396.patch
           test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
