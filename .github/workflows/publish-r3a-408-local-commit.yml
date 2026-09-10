@@ -1,0 +1,62 @@
+name: Publish exact local R3A 408 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-408-publish-20260910-1153
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        shell: bash
+        env:
+          SOURCE_SHA: a0fd836b07ff935e8785f8a5a78f05d7d5a6ae32
+          TARGET_BRANCH: r3a/408-quick-transfer-preview
+          EXPECTED_HEAD: 937c75e731a416ea62c161646bf21c6c963d5cd5
+          EXPECTED_TREE: 6556f6588da739c947b5c2e95434ce6aba3c1319
+          B64_SHA256: 75006e229c86421915b7c344999c795599334ba543826c1ddce3a33353f98c93
+          GZIP_SHA256: 19cb5e5d1167c77849b66ee1b8d02ef721b7c2100b88c7c5072797f7a6ee68bd
+          PATCH_SHA256: 1cce8d92dd49e92dc0f9398d0dbdd9efbcfcb02c46bfbbbf983e10ee75bcb3a1
+        run: |
+          set -euo pipefail
+          cat .transport/r3a-408-00.b64 .transport/r3a-408-01.b64 .transport/r3a-408-02.b64 .transport/r3a-408-03.b64 | tr -d '\r\n' > /tmp/408.patch.gz.b64
+          echo "${B64_SHA256}  /tmp/408.patch.gz.b64" | sha256sum -c -
+          base64 -d /tmp/408.patch.gz.b64 > /tmp/408.patch.gz
+          echo "${GZIP_SHA256}  /tmp/408.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/408.patch.gz > /tmp/408.patch
+          echo "${PATCH_SHA256}  /tmp/408.patch" | sha256sum -c -
+
+          git fetch --no-tags origin \
+            "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          test "$(git rev-parse refs/remotes/origin/main)" = "${SOURCE_SHA}"
+          test "$(git rev-parse refs/remotes/origin/${TARGET_BRANCH})" = "${SOURCE_SHA}"
+
+          git switch -C "${TARGET_BRANCH}" "${SOURCE_SHA}"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/408.patch
+
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+          test "$(git rev-parse HEAD^{tree})" = "${EXPECTED_TREE}"
+          test "$(git rev-parse HEAD^)" = "${SOURCE_SHA}"
+          git diff --check "${SOURCE_SHA}" HEAD
+
+          actual_files="$(git diff --name-only "${SOURCE_SHA}" HEAD | LC_ALL=C sort)"
+          expected_files="$(printf '%s\n' \
+            docs/R3A_PREVIEW_WRITER.md \
+            tests/integration/r2-safe-ui-preview.test.mjs \
+            web/preview-bootstrap.mjs \
+            web/preview-writer-outbox.mjs \
+            web/preview-writer.mjs | LC_ALL=C sort)"
+          test "${actual_files}" = "${expected_files}"
+
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
