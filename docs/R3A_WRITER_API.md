@@ -4,9 +4,9 @@ Status: R3A synthetic/test application contract. Он **не** является 
 
 ## Цель текущего среза
 
-Минимально доказать одну вещь из `docs/ROADMAP.md`: repeated create одного и того же manual EXPENSE не должен порождать вторую Transaction.
+Минимально доказать create/idempotency semantics по типам без premature universal API: repeated create одного и того же manual EXPENSE или INCOME не должен порождать вторую Transaction. EXPENSE и INCOME пока имеют отдельные type-specific application contracts; общий create framework не вводится без доказанной необходимости.
 
-Контракт transport-independent. HTTP route, OWNER auth binding, YDB persistence schema и browser sync worker добавляются отдельными work items после доказанного application behavior.
+Контракты transport-independent. HTTP route, OWNER auth binding, YDB persistence schema и browser sync worker добавляются отдельными work items после доказанного application behavior.
 
 ## Create EXPENSE v1
 
@@ -114,12 +114,61 @@ Application дополнительно fail-closed проверяет committed/
 
 Они не содержат financial payload или provider diagnostics. Exceptions от reference/store ports не пробрасываются наружу verbatim: transport сможет позже маппить только стабильные safe codes, не зная внутренних provider сообщений.
 
+
+## Create INCOME v1
+
+`idempotentIncomeCreate.ts` добавляет отдельный type-specific application contract без рефакторинга проверенного EXPENSE path. `WRITER_INCOME_CREATE_CONTRACT_VERSION = 1`.
+
+Request:
+
+```text
+idempotencyKey  canonical lowercase UUID
+occurredOn      valid full YYYY-MM-DD
+amountMinor     positive safe integer
+currency        RUB
+toAccountId     canonical lowercase UUID
+categoryId      canonical lowercase UUID
+description     null | non-empty already-trimmed text
+note            null | non-empty already-trimmed text
+```
+
+Unknown fields и malformed lexical evidence fail-closed как `INVALID_REQUEST`; normalization/fuzzy matching отсутствуют. `idempotencyKey` отделён от canonical Transaction id.
+
+На new-create miss dependency `readIncomeCreateReferenceEvidence({toAccountId, categoryId})` обязана вернуть exact destination account/category evidence. Missing → `REFERENCE_NOT_FOUND`; mismatched/malformed → `REFERENCE_MISMATCH`; category kind, отличный от `INCOME`, → `CATEGORY_KIND_INVALID`; dependency exception → `REFERENCE_READ_FAILED` без raw diagnostics.
+
+Canonical INCOME projection:
+
+```text
+type                    INCOME
+recordGranularity       TRANSACTION
+datePrecision           DAY
+aggregatePeriodMonth    null
+financialPeriodId       null
+periodAssignmentQuality UNASSIGNED
+currency                RUB
+fromAccountId           null
+toAccountId             request.toAccountId
+categoryId              request.categoryId
+paidByMemberId          null
+status                  POSTED
+analyticsState          INCLUDED
+flowKind                null
+version                 1 (create result envelope)
+```
+
+Projection проходит существующий `validateTransaction(..., { categoryKind: 'INCOME' })`.
+
+Idempotency semantics совпадают по гарантиям с EXPENSE, но не реализованы через новый universal abstraction: exact committed pre-read → `REPLAY` без current reference lookup/new identity; changed request на том же key → `IDEMPOTENCY_CONFLICT`; atomic `createOrReplay()` закрывает race после miss. Stored request/result и race response валидируются fail-closed против expected INCOME transaction; wrong type/direction/version/payload → `STORE_CONTRACT_INVALID`.
+
+INCOME application использует тот же stable value-free error vocabulary (`INVALID_REQUEST`, reference errors, identity error, `IDEMPOTENCY_CONFLICT`, store errors). Public INCOME API envelope, browser ACK delivery и provider persistence этим work item не определяются.
+
 ## Non-scope
 
 - HTTP status/body mapping и OWNER session binding;
 - YDB idempotency table/transaction implementation;
 - outbox POST/retry worker;
-- INCOME / TRANSFER / `paid_by`;
+- INCOME public API envelope / browser delivery;
+- TRANSFER / `paid_by`;
 - optimistic edit / VOID;
 - Google Form/GAS intake parity;
 - production Writer, R4, CUTOVER.
