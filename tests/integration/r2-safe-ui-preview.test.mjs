@@ -19,6 +19,11 @@ import {
   parsePreviewIncomeCreateAck,
 } from '../../web/preview-income-writer-delivery.mjs';
 import {
+  createPreviewTransferCreateApiRequest,
+  deliverPreviewTransferIntent,
+  parsePreviewTransferCreateAck,
+} from '../../web/preview-transfer-writer-delivery.mjs';
+import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewIncomeDraftStore,
   createIndexedDbPreviewTransferDraftStore,
@@ -1179,4 +1184,231 @@ test('R3A preview INCOME delivery remains transport-neutral and EXPENSE delivery
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.doesNotMatch(productionApp, /preview-income-writer-delivery|sendIncomeCreate/u);
   assert.doesNotMatch(productionServiceWorker, /preview-income-writer-delivery|sendIncomeCreate/u);
+});
+
+test('R3A preview TRANSFER delivery maps PENDING intent to minimal create request without flow kind/local labels/metadata', () => {
+  const intent = previewTransferIntent();
+  const request = createPreviewTransferCreateApiRequest(intent);
+  assert.deepEqual(request, {
+    idempotencyKey: intent.intentId,
+    occurredOn: intent.payload.occurredOn,
+    amountMinor: intent.payload.amountMinor,
+    currency: 'RUB',
+    fromAccountId: intent.payload.fromAccount.id,
+    toAccountId: intent.payload.toAccount.id,
+    description: intent.payload.description,
+    note: intent.payload.note,
+  });
+  assert.equal(Object.isFrozen(request), true);
+  assert.equal('createdAt' in request, false);
+  assert.equal('fromAccount' in request, false);
+  assert.equal('toAccount' in request, false);
+  assert.equal('flowKind' in request, false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.fromAccount.label), false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.toAccount.label), false);
+});
+
+test('R3A preview TRANSFER delivery validates CREATED and REPLAY ACK before local acknowledge', async () => {
+  const intent = previewTransferIntent();
+  for (const outcome of ['CREATED', 'REPLAY']) {
+    const events = [];
+    const ack = await deliverPreviewTransferIntent({
+      intent,
+      sender: {
+        async sendTransferCreate(request) {
+          events.push(['send', request.idempotencyKey]);
+          return {
+            apiVersion: 1,
+            outcome,
+            idempotencyKey: request.idempotencyKey,
+            transactionId: '62000000-0000-0000-0000-000000000001',
+            version: 1,
+          };
+        },
+      },
+      outbox: {
+        async acknowledge(intentId) {
+          events.push(['acknowledge', intentId]);
+        },
+      },
+    });
+    assert.equal(ack.outcome, outcome);
+    assert.equal(Object.isFrozen(ack), true);
+    assert.deepEqual(events, [
+      ['send', intent.intentId],
+      ['acknowledge', intent.intentId],
+    ]);
+  }
+});
+
+test('R3A preview TRANSFER delivery removes the exact IndexedDB row only after valid ACK', async () => {
+  const intent = previewTransferIntent();
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  assert.equal(await outbox.countPending(), 1);
+  let sendCount = 0;
+  await deliverPreviewTransferIntent({
+    intent,
+    outbox,
+    sender: {
+      async sendTransferCreate(request) {
+        sendCount += 1;
+        assert.equal(await outbox.countPending(), 1);
+        return {
+          apiVersion: 1,
+          outcome: 'CREATED',
+          idempotencyKey: request.idempotencyKey,
+          transactionId: '62000000-0000-0000-0000-000000000001',
+          version: 1,
+        };
+      },
+    },
+  });
+  assert.equal(sendCount, 1);
+  assert.equal(await outbox.countPending(), 0);
+});
+
+test('R3A preview TRANSFER delivery fails before sender mutation when required ports are unavailable', async () => {
+  const intent = previewTransferIntent();
+  let sendCount = 0;
+  const sender = {
+    async sendTransferCreate() {
+      sendCount += 1;
+      return null;
+    },
+  };
+  await assert.rejects(
+    deliverPreviewTransferIntent({ intent, sender, outbox: null }),
+    /PREVIEW_TRANSFER_DELIVERY_UNAVAILABLE/u,
+  );
+  await assert.rejects(
+    deliverPreviewTransferIntent({ intent, sender: {}, outbox: { acknowledge: async () => {} } }),
+    /PREVIEW_TRANSFER_DELIVERY_UNAVAILABLE/u,
+  );
+  assert.equal(sendCount, 0);
+});
+
+test('R3A preview TRANSFER delivery keeps PENDING when sender fails and sanitizes raw diagnostics', async () => {
+  const intent = previewTransferIntent();
+  let acknowledged = false;
+  let sendCount = 0;
+  await assert.rejects(
+    deliverPreviewTransferIntent({
+      intent,
+      sender: {
+        async sendTransferCreate() {
+          sendCount += 1;
+          throw new Error('private-provider-diagnostic');
+        },
+      },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }),
+    (error) => error?.message === 'PREVIEW_TRANSFER_SEND_FAILED' && !String(error).includes('private-provider-diagnostic'),
+  );
+  assert.equal(sendCount, 1);
+  assert.equal(acknowledged, false);
+});
+
+test('R3A preview TRANSFER delivery rejects malformed or mismatched ACK without acknowledging local intent', async () => {
+  const intent = previewTransferIntent();
+  const valid = {
+    apiVersion: 1,
+    outcome: 'CREATED',
+    idempotencyKey: intent.intentId,
+    transactionId: '62000000-0000-0000-0000-000000000001',
+    version: 1,
+  };
+  const { transactionId: _missingTransactionId, ...missingTransactionId } = valid;
+  const { version: _missingVersion, ...missingVersion } = valid;
+  const badAcks = [
+    { ...valid, apiVersion: 2 },
+    { ...valid, outcome: 'POSTED' },
+    { ...valid, idempotencyKey: '52000000-0000-0000-0000-000000000002' },
+    { ...valid, transactionId: intent.intentId },
+    { ...valid, transactionId: 'A2000000-0000-0000-0000-000000000001' },
+    { ...valid, version: 2 },
+    { ...valid, extra: true },
+    missingTransactionId,
+    missingVersion,
+    null,
+  ];
+  for (const response of badAcks) {
+    let acknowledged = false;
+    await assert.rejects(deliverPreviewTransferIntent({
+      intent,
+      sender: { sendTransferCreate: async () => response },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }), /INVALID_PREVIEW_TRANSFER_ACK/u);
+    assert.equal(acknowledged, false);
+  }
+  assert.throws(
+    () => parsePreviewTransferCreateAck(valid, 'A2000000-0000-0000-0000-000000000001'),
+    /INVALID_PREVIEW_TRANSFER_ACK/u,
+  );
+});
+
+test('R3A preview TRANSFER retry after server commit but local ACK failure reuses same key and clears on REPLAY', async () => {
+  const intent = previewTransferIntent();
+  const sentKeys = [];
+  let sendCount = 0;
+  const sender = {
+    async sendTransferCreate(request) {
+      sentKeys.push(request.idempotencyKey);
+      sendCount += 1;
+      return {
+        apiVersion: 1,
+        outcome: sendCount === 1 ? 'CREATED' : 'REPLAY',
+        idempotencyKey: request.idempotencyKey,
+        transactionId: '62000000-0000-0000-0000-000000000001',
+        version: 1,
+      };
+    },
+  };
+  let ackAttempts = 0;
+  const outbox = {
+    async acknowledge(intentId) {
+      assert.equal(intentId, intent.intentId);
+      ackAttempts += 1;
+      if (ackAttempts === 1) throw new Error('local-delete-failed');
+    },
+  };
+  await assert.rejects(
+    deliverPreviewTransferIntent({ outbox, sender, intent }),
+    (error) => error?.message === 'PREVIEW_TRANSFER_LOCAL_ACK_FAILED' && !String(error).includes('local-delete-failed'),
+  );
+  assert.equal(sendCount, 1);
+  const replay = await deliverPreviewTransferIntent({ outbox, sender, intent });
+  assert.equal(replay.outcome, 'REPLAY');
+  assert.deepEqual(sentKeys, [intent.intentId, intent.intentId]);
+  assert.equal(ackAttempts, 2);
+});
+
+test('R3A preview TRANSFER delivery remains transport-neutral and existing Writer/provider boundaries stay byte-unchanged', async () => {
+  const transferDeliverySource = await readFile(new URL('../../web/preview-transfer-writer-delivery.mjs', import.meta.url), 'utf8');
+  const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
+  const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
+  assert.match(transferDeliverySource, /parsePreviewTransferIntent/u);
+  assert.match(transferDeliverySource, /sendTransferCreate/u);
+  assert.match(transferDeliverySource, /fromAccountId/u);
+  assert.match(transferDeliverySource, /toAccountId/u);
+  assert.doesNotMatch(transferDeliverySource, /flowKind/u);
+  for (const source of [transferDeliverySource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /https?:\/\//u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /API Gateway|Yandex|YDB_WRITE_ENABLED|@ydb|ydbjs|cookie|Authorization/iu);
+  }
+  assert.equal(
+    createHash('sha256').update(expenseDeliverySource).digest('hex'),
+    '576ba33637e3d983ee21fb3eb88a173918a9cbd493763142ce356a383a02ed77',
+  );
+  assert.equal(
+    createHash('sha256').update(incomeDeliverySource).digest('hex'),
+    'c2fc6b587bef992c84660fb1d1205378c94ae987f2b997e723f514e438516ccb',
+  );
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionApp, /preview-transfer-writer-delivery|sendTransferCreate/u);
+  assert.doesNotMatch(productionServiceWorker, /preview-transfer-writer-delivery|sendTransferCreate/u);
 });
