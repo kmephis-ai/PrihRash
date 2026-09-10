@@ -1,0 +1,1 @@
+Transport-only trigger for exact local commit publication. No product content.
