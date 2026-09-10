@@ -2,31 +2,40 @@ const DB_NAME = 'prihrash-r3a-preview';
 const DB_VERSION = 2;
 const OUTBOX_STORE_NAME = 'outbox';
 const DRAFT_STORE_NAME = 'drafts';
-const DRAFT_KEY = 'quick-expense';
+const EXPENSE_DRAFT_KEY = 'quick-expense';
+const INCOME_DRAFT_KEY = 'quick-income';
 const RECORD_SCHEMA_VERSION = 1;
 const DRAFT_SCHEMA_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 const AMOUNT_PATTERN = /^(?:0|[1-9]\d*)(?:[.,]\d{1,2})?$/u;
 
-function invalidInput() {
+function invalidExpenseInput() {
   throw new Error('INVALID_PREVIEW_EXPENSE_INPUT');
+}
+
+function invalidIncomeInput() {
+  throw new Error('INVALID_PREVIEW_INCOME_INPUT');
 }
 
 function invalidRecord() {
   throw new Error('INVALID_PREVIEW_OUTBOX_RECORD');
 }
 
-function invalidDraft() {
+function invalidExpenseDraft() {
   throw new Error('INVALID_PREVIEW_EXPENSE_DRAFT');
 }
 
-function canonicalUuid(value, fail = invalidInput) {
+function invalidIncomeDraft() {
+  throw new Error('INVALID_PREVIEW_INCOME_DRAFT');
+}
+
+function canonicalUuid(value, fail = invalidExpenseInput) {
   if (typeof value !== 'string' || !UUID_PATTERN.test(value)) fail();
   return value;
 }
 
-function canonicalDate(value, fail = invalidInput) {
+function canonicalDate(value, fail = invalidExpenseInput) {
   if (typeof value !== 'string' || !DATE_PATTERN.test(value)) fail();
   const [year, month, day] = value.split('-').map(Number);
   const parsed = new Date(Date.UTC(year, month - 1, day));
@@ -43,6 +52,13 @@ function canonicalTimestamp(value, fail = invalidRecord) {
   return value;
 }
 
+function exactKeys(value, keys) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
 function entityRef(value, fail = invalidRecord) {
   if (!exactKeys(value, ['id', 'label'])) fail();
   const id = canonicalUuid(value.id, fail);
@@ -50,11 +66,11 @@ function entityRef(value, fail = invalidRecord) {
   return Object.freeze({ id, label: value.label });
 }
 
-function expenseCategoryRef(value, fail = invalidRecord) {
-  if (!exactKeys(value, ['id', 'label', 'kind']) || value.kind !== 'EXPENSE') fail();
+function categoryRef(value, kind, fail = invalidRecord) {
+  if (!exactKeys(value, ['id', 'label', 'kind']) || value.kind !== kind) fail();
   const id = canonicalUuid(value.id, fail);
   if (typeof value.label !== 'string' || value.label.length === 0 || value.label !== value.label.trim()) fail();
-  return Object.freeze({ id, label: value.label, kind: 'EXPENSE' });
+  return Object.freeze({ id, label: value.label, kind });
 }
 
 function optionalLiteralText(value, fail = invalidRecord) {
@@ -63,32 +79,25 @@ function optionalLiteralText(value, fail = invalidRecord) {
   return value;
 }
 
-function literalDraftField(value) {
-  if (typeof value !== 'string') invalidDraft();
+function literalDraftField(value, fail) {
+  if (typeof value !== 'string') fail();
   return value;
 }
 
-function exactKeys(value, keys) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+function resolveUniqueRef(id, values, fail) {
+  canonicalUuid(id, fail);
+  if (!Array.isArray(values)) fail();
+  const matches = values.filter((item) => item?.id === id);
+  if (matches.length !== 1) fail();
+  return entityRef(matches[0], fail);
 }
 
-function resolveUniqueRef(id, values) {
-  canonicalUuid(id);
-  if (!Array.isArray(values)) invalidInput();
+function resolveUniqueCategory(id, values, kind, fail) {
+  canonicalUuid(id, fail);
+  if (!Array.isArray(values)) fail();
   const matches = values.filter((item) => item?.id === id);
-  if (matches.length !== 1) invalidInput();
-  return entityRef(matches[0], invalidInput);
-}
-
-function resolveUniqueExpenseCategory(id, values) {
-  canonicalUuid(id);
-  if (!Array.isArray(values)) invalidInput();
-  const matches = values.filter((item) => item?.id === id);
-  if (matches.length !== 1) invalidInput();
-  return expenseCategoryRef(matches[0], invalidInput);
+  if (matches.length !== 1) fail();
+  return categoryRef(matches[0], kind, fail);
 }
 
 function restorableAccountId(id, accounts) {
@@ -96,21 +105,37 @@ function restorableAccountId(id, accounts) {
   return accounts.filter((item) => item?.id === id).length === 1 ? id : '';
 }
 
-function restorableExpenseCategoryId(id, categories) {
+function restorableCategoryId(id, categories, kind) {
   if (typeof id !== 'string' || !Array.isArray(categories)) return '';
-  const matches = categories.filter((item) => item?.id === id && item?.kind === 'EXPENSE');
+  const matches = categories.filter((item) => item?.id === id && item?.kind === kind);
   return matches.length === 1 ? id : '';
 }
 
-export function parsePreviewExpenseAmountMinor(value) {
-  if (typeof value !== 'string' || value !== value.trim() || !AMOUNT_PATTERN.test(value)) invalidInput();
+function parsePreviewAmountMinor(value, fail) {
+  if (typeof value !== 'string' || value !== value.trim() || !AMOUNT_PATTERN.test(value)) fail();
   const [wholeText, fractionText = ''] = value.replace(',', '.').split('.');
   const whole = Number(wholeText);
   const fraction = Number(fractionText.padEnd(2, '0') || '0');
-  if (!Number.isSafeInteger(whole) || !Number.isSafeInteger(fraction)) invalidInput();
+  if (!Number.isSafeInteger(whole) || !Number.isSafeInteger(fraction)) fail();
   const amountMinor = whole * 100 + fraction;
-  if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) invalidInput();
+  if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) fail();
   return amountMinor;
+}
+
+export function parsePreviewExpenseAmountMinor(value) {
+  return parsePreviewAmountMinor(value, invalidExpenseInput);
+}
+
+export function parsePreviewIncomeAmountMinor(value) {
+  return parsePreviewAmountMinor(value, invalidIncomeInput);
+}
+
+function createIntentBase(input, { randomUuid, now, fail }) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail();
+  const intentId = canonicalUuid(randomUuid(), fail);
+  const createdAt = now();
+  if (typeof createdAt !== 'string' || createdAt.length === 0 || createdAt !== createdAt.trim() || !Number.isFinite(Date.parse(createdAt))) fail();
+  return { intentId, createdAt };
 }
 
 export function createPreviewExpenseIntent(input, {
@@ -119,14 +144,11 @@ export function createPreviewExpenseIntent(input, {
   randomUuid = () => globalThis.crypto?.randomUUID?.(),
   now = () => new Date().toISOString(),
 } = {}) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) invalidInput();
-  const intentId = canonicalUuid(randomUuid());
-  const createdAt = now();
-  if (typeof createdAt !== 'string' || createdAt.length === 0 || createdAt !== createdAt.trim() || !Number.isFinite(Date.parse(createdAt))) invalidInput();
-  const fromAccount = resolveUniqueRef(input.accountId, accounts);
-  const category = resolveUniqueExpenseCategory(input.categoryId, categories);
-  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidInput);
-  const note = input.note === '' ? null : optionalLiteralText(input.note, invalidInput);
+  const { intentId, createdAt } = createIntentBase(input, { randomUuid, now, fail: invalidExpenseInput });
+  const fromAccount = resolveUniqueRef(input.accountId, accounts, invalidExpenseInput);
+  const category = resolveUniqueCategory(input.categoryId, categories, 'EXPENSE', invalidExpenseInput);
+  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidExpenseInput);
+  const note = input.note === '' ? null : optionalLiteralText(input.note, invalidExpenseInput);
 
   return parsePreviewExpenseIntent({
     schemaVersion: RECORD_SCHEMA_VERSION,
@@ -136,10 +158,41 @@ export function createPreviewExpenseIntent(input, {
     createdAt,
     payload: {
       type: 'EXPENSE',
-      occurredOn: canonicalDate(input.occurredOn),
+      occurredOn: canonicalDate(input.occurredOn, invalidExpenseInput),
       amountMinor: parsePreviewExpenseAmountMinor(input.amount),
       currency: 'RUB',
       fromAccount,
+      category,
+      description,
+      note,
+    },
+  });
+}
+
+export function createPreviewIncomeIntent(input, {
+  accounts,
+  categories,
+  randomUuid = () => globalThis.crypto?.randomUUID?.(),
+  now = () => new Date().toISOString(),
+} = {}) {
+  const { intentId, createdAt } = createIntentBase(input, { randomUuid, now, fail: invalidIncomeInput });
+  const toAccount = resolveUniqueRef(input.accountId, accounts, invalidIncomeInput);
+  const category = resolveUniqueCategory(input.categoryId, categories, 'INCOME', invalidIncomeInput);
+  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidIncomeInput);
+  const note = input.note === '' ? null : optionalLiteralText(input.note, invalidIncomeInput);
+
+  return parsePreviewIncomeIntent({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'CREATE_INCOME',
+    state: 'PENDING',
+    createdAt,
+    payload: {
+      type: 'INCOME',
+      occurredOn: canonicalDate(input.occurredOn, invalidIncomeInput),
+      amountMinor: parsePreviewIncomeAmountMinor(input.amount),
+      currency: 'RUB',
+      toAccount,
       category,
       description,
       note,
@@ -157,7 +210,7 @@ export function parsePreviewExpenseIntent(value) {
   if (!Number.isSafeInteger(value.payload.amountMinor) || value.payload.amountMinor <= 0) invalidRecord();
   const occurredOn = canonicalDate(value.payload.occurredOn, invalidRecord);
   const fromAccount = entityRef(value.payload.fromAccount, invalidRecord);
-  const category = expenseCategoryRef(value.payload.category, invalidRecord);
+  const category = categoryRef(value.payload.category, 'EXPENSE', invalidRecord);
   const description = optionalLiteralText(value.payload.description, invalidRecord);
   const note = optionalLiteralText(value.payload.note, invalidRecord);
 
@@ -180,11 +233,67 @@ export function parsePreviewExpenseIntent(value) {
   });
 }
 
-export function createPreviewExpenseDraft(input, { now = () => new Date().toISOString() } = {}) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) invalidDraft();
-  return parsePreviewExpenseDraft({
+export function parsePreviewIncomeIntent(value) {
+  if (!exactKeys(value, ['schemaVersion', 'intentId', 'kind', 'state', 'createdAt', 'payload'])) invalidRecord();
+  if (value.schemaVersion !== RECORD_SCHEMA_VERSION || value.kind !== 'CREATE_INCOME' || value.state !== 'PENDING') invalidRecord();
+  const intentId = canonicalUuid(value.intentId, invalidRecord);
+  const createdAt = canonicalTimestamp(value.createdAt, invalidRecord);
+  if (!exactKeys(value.payload, ['type', 'occurredOn', 'amountMinor', 'currency', 'toAccount', 'category', 'description', 'note'])) invalidRecord();
+  if (value.payload.type !== 'INCOME' || value.payload.currency !== 'RUB') invalidRecord();
+  if (!Number.isSafeInteger(value.payload.amountMinor) || value.payload.amountMinor <= 0) invalidRecord();
+  const occurredOn = canonicalDate(value.payload.occurredOn, invalidRecord);
+  const toAccount = entityRef(value.payload.toAccount, invalidRecord);
+  const category = categoryRef(value.payload.category, 'INCOME', invalidRecord);
+  const description = optionalLiteralText(value.payload.description, invalidRecord);
+  const note = optionalLiteralText(value.payload.note, invalidRecord);
+
+  return Object.freeze({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'CREATE_INCOME',
+    state: 'PENDING',
+    createdAt,
+    payload: Object.freeze({
+      type: 'INCOME',
+      occurredOn,
+      amountMinor: value.payload.amountMinor,
+      currency: 'RUB',
+      toAccount,
+      category,
+      description,
+      note,
+    }),
+  });
+}
+
+export function parsePreviewIntent(value) {
+  if (value?.kind === 'CREATE_EXPENSE') return parsePreviewExpenseIntent(value);
+  if (value?.kind === 'CREATE_INCOME') return parsePreviewIncomeIntent(value);
+  invalidRecord();
+}
+
+function parsePreviewDraft(value, { draftKey, fail }) {
+  if (!exactKeys(value, ['schemaVersion', 'draftKey', 'savedAt', 'amount', 'occurredOn', 'accountId', 'categoryId', 'description', 'note'])) fail();
+  if (value.schemaVersion !== DRAFT_SCHEMA_VERSION || value.draftKey !== draftKey) fail();
+  const savedAt = canonicalTimestamp(value.savedAt, fail);
+  return Object.freeze({
     schemaVersion: DRAFT_SCHEMA_VERSION,
-    draftKey: DRAFT_KEY,
+    draftKey,
+    savedAt,
+    amount: literalDraftField(value.amount, fail),
+    occurredOn: literalDraftField(value.occurredOn, fail),
+    accountId: literalDraftField(value.accountId, fail),
+    categoryId: literalDraftField(value.categoryId, fail),
+    description: literalDraftField(value.description, fail),
+    note: literalDraftField(value.note, fail),
+  });
+}
+
+function createPreviewDraft(input, { now, draftKey, parseDraft, fail }) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail();
+  return parseDraft({
+    schemaVersion: DRAFT_SCHEMA_VERSION,
+    draftKey,
     savedAt: now(),
     amount: input.amount,
     occurredOn: input.occurredOn,
@@ -195,32 +304,59 @@ export function createPreviewExpenseDraft(input, { now = () => new Date().toISOS
   });
 }
 
-export function parsePreviewExpenseDraft(value) {
-  if (!exactKeys(value, ['schemaVersion', 'draftKey', 'savedAt', 'amount', 'occurredOn', 'accountId', 'categoryId', 'description', 'note'])) invalidDraft();
-  if (value.schemaVersion !== DRAFT_SCHEMA_VERSION || value.draftKey !== DRAFT_KEY) invalidDraft();
-  const savedAt = canonicalTimestamp(value.savedAt, invalidDraft);
-  return Object.freeze({
-    schemaVersion: DRAFT_SCHEMA_VERSION,
-    draftKey: DRAFT_KEY,
-    savedAt,
-    amount: literalDraftField(value.amount),
-    occurredOn: literalDraftField(value.occurredOn),
-    accountId: literalDraftField(value.accountId),
-    categoryId: literalDraftField(value.categoryId),
-    description: literalDraftField(value.description),
-    note: literalDraftField(value.note),
+export function createPreviewExpenseDraft(input, { now = () => new Date().toISOString() } = {}) {
+  return createPreviewDraft(input, {
+    now,
+    draftKey: EXPENSE_DRAFT_KEY,
+    parseDraft: parsePreviewExpenseDraft,
+    fail: invalidExpenseDraft,
   });
 }
 
-export function restorePreviewExpenseDraft(draft, { accounts, categories } = {}) {
-  const safe = parsePreviewExpenseDraft(draft);
+export function createPreviewIncomeDraft(input, { now = () => new Date().toISOString() } = {}) {
+  return createPreviewDraft(input, {
+    now,
+    draftKey: INCOME_DRAFT_KEY,
+    parseDraft: parsePreviewIncomeDraft,
+    fail: invalidIncomeDraft,
+  });
+}
+
+export function parsePreviewExpenseDraft(value) {
+  return parsePreviewDraft(value, { draftKey: EXPENSE_DRAFT_KEY, fail: invalidExpenseDraft });
+}
+
+export function parsePreviewIncomeDraft(value) {
+  return parsePreviewDraft(value, { draftKey: INCOME_DRAFT_KEY, fail: invalidIncomeDraft });
+}
+
+function restorePreviewDraft(draft, { accounts, categories, categoryKind, parseDraft }) {
+  const safe = parseDraft(draft);
   return Object.freeze({
     amount: safe.amount,
     occurredOn: safe.occurredOn,
     accountId: restorableAccountId(safe.accountId, accounts),
-    categoryId: restorableExpenseCategoryId(safe.categoryId, categories),
+    categoryId: restorableCategoryId(safe.categoryId, categories, categoryKind),
     description: safe.description,
     note: safe.note,
+  });
+}
+
+export function restorePreviewExpenseDraft(draft, { accounts, categories } = {}) {
+  return restorePreviewDraft(draft, {
+    accounts,
+    categories,
+    categoryKind: 'EXPENSE',
+    parseDraft: parsePreviewExpenseDraft,
+  });
+}
+
+export function restorePreviewIncomeDraft(draft, { accounts, categories } = {}) {
+  return restorePreviewDraft(draft, {
+    accounts,
+    categories,
+    categoryKind: 'INCOME',
+    parseDraft: parsePreviewIncomeDraft,
   });
 }
 
@@ -283,9 +419,9 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
     const valid = [];
     for (const row of rows) {
       try {
-        valid.push(parsePreviewExpenseIntent(row));
+        valid.push(parsePreviewIntent(row));
       } catch {
-        // Malformed durable preview evidence is ignored and never counted as a valid pending intent.
+        // Malformed or unknown durable preview evidence is ignored and never counted as valid pending intent.
       }
     }
     return Object.freeze(valid);
@@ -293,7 +429,7 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
 
   return Object.freeze({
     async enqueue(intent) {
-      const safe = parsePreviewExpenseIntent(intent);
+      const safe = parsePreviewIntent(intent);
       try {
         await withStore(OUTBOX_STORE_NAME, 'readwrite', (store) => requestResult(store.add(safe)));
       } catch {
@@ -316,11 +452,11 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
   });
 }
 
-export function createIndexedDbPreviewDraftStore(indexedDb = globalThis.indexedDB) {
+function createIndexedDbPreviewDraftStoreFor(indexedDb, { draftKey, parseDraft }) {
   const withStore = createStoreAccess(indexedDb);
   return Object.freeze({
     async save(draft) {
-      const safe = parsePreviewExpenseDraft(draft);
+      const safe = parseDraft(draft);
       try {
         await withStore(DRAFT_STORE_NAME, 'readwrite', (store) => requestResult(store.put(safe)));
       } catch {
@@ -331,20 +467,20 @@ export function createIndexedDbPreviewDraftStore(indexedDb = globalThis.indexedD
     async load() {
       let row;
       try {
-        row = await withStore(DRAFT_STORE_NAME, 'readonly', (store) => requestResult(store.get(DRAFT_KEY)));
+        row = await withStore(DRAFT_STORE_NAME, 'readonly', (store) => requestResult(store.get(draftKey)));
       } catch {
         throw new Error('PREVIEW_DRAFT_READ_FAILED');
       }
       if (row === undefined) return null;
       try {
-        return parsePreviewExpenseDraft(row);
+        return parseDraft(row);
       } catch {
         return null;
       }
     },
     async clear() {
       try {
-        await withStore(DRAFT_STORE_NAME, 'readwrite', (store) => requestResult(store.delete(DRAFT_KEY)));
+        await withStore(DRAFT_STORE_NAME, 'readwrite', (store) => requestResult(store.delete(draftKey)));
       } catch {
         throw new Error('PREVIEW_DRAFT_CLEAR_FAILED');
       }
@@ -352,7 +488,21 @@ export function createIndexedDbPreviewDraftStore(indexedDb = globalThis.indexedD
   });
 }
 
-export async function enqueuePreviewExpenseThenClearDraft({ outbox, draftStore, intent }) {
+export function createIndexedDbPreviewDraftStore(indexedDb = globalThis.indexedDB) {
+  return createIndexedDbPreviewDraftStoreFor(indexedDb, {
+    draftKey: EXPENSE_DRAFT_KEY,
+    parseDraft: parsePreviewExpenseDraft,
+  });
+}
+
+export function createIndexedDbPreviewIncomeDraftStore(indexedDb = globalThis.indexedDB) {
+  return createIndexedDbPreviewDraftStoreFor(indexedDb, {
+    draftKey: INCOME_DRAFT_KEY,
+    parseDraft: parsePreviewIncomeDraft,
+  });
+}
+
+async function enqueuePreviewIntentThenClearDraft({ outbox, draftStore, intent }) {
   const saved = await outbox.enqueue(intent);
   try {
     await draftStore.clear();
@@ -362,12 +512,22 @@ export async function enqueuePreviewExpenseThenClearDraft({ outbox, draftStore, 
   }
 }
 
+export async function enqueuePreviewExpenseThenClearDraft(args) {
+  return enqueuePreviewIntentThenClearDraft(args);
+}
+
+export async function enqueuePreviewIncomeThenClearDraft(args) {
+  return enqueuePreviewIntentThenClearDraft(args);
+}
+
 export const previewOutboxContract = Object.freeze({
   dbName: DB_NAME,
   dbVersion: DB_VERSION,
   storeName: OUTBOX_STORE_NAME,
   recordSchemaVersion: RECORD_SCHEMA_VERSION,
   draftStoreName: DRAFT_STORE_NAME,
-  draftKey: DRAFT_KEY,
+  draftKey: EXPENSE_DRAFT_KEY,
+  expenseDraftKey: EXPENSE_DRAFT_KEY,
+  incomeDraftKey: INCOME_DRAFT_KEY,
   draftSchemaVersion: DRAFT_SCHEMA_VERSION,
 });

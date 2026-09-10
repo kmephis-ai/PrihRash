@@ -14,15 +14,24 @@ import {
 } from '../../web/preview-writer-delivery.mjs';
 import {
   createIndexedDbPreviewDraftStore,
+  createIndexedDbPreviewIncomeDraftStore,
   createIndexedDbPreviewOutbox,
   createPreviewExpenseDraft,
   createPreviewExpenseIntent,
+  createPreviewIncomeDraft,
+  createPreviewIncomeIntent,
   enqueuePreviewExpenseThenClearDraft,
+  enqueuePreviewIncomeThenClearDraft,
   parsePreviewExpenseAmountMinor,
   parsePreviewExpenseDraft,
   parsePreviewExpenseIntent,
+  parsePreviewIncomeAmountMinor,
+  parsePreviewIncomeDraft,
+  parsePreviewIncomeIntent,
+  parsePreviewIntent,
   previewOutboxContract,
   restorePreviewExpenseDraft,
+  restorePreviewIncomeDraft,
 } from '../../web/preview-writer-outbox.mjs';
 
 function createTransport() {
@@ -245,6 +254,28 @@ function previewExpenseIntent(overrides = {}) {
   });
 }
 
+function previewIncomeInput(overrides = {}) {
+  return {
+    amount: '2500,75',
+    occurredOn: '2026-09-10',
+    accountId: syntheticPreviewEvidence.accounts[0].id,
+    categoryId: syntheticPreviewEvidence.categories.find((item) => item.kind === 'INCOME').id,
+    description: 'Доход · демо',
+    note: '',
+    ...overrides,
+  };
+}
+
+function previewIncomeIntent(overrides = {}) {
+  return createPreviewIncomeIntent(previewIncomeInput(), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '51000000-0000-0000-0000-000000000001',
+    now: () => '2026-09-10T05:30:00.000Z',
+    ...overrides,
+  });
+}
+
 test('R3A preview amount parser uses exact RUB minor units without float rounding', () => {
   assert.equal(parsePreviewExpenseAmountMinor('1'), 100);
   assert.equal(parsePreviewExpenseAmountMinor('1,2'), 120);
@@ -294,6 +325,77 @@ test('R3A preview accepts only the selected EXPENSE category and required canoni
     randomUuid: () => '50000000-0000-0000-0000-000000000004',
     now: () => '2026-09-09T12:00:00.000Z',
   }), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+});
+
+test('R3A preview INCOME amount parser reuses exact RUB minor-unit semantics', () => {
+  assert.equal(parsePreviewIncomeAmountMinor('1'), 100);
+  assert.equal(parsePreviewIncomeAmountMinor('1,2'), 120);
+  assert.equal(parsePreviewIncomeAmountMinor('2500.75'), 250075);
+  assert.equal(parsePreviewIncomeAmountMinor('0,01'), 1);
+  for (const value of ['0', '0.00', '-1', '1.234', '1e2', ' 1', '01']) {
+    assert.throws(() => parsePreviewIncomeAmountMinor(value), /INVALID_PREVIEW_INCOME_INPUT/u);
+  }
+});
+
+test('R3A preview creates one immutable PENDING INCOME intent with destination account and INCOME category', () => {
+  const intent = previewIncomeIntent();
+  assert.equal(intent.schemaVersion, 1);
+  assert.equal(intent.kind, 'CREATE_INCOME');
+  assert.equal(intent.state, 'PENDING');
+  assert.equal(intent.payload.type, 'INCOME');
+  assert.equal(intent.payload.amountMinor, 250075);
+  assert.equal(intent.payload.currency, 'RUB');
+  assert.equal(intent.payload.toAccount.id, syntheticPreviewEvidence.accounts[0].id);
+  assert.equal(intent.payload.category.kind, 'INCOME');
+  assert.equal(intent.payload.note, null);
+  assert.equal('fromAccount' in intent.payload, false);
+  assert.equal(Object.isFrozen(intent), true);
+  assert.equal(Object.isFrozen(intent.payload), true);
+});
+
+test('R3A preview INCOME accepts only exact destination account and INCOME category', () => {
+  const expense = syntheticPreviewEvidence.categories.find((item) => item.kind === 'EXPENSE');
+  assert.throws(
+    () => createPreviewIncomeIntent(previewIncomeInput({ categoryId: expense.id }), {
+      accounts: syntheticPreviewEvidence.accounts,
+      categories: syntheticPreviewEvidence.categories,
+      randomUuid: () => '51000000-0000-0000-0000-000000000002',
+      now: () => '2026-09-10T05:30:00.000Z',
+    }),
+    /INVALID_PREVIEW_INCOME_INPUT/u,
+  );
+  assert.throws(() => createPreviewIncomeIntent(previewIncomeInput({ accountId: 'not-a-uuid' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '51000000-0000-0000-0000-000000000003',
+    now: () => '2026-09-10T05:30:00.000Z',
+  }), /INVALID_PREVIEW_INCOME_INPUT/u);
+  assert.throws(() => createPreviewIncomeIntent(previewIncomeInput({ occurredOn: '2026-02-31' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => '51000000-0000-0000-0000-000000000004',
+    now: () => '2026-09-10T05:30:00.000Z',
+  }), /INVALID_PREVIEW_INCOME_INPUT/u);
+});
+
+test('R3A preview strict outbox union accepts EXPENSE and INCOME while unknown kinds fail closed', async () => {
+  const expense = previewExpenseIntent();
+  const income = previewIncomeIntent();
+  assert.equal(parsePreviewIntent(expense).kind, 'CREATE_EXPENSE');
+  assert.equal(parsePreviewIntent(income).kind, 'CREATE_INCOME');
+  assert.equal(parsePreviewIncomeIntent(income).payload.toAccount.id, income.payload.toAccount.id);
+  assert.throws(() => parsePreviewIncomeIntent({ ...income, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewIncomeIntent({ ...income, payload: { ...income.payload, category: { ...income.payload.category, kind: 'EXPENSE' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewIntent({ ...income, kind: 'CREATE_TRANSFER' }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+
+  const unknown = { ...income, intentId: '51000000-0000-0000-0000-000000000099', kind: 'CREATE_TRANSFER' };
+  const fake = createPreviewOutboxFakeIndexedDb([unknown]);
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  assert.equal(await outbox.countPending(), 0);
+  await outbox.enqueue(expense);
+  await outbox.enqueue(income);
+  assert.equal(await outbox.countPending(), 2);
+  assert.deepEqual((await outbox.listPending()).map((item) => item.kind).sort(), ['CREATE_EXPENSE', 'CREATE_INCOME']);
 });
 
 test('R3A preview preserves literal optional text while empty form values become null', () => {
@@ -349,8 +451,9 @@ test('R3A Writer is injected by synthetic preview only; production Reader stays 
   const productionShell = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
   const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
   assert.match(bootstrap, /preview-writer\.mjs/u);
+  assert.match(bootstrap, /mountSyntheticPreviewIncomeWriter/u);
   assert.match(productionShell, />Только чтение</u);
-  assert.doesNotMatch(productionShell, /Новый расход|data-preview-writer|Сохранить локально/u);
+  assert.doesNotMatch(productionShell, /Новый расход|Новый доход|data-preview-writer|Сохранить локально/u);
   assert.doesNotMatch(productionApp, /preview-writer|CREATE_EXPENSE|Сохранить локально/u);
   const productionStyles = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(productionStyles, /preview-writer/u);
@@ -415,6 +518,52 @@ test('R3A preview malformed durable draft fails closed and is not restored', asy
   assert.equal(await drafts.load(), null);
 });
 
+test('R3A preview INCOME draft preserves incomplete literals and restores only exact current references', () => {
+  const draft = createPreviewIncomeDraft({
+    amount: '7,',
+    occurredOn: '2026-0',
+    accountId: '91000000-0000-0000-0000-000000000001',
+    categoryId: '91000000-0000-0000-0000-000000000002',
+    description: '  literal income draft  ',
+    note: 'unfinished',
+  }, { now: () => '2026-09-10T05:31:00.000Z' });
+  assert.equal(draft.draftKey, previewOutboxContract.incomeDraftKey);
+  assert.equal(parsePreviewIncomeDraft(draft).amount, '7,');
+  assert.throws(() => parsePreviewIncomeDraft({ ...draft, amount: null }), /INVALID_PREVIEW_INCOME_DRAFT/u);
+
+  const stale = restorePreviewIncomeDraft(draft, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+  });
+  assert.equal(stale.accountId, '');
+  assert.equal(stale.categoryId, '');
+  assert.equal(stale.description, '  literal income draft  ');
+
+  const current = restorePreviewIncomeDraft(createPreviewIncomeDraft(previewIncomeInput(), {
+    now: () => '2026-09-10T05:31:00.000Z',
+  }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+  });
+  assert.equal(current.accountId, previewIncomeInput().accountId);
+  assert.equal(current.categoryId, previewIncomeInput().categoryId);
+});
+
+test('R3A preview EXPENSE and INCOME drafts use isolated keys and income clear never deletes expense draft', async () => {
+  const fake = createPreviewWriterFakeIndexedDb({ version: 2 });
+  const expenseStore = createIndexedDbPreviewDraftStore(fake.indexedDb);
+  const incomeStore = createIndexedDbPreviewIncomeDraftStore(fake.indexedDb);
+  const expenseDraft = createPreviewExpenseDraft(previewExpenseInput(), { now: () => '2026-09-10T05:32:00.000Z' });
+  const incomeDraft = createPreviewIncomeDraft(previewIncomeInput(), { now: () => '2026-09-10T05:32:00.000Z' });
+  await expenseStore.save(expenseDraft);
+  await incomeStore.save(incomeDraft);
+  assert.equal((await expenseStore.load()).draftKey, previewOutboxContract.expenseDraftKey);
+  assert.equal((await incomeStore.load()).draftKey, previewOutboxContract.incomeDraftKey);
+  await incomeStore.clear();
+  assert.equal(await incomeStore.load(), null);
+  assert.equal((await expenseStore.load()).draftKey, previewOutboxContract.expenseDraftKey);
+});
+
 test('R3A preview IndexedDB v1 to v2 upgrade adds drafts without losing existing outbox intents', async () => {
   const existing = previewExpenseIntent();
   const fake = createPreviewWriterFakeIndexedDb({ version: 1, outboxRows: [existing] });
@@ -456,6 +605,26 @@ test('R3A preview commits outbox before clearing draft and never clears draft wh
   assert.equal(degraded.draftCleared, false);
 });
 
+test('R3A preview INCOME commits outbox before clearing only its draft and preserves draft on enqueue failure', async () => {
+  const intent = previewIncomeIntent();
+  const events = [];
+  const success = await enqueuePreviewIncomeThenClearDraft({
+    outbox: { enqueue: async (value) => { events.push('enqueue'); return value; } },
+    draftStore: { clear: async () => { events.push('clear-income'); } },
+    intent,
+  });
+  assert.deepEqual(events, ['enqueue', 'clear-income']);
+  assert.equal(success.draftCleared, true);
+
+  events.length = 0;
+  await assert.rejects(enqueuePreviewIncomeThenClearDraft({
+    outbox: { enqueue: async () => { events.push('enqueue'); throw new Error('failed'); } },
+    draftStore: { clear: async () => { events.push('clear-income'); } },
+    intent,
+  }), /failed/u);
+  assert.deepEqual(events, ['enqueue']);
+});
+
 test('R3A draft mechanics remain preview-only and contain no network/provider write path', async () => {
   const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
   const storageSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
@@ -463,6 +632,9 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   assert.equal(previewOutboxContract.draftStoreName, 'drafts');
   assert.match(writerSource, /Черновик сохранён локально · демо/u);
   assert.match(writerSource, /enqueuePreviewExpenseThenClearDraft/u);
+  assert.match(writerSource, /enqueuePreviewIncomeThenClearDraft/u);
+  assert.match(writerSource, /Новый доход · демо/u);
+  assert.equal(previewOutboxContract.incomeDraftKey, 'quick-income');
   assert.match(storageSource, /createObjectStore\(DRAFT_STORE_NAME/u);
   for (const source of [writerSource, storageSource]) {
     assert.doesNotMatch(source, /\bfetch\s*\(/u);
@@ -472,7 +644,7 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   const productionShell = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
   const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer/u);
+  assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer|Новый доход/u);
   assert.doesNotMatch(productionApp, /drafts|preview-writer/u);
   assert.doesNotMatch(productionServiceWorker, /preview-writer|drafts/u);
 });

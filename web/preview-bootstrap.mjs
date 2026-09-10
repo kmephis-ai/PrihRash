@@ -21,8 +21,9 @@ try {
   await loadCanonicalShell();
   installSyntheticPreviewTransport();
   await import('./app.mjs');
-  const { mountSyntheticPreviewExpenseWriter } = await import('./preview-writer.mjs');
+  const { mountSyntheticPreviewExpenseWriter, mountSyntheticPreviewIncomeWriter } = await import('./preview-writer.mjs');
   await mountSyntheticPreviewExpenseWriter();
+  await mountSyntheticPreviewIncomeWriter();
 } catch {
   document.body.innerHTML = '<main style="max-width:720px;margin:48px auto;padding:24px;font-family:system-ui,sans-serif"><h1>PrihRash</h1><p>Не удалось запустить безопасный demo preview.</p></main>';
 }
