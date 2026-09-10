@@ -197,7 +197,7 @@ TRANSFER использует отдельный type-specific preview delivery 
 - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
 - create-time `paid_by_member` UX/delivery;
-- browser edit/conflict UI и public edit API envelope;
+- browser edit/conflict UI;
 - INCOME/TRANSFER edit;
 - VOID;
 - FinancialPeriod membership;
