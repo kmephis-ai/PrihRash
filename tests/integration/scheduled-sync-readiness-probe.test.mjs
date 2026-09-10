@@ -48,9 +48,9 @@ const validMigrationRows = Object.freeze([
   Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: '2026-09-02T00:00:00.000Z' }),
 ]);
 
-test('readiness probe performs one Google read and three read-only YDB checks', async () => {
+test('readiness probe performs one Google read and five read-only YDB checks', async () => {
   const sourceCounter = { calls: 0 };
-  const { adapter, capture } = adapterForReads([validMigrationRows, [], []]);
+  const { adapter, capture } = adapterForReads([[], [], validMigrationRows, [], []]);
 
   const result = await runScheduledSyncReadinessProbe(sourceThatSucceeds(sourceCounter), adapter);
 
@@ -61,11 +61,13 @@ test('readiness probe performs one Google read and three read-only YDB checks', 
   });
   assert.equal(sourceCounter.calls, 1);
   assert.equal(capture.transactions, 0);
-  assert.equal(capture.statements.length, 3);
+  assert.equal(capture.statements.length, 5);
   assert.equal(capture.statements[0].kind, 'READ');
-  assert.equal(capture.statements[0].text, 'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC');
-  assert.equal(capture.statements[1].text, 'SELECT normalized_source_label FROM accounts LIMIT 0');
-  assert.equal(capture.statements[2].text, 'SELECT normalized_source_label FROM categories LIMIT 0');
+  assert.equal(capture.statements[0].text, 'SELECT 1 AS readiness_probe');
+  assert.equal(capture.statements[1].text, 'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0');
+  assert.equal(capture.statements[2].text, 'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC');
+  assert.equal(capture.statements[3].text, 'SELECT normalized_source_label FROM accounts LIMIT 0');
+  assert.equal(capture.statements[4].text, 'SELECT normalized_source_label FROM categories LIMIT 0');
   assert.deepEqual(Object.keys(result).sort(), ['googleSource', 'requiredMigrationVersion', 'ydbSchema']);
 });
 
@@ -80,7 +82,7 @@ test('schema migration evidence fails closed for malformed rows', async () => {
   ];
 
   for (const rows of malformedRows) {
-    const { adapter } = adapterForReads([rows]);
+    const { adapter } = adapterForReads([[], [], rows]);
     await assert.rejects(
       () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), adapter),
       (error) => error instanceof ScheduledSyncReadinessError
@@ -90,14 +92,14 @@ test('schema migration evidence fails closed for malformed rows', async () => {
 });
 
 test('missing and future migration versions are distinct fail-closed blockers', async () => {
-  const missing = adapterForReads([[validMigrationRows[0]]]).adapter;
+  const missing = adapterForReads([[], [], [validMigrationRows[0]]]).adapter;
   await assert.rejects(
     () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), missing),
     (error) => error instanceof ScheduledSyncReadinessError
       && error.code === 'MISSING_REQUIRED_SCHEMA_MIGRATION',
   );
 
-  const unexpected = adapterForReads([[
+  const unexpected = adapterForReads([[], [], [
     ...validMigrationRows,
     { version: 3, checksum: 'checksum-003', applied_at: '2026-09-03T00:00:00.000Z' },
   ]]).adapter;
@@ -172,19 +174,29 @@ test('Google source provider failure is sanitized and prevents every YDB readine
 test('YDB readiness read failures are stage-specific, sanitized, and never open a transaction', async () => {
   const cases = [
     {
-      reads: [new Error('private-ydb-endpoint synthetic-migration-table-missing')],
-      expectedCode: 'YDB_MIGRATION_EVIDENCE_READ_FAILED',
+      reads: [new Error('private-ydb-endpoint synthetic-query-health-failure')],
+      expectedCode: 'YDB_QUERY_HEALTH_READ_FAILED',
       expectedStatements: 1,
     },
     {
-      reads: [validMigrationRows, new Error('private-ydb-endpoint synthetic-accounts-column-missing')],
-      expectedCode: 'YDB_ACCOUNTS_SCHEMA_READ_FAILED',
+      reads: [[], new Error('private-ydb-endpoint synthetic-migration-schema-missing')],
+      expectedCode: 'YDB_MIGRATION_SCHEMA_READ_FAILED',
       expectedStatements: 2,
     },
     {
-      reads: [validMigrationRows, [], new Error('private-ydb-endpoint synthetic-categories-column-missing')],
-      expectedCode: 'YDB_CATEGORIES_SCHEMA_READ_FAILED',
+      reads: [[], [], new Error('private-ydb-endpoint synthetic-migration-evidence-failure')],
+      expectedCode: 'YDB_MIGRATION_EVIDENCE_READ_FAILED',
       expectedStatements: 3,
+    },
+    {
+      reads: [[], [], validMigrationRows, new Error('private-ydb-endpoint synthetic-accounts-column-missing')],
+      expectedCode: 'YDB_ACCOUNTS_SCHEMA_READ_FAILED',
+      expectedStatements: 4,
+    },
+    {
+      reads: [[], [], validMigrationRows, [], new Error('private-ydb-endpoint synthetic-categories-column-missing')],
+      expectedCode: 'YDB_CATEGORIES_SCHEMA_READ_FAILED',
+      expectedStatements: 5,
     },
   ];
 
@@ -207,7 +219,7 @@ test('YDB readiness read failures are stage-specific, sanitized, and never open 
 
 function runtimeForLifecycle(options = {}) {
   const state = { closed: 0, sourceCreated: 0, clientCreated: 0 };
-  const rows = options.rows ?? [validMigrationRows, [], []];
+  const rows = options.rows ?? [[], [], validMigrationRows, [], []];
   let readIndex = 0;
   const transport = {
     async executeRead() {
