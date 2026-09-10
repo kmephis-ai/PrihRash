@@ -1,0 +1,58 @@
+name: Publish exact local R3A 404 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-404-publish-20260910-1023
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: 2a7f65879ceaaec02042e1fa88d8fe30cadf46df
+          TARGET_BRANCH: r3a/404-income-create-api
+          EXPECTED_HEAD: 25740dff399bf662e470dcb5163af2e4da3ff070
+          EXPECTED_TREE: 60400d2e578fe3cb7712fc2ec4d59ec602832b20
+          EXPECTED_PARENT: 2a7f65879ceaaec02042e1fa88d8fe30cadf46df
+          B64_SHA256: 740499ca5bd7449de3bb61a44418564067d6efb0d1478d97c4dcff42f2654c8d
+          GZ_SHA256: 4a65f2d2f95b059d055f94ec60f65f81c225e4f9753c9630a3a945e7c436ee69
+          PATCH_SHA256: e5507bee1203bc76ff29137bd9f54018c0092da478b6900eb548926128c377ed
+        run: |
+          set -euo pipefail
+          cat .transport/r3a404.gz.b64.part.* > /tmp/r3a404.patch.gz.b64
+          echo "$B64_SHA256  /tmp/r3a404.patch.gz.b64" | sha256sum -c -
+          base64 -d /tmp/r3a404.patch.gz.b64 > /tmp/r3a404.patch.gz
+          echo "$GZ_SHA256  /tmp/r3a404.patch.gz" | sha256sum -c -
+          gzip -dc /tmp/r3a404.patch.gz > /tmp/r3a404.patch
+          echo "$PATCH_SHA256  /tmp/r3a404.patch" | sha256sum -c -
+
+          git fetch origin main
+          git fetch origin "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$SOURCE_SHA"
+
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git switch --detach "$SOURCE_SHA"
+          git am --committer-date-is-author-date /tmp/r3a404.patch
+
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+
+          expected_files=$(printf '%s\n' \
+            docs/R3A_WRITER_API.md \
+            src/writer/incomeCreateApi.ts \
+            tests/domain/writer-income-create-api.test.mjs)
+          actual_files=$(git diff --name-only "$SOURCE_SHA" HEAD)
+          test "$actual_files" = "$expected_files"
+
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
