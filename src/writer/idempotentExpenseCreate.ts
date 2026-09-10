@@ -36,6 +36,7 @@ export interface ExpenseCreateRequest {
   readonly currency: 'RUB';
   readonly fromAccountId: string;
   readonly categoryId: string;
+  readonly paidByMemberId: string | null;
   readonly description: string | null;
   readonly note: string | null;
 }
@@ -44,11 +45,12 @@ export interface ExpenseCreateReferenceEvidence {
   readonly accountId: string;
   readonly categoryId: string;
   readonly categoryKind: CategoryKind;
+  readonly memberId: string | null;
 }
 
 export interface ExpenseCreateReferenceReader {
   readExpenseCreateReferenceEvidence(
-    request: Readonly<Pick<ExpenseCreateRequest, 'fromAccountId' | 'categoryId'>>,
+    request: Readonly<Pick<ExpenseCreateRequest, 'fromAccountId' | 'categoryId' | 'paidByMemberId'>>,
   ): Promise<Readonly<ExpenseCreateReferenceEvidence> | null>;
 }
 
@@ -146,6 +148,14 @@ function canonicalDate(value: unknown): string {
   return value;
 }
 
+function optionalCanonicalUuid(
+  value: unknown,
+  code: ExpenseCreateErrorCode = 'INVALID_REQUEST',
+): string | null {
+  if (value === null) return null;
+  return canonicalUuid(value, code);
+}
+
 function optionalCanonicalText(value: unknown): string | null {
   if (value === null) return null;
   if (
@@ -165,6 +175,7 @@ export function parseExpenseCreateRequest(value: unknown): Readonly<ExpenseCreat
     'currency',
     'fromAccountId',
     'categoryId',
+    'paidByMemberId',
     'description',
     'note',
   ])) return fail('INVALID_REQUEST');
@@ -181,6 +192,7 @@ export function parseExpenseCreateRequest(value: unknown): Readonly<ExpenseCreat
     currency: 'RUB',
     fromAccountId: canonicalUuid(value.fromAccountId),
     categoryId: canonicalUuid(value.categoryId),
+    paidByMemberId: optionalCanonicalUuid(value.paidByMemberId),
     description: optionalCanonicalText(value.description),
     note: optionalCanonicalText(value.note),
   });
@@ -191,12 +203,18 @@ function parseReferenceEvidence(
   request: Readonly<ExpenseCreateRequest>,
 ): void {
   if (value === null) return fail('REFERENCE_NOT_FOUND');
-  if (!exactKeys(value, ['accountId', 'categoryId', 'categoryKind'])) return fail('REFERENCE_MISMATCH');
-  const accountId = canonicalUuid(value.accountId, 'REFERENCE_MISMATCH');
-  const categoryId = canonicalUuid(value.categoryId, 'REFERENCE_MISMATCH');
-  if (accountId !== request.fromAccountId || categoryId !== request.categoryId) {
+  if (!exactKeys(value, ['accountId', 'categoryId', 'categoryKind', 'memberId'])) {
     return fail('REFERENCE_MISMATCH');
   }
+  const accountId = canonicalUuid(value.accountId, 'REFERENCE_MISMATCH');
+  const categoryId = canonicalUuid(value.categoryId, 'REFERENCE_MISMATCH');
+  const memberId = optionalCanonicalUuid(value.memberId, 'REFERENCE_MISMATCH');
+  if (request.paidByMemberId !== null && memberId === null) return fail('REFERENCE_NOT_FOUND');
+  if (
+    accountId !== request.fromAccountId
+    || categoryId !== request.categoryId
+    || memberId !== request.paidByMemberId
+  ) return fail('REFERENCE_MISMATCH');
   if (value.categoryKind !== 'EXPENSE') return fail('CATEGORY_KIND_INVALID');
 }
 
@@ -214,7 +232,7 @@ function buildCanonicalExpense(request: Readonly<ExpenseCreateRequest>): Readonl
     fromAccountId: request.fromAccountId,
     toAccountId: null,
     categoryId: request.categoryId,
-    paidByMemberId: null,
+    paidByMemberId: request.paidByMemberId,
     description: request.description,
     note: request.note,
     status: 'POSTED',
@@ -234,6 +252,7 @@ function sameRequest(left: Readonly<ExpenseCreateRequest>, right: Readonly<Expen
     && left.currency === right.currency
     && left.fromAccountId === right.fromAccountId
     && left.categoryId === right.categoryId
+    && left.paidByMemberId === right.paidByMemberId
     && left.description === right.description
     && left.note === right.note;
 }
@@ -360,6 +379,7 @@ export async function executeIdempotentExpenseCreate(
     referenceEvidence = await dependencies.references.readExpenseCreateReferenceEvidence({
       fromAccountId: request.fromAccountId,
       categoryId: request.categoryId,
+      paidByMemberId: request.paidByMemberId,
     });
   } catch {
     return fail('REFERENCE_READ_FAILED');

@@ -15,6 +15,8 @@ const ACCOUNT_ID = 'c0000000-0000-0000-0000-000000000001';
 const ACCOUNT_ID_2 = 'c0000000-0000-0000-0000-000000000002';
 const CATEGORY_ID = 'd0000000-0000-0000-0000-000000000001';
 const CATEGORY_ID_2 = 'd0000000-0000-0000-0000-000000000002';
+const MEMBER_ID = 'e0000000-0000-0000-0000-000000000001';
+const MEMBER_ID_2 = 'e0000000-0000-0000-0000-000000000002';
 
 const REQUEST = Object.freeze({
   idempotencyKey: KEY,
@@ -23,6 +25,7 @@ const REQUEST = Object.freeze({
   currency: 'RUB',
   fromAccountId: ACCOUNT_ID,
   categoryId: CATEGORY_ID,
+  paidByMemberId: null,
   description: 'Продукты',
   note: null,
 });
@@ -57,17 +60,19 @@ class InMemoryAtomicCreateStore {
 }
 
 function referenceReader(overrides = {}) {
-  const state = { calls: 0 };
+  const state = { calls: 0, lastRequest: null };
   return {
     state,
     dependency: {
       async readExpenseCreateReferenceEvidence(request) {
         state.calls += 1;
+        state.lastRequest = Object.freeze({ ...request });
         if (overrides.missing) return null;
         const evidence = {
           accountId: overrides.accountId ?? request.fromAccountId,
           categoryId: overrides.categoryId ?? request.categoryId,
           categoryKind: overrides.categoryKind ?? 'EXPENSE',
+          memberId: Object.hasOwn(overrides, 'memberId') ? overrides.memberId : request.paidByMemberId,
         };
         if (overrides.extra) evidence.extra = true;
         return evidence;
@@ -131,12 +136,43 @@ test('first EXPENSE create uses canonical defaults and creates one separate tran
   });
   assert.deepEqual(validateTransaction(response.result.transaction, { categoryKind: 'EXPENSE' }), []);
   assert.equal(refs.state.calls, 1);
+  assert.deepEqual(refs.state.lastRequest, {
+    fromAccountId: ACCOUNT_ID,
+    categoryId: CATEGORY_ID,
+    paidByMemberId: null,
+  });
   assert.equal(store.readCalls, 1);
   assert.equal(store.calls, 1);
   assert.equal(store.creates, 1);
   assert.ok(Object.isFrozen(response));
   assert.ok(Object.isFrozen(response.result));
   assert.ok(Object.isFrozen(response.result.transaction));
+});
+
+test('exact paidByMemberId is stored independently from payment account without inference', async () => {
+  const store = new InMemoryAtomicCreateStore();
+  const refs = referenceReader();
+  const request = Object.freeze({
+    ...REQUEST,
+    fromAccountId: ACCOUNT_ID_2,
+    paidByMemberId: MEMBER_ID,
+  });
+  const response = await executeIdempotentExpenseCreate({
+    references: refs.dependency,
+    store,
+    randomUuid: () => TX_ID,
+  }, request);
+
+  assert.equal(response.outcome, 'CREATED');
+  assert.equal(response.result.transaction.fromAccountId, ACCOUNT_ID_2);
+  assert.equal(response.result.transaction.paidByMemberId, MEMBER_ID);
+  assert.deepEqual(store.records.get(KEY).request, request);
+  assert.equal(refs.state.calls, 1);
+  assert.deepEqual(refs.state.lastRequest, {
+    fromAccountId: ACCOUNT_ID_2,
+    categoryId: CATEGORY_ID,
+    paidByMemberId: MEMBER_ID,
+  });
 });
 
 test('exact replay returns original result and never creates a second transaction', async () => {
@@ -163,6 +199,7 @@ test('same key with any changed canonical field fails as idempotency conflict wi
     ['amountMinor', { amountMinor: 12346 }],
     ['fromAccountId', { fromAccountId: ACCOUNT_ID_2 }],
     ['categoryId', { categoryId: CATEGORY_ID_2 }],
+    ['paidByMemberId', { paidByMemberId: MEMBER_ID }],
     ['description', { description: 'Транспорт' }],
     ['description null', { description: null }],
     ['note', { note: 'Чек сохранён' }],
@@ -191,6 +228,9 @@ test('malformed requests fail before reference lookup and store mutation', async
   const cases = [
     ['uppercase key', { ...REQUEST, idempotencyKey: KEY.toUpperCase() }],
     ['uppercase account', { ...REQUEST, fromAccountId: ACCOUNT_ID.toUpperCase() }],
+    ['uppercase member', { ...REQUEST, paidByMemberId: MEMBER_ID.toUpperCase() }],
+    ['malformed member', { ...REQUEST, paidByMemberId: 'member-vika' }],
+    ['missing payer field', (() => { const { paidByMemberId, ...rest } = REQUEST; return rest; })()],
     ['invalid date', { ...REQUEST, occurredOn: '2026-02-30' }],
     ['short date', { ...REQUEST, occurredOn: '2026-9-10' }],
     ['zero amount', { ...REQUEST, amountMinor: 0 }],
@@ -223,6 +263,9 @@ test('missing and mismatched reference evidence fail before store mutation', asy
     ['missing', { missing: true }, 'REFERENCE_NOT_FOUND'],
     ['account mismatch', { accountId: ACCOUNT_ID_2 }, 'REFERENCE_MISMATCH'],
     ['category mismatch', { categoryId: CATEGORY_ID_2 }, 'REFERENCE_MISMATCH'],
+    ['unexpected member for null request', { memberId: MEMBER_ID }, 'REFERENCE_MISMATCH'],
+    ['malformed member evidence', { memberId: 'member-vika' }, 'REFERENCE_MISMATCH'],
+    ['duplicate/ambiguous member evidence', { memberId: [MEMBER_ID, MEMBER_ID_2] }, 'REFERENCE_MISMATCH'],
     ['wrong category kind', { categoryKind: 'INCOME' }, 'CATEGORY_KIND_INVALID'],
     ['extra reference field', { extra: true }, 'REFERENCE_MISMATCH'],
   ];
@@ -237,6 +280,28 @@ test('missing and mismatched reference evidence fail before store mutation', asy
       );
       assert.equal(refs.state.calls, 1);
       assert.equal(store.readCalls, 1);
+      assert.equal(store.calls, 0);
+    });
+  }
+});
+
+test('requested payer requires exact member evidence and ambiguous/missing payer fails closed', async (t) => {
+  const request = Object.freeze({ ...REQUEST, paidByMemberId: MEMBER_ID });
+  const cases = [
+    ['member missing from otherwise exact evidence', { memberId: null }, 'REFERENCE_NOT_FOUND'],
+    ['different member evidence', { memberId: MEMBER_ID_2 }, 'REFERENCE_MISMATCH'],
+    ['no exact aggregate evidence (including ambiguous reference result)', { missing: true }, 'REFERENCE_NOT_FOUND'],
+  ];
+
+  for (const [name, refOverrides, code] of cases) {
+    await t.test(name, async () => {
+      const store = new InMemoryAtomicCreateStore();
+      const refs = referenceReader(refOverrides);
+      await expectCode(
+        executeIdempotentExpenseCreate({ references: refs.dependency, store, randomUuid: () => TX_ID }, request),
+        code,
+      );
+      assert.equal(refs.state.calls, 1);
       assert.equal(store.calls, 0);
     });
   }
@@ -286,6 +351,27 @@ test('committed replay does not depend on current reference availability or gene
   assert.equal(store.creates, 1);
 });
 
+test('committed paid-by replay remains independent of later member reference state', async () => {
+  const store = new InMemoryAtomicCreateStore();
+  const refs = referenceReader();
+  const request = Object.freeze({ ...REQUEST, paidByMemberId: MEMBER_ID });
+  let generated = 0;
+  const randomUuid = () => {
+    generated += 1;
+    return generated === 1 ? TX_ID : TX_ID_2;
+  };
+
+  const first = await executeIdempotentExpenseCreate({ references: refs.dependency, store, randomUuid }, request);
+  const unavailableRefs = referenceReader({ missing: true });
+  const replay = await executeIdempotentExpenseCreate({ references: unavailableRefs.dependency, store, randomUuid }, request);
+
+  assert.equal(first.result.transaction.paidByMemberId, MEMBER_ID);
+  assert.equal(replay.outcome, 'REPLAY');
+  assert.equal(replay.result.transaction.paidByMemberId, MEMBER_ID);
+  assert.equal(unavailableRefs.state.calls, 0);
+  assert.equal(generated, 1);
+});
+
 test('store conflict and malformed replay evidence fail closed', async (t) => {
   const seedStore = new InMemoryAtomicCreateStore();
   const expected = await executeIdempotentExpenseCreate({
@@ -311,6 +397,13 @@ test('store conflict and malformed replay evidence fail closed', async (t) => {
       readCommitted: async () => ({
         request: REQUEST,
         result: { ...expected.result, transaction: { ...expected.result.transaction, amountMinor: 999 } },
+      }),
+      createOrReplay: async () => assert.fail('createOrReplay must not run'),
+    }, 'STORE_CONTRACT_INVALID'],
+    ['committed payer projection differs from request', {
+      readCommitted: async () => ({
+        request: REQUEST,
+        result: { ...expected.result, transaction: { ...expected.result.transaction, paidByMemberId: MEMBER_ID } },
       }),
       createOrReplay: async () => assert.fail('createOrReplay must not run'),
     }, 'STORE_CONTRACT_INVALID'],
