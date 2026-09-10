@@ -1,0 +1,38 @@
+name: Publish exact local R3A 396 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-396-publish-20260910-0714
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: 7e6af8f6b6a5eee3cffb445e0e80d1ba5ef7609c
+          EXPECTED_COMMIT: e209379d7bff06f9ff6b3ce29cce8981c562e055
+          EXPECTED_TREE: c3e4e00254cd48f6036ba4d2aff49a9780640c6d
+          TARGET_BRANCH: r3a/396-writer-create-api-envelope
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$SOURCE_SHA"
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          base64 -d .transport/r3a-396.patch.gz.b64 | gzip -d > /tmp/396.patch
+          git am --committer-date-is-author-date /tmp/396.patch
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git diff --check "$SOURCE_SHA"...HEAD
+          git push origin HEAD:"refs/heads/$TARGET_BRANCH"
