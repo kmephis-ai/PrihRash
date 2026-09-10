@@ -165,8 +165,8 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
 
 - EXPENSE имеет отдельные application/API/idempotency и injected ACK-delivery proofs;
 - INCOME также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
-- TRANSFER в этом item имеет только synthetic durable draft/outbox UX proof; application/API/delivery для него ещё не заявлены;
-- реальный browser HTTP sender для EXPENSE/INCOME всё ещё не подключён; TRANSFER sender отсутствует полностью;
+- TRANSFER также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
+- реальный browser HTTP sender для EXPENSE/INCOME/TRANSFER всё ещё не подключён;
 - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
 - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
 - R1 #302 и production R2 auth/YDB wiring не обходятся.
@@ -185,13 +185,15 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
 
 INCOME использует отдельный type-specific preview delivery module с теми же crash/retry invariants, но с `toAccountId` и injected `sendIncomeCreate(request)`. Он не рефакторит доказанный EXPENSE path: malformed/mismatched ACK не удаляет local intent, valid `CREATED|REPLAY` ACK предшествует `acknowledge()`, а local delete failure оставляет тот же idempotency key для безопасного `REPLAY` при следующем явном вызове. Automatic retry cadence/backoff здесь не определяются.
 
+TRANSFER использует отдельный type-specific preview delivery module с injected `sendTransferCreate(request)`. Request содержит только `idempotencyKey`, `occurredOn`, `amountMinor`, `currency=RUB`, exact `fromAccountId`, exact `toAccountId`, `description`, `note`: local labels/metadata и `flowKind=null` в transport envelope не передаются. Valid `CREATED|REPLAY` ACK проверяется до exact-key `acknowledge()`, sender/local-ACK failures санитизируются, а crash после server commit безопасно завершается повтором того же key и `REPLAY`. Automatic retry cadence/backoff здесь не определяются.
+
 ## Не входит
 
 - production Writer UI;
 - Google Form/GAS intake parity;
 - real browser HTTP sender / API Gateway / private Function;
 - real INCOME HTTP sender / provider-bound delivery;
-- TRANSFER application/idempotency contract, API envelope и browser ACK delivery;
+- real TRANSFER HTTP sender / provider-bound delivery;
 - TRANSFER flow-kind selection/inference, включая credit draw/repayment UX;
 - automatic retry/sync scheduler;
 - `paid_by_member`;
