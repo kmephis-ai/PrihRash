@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { planInitialSourceRevisionEvidenceResume } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
-import { serializeRawPayloadV2 } from '../../dist/migration/rawPayloadProvenance.js';
+import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
 const RUN_ID = '00000000-0000-0000-0000-000000009601';
 const SOURCE_ID = '00000000-0000-0000-0000-000000009602';
@@ -11,7 +11,7 @@ const ROW_DIGEST = ' synthetic-row-digest ';
 function rawPayload() {
   const S = (value) => ({ kind: 'STRING', value });
   const N = (value) => ({ kind: 'NUMBER', value });
-  return serializeRawPayloadV2({
+  return serializeRawPayload({
     adapter_schema_version: 2,
     date: N('45292.5'),
     operation_type: S('Расход'),

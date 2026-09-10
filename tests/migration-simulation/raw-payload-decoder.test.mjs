@@ -52,6 +52,13 @@ test('decodes Sheets serial day and RUB minor units without float multiplication
   });
 });
 
+test('decodes current adapter schema v3 with the same typed financial semantics', () => {
+  const result = decodeLegacyFinancialRawPayload(expense({ adapter_schema_version: 3 }));
+  assert.equal(result.ok, true);
+  assert.equal(result.value.occurredOn, '2024-01-01');
+  assert.equal(result.value.amountMinor, 12345);
+});
+
 test('uses only the operation-active amount column', () => {
   const result = decodeLegacyFinancialRawPayload(income());
   assert.equal(result.ok, true);

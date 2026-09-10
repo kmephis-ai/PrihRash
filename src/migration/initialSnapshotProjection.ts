@@ -4,13 +4,13 @@ import type { CanonicalTransaction } from '../domain/transaction.js';
 import type { InitialSnapshotGranularityEvidence } from '../normalization/historicalGranularity.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import type { InitialFinancialProjectionErrorCode } from './initialFinancialProjection.js';
-import type { RawPayloadDecodeErrorCode, RawPayloadV2 } from './rawPayloadDecoder.js';
+import type { RawPayloadDecodeErrorCode, RawPayload } from './rawPayloadDecoder.js';
 import { projectSourceSnapshotSemantics } from './sourceSnapshotSemanticProjection.js';
 
 export interface InitialSnapshotProjectionRowInput {
   readonly sourceRecordId: string;
   readonly sourceOrdinal: number;
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
   readonly aggregatePeriodMonth: string | null;
 }
 

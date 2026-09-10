@@ -162,7 +162,7 @@ test('missing source sheet fails closed', async () => {
 
 test('header schema drift fails closed through canonical source contract', async () => {
   const headers = [...EXPECTED_SOURCE_HEADERS];
-  headers[0] = 'Дата';
+  headers[0] = ' Дата';
   const header = { values: headers.map((value) => ({ userEnteredValue: { stringValue: value } })) };
   const { reader, digest } = makeReader({ payload: providerPayload({ header }) });
 

@@ -8,10 +8,10 @@ import {
   projectFinancialTransaction,
   type FinancialProjectionErrorCode,
 } from './financialProjection.js';
-import type { RawPayloadV2 } from './rawPayloadDecoder.js';
+import type { RawPayload } from './rawPayloadDecoder.js';
 
 export interface InitialFinancialProjectionInput {
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
   readonly initialSourceOrdinal: number | null;
   readonly aggregatePeriodMonth: string | null;
 }

@@ -1,7 +1,7 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
-import { serializeRawPayloadV2 } from './rawPayloadProvenance.js';
+import { serializeRawPayload } from './rawPayloadProvenance.js';
 
 interface ExistingInitialRevisionRow {
   readonly source_record_id?: unknown;
@@ -78,7 +78,7 @@ function canonicalRawPayload(value: unknown): string {
   }
   if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed();
   try {
-    return serializeRawPayloadV2(payload as Readonly<Record<string, unknown>>);
+    return serializeRawPayload(payload as Readonly<Record<string, unknown>>);
   } catch {
     malformed();
   }

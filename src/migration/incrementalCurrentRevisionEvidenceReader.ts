@@ -1,8 +1,8 @@
 import { SOURCE_SHEET_NAME } from '../integration/google/sourceSchema.js';
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { utf8Parameter } from '../integration/ydb/parameters.js';
-import type { RawPayloadV2 } from './rawPayloadDecoder.js';
-import { normalizeRawPayloadV2 } from './rawPayloadProvenance.js';
+import type { RawPayload } from './rawPayloadDecoder.js';
+import { normalizeRawPayload } from './rawPayloadProvenance.js';
 import type { IncrementalPreviousRevisionEvidence } from './incrementalRevisionEvidence.js';
 import type { IncrementalPreviousSourceCurrentEvidence } from './incrementalSourceCurrentCandidate.js';
 
@@ -25,7 +25,7 @@ export interface IncrementalCurrentRevisionPayloadEvidence {
   readonly rowHint: number;
   readonly rowDigest: string;
   readonly changeClass: 'WORKFLOW_TRANSFORM' | 'OWNER_CORRECTION' | 'AMBIGUOUS_CHANGE' | null;
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
 }
 
 export interface IncrementalCurrentRevisionEvidenceSnapshot {
@@ -89,7 +89,7 @@ function changeClass(value: unknown): IncrementalCurrentRevisionPayloadEvidence[
   return value as Exclude<IncrementalCurrentRevisionPayloadEvidence['changeClass'], null>;
 }
 
-function rawPayload(value: unknown): RawPayloadV2 {
+function rawPayload(value: unknown): RawPayload {
   let candidate: unknown = value;
   if (typeof value === 'string') {
     try {
@@ -100,7 +100,7 @@ function rawPayload(value: unknown): RawPayloadV2 {
   }
   if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) malformed();
   try {
-    return normalizeRawPayloadV2(candidate as Readonly<Record<string, unknown>>);
+    return normalizeRawPayload(candidate as Readonly<Record<string, unknown>>);
   } catch {
     malformed();
   }

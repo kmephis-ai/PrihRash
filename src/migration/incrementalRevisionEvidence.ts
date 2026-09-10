@@ -4,7 +4,7 @@ import type {
   IncrementalLineagePlan,
 } from './incrementalLineagePlan.js';
 import type { MigrationRun } from './migrationRunState.js';
-import { serializeRawPayloadV2 } from './rawPayloadProvenance.js';
+import { serializeRawPayload } from './rawPayloadProvenance.js';
 
 export interface IncrementalRevisionPayloadObservation {
   readonly currentRowHint: number;
@@ -79,7 +79,7 @@ function payloadsByRowHint(
     if (byRowHint.has(observation.currentRowHint)) {
       throw new IncrementalRevisionEvidenceError('DUPLICATE_PAYLOAD_ROW_HINT');
     }
-    byRowHint.set(observation.currentRowHint, serializeRawPayloadV2(observation.payload));
+    byRowHint.set(observation.currentRowHint, serializeRawPayload(observation.payload));
   }
   return byRowHint;
 }

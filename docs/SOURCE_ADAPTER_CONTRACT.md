@@ -17,13 +17,13 @@ Reference sheets не участвуют в создании Transactions.
 
 ## 2. Physical columns
 
-Последняя live read-only проверка header по exact Google spreadsheet identity: **2026-09-06**.
+Последняя live read-only проверка header по exact Google spreadsheet identity: **2026-09-10**.
 
 Текущая проверенная схема содержит 11 колонок:
 
 | Position | Physical header | Stable adapter key | Meaning |
 |---|---|---|---|
-| A | ` Дата` | `date` | legacy source date/datetime |
+| A | `Отметка времени` | `date` | legacy source date/datetime |
 | B | `Тип операции` | `operation_type` | `Расход` / `Доход` |
 | C | `Счет` | `expense_account` | expense payment account |
 | D | `Категория` | `expense_category` | expense category |
@@ -37,7 +37,11 @@ Reference sheets не участвуют в создании Transactions.
 
 У физического source два одинаковых header `Счет` и два `Сумма`. Поэтому adapter работает через **позиционную схему + stable adapter keys**, а не через автоматически придуманные parser names вроде `Счет.1`/`Сумма.1`.
 
-Перед чтением payload adapter проверяет ожидаемое число/порядок колонок и нормализованные header labels. Неожиданное schema drift → fail-closed `SOURCE_SCHEMA_MISMATCH`.
+Read-only re-verification 2026-09-10 локализовала physical schema evolution: по сравнению с контрактом, проверенным 2026-09-06, изменился только exact header A — ` Дата` → `Отметка времени`; B–K, spreadsheet title, locale, timezone и canonical sheet identity совпали. Это не alias и не повод угадывать новую финансовую семантику: stable adapter key остаётся `date`, а сам label `Отметка времени` **не доказывает** `captured_at`. Canonical interpretation source serial остаётся прежней и определяется `FINANCIAL_SEMANTICS`.
+
+Текущий source adapter schema version: **3**. Новые Google observations обязаны emit `adapter_schema_version=3`. Persisted v2 provenance остаётся readable для compatibility, но current reader не принимает старый header vector как alias.
+
+Перед чтением payload adapter проверяет ожидаемое число/порядок колонок и exact current header labels. Неожиданное schema drift → fail-closed `SOURCE_SCHEMA_MISMATCH`.
 
 ### 2.1. Typed cell representation
 

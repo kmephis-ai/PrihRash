@@ -4,10 +4,23 @@ import {
   type SourceCellPayloadV2,
 } from '../integration/google/sourceValueCodec.js';
 
+export type SupportedAdapterSchemaVersion = 2 | 3;
+
 export type RawPayloadV2 = Readonly<
   { adapter_schema_version: 2 }
   & Record<AdapterKey, SourceCellPayloadV2>
 >;
+
+export type RawPayloadV3 = Readonly<
+  { adapter_schema_version: 3 }
+  & Record<AdapterKey, SourceCellPayloadV2>
+>;
+
+export type RawPayload = RawPayloadV2 | RawPayloadV3;
+
+export function isSupportedAdapterSchemaVersion(value: unknown): value is SupportedAdapterSchemaVersion {
+  return value === 2 || value === 3;
+}
 
 export interface DecodedLegacyFinancialFields {
   readonly operationType: 'Расход' | 'Доход';
@@ -110,8 +123,8 @@ export function decodeRawPayloadAmountMinor(
   return success(Number(minor));
 }
 
-export function decodeLegacyFinancialRawPayload(payload: RawPayloadV2): RawPayloadDecodeResult {
-  if (payload.adapter_schema_version !== 2) {
+export function decodeLegacyFinancialRawPayload(payload: RawPayload): RawPayloadDecodeResult {
+  if (!isSupportedAdapterSchemaVersion(payload.adapter_schema_version)) {
     return failure('INVALID_PAYLOAD_SCHEMA', 'adapter_schema_version');
   }
 

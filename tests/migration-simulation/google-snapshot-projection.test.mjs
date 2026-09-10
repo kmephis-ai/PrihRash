@@ -5,6 +5,7 @@ import {
   GoogleSnapshotProjectionError,
   projectGoogleSnapshotForIncrementalMigration,
 } from '../../dist/migration/googleSnapshotProjection.js';
+import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
 function row(rowHint = 2, overrides = {}) {
   const values = [
@@ -46,7 +47,7 @@ function digestSpy() {
   };
 }
 
-test('maps exact A:K positions to RawPayloadV2 adapter keys and current sequence evidence', () => {
+test('maps exact A:K positions to current RawPayloadV3 adapter keys and sequence evidence', () => {
   const digest = digestSpy();
   const projection = projectGoogleSnapshotForIncrementalMigration(snapshot(), digest);
 
@@ -55,7 +56,7 @@ test('maps exact A:K positions to RawPayloadV2 adapter keys and current sequence
     rowHint: 2,
     digest: 'row-digest-1',
     rawPayload: {
-      adapter_schema_version: 2,
+      adapter_schema_version: 3,
       date: { kind: 'NUMBER', value: '45000' },
       operation_type: { kind: 'STRING', value: 'Расход' },
       expense_account: { kind: 'STRING', value: 'Карта Visa' },
@@ -74,7 +75,23 @@ test('maps exact A:K positions to RawPayloadV2 adapter keys and current sequence
   assert.equal(Object.isFrozen(projection.rows[0]), true);
   assert.equal(Object.isFrozen(projection.rows[0].rawPayload), true);
 
-  assert.deepEqual(JSON.parse(digest.canonicalRows[0]), projection.rows[0].rawPayload);
+  assert.equal(
+    digest.canonicalRows[0],
+    serializeRawPayload({ ...projection.rows[0].rawPayload, adapter_schema_version: 2 }),
+  );
+});
+
+
+test('v3 provenance keeps v2-compatible lineage digest framing for unchanged A-K cells', () => {
+  const digest = digestSpy();
+  const projection = projectGoogleSnapshotForIncrementalMigration(snapshot(), digest);
+  const legacyEquivalent = serializeRawPayload({
+    ...projection.rows[0].rawPayload,
+    adapter_schema_version: 2,
+  });
+
+  assert.equal(projection.rows[0].rawPayload.adapter_schema_version, 3);
+  assert.equal(digest.canonicalRows[0], legacyEquivalent);
 });
 
 test('canonical row digest input is deterministic for semantically identical provider objects', () => {

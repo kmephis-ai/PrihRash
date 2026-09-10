@@ -10,11 +10,11 @@ import type { NormalizationErrorCode, ReferenceResolver } from '../normalization
 import {
   decodeLegacyFinancialRawPayload,
   type RawPayloadDecodeErrorCode,
-  type RawPayloadV2,
+  type RawPayload,
 } from './rawPayloadDecoder.js';
 
 export interface FinancialProjectionInput {
-  readonly rawPayload: RawPayloadV2;
+  readonly rawPayload: RawPayload;
   readonly recordGranularity: RecordGranularity;
   readonly datePrecision: DatePrecision;
   readonly aggregatePeriodMonth: string | null;

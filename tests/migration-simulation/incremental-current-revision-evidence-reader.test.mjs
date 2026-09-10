@@ -119,6 +119,15 @@ test('reads current revision rows once and returns consistent previous revision 
   assert.equal(Object.isFrozen(evidence.currentRevisionPayloads[0].rawPayload), true);
 });
 
+test('reads persisted current adapter schema v3 provenance without rewriting it', async () => {
+  const { adapter } = makeAdapter([revisionRow(SOURCE_ID_A, {
+    raw_payload: payload({ adapter_schema_version: 3 }),
+  })]);
+  const evidence = await readIncrementalCurrentRevisionEvidence(adapter, [source(SOURCE_ID_A)]);
+
+  assert.equal(evidence.currentRevisionPayloads[0].rawPayload.adapter_schema_version, 3);
+});
+
 test('normalizes UUID casing and accepts null change_class for initial revision evidence', async () => {
   const upper = SOURCE_ID_A.toUpperCase();
   const { adapter } = makeAdapter([revisionRow(upper, { change_class: null })]);

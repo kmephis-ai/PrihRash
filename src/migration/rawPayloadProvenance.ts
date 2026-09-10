@@ -3,7 +3,11 @@ import {
   isCanonicalGoogleNumberText,
   type SourceCellPayloadV2,
 } from '../integration/google/sourceValueCodec.js';
-import type { RawPayloadV2 } from './rawPayloadDecoder.js';
+import {
+  isSupportedAdapterSchemaVersion,
+  type RawPayload,
+  type SupportedAdapterSchemaVersion,
+} from './rawPayloadDecoder.js';
 
 export type RawPayloadProvenanceErrorCode =
   | 'INVALID_PAYLOAD_SCHEMA'
@@ -43,10 +47,11 @@ function normalizedCell(value: unknown): SourceCellPayloadV2 {
   throw new RawPayloadProvenanceError('INVALID_PAYLOAD_VALUE');
 }
 
-export function normalizeRawPayloadV2(
+export function normalizeRawPayload(
   payload: Readonly<Record<string, unknown>>,
-): RawPayloadV2 {
-  if (payload.adapter_schema_version !== 2) {
+): RawPayload {
+  const schemaVersion = payload.adapter_schema_version;
+  if (!isSupportedAdapterSchemaVersion(schemaVersion)) {
     throw new RawPayloadProvenanceError('INVALID_PAYLOAD_SCHEMA');
   }
 
@@ -55,15 +60,28 @@ export function normalizeRawPayloadV2(
     throw new RawPayloadProvenanceError('INVALID_PAYLOAD_KEYS');
   }
 
-  const normalized: Record<string, SourceCellPayloadV2 | 2> = { adapter_schema_version: 2 };
+  const normalized: Record<string, SourceCellPayloadV2 | SupportedAdapterSchemaVersion> = {
+    adapter_schema_version: schemaVersion,
+  };
   for (const key of ADAPTER_KEYS) normalized[key] = normalizedCell(payload[key]);
-  return Object.freeze(normalized) as RawPayloadV2;
+  return Object.freeze(normalized) as RawPayload;
 }
 
-export function serializeRawPayloadV2(
+export function serializeRawPayload(
   payload: Readonly<Record<string, unknown>>,
 ): string {
-  const normalized = normalizeRawPayloadV2(payload);
+  const normalized = normalizeRawPayload(payload);
+  const ordered: Record<string, SourceCellPayloadV2 | SupportedAdapterSchemaVersion> = {
+    adapter_schema_version: normalized.adapter_schema_version,
+  };
+  for (const key of ADAPTER_KEYS) ordered[key] = normalized[key];
+  return JSON.stringify(ordered);
+}
+
+export function serializeRawPayloadForLineageDigest(
+  payload: Readonly<Record<string, unknown>>,
+): string {
+  const normalized = normalizeRawPayload(payload);
   const ordered: Record<string, SourceCellPayloadV2 | 2> = { adapter_schema_version: 2 };
   for (const key of ADAPTER_KEYS) ordered[key] = normalized[key];
   return JSON.stringify(ordered);
