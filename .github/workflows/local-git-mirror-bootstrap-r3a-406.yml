@@ -1,0 +1,37 @@
+name: Local Git Mirror Bootstrap R3A 406
+
+on:
+  push:
+    branches:
+      - agent/r3a-mirror-406-20260910-1028
+
+permissions:
+  contents: read
+
+jobs:
+  build-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Build exact-source bundle
+        env:
+          SOURCE_SHA: 23c36403d3025d782b3733db885cb9d93493818a
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          mkdir -p /tmp/prihrash-mirror
+          git update-ref refs/heads/mirror-source "$SOURCE_SHA"
+          git bundle create /tmp/prihrash-mirror/repository.bundle refs/heads/mirror-source
+          BUNDLE_SHA=$(sha256sum /tmp/prihrash-mirror/repository.bundle | awk '{print $1}')
+          TREE_SHA=$(git rev-parse "$SOURCE_SHA^{tree}")
+          printf '{"sourceSha":"%s","treeSha":"%s","bundleSha256":"%s"}\n' "$SOURCE_SHA" "$TREE_SHA" "$BUNDLE_SHA" > /tmp/prihrash-mirror/manifest.json
+          (cd /tmp/prihrash-mirror && sha256sum repository.bundle manifest.json > SHA256SUMS.txt)
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-git-mirror-r3a-406
+          path: /tmp/prihrash-mirror
+          retention-days: 1
