@@ -8,11 +8,16 @@ import { sanitizeReaderResponse, toOperationPresentation } from '../../web/prese
 import { sanitizeReaderFilterOptions } from '../../web/reader-filters.mjs';
 import { sanitizeReaderSyncStatus } from '../../web/reader-sync-status.mjs';
 import {
+  createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewOutbox,
+  createPreviewExpenseDraft,
   createPreviewExpenseIntent,
+  enqueuePreviewExpenseThenClearDraft,
   parsePreviewExpenseAmountMinor,
+  parsePreviewExpenseDraft,
   parsePreviewExpenseIntent,
   previewOutboxContract,
+  restorePreviewExpenseDraft,
 } from '../../web/preview-writer-outbox.mjs';
 
 function createTransport() {
@@ -128,10 +133,13 @@ test('preview build emits static root without service worker or manifest deploym
 });
 
 
-function createPreviewOutboxFakeIndexedDb(initialRows = []) {
-  const rows = [...initialRows];
-  let hasStore = false;
-  const objectStoreNames = { contains: (name) => hasStore && name === previewOutboxContract.storeName };
+function createPreviewWriterFakeIndexedDb({ version = 0, outboxRows = [], draftRows = [] } = {}) {
+  let currentVersion = version;
+  const stores = new Map();
+  if (version >= 1) stores.set(previewOutboxContract.storeName, new Map(outboxRows.map((row) => [row.intentId, row])));
+  if (version >= 2) stores.set(previewOutboxContract.draftStoreName, new Map(draftRows.map((row) => [row.draftKey, row])));
+  const createdStores = [];
+  const objectStoreNames = { contains: (name) => stores.has(name) };
 
   function makeRequest(run, transaction) {
     const request = {};
@@ -150,41 +158,64 @@ function createPreviewOutboxFakeIndexedDb(initialRows = []) {
 
   const db = {
     objectStoreNames,
-    createObjectStore(name) {
-      assert.equal(name, previewOutboxContract.storeName);
-      hasStore = true;
+    createObjectStore(name, options) {
+      assert.equal(stores.has(name), false);
+      assert.equal(options?.keyPath, name === previewOutboxContract.storeName ? 'intentId' : 'draftKey');
+      stores.set(name, new Map());
+      createdStores.push(name);
     },
     close() {},
     transaction(name) {
-      assert.equal(name, previewOutboxContract.storeName);
+      assert.equal(stores.has(name), true);
       const transaction = {};
-      transaction.objectStore = () => ({
-        add: (value) => makeRequest(() => {
-          if (rows.some((row) => row?.intentId === value.intentId)) throw new Error('duplicate');
-          rows.push(value);
-          return value.intentId;
-        }, transaction),
-        getAll: () => makeRequest(() => [...rows], transaction),
-      });
+      transaction.objectStore = () => {
+        const rows = stores.get(name);
+        const keyFor = (value) => name === previewOutboxContract.storeName ? value.intentId : value.draftKey;
+        return {
+          add: (value) => makeRequest(() => {
+            const key = keyFor(value);
+            if (rows.has(key)) throw new Error('duplicate');
+            rows.set(key, value);
+            return key;
+          }, transaction),
+          put: (value) => makeRequest(() => {
+            const key = keyFor(value);
+            rows.set(key, value);
+            return key;
+          }, transaction),
+          get: (key) => makeRequest(() => rows.get(key), transaction),
+          getAll: () => makeRequest(() => [...rows.values()], transaction),
+          delete: (key) => makeRequest(() => rows.delete(key), transaction),
+        };
+      };
       return transaction;
     },
   };
 
   return {
     indexedDb: {
-      open(name, version) {
+      open(name, requestedVersion) {
         assert.equal(name, previewOutboxContract.dbName);
-        assert.equal(version, previewOutboxContract.dbVersion);
-        const request = { result: db };
+        assert.equal(requestedVersion, previewOutboxContract.dbVersion);
+        const request = { result: db, oldVersion: currentVersion };
         queueMicrotask(() => {
-          if (!hasStore) request.onupgradeneeded?.();
+          if (requestedVersion > currentVersion) {
+            request.onupgradeneeded?.();
+            currentVersion = requestedVersion;
+          }
           request.onsuccess?.();
         });
         return request;
       },
     },
-    rows,
+    createdStores,
+    stores,
+    version: () => currentVersion,
   };
+}
+
+function createPreviewOutboxFakeIndexedDb(initialRows = []) {
+  return createPreviewWriterFakeIndexedDb({ version: 1, outboxRows: initialRows });
 }
 
 function previewExpenseInput(overrides = {}) {
@@ -318,4 +349,125 @@ test('R3A Writer is injected by synthetic preview only; production Reader stays 
   assert.doesNotMatch(productionApp, /preview-writer|CREATE_EXPENSE|Сохранить локально/u);
   const productionStyles = await readFile(new URL('../../web/styles.css', import.meta.url), 'utf8');
   assert.doesNotMatch(productionStyles, /preview-writer/u);
+});
+
+
+test('R3A preview draft preserves incomplete literal fields without promoting them to a transaction', () => {
+  const draft = createPreviewExpenseDraft({
+    amount: 'not-yet-valid',
+    occurredOn: '2026-0',
+    accountId: '',
+    categoryId: '',
+    description: '  literal draft  ',
+    note: 'unfinished',
+  }, { now: () => '2026-09-10T03:00:00.000Z' });
+  assert.equal(draft.schemaVersion, previewOutboxContract.draftSchemaVersion);
+  assert.equal(draft.draftKey, previewOutboxContract.draftKey);
+  assert.equal(draft.amount, 'not-yet-valid');
+  assert.equal(draft.occurredOn, '2026-0');
+  assert.equal(draft.description, '  literal draft  ');
+  assert.equal(parsePreviewExpenseDraft(draft).note, 'unfinished');
+  assert.throws(() => parsePreviewExpenseDraft({ ...draft, amount: null }), /INVALID_PREVIEW_EXPENSE_DRAFT/u);
+  assert.throws(() => parsePreviewExpenseDraft({ ...draft, savedAt: 'not-a-time' }), /INVALID_PREVIEW_EXPENSE_DRAFT/u);
+});
+
+test('R3A preview draft restore keeps literal text but clears stale reference ids without guessing', () => {
+  const validAccount = syntheticPreviewEvidence.accounts[0].id;
+  const validExpense = syntheticPreviewEvidence.categories.find((item) => item.kind === 'EXPENSE').id;
+  const draft = createPreviewExpenseDraft({
+    ...previewExpenseInput(),
+    accountId: '90000000-0000-0000-0000-000000000001',
+    categoryId: '90000000-0000-0000-0000-000000000002',
+  }, { now: () => '2026-09-10T03:00:00.000Z' });
+  const stale = restorePreviewExpenseDraft(draft, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+  });
+  assert.equal(stale.accountId, '');
+  assert.equal(stale.categoryId, '');
+  assert.equal(stale.amount, draft.amount);
+  assert.equal(stale.description, draft.description);
+
+  const current = restorePreviewExpenseDraft(createPreviewExpenseDraft({
+    ...previewExpenseInput(), accountId: validAccount, categoryId: validExpense,
+  }, { now: () => '2026-09-10T03:00:00.000Z' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+  });
+  assert.equal(current.accountId, validAccount);
+  assert.equal(current.categoryId, validExpense);
+});
+
+test('R3A preview malformed durable draft fails closed and is not restored', async () => {
+  const malformed = {
+    schemaVersion: 1,
+    draftKey: previewOutboxContract.draftKey,
+    savedAt: 'not-a-time',
+    amount: '12', occurredOn: '', accountId: '', categoryId: '', description: '', note: '',
+  };
+  const fake = createPreviewWriterFakeIndexedDb({ version: 2, draftRows: [malformed] });
+  const drafts = createIndexedDbPreviewDraftStore(fake.indexedDb);
+  assert.equal(await drafts.load(), null);
+});
+
+test('R3A preview IndexedDB v1 to v2 upgrade adds drafts without losing existing outbox intents', async () => {
+  const existing = previewExpenseIntent();
+  const fake = createPreviewWriterFakeIndexedDb({ version: 1, outboxRows: [existing] });
+  const drafts = createIndexedDbPreviewDraftStore(fake.indexedDb);
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  const draft = createPreviewExpenseDraft(previewExpenseInput({ amount: '7,' }), { now: () => '2026-09-10T03:00:00.000Z' });
+  await drafts.save(draft);
+  assert.equal(fake.version(), 2);
+  assert.deepEqual(fake.createdStores, [previewOutboxContract.draftStoreName]);
+  assert.equal(await outbox.countPending(), 1);
+  assert.equal((await outbox.listPending())[0].intentId, existing.intentId);
+  assert.equal((await drafts.load()).amount, '7,');
+});
+
+test('R3A preview commits outbox before clearing draft and never clears draft when enqueue fails', async () => {
+  const intent = previewExpenseIntent();
+  const events = [];
+  const success = await enqueuePreviewExpenseThenClearDraft({
+    outbox: { enqueue: async (value) => { events.push('enqueue'); return value; } },
+    draftStore: { clear: async () => { events.push('clear'); } },
+    intent,
+  });
+  assert.deepEqual(events, ['enqueue', 'clear']);
+  assert.equal(success.draftCleared, true);
+
+  events.length = 0;
+  await assert.rejects(enqueuePreviewExpenseThenClearDraft({
+    outbox: { enqueue: async () => { events.push('enqueue'); throw new Error('failed'); } },
+    draftStore: { clear: async () => { events.push('clear'); } },
+    intent,
+  }), /failed/u);
+  assert.deepEqual(events, ['enqueue']);
+
+  const degraded = await enqueuePreviewExpenseThenClearDraft({
+    outbox: { enqueue: async (value) => value },
+    draftStore: { clear: async () => { throw new Error('failed'); } },
+    intent,
+  });
+  assert.equal(degraded.draftCleared, false);
+});
+
+test('R3A draft mechanics remain preview-only and contain no network/provider write path', async () => {
+  const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
+  const storageSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
+  assert.equal(previewOutboxContract.dbVersion, 2);
+  assert.equal(previewOutboxContract.draftStoreName, 'drafts');
+  assert.match(writerSource, /Черновик сохранён локально · демо/u);
+  assert.match(writerSource, /enqueuePreviewExpenseThenClearDraft/u);
+  assert.match(storageSource, /createObjectStore\(DRAFT_STORE_NAME/u);
+  for (const source of [writerSource, storageSource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /YDB_WRITE_ENABLED|@ydb|ydbjs|google-auth-library|spreadsheets\./iu);
+  }
+  const productionShell = await readFile(new URL('../../web/index.html', import.meta.url), 'utf8');
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionShell, /Черновик|drafts|preview-writer/u);
+  assert.doesNotMatch(productionApp, /drafts|preview-writer/u);
+  assert.doesNotMatch(productionServiceWorker, /preview-writer|drafts/u);
 });

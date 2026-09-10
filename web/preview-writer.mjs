@@ -1,5 +1,14 @@
-import { createIndexedDbPreviewOutbox, createPreviewExpenseIntent } from './preview-writer-outbox.mjs';
+import {
+  createIndexedDbPreviewDraftStore,
+  createIndexedDbPreviewOutbox,
+  createPreviewExpenseDraft,
+  createPreviewExpenseIntent,
+  enqueuePreviewExpenseThenClearDraft,
+  restorePreviewExpenseDraft,
+} from './preview-writer-outbox.mjs';
 import { syntheticPreviewEvidence } from './preview-transport.mjs';
+
+const DRAFT_STATUS = 'Черновик сохраняется локально · демо';
 
 function optionMarkup(items) {
   return items.map((item) => `<option value="${item.id}">${item.label}</option>`).join('');
@@ -26,7 +35,7 @@ function panelMarkup() {
           <button type="submit" data-preview-expense-save>Сохранить локально</button>
           <span data-preview-pending-count>Локальная очередь: проверяем…</span>
         </div>
-        <p class="preview-writer__status" data-preview-writer-status role="status" aria-live="polite" aria-atomic="true"></p>
+        <p class="preview-writer__status" data-preview-writer-status role="status" aria-live="polite" aria-atomic="true">${DRAFT_STATUS}</p>
       </form>
     </section>`;
 }
@@ -35,6 +44,29 @@ function formValue(form, name) {
   const field = form.elements.namedItem(name);
   if (!field || typeof field.value !== 'string') throw new Error('PREVIEW_WRITER_FORM_INVALID');
   return field.value;
+}
+
+function formInput(form) {
+  return {
+    amount: formValue(form, 'amount'),
+    occurredOn: formValue(form, 'occurredOn'),
+    accountId: formValue(form, 'accountId'),
+    categoryId: formValue(form, 'categoryId'),
+    description: formValue(form, 'description'),
+    note: formValue(form, 'note'),
+  };
+}
+
+function setFormValue(form, name, value) {
+  const field = form.elements.namedItem(name);
+  if (!field || typeof field.value !== 'string') throw new Error('PREVIEW_WRITER_FORM_INVALID');
+  field.value = value;
+}
+
+function restoreForm(form, values) {
+  for (const name of ['amount', 'occurredOn', 'accountId', 'categoryId', 'description', 'note']) {
+    setFormValue(form, name, values[name]);
+  }
 }
 
 export async function mountSyntheticPreviewExpenseWriter({
@@ -55,6 +87,7 @@ export async function mountSyntheticPreviewExpenseWriter({
   const pending = panel.querySelector('[data-preview-pending-count]');
   const status = panel.querySelector('[data-preview-writer-status]');
   const outbox = createIndexedDbPreviewOutbox(indexedDb);
+  const draftStore = createIndexedDbPreviewDraftStore(indexedDb);
 
   async function refreshPending() {
     try {
@@ -64,28 +97,52 @@ export async function mountSyntheticPreviewExpenseWriter({
     }
   }
 
+  try {
+    const draft = await draftStore.load();
+    if (draft) {
+      restoreForm(form, restorePreviewExpenseDraft(draft, {
+        accounts: syntheticPreviewEvidence.accounts,
+        categories: syntheticPreviewEvidence.categories,
+      }));
+      status.textContent = 'Черновик восстановлен локально · демо';
+    }
+  } catch {
+    status.textContent = 'Локальный черновик недоступен';
+  }
+
   await refreshPending();
+
+  let draftWrite = Promise.resolve();
+  const saveDraft = () => {
+    const snapshot = formInput(form);
+    draftWrite = draftWrite.then(async () => {
+      try {
+        await draftStore.save(createPreviewExpenseDraft(snapshot, { now }));
+        status.textContent = 'Черновик сохранён локально · демо';
+      } catch {
+        status.textContent = 'Не удалось сохранить черновик локально.';
+      }
+    });
+  };
+
+  form.addEventListener('input', saveDraft);
+  form.addEventListener('change', saveDraft);
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     button.disabled = true;
-    status.textContent = '';
     try {
-      const intent = createPreviewExpenseIntent({
-        amount: formValue(form, 'amount'),
-        occurredOn: formValue(form, 'occurredOn'),
-        accountId: formValue(form, 'accountId'),
-        categoryId: formValue(form, 'categoryId'),
-        description: formValue(form, 'description'),
-        note: formValue(form, 'note'),
-      }, {
+      await draftWrite;
+      const intent = createPreviewExpenseIntent(formInput(form), {
         accounts: syntheticPreviewEvidence.accounts,
         categories: syntheticPreviewEvidence.categories,
         randomUuid,
         now,
       });
-      await outbox.enqueue(intent);
-      status.textContent = 'Сохранено локально · демо · не отправлено';
+      const result = await enqueuePreviewExpenseThenClearDraft({ outbox, draftStore, intent });
+      status.textContent = result.draftCleared
+        ? 'Сохранено локально · демо · не отправлено'
+        : 'Сохранено локально · демо · не отправлено · черновик не очищен';
       await refreshPending();
     } catch (error) {
       status.textContent = error?.message === 'INVALID_PREVIEW_EXPENSE_INPUT'
