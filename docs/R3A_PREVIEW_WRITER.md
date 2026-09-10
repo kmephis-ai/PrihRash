@@ -124,8 +124,9 @@ Draft — **не финансовый факт и не CanonicalTransaction**. �
 
 EXPENSE/INCOME local save path не содержит `fetch`, Reader API mutation, YDB/Google endpoint или provider credential.
 
-- EXPENSE уже имеет отдельные application/API/idempotency и injected ACK-delivery proofs, но реальный browser HTTP sender всё ещё не подключён;
-- INCOME в этом S-unit **не** получает server application/API/idempotency/delivery contract;
+- EXPENSE имеет отдельные application/API/idempotency и injected ACK-delivery proofs;
+- INCOME также имеет отдельные application/idempotency и minimal public API envelope proofs; этот S-unit добавляет только injected ACK-delivery proof;
+- реальный browser HTTP sender для EXPENSE/INCOME всё ещё не подключён;
 - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
 - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
 - R1 #302 и production R2 auth/YDB wiring не обходятся.
@@ -142,14 +143,14 @@ EXPENSE/INCOME local save path не содержит `fetch`, Reader API mutatio
 - если server успел commit, но local `acknowledge()` не удался, следующий delivery повторяет тот же key и может безопасно завершить cleanup через `REPLAY`;
 - один delivery invocation делает не более одной sender попытки; retry cadence/backoff/scheduling здесь не определяются.
 
-INCOME delivery намеренно не подменяется EXPENSE contract и остаётся отдельным будущим work item.
+INCOME использует отдельный type-specific preview delivery module с теми же crash/retry invariants, но с `toAccountId` и injected `sendIncomeCreate(request)`. Он не рефакторит доказанный EXPENSE path: malformed/mismatched ACK не удаляет local intent, valid `CREATED|REPLAY` ACK предшествует `acknowledge()`, а local delete failure оставляет тот же idempotency key для безопасного `REPLAY` при следующем явном вызове. Automatic retry cadence/backoff здесь не определяются.
 
 ## Не входит
 
 - production Writer UI;
 - Google Form/GAS intake parity;
 - real browser HTTP sender / API Gateway / private Function;
-- INCOME server create/idempotency/ACK delivery;
+- real INCOME HTTP sender / provider-bound delivery;
 - automatic retry/sync scheduler;
 - `paid_by_member`;
 - TRANSFER;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { access, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createSyntheticPreviewFetch, syntheticPreviewEvidence } from '../../web/preview-transport.mjs';
@@ -12,6 +13,11 @@ import {
   deliverPreviewExpenseIntent,
   parsePreviewExpenseCreateAck,
 } from '../../web/preview-writer-delivery.mjs';
+import {
+  createPreviewIncomeCreateApiRequest,
+  deliverPreviewIncomeIntent,
+  parsePreviewIncomeCreateAck,
+} from '../../web/preview-income-writer-delivery.mjs';
 import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewIncomeDraftStore,
@@ -808,4 +814,199 @@ test('R3A preview delivery remains transport-neutral and production Reader stays
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.doesNotMatch(productionApp, /preview-writer-delivery|sendExpenseCreate/u);
   assert.doesNotMatch(productionServiceWorker, /preview-writer-delivery|sendExpenseCreate/u);
+});
+
+
+test('R3A preview INCOME delivery maps PENDING intent to minimal create request without local labels/metadata', () => {
+  const intent = previewIncomeIntent();
+  const request = createPreviewIncomeCreateApiRequest(intent);
+  assert.deepEqual(request, {
+    idempotencyKey: intent.intentId,
+    occurredOn: intent.payload.occurredOn,
+    amountMinor: intent.payload.amountMinor,
+    currency: 'RUB',
+    toAccountId: intent.payload.toAccount.id,
+    categoryId: intent.payload.category.id,
+    description: intent.payload.description,
+    note: intent.payload.note,
+  });
+  assert.equal(Object.isFrozen(request), true);
+  assert.equal('createdAt' in request, false);
+  assert.equal('toAccount' in request, false);
+  assert.equal('category' in request, false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.toAccount.label), false);
+  assert.equal(JSON.stringify(request).includes(intent.payload.category.label), false);
+});
+
+test('R3A preview INCOME delivery validates CREATED and REPLAY ACK before local acknowledge', async () => {
+  const intent = previewIncomeIntent();
+  for (const outcome of ['CREATED', 'REPLAY']) {
+    const events = [];
+    const ack = await deliverPreviewIncomeIntent({
+      intent,
+      sender: {
+        async sendIncomeCreate(request) {
+          events.push(['send', request.idempotencyKey]);
+          return {
+            apiVersion: 1,
+            outcome,
+            idempotencyKey: request.idempotencyKey,
+            transactionId: '61000000-0000-0000-0000-000000000001',
+            version: 1,
+          };
+        },
+      },
+      outbox: {
+        async acknowledge(intentId) {
+          events.push(['acknowledge', intentId]);
+        },
+      },
+    });
+    assert.equal(ack.outcome, outcome);
+    assert.equal(Object.isFrozen(ack), true);
+    assert.deepEqual(events, [
+      ['send', intent.intentId],
+      ['acknowledge', intent.intentId],
+    ]);
+  }
+});
+
+test('R3A preview INCOME delivery removes the exact IndexedDB row only after valid ACK', async () => {
+  const intent = previewIncomeIntent();
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  assert.equal(await outbox.countPending(), 1);
+  let sendCount = 0;
+  await deliverPreviewIncomeIntent({
+    intent,
+    outbox,
+    sender: {
+      async sendIncomeCreate(request) {
+        sendCount += 1;
+        assert.equal(await outbox.countPending(), 1);
+        return {
+          apiVersion: 1,
+          outcome: 'CREATED',
+          idempotencyKey: request.idempotencyKey,
+          transactionId: '61000000-0000-0000-0000-000000000001',
+          version: 1,
+        };
+      },
+    },
+  });
+  assert.equal(sendCount, 1);
+  assert.equal(await outbox.countPending(), 0);
+});
+
+test('R3A preview INCOME delivery keeps PENDING when sender fails and sanitizes raw diagnostics', async () => {
+  const intent = previewIncomeIntent();
+  let acknowledged = false;
+  let sendCount = 0;
+  await assert.rejects(
+    deliverPreviewIncomeIntent({
+      intent,
+      sender: {
+        async sendIncomeCreate() {
+          sendCount += 1;
+          throw new Error('private-provider-diagnostic');
+        },
+      },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }),
+    (error) => error?.message === 'PREVIEW_INCOME_SEND_FAILED' && !String(error).includes('private-provider-diagnostic'),
+  );
+  assert.equal(sendCount, 1);
+  assert.equal(acknowledged, false);
+});
+
+test('R3A preview INCOME delivery rejects malformed or mismatched ACK without acknowledging local intent', async () => {
+  const intent = previewIncomeIntent();
+  const valid = {
+    apiVersion: 1,
+    outcome: 'CREATED',
+    idempotencyKey: intent.intentId,
+    transactionId: '61000000-0000-0000-0000-000000000001',
+    version: 1,
+  };
+  const badAcks = [
+    { ...valid, apiVersion: 2 },
+    { ...valid, outcome: 'POSTED' },
+    { ...valid, idempotencyKey: '51000000-0000-0000-0000-000000000002' },
+    { ...valid, transactionId: intent.intentId },
+    { ...valid, transactionId: 'A1000000-0000-0000-0000-000000000001' },
+    { ...valid, version: 2 },
+    { ...valid, extra: true },
+  ];
+  for (const response of badAcks) {
+    let acknowledged = false;
+    await assert.rejects(deliverPreviewIncomeIntent({
+      intent,
+      sender: { sendIncomeCreate: async () => response },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }), /INVALID_PREVIEW_INCOME_ACK/u);
+    assert.equal(acknowledged, false);
+  }
+  assert.throws(
+    () => parsePreviewIncomeCreateAck(valid, 'A1000000-0000-0000-0000-000000000001'),
+    /INVALID_PREVIEW_INCOME_ACK/u,
+  );
+});
+
+test('R3A preview INCOME retry after server commit but local ACK failure reuses same key and clears on REPLAY', async () => {
+  const intent = previewIncomeIntent();
+  const sentKeys = [];
+  let sendCount = 0;
+  const sender = {
+    async sendIncomeCreate(request) {
+      sentKeys.push(request.idempotencyKey);
+      sendCount += 1;
+      return {
+        apiVersion: 1,
+        outcome: sendCount === 1 ? 'CREATED' : 'REPLAY',
+        idempotencyKey: request.idempotencyKey,
+        transactionId: '61000000-0000-0000-0000-000000000001',
+        version: 1,
+      };
+    },
+  };
+  let ackAttempts = 0;
+  const outbox = {
+    async acknowledge(intentId) {
+      assert.equal(intentId, intent.intentId);
+      ackAttempts += 1;
+      if (ackAttempts === 1) throw new Error('local-delete-failed');
+    },
+  };
+  await assert.rejects(
+    deliverPreviewIncomeIntent({ outbox, sender, intent }),
+    (error) => error?.message === 'PREVIEW_INCOME_LOCAL_ACK_FAILED' && !String(error).includes('local-delete-failed'),
+  );
+  assert.equal(sendCount, 1);
+  const replay = await deliverPreviewIncomeIntent({ outbox, sender, intent });
+  assert.equal(replay.outcome, 'REPLAY');
+  assert.deepEqual(sentKeys, [intent.intentId, intent.intentId]);
+  assert.equal(ackAttempts, 2);
+});
+
+test('R3A preview INCOME delivery remains transport-neutral and EXPENSE delivery stays byte-unchanged', async () => {
+  const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
+  const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
+  assert.match(incomeDeliverySource, /parsePreviewIncomeIntent/u);
+  assert.match(incomeDeliverySource, /sendIncomeCreate/u);
+  assert.match(incomeDeliverySource, /toAccountId/u);
+  for (const source of [incomeDeliverySource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /https?:\/\//u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /API Gateway|Yandex|YDB_WRITE_ENABLED|@ydb|ydbjs|cookie|Authorization/iu);
+  }
+  assert.equal(
+    createHash('sha256').update(expenseDeliverySource).digest('hex'),
+    '576ba33637e3d983ee21fb3eb88a173918a9cbd493763142ce356a383a02ed77',
+  );
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionApp, /preview-income-writer-delivery|sendIncomeCreate/u);
+  assert.doesNotMatch(productionServiceWorker, /preview-income-writer-delivery|sendIncomeCreate/u);
 });
