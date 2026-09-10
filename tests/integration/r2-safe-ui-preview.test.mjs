@@ -251,12 +251,15 @@ function createPreviewOutboxFakeIndexedDb(initialRows = []) {
   return createPreviewWriterFakeIndexedDb({ version: 1, outboxRows: initialRows });
 }
 
+const SYNTHETIC_PAYER = syntheticPreviewEvidence.operations.find((item) => item.paidByMember !== null).paidByMember;
+
 function previewExpenseInput(overrides = {}) {
   return {
     amount: '125,40',
     occurredOn: '2026-09-09',
     accountId: syntheticPreviewEvidence.accounts[0].id,
     categoryId: syntheticPreviewEvidence.categories.find((item) => item.kind === 'EXPENSE').id,
+    paidByMemberId: '',
     description: 'Кофе · демо',
     note: '',
     ...overrides,
@@ -267,8 +270,34 @@ function previewExpenseIntent(overrides = {}) {
   return createPreviewExpenseIntent(previewExpenseInput(), {
     accounts: syntheticPreviewEvidence.accounts,
     categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
     randomUuid: () => '50000000-0000-0000-0000-000000000001',
     now: () => '2026-09-09T12:00:00.000Z',
+    ...overrides,
+  });
+}
+
+function legacyPreviewExpenseIntent() {
+  const current = previewExpenseIntent();
+  const { paidByMember, ...legacyPayload } = current.payload;
+  return Object.freeze({
+    ...current,
+    schemaVersion: 1,
+    payload: Object.freeze(legacyPayload),
+  });
+}
+
+function legacyPreviewExpenseDraft(overrides = {}) {
+  return Object.freeze({
+    schemaVersion: 1,
+    draftKey: previewOutboxContract.expenseDraftKey,
+    savedAt: '2026-09-10T03:00:00.000Z',
+    amount: '9,99',
+    occurredOn: '2026-09-09',
+    accountId: syntheticPreviewEvidence.accounts[0].id,
+    categoryId: syntheticPreviewEvidence.categories.find((item) => item.kind === 'EXPENSE').id,
+    description: 'legacy local draft',
+    note: '',
     ...overrides,
   });
 }
@@ -328,7 +357,7 @@ test('R3A preview amount parser uses exact RUB minor units without float roundin
 
 test('R3A preview creates one immutable PENDING EXPENSE intent from exact synthetic references', () => {
   const intent = previewExpenseIntent();
-  assert.equal(intent.schemaVersion, 1);
+  assert.equal(intent.schemaVersion, previewOutboxContract.expenseRecordSchemaVersion);
   assert.equal(intent.kind, 'CREATE_EXPENSE');
   assert.equal(intent.state, 'PENDING');
   assert.equal(intent.payload.type, 'EXPENSE');
@@ -336,9 +365,41 @@ test('R3A preview creates one immutable PENDING EXPENSE intent from exact synthe
   assert.equal(intent.payload.currency, 'RUB');
   assert.equal(intent.payload.fromAccount.id, syntheticPreviewEvidence.accounts[0].id);
   assert.equal(intent.payload.category.kind, 'EXPENSE');
+  assert.equal(intent.payload.paidByMember, null);
   assert.equal(intent.payload.note, null);
   assert.equal(Object.isFrozen(intent), true);
   assert.equal(Object.isFrozen(intent.payload), true);
+});
+
+test('R3A preview EXPENSE stores exact selected payer independently from payment account and fails closed on ambiguous payer', () => {
+  const input = previewExpenseInput({
+    accountId: syntheticPreviewEvidence.accounts[1].id,
+    paidByMemberId: SYNTHETIC_PAYER.id,
+  });
+  const options = {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+    randomUuid: () => '50000000-0000-0000-0000-000000000006',
+    now: () => '2026-09-09T12:00:00.000Z',
+  };
+  const intent = createPreviewExpenseIntent(input, options);
+  assert.equal(intent.payload.fromAccount.id, syntheticPreviewEvidence.accounts[1].id);
+  assert.deepEqual(intent.payload.paidByMember, SYNTHETIC_PAYER);
+  assert.notEqual(intent.payload.fromAccount.id, intent.payload.paidByMember.id);
+
+  assert.throws(
+    () => createPreviewExpenseIntent(input, { ...options, members: [] }),
+    /INVALID_PREVIEW_EXPENSE_INPUT/u,
+  );
+  assert.throws(
+    () => createPreviewExpenseIntent(input, { ...options, members: [SYNTHETIC_PAYER, { ...SYNTHETIC_PAYER }] }),
+    /INVALID_PREVIEW_EXPENSE_INPUT/u,
+  );
+  assert.throws(
+    () => createPreviewExpenseIntent(previewExpenseInput({ paidByMemberId: 'not-a-uuid' }), options),
+    /INVALID_PREVIEW_EXPENSE_INPUT/u,
+  );
 });
 
 test('R3A preview accepts only the selected EXPENSE category and required canonical input', () => {
@@ -353,6 +414,14 @@ test('R3A preview accepts only the selected EXPENSE category and required canoni
     }),
     /INVALID_PREVIEW_EXPENSE_INPUT/u,
   );
+  const { paidByMemberId, ...missingPayer } = previewExpenseInput();
+  assert.throws(() => createPreviewExpenseIntent(missingPayer, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+    randomUuid: () => '50000000-0000-0000-0000-000000000099',
+    now: () => '2026-09-09T12:00:00.000Z',
+  }), /INVALID_PREVIEW_EXPENSE_INPUT/u);
   assert.throws(() => createPreviewExpenseIntent(previewExpenseInput({ occurredOn: '2026-02-31' }), {
     accounts: syntheticPreviewEvidence.accounts,
     categories: syntheticPreviewEvidence.categories,
@@ -522,6 +591,30 @@ test('R3A preview durable record validation fails closed on malformed evidence',
   assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, occurredOn: '2026-02-31' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
   assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, note: '   ' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
   assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, category: { ...valid.payload.category, kind: 'INCOME' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, paidByMember: { id: 'not-a-uuid', label: 'X' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  assert.throws(() => parsePreviewExpenseIntent({ ...valid, payload: { ...valid.payload, paidByMember: { ...SYNTHETIC_PAYER, extra: true } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+});
+
+test('R3A preview reads strict legacy EXPENSE v1 intent without rewriting it and maps payer as unspecified at delivery', () => {
+  const legacy = legacyPreviewExpenseIntent();
+  const parsed = parsePreviewExpenseIntent(legacy);
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal('paidByMember' in parsed.payload, false);
+  assert.deepEqual(createPreviewExpenseCreateApiRequest(legacy), {
+    idempotencyKey: legacy.intentId,
+    occurredOn: legacy.payload.occurredOn,
+    amountMinor: legacy.payload.amountMinor,
+    currency: 'RUB',
+    fromAccountId: legacy.payload.fromAccount.id,
+    categoryId: legacy.payload.category.id,
+    paidByMemberId: null,
+    description: legacy.payload.description,
+    note: legacy.payload.note,
+  });
+  assert.throws(
+    () => parsePreviewExpenseIntent({ ...legacy, payload: { ...legacy.payload, paidByMember: null } }),
+    /INVALID_PREVIEW_OUTBOX_RECORD/u,
+  );
 });
 
 test('R3A preview IndexedDB outbox is separate, durable, and excludes malformed rows from pending count', async () => {
@@ -535,6 +628,23 @@ test('R3A preview IndexedDB outbox is separate, durable, and excludes malformed 
   await outbox.enqueue(intent);
   assert.equal(await outbox.countPending(), 1);
   assert.equal((await outbox.listPending())[0].intentId, intent.intentId);
+});
+
+test('R3A preview IndexedDB outbox preserves exact selected EXPENSE payer reference across durable read', async () => {
+  const intent = createPreviewExpenseIntent(previewExpenseInput({ paidByMemberId: SYNTHETIC_PAYER.id }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+    randomUuid: () => '50000000-0000-0000-0000-000000000008',
+    now: () => '2026-09-09T12:00:00.000Z',
+  });
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  const [restored] = await outbox.listPending();
+  assert.equal(restored.schemaVersion, previewOutboxContract.expenseRecordSchemaVersion);
+  assert.deepEqual(restored.payload.paidByMember, SYNTHETIC_PAYER);
+  assert.equal(restored.payload.fromAccount.id, intent.payload.fromAccount.id);
 });
 
 test('R3A preview enqueue is local-only and contains no network/provider write path', async () => {
@@ -555,6 +665,11 @@ test('R3A Writer is injected by synthetic preview only; production Reader stays 
   assert.match(bootstrap, /preview-writer\.mjs/u);
   assert.match(bootstrap, /mountSyntheticPreviewIncomeWriter/u);
   assert.match(bootstrap, /mountSyntheticPreviewTransferWriter/u);
+  const writerSource = await readFile(new URL('../../web/preview-writer.mjs', import.meta.url), 'utf8');
+  assert.match(writerSource, /Кто оплатил/u);
+  assert.match(writerSource, /name="paidByMemberId"/u);
+  assert.match(writerSource, /payerEnabled:\s*true/u);
+  assert.match(writerSource, /payerEnabled:\s*false/u);
   assert.match(productionShell, />Только чтение</u);
   assert.doesNotMatch(productionShell, /Новый расход|Новый доход|Новый перевод|data-preview-writer|Сохранить локально/u);
   assert.doesNotMatch(productionApp, /preview-writer|CREATE_EXPENSE|Сохранить локально/u);
@@ -569,10 +684,11 @@ test('R3A preview draft preserves incomplete literal fields without promoting th
     occurredOn: '2026-0',
     accountId: '',
     categoryId: '',
+    paidByMemberId: '',
     description: '  literal draft  ',
     note: 'unfinished',
   }, { now: () => '2026-09-10T03:00:00.000Z' });
-  assert.equal(draft.schemaVersion, previewOutboxContract.draftSchemaVersion);
+  assert.equal(draft.schemaVersion, previewOutboxContract.expenseDraftSchemaVersion);
   assert.equal(draft.draftKey, previewOutboxContract.draftKey);
   assert.equal(draft.amount, 'not-yet-valid');
   assert.equal(draft.occurredOn, '2026-0');
@@ -593,6 +709,7 @@ test('R3A preview draft restore keeps literal text but clears stale reference id
   const stale = restorePreviewExpenseDraft(draft, {
     accounts: syntheticPreviewEvidence.accounts,
     categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
   });
   assert.equal(stale.accountId, '');
   assert.equal(stale.categoryId, '');
@@ -604,9 +721,51 @@ test('R3A preview draft restore keeps literal text but clears stale reference id
   }, { now: () => '2026-09-10T03:00:00.000Z' }), {
     accounts: syntheticPreviewEvidence.accounts,
     categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
   });
   assert.equal(current.accountId, validAccount);
   assert.equal(current.categoryId, validExpense);
+});
+
+test('R3A preview EXPENSE draft preserves payer, clears stale/ambiguous payer on restore, and accepts legacy v1 as empty payer', () => {
+  const selected = createPreviewExpenseDraft(previewExpenseInput({ paidByMemberId: SYNTHETIC_PAYER.id }), {
+    now: () => '2026-09-10T03:00:00.000Z',
+  });
+  assert.equal(selected.schemaVersion, previewOutboxContract.expenseDraftSchemaVersion);
+  assert.equal(selected.paidByMemberId, SYNTHETIC_PAYER.id);
+  const restored = restorePreviewExpenseDraft(selected, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+  });
+  assert.equal(restored.paidByMemberId, SYNTHETIC_PAYER.id);
+
+  const ambiguous = restorePreviewExpenseDraft(selected, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER, { ...SYNTHETIC_PAYER }],
+  });
+  assert.equal(ambiguous.paidByMemberId, '');
+  const stale = restorePreviewExpenseDraft({ ...selected, paidByMemberId: '90000000-0000-0000-0000-000000000099' }, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+  });
+  assert.equal(stale.paidByMemberId, '');
+
+  const legacy = legacyPreviewExpenseDraft();
+  assert.equal(parsePreviewExpenseDraft(legacy).schemaVersion, 1);
+  const legacyRestored = restorePreviewExpenseDraft(legacy, {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+  });
+  assert.equal(legacyRestored.paidByMemberId, '');
+  assert.equal('paidByMemberId' in parsePreviewExpenseDraft(legacy), false);
+  assert.throws(
+    () => parsePreviewExpenseDraft({ ...legacy, paidByMemberId: '' }),
+    /INVALID_PREVIEW_EXPENSE_DRAFT/u,
+  );
 });
 
 test('R3A preview malformed durable draft fails closed and is not restored', async () => {
@@ -790,6 +949,10 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   const storageSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
   assert.equal(previewOutboxContract.dbVersion, 2);
   assert.equal(previewOutboxContract.draftStoreName, 'drafts');
+  assert.equal(previewOutboxContract.recordSchemaVersion, 1);
+  assert.equal(previewOutboxContract.expenseRecordSchemaVersion, 2);
+  assert.equal(previewOutboxContract.draftSchemaVersion, 1);
+  assert.equal(previewOutboxContract.expenseDraftSchemaVersion, 2);
   assert.match(writerSource, /Черновик сохранён локально · демо/u);
   assert.match(writerSource, /enqueuePreviewExpenseThenClearDraft/u);
   assert.match(writerSource, /enqueuePreviewIncomeThenClearDraft/u);
@@ -840,6 +1003,7 @@ test('R3A preview delivery maps PENDING intent to minimal create request without
     currency: 'RUB',
     fromAccountId: intent.payload.fromAccount.id,
     categoryId: intent.payload.category.id,
+    paidByMemberId: null,
     description: intent.payload.description,
     note: intent.payload.note,
   });
@@ -849,6 +1013,20 @@ test('R3A preview delivery maps PENDING intent to minimal create request without
   assert.equal('category' in request, false);
   assert.equal(JSON.stringify(request).includes(intent.payload.fromAccount.label), false);
   assert.equal(JSON.stringify(request).includes(intent.payload.category.label), false);
+});
+
+test('R3A preview EXPENSE delivery sends exact payer id only and never local member label', () => {
+  const intent = createPreviewExpenseIntent(previewExpenseInput({ paidByMemberId: SYNTHETIC_PAYER.id }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+    randomUuid: () => '50000000-0000-0000-0000-000000000007',
+    now: () => '2026-09-09T12:00:00.000Z',
+  });
+  const request = createPreviewExpenseCreateApiRequest(intent);
+  assert.equal(request.paidByMemberId, SYNTHETIC_PAYER.id);
+  assert.equal(JSON.stringify(request).includes(SYNTHETIC_PAYER.label), false);
+  assert.equal('paidByMember' in request, false);
 });
 
 test('R3A preview IndexedDB acknowledge removes only the exact canonical pending key', async () => {
@@ -1164,7 +1342,7 @@ test('R3A preview INCOME retry after server commit but local ACK failure reuses 
   assert.equal(ackAttempts, 2);
 });
 
-test('R3A preview INCOME delivery remains transport-neutral and EXPENSE delivery stays byte-unchanged', async () => {
+test('R3A preview INCOME delivery remains transport-neutral and EXPENSE payer delivery is pinned', async () => {
   const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
   const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
   assert.match(incomeDeliverySource, /parsePreviewIncomeIntent/u);
@@ -1178,7 +1356,7 @@ test('R3A preview INCOME delivery remains transport-neutral and EXPENSE delivery
   }
   assert.equal(
     createHash('sha256').update(expenseDeliverySource).digest('hex'),
-    '576ba33637e3d983ee21fb3eb88a173918a9cbd493763142ce356a383a02ed77',
+    '2e941f41493acd8f130634f9a1d414263ef7f55d3d70da6f5fb9a8e51376b2d5',
   );
   const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
@@ -1384,7 +1562,7 @@ test('R3A preview TRANSFER retry after server commit but local ACK failure reuse
   assert.equal(ackAttempts, 2);
 });
 
-test('R3A preview TRANSFER delivery remains transport-neutral and existing Writer/provider boundaries stay byte-unchanged', async () => {
+test('R3A preview TRANSFER delivery remains transport-neutral and existing type-specific delivery boundaries stay pinned', async () => {
   const transferDeliverySource = await readFile(new URL('../../web/preview-transfer-writer-delivery.mjs', import.meta.url), 'utf8');
   const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
   const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
@@ -1401,7 +1579,7 @@ test('R3A preview TRANSFER delivery remains transport-neutral and existing Write
   }
   assert.equal(
     createHash('sha256').update(expenseDeliverySource).digest('hex'),
-    '576ba33637e3d983ee21fb3eb88a173918a9cbd493763142ce356a383a02ed77',
+    '2e941f41493acd8f130634f9a1d414263ef7f55d3d70da6f5fb9a8e51376b2d5',
   );
   assert.equal(
     createHash('sha256').update(incomeDeliverySource).digest('hex'),
