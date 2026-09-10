@@ -1,0 +1,38 @@
+name: Publish exact local R3A 398 commit
+
+on:
+  push:
+    branches:
+      - transport/r3a-398-publish-20260910-0723
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+      - name: Reproduce and publish exact local commit
+        env:
+          SOURCE_SHA: 603fabf70338ca03480053b2c973f2f443e9c8a4
+          EXPECTED_COMMIT: b2cf82a36e5950e65d60d19f4fca7b89c19108b6
+          EXPECTED_TREE: 90d771dd8d555fd0f77671468de322a3dab6557d
+          TARGET_BRANCH: r3a/398-outbox-validated-ack
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse "origin/$TARGET_BRANCH")" = "$SOURCE_SHA"
+          base64 -d .transport/r3a-398.patch.gz.b64 | gzip -d > /tmp/398.patch
+          git switch -C "$TARGET_BRANCH" "$SOURCE_SHA"
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git am --committer-date-is-author-date /tmp/398.patch
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git diff --check "$SOURCE_SHA"...HEAD
+          git push origin HEAD:"refs/heads/$TARGET_BRANCH"
