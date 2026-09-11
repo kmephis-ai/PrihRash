@@ -274,6 +274,8 @@ Runtime safe codes:
 - `SCHEMA_BOOTSTRAP_FINAL_READBACK_FAILED`
 - `SCHEMA_BOOTSTRAP_YDB_CLIENT_CLOSE_FAILED`
 
+`SCHEMA_BOOTSTRAP_UNEXPECTED_MIGRATION_EVIDENCE` относится к preflight evidence, существовавшему до текущего apply attempt. После записи ledger evidence read-back failure обязан быть stage-specific: `SCHEMA_BOOTSTRAP_MIGRATION_001_EVIDENCE_FAILED` или `SCHEMA_BOOTSTRAP_MIGRATION_002_EVIDENCE_FAILED`. Provider-native YDB `Timestamp` из `@ydbjs/query` валидируется как JavaScript `Date`; string timestamp остаётся допустимым для provider-neutral adapters/tests.
+
 Invoke wrapper также может вернуть `SCHEMA_BOOTSTRAP_CONFIG_INVALID`, `SCHEMA_BOOTSTRAP_INVOKE_FAILED`, `SCHEMA_BOOTSTRAP_INVOKE_OUTPUT_INVALID`, `SCHEMA_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` или `SCHEMA_BOOTSTRAP_INVOKE_MARKER_AMBIGUOUS`.
 
 Provider/OIDC/WIF/deploy boundary публикует только `SCHEMA_BOOTSTRAP_*` status codes; raw provider output остаётся внутри ephemeral runner temp files.

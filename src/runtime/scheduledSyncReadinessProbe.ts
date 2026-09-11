@@ -160,6 +160,12 @@ function classifyMigrationTableReadFailure(error: unknown): ScheduledSyncReadine
   return new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_READ_FAILED');
 }
 
+function validSchemaMigrationAppliedAt(value: unknown): boolean {
+  if (value instanceof Date) return Number.isFinite(value.getTime());
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) return false;
+  return Number.isFinite(Date.parse(value));
+}
+
 function validateSchemaMigrationEvidence(rows: readonly Readonly<SchemaMigrationEvidenceRow>[]): void {
   const seen = new Set<number>();
   for (const row of rows) {
@@ -173,10 +179,7 @@ function validateSchemaMigrationEvidence(rows: readonly Readonly<SchemaMigration
       typeof row.checksum !== 'string'
       || row.checksum.length === 0
       || row.checksum !== row.checksum.trim()
-      || typeof row.applied_at !== 'string'
-      || row.applied_at.length === 0
-      || row.applied_at !== row.applied_at.trim()
-      || !Number.isFinite(Date.parse(row.applied_at))
+      || !validSchemaMigrationAppliedAt(row.applied_at)
     ) {
       throw new ScheduledSyncReadinessError('MALFORMED_SCHEMA_MIGRATION_EVIDENCE');
     }

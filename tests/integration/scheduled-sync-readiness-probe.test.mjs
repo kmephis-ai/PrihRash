@@ -44,8 +44,8 @@ function adapterForReads(rowsByCall, capture = { statements: [], transactions: 0
 }
 
 const validMigrationRows = Object.freeze([
-  Object.freeze({ version: 1n, checksum: 'checksum-001', applied_at: '2026-09-01T00:00:00.000Z' }),
-  Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: '2026-09-02T00:00:00.000Z' }),
+  Object.freeze({ version: 1n, checksum: 'checksum-001', applied_at: new Date('2026-09-01T00:00:00.000Z') }),
+  Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: new Date('2026-09-02T00:00:00.000Z') }),
 ]);
 
 test('readiness probe performs one Google read and five read-only YDB checks', async () => {
