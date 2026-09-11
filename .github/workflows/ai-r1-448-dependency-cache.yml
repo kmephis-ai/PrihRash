@@ -69,7 +69,7 @@ jobs:
             "npm_version": "${NPM_VERSION}",
             "npm_major": ${NPM_MAJOR},
             "platform": "${NODE_PLATFORM}",
-            "arch": "${NODE_ARCH"
+            "arch": "${NODE_ARCH}"
           }
           JSON
 
