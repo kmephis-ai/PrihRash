@@ -31,13 +31,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ROOT="tools/local-git-mirror/r1-448-publish"
+          NORMALIZED="$RUNNER_TEMP/r1-448-normalized"
           PATCH_B64="$RUNNER_TEMP/r1-448.patch.gz.b64"
           PATCH_GZ="$RUNNER_TEMP/r1-448.patch.gz"
           PATCH="$RUNNER_TEMP/r1-448.patch"
-          cat tools/local-git-mirror/r1-448-publish/patch.00 \
-              tools/local-git-mirror/r1-448-publish/patch.01 \
-              tools/local-git-mirror/r1-448-publish/patch.02 \
-              tools/local-git-mirror/r1-448-publish/patch.03 > "$PATCH_B64"
+          mkdir -p "$NORMALIZED"
+
+          head -c 8000 "$ROOT/patch.00" > "$NORMALIZED/patch.00"
+          head -c 8000 "$ROOT/patch.01" > "$NORMALIZED/patch.01"
+          head -c 8000 "$ROOT/patch.02" > "$NORMALIZED/patch.02"
+          head -c 6656 "$ROOT/patch.03" > "$NORMALIZED/patch.03"
+
+          echo "184994e3e84adedd9c4b3c2ff281f599c0cad95b4c276f6b1d64b4f4ee51895a  $NORMALIZED/patch.00" | sha256sum --check --status
+          echo "63b33b2b2f996a1b6d11c4c762effb6780cb4d5487e959a39fc02f996f7ff8c5  $NORMALIZED/patch.01" | sha256sum --check --status
+          echo "e27d4df2f3d7180efd498b73d01e844c2dcb075ea5108bf59e7a08bf8f6b62bd  $NORMALIZED/patch.02" | sha256sum --check --status
+          echo "c0db348fbb2c92627e3f89f7685c0ad1fa3d21036455db00fa8f392d0f2a0e9f  $NORMALIZED/patch.03" | sha256sum --check --status
+
+          cat "$NORMALIZED/patch.00" "$NORMALIZED/patch.01" "$NORMALIZED/patch.02" "$NORMALIZED/patch.03" > "$PATCH_B64"
           base64 --decode "$PATCH_B64" > "$PATCH_GZ"
           gzip --decompress --stdout "$PATCH_GZ" > "$PATCH"
           test "$(wc -c < "$PATCH" | tr -d ' ')" = "$PATCH_BYTES"
