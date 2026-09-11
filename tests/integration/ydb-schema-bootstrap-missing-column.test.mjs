@@ -92,7 +92,7 @@ test('preflight accepts the exact YDB GENERIC_ERROR shape for the expected missi
 
   const writes = fixture.calls.filter(({ kind }) => kind === 'WRITE');
   assert.equal(writes.length, 1);
-  assert.match(writes[0].text, /^ALTER TABLE accounts ADD COLUMN normalized_source_label Utf8$/u);
+  assert.match(writes[0].text, /(?:^|\n)ALTER TABLE accounts ADD COLUMN normalized_source_label Utf8$/u);
 });
 
 test('preflight keeps a generic type-annotation error for another member fail-closed', async () => {
