@@ -124,7 +124,7 @@ API Gateway должен вызывать private Function через отдел
 
 ## Durable persistence boundary
 
-Concrete OWNER auth persistence использует ту же YDB/runtime boundary, но **не** расширяет financial `schema_migrations`. Первый auth bootstrap contract хранится отдельно в `db/auth/001_owner_auth.sql` и создаёт только `owner_oauth_transactions` + `owner_sessions`. Это deliberate separation: R1 readiness #302 продолжает exact fail-closed проверку applied financial migrations `1..2`; наличие versioned auth DDL в repository само по себе не является provider mutation.
+Concrete OWNER auth persistence использует ту же YDB/runtime boundary, но **не** расширяет financial `schema_migrations`. Первый auth bootstrap contract хранится отдельно в `db/auth/001_owner_auth.sql` и создаёт только `owner_oauth_transactions` + `owner_sessions`. Это deliberate separation: R1 readiness продолжает exact fail-closed проверку applied financial migrations `1..3`; наличие versioned auth DDL в repository само по себе не является provider mutation.
 
 `YdbOwnerAuthPersistence` реализует `YandexOwnerOAuthTransactionStore`, `OwnerSessionIssuer`, `OwnerSessionRevoker` и `OwnerSessionVerifier`:
 

@@ -198,7 +198,7 @@ Secret injection:
 Он выдаётся только если provider вернул exact object:
 
 ```json
-{"googleSource":"READY","ydbSchema":"READY","requiredMigrationVersion":2}
+{"googleSource":"READY","ydbSchema":"READY","requiredMigrationVersion":3}
 ```
 
 Safe invoke taxonomy различает только форму результата и количество allowlisted markers; raw stdout/stderr, provider IDs и payload не публикуются:
@@ -221,9 +221,9 @@ Safe invoke taxonomy различает только форму результа
 - `READINESS_GOOGLE_SOURCE_VALUE_UNSUPPORTED` — source содержит cell representation, которую canonical adapter обязан отклонить fail-closed;
 - `READINESS_GOOGLE_SOURCE_READ_FAILED` — unknown/untyped Google source failure.
 
-Для YDB/readiness lifecycle разрешены `READINESS_YDB_CLIENT_CREATE_FAILED`, `READINESS_YDB_QUERY_HEALTH_READ_FAILED`, `READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED`, `READINESS_YDB_MIGRATION_TABLE_ACCESS_DENIED`, `READINESS_YDB_MIGRATION_TABLE_READ_FAILED`, `READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED`, `READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED`, `READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED`, `READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED`, `READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE`, `READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION`, `READINESS_UNEXPECTED_SCHEMA_MIGRATION`, `READINESS_YDB_CLIENT_CLOSE_FAILED`, а для generic runtime wrapper — `READINESS_RUNTIME_CONFIG_INVALID` и `READINESS_RUNTIME_FAILED`. `READINESS_YDB_QUERY_HEALTH_READ_FAILED` относится к table-independent `SELECT 1`. Если expected-column zero-row check уже упал, table-only `schema_migrations` probe классифицирует только machine-readable YDB status: `SCHEME_ERROR`/`NOT_FOUND` → `READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED`, `UNAUTHORIZED` → `READINESS_YDB_MIGRATION_TABLE_ACCESS_DENIED`, остальные/нетипизированные ошибки → `READINESS_YDB_MIGRATION_TABLE_READ_FAILED`; raw provider message/issues не публикуются. Если table-only read проходит, `READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED` означает drift expected columns `version/checksum/applied_at`. `READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED` относится к чтению migration ledger rows; accounts/categories codes остаются zero-row checks physical migration 002. Эти коды различают только read-only stage/status class и не содержат YDB endpoint, database path, provider error text или query result.
+Для YDB/readiness lifecycle разрешены `READINESS_YDB_CLIENT_CREATE_FAILED`, `READINESS_YDB_QUERY_HEALTH_READ_FAILED`, `READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED`, `READINESS_YDB_MIGRATION_TABLE_ACCESS_DENIED`, `READINESS_YDB_MIGRATION_TABLE_READ_FAILED`, `READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED`, `READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED`, `READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED`, `READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED`, `READINESS_YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED`, `READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE`, `READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION`, `READINESS_UNEXPECTED_SCHEMA_MIGRATION`, `READINESS_YDB_CLIENT_CLOSE_FAILED`, а для generic runtime wrapper — `READINESS_RUNTIME_CONFIG_INVALID` и `READINESS_RUNTIME_FAILED`. `READINESS_YDB_QUERY_HEALTH_READ_FAILED` относится к table-independent `SELECT 1`. Если expected-column zero-row check уже упал, table-only `schema_migrations` probe классифицирует только machine-readable YDB status: `SCHEME_ERROR`/`NOT_FOUND` → `READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED`, `UNAUTHORIZED` → `READINESS_YDB_MIGRATION_TABLE_ACCESS_DENIED`, остальные/нетипизированные ошибки → `READINESS_YDB_MIGRATION_TABLE_READ_FAILED`; raw provider message/issues не публикуются. Если table-only read проходит, `READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED` означает drift expected columns `version/checksum/applied_at`. `READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED` относится к чтению migration ledger rows; accounts/categories codes остаются zero-row checks physical migration 002; `READINESS_YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED` — zero-row physical check migration 003 table/required columns. Эти коды различают только read-only stage/status class и не содержат YDB endpoint, database path, provider error text или query result.
 
-`READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED` сам по себе **не** разрешает DDL внутри readiness workflow. Если live evidence доказывает отсутствующий migration ledger и Owner отдельно разрешил production schema bootstrap, использовать только `docs/R1_YDB_SCHEMA_BOOTSTRAP_RUNBOOK.md`; readiness identity остаётся `ydb.viewer`.
+`READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED` сам по себе **не** разрешает DDL внутри readiness workflow. Historical bootstrap `001→002` выполнялся только через `docs/R1_YDB_SCHEMA_BOOTSTRAP_RUNBOOK.md`. Forward migration `003` перед initial shadow bootstrap выполняется только через отдельный `docs/R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md` и новую explicit provider-write authority; readiness identity остаётся `ydb.viewer`.
 
 Отсутствующая/пустая function identity →
 
@@ -241,10 +241,10 @@ Authentication transport также fail-closed и диагностируетс�
 - `READINESS_WIF_INVALID_REQUEST`, `READINESS_WIF_INVALID_GRANT`, `READINESS_WIF_INVALID_TARGET`, `READINESS_WIF_UNAUTHORIZED_CLIENT`, `READINESS_WIF_UNSUPPORTED_GRANT_TYPE` отражают только allowlisted OAuth `error` category от Yandex; response body/description не публикуются.
 - `READINESS_WIF_EXCHANGE_FAILED` остаётся generic fallback, если Yandex отказал, но безопасная allowlisted категория не определена или 2xx response не содержит пригодного IAM token.
 
-Любой auth code оставляет #302 OPEN и сам по себе не разрешает расширять IAM, менять secret transport или provider write boundary.
+Любой auth code оставляет текущий readiness gate FAIL и сам по себе не разрешает расширять IAM, менять secret transport или provider write boundary.
 
 ## Exit from this gate
 
-Только `READINESS_READY` на version, собранной из exact current canonical `main`, закрывает #302 и разрешает начать fresh discovery для следующего R1 mutation item.
+Только `READINESS_READY` на version, собранной из exact current canonical `main`, является current read-only provider PASS. #302 уже был закрыт историческим successful readiness после schema `001..002`; его не переоткрывают для forward migration 003. После `SCHEMA_UPGRADE_003_READY` новый `READINESS_READY` с `requiredMigrationVersion=3` подтверждает schema-v3 gate; initial shadow bootstrap разрешается только после отдельного retirement temporary migration-003 write authority.
 
-Readiness PASS **не** включает timer, bootstrap/incremental shadow writes, auth DDL или authority cutover.
+Readiness PASS сам по себе **не** включает timer, bootstrap/incremental shadow writes, auth DDL или authority cutover.

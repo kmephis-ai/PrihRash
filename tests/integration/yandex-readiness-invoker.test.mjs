@@ -32,6 +32,7 @@ const SAFE_PROBE_FAILURES = Object.freeze([
   ['YDB_MIGRATION_EVIDENCE_READ_FAILED', 'READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED'],
   ['YDB_ACCOUNTS_SCHEMA_READ_FAILED', 'READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED'],
   ['YDB_CATEGORIES_SCHEMA_READ_FAILED', 'READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED'],
+  ['YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED', 'READINESS_YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED'],
   ['MALFORMED_SCHEMA_MIGRATION_EVIDENCE', 'READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE'],
   ['MISSING_REQUIRED_SCHEMA_MIGRATION', 'READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION'],
   ['UNEXPECTED_SCHEMA_MIGRATION', 'READINESS_UNEXPECTED_SCHEMA_MIGRATION'],
@@ -90,7 +91,7 @@ if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.
 if (process.env.PRIHRASH_YANDEX_READINESS_FUNCTION_ID !== undefined) process.exit(92);
 if (process.env.SYNTHETIC_PRIVATE_VALUE !== undefined) process.exit(93);
 if (process.env.YC_IAM_TOKEN !== 'synthetic-short-lived-iam-token') process.exit(94);
-process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:2}));
+process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
 `,
   });
 
@@ -141,8 +142,8 @@ test('malformed or unexpected successful provider output is classified without e
   const outputs = [
     PRIVATE_LOOKING,
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY' }),
-    JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY', requiredMigrationVersion: 2, extra: PRIVATE_LOOKING }),
-    JSON.stringify({ googleSource: 'READY', ydbSchema: 'NOT_READY', requiredMigrationVersion: 2 }),
+    JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY', requiredMigrationVersion: 3, extra: PRIVATE_LOOKING }),
+    JSON.stringify({ googleSource: 'READY', ydbSchema: 'NOT_READY', requiredMigrationVersion: 3 }),
   ];
 
   for (const output of outputs) {

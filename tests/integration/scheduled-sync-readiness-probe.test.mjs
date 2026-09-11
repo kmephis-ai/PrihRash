@@ -46,11 +46,12 @@ function adapterForReads(rowsByCall, capture = { statements: [], transactions: 0
 const validMigrationRows = Object.freeze([
   Object.freeze({ version: 1n, checksum: 'checksum-001', applied_at: new Date('2026-09-01T00:00:00.000Z') }),
   Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: new Date('2026-09-02T00:00:00.000Z') }),
+  Object.freeze({ version: 3n, checksum: 'checksum-003', applied_at: new Date('2026-09-03T00:00:00.000Z') }),
 ]);
 
-test('readiness probe performs one Google read and five read-only YDB checks', async () => {
+test('readiness probe performs one Google read and six read-only YDB checks', async () => {
   const sourceCounter = { calls: 0 };
-  const { adapter, capture } = adapterForReads([[], [], validMigrationRows, [], []]);
+  const { adapter, capture } = adapterForReads([[], [], validMigrationRows, [], [], []]);
 
   const result = await runScheduledSyncReadinessProbe(sourceThatSucceeds(sourceCounter), adapter);
 
@@ -61,24 +62,25 @@ test('readiness probe performs one Google read and five read-only YDB checks', a
   });
   assert.equal(sourceCounter.calls, 1);
   assert.equal(capture.transactions, 0);
-  assert.equal(capture.statements.length, 5);
+  assert.equal(capture.statements.length, 6);
   assert.equal(capture.statements[0].kind, 'READ');
   assert.equal(capture.statements[0].text, 'SELECT 1 AS readiness_probe');
   assert.equal(capture.statements[1].text, 'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0');
   assert.equal(capture.statements[2].text, 'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC');
   assert.equal(capture.statements[3].text, 'SELECT normalized_source_label FROM accounts LIMIT 0');
   assert.equal(capture.statements[4].text, 'SELECT normalized_source_label FROM categories LIMIT 0');
+  assert.equal(capture.statements[5].text, 'SELECT migration_run_id, source_snapshot_id, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, binding_count, bindings FROM initial_bootstrap_identity_manifests LIMIT 0');
   assert.deepEqual(Object.keys(result).sort(), ['googleSource', 'requiredMigrationVersion', 'ydbSchema']);
 });
 
 test('schema migration evidence fails closed for malformed rows', async () => {
   const malformedRows = [
     [{ version: -1, checksum: 'x', applied_at: '2026-09-01T00:00:00.000Z' }],
-    [{ version: 1, checksum: '', applied_at: '2026-09-01T00:00:00.000Z' }, validMigrationRows[1]],
-    [{ version: 1, checksum: ' x ', applied_at: '2026-09-01T00:00:00.000Z' }, validMigrationRows[1]],
-    [{ version: 1, checksum: 'x', applied_at: 'invalid' }, validMigrationRows[1]],
-    [validMigrationRows[0], { version: 2, checksum: 'x', applied_at: null }],
-    [validMigrationRows[0], validMigrationRows[0], validMigrationRows[1]],
+    [{ version: 1, checksum: '', applied_at: '2026-09-01T00:00:00.000Z' }, validMigrationRows[1], validMigrationRows[2]],
+    [{ version: 1, checksum: ' x ', applied_at: '2026-09-01T00:00:00.000Z' }, validMigrationRows[1], validMigrationRows[2]],
+    [{ version: 1, checksum: 'x', applied_at: 'invalid' }, validMigrationRows[1], validMigrationRows[2]],
+    [validMigrationRows[0], { version: 2, checksum: 'x', applied_at: null }, validMigrationRows[2]],
+    [validMigrationRows[0], validMigrationRows[0], validMigrationRows[1], validMigrationRows[2]],
   ];
 
   for (const rows of malformedRows) {
@@ -92,7 +94,7 @@ test('schema migration evidence fails closed for malformed rows', async () => {
 });
 
 test('missing and future migration versions are distinct fail-closed blockers', async () => {
-  const missing = adapterForReads([[], [], [validMigrationRows[0]]]).adapter;
+  const missing = adapterForReads([[], [], [validMigrationRows[0], validMigrationRows[1]]]).adapter;
   await assert.rejects(
     () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), missing),
     (error) => error instanceof ScheduledSyncReadinessError
@@ -101,7 +103,7 @@ test('missing and future migration versions are distinct fail-closed blockers', 
 
   const unexpected = adapterForReads([[], [], [
     ...validMigrationRows,
-    { version: 3, checksum: 'checksum-003', applied_at: '2026-09-03T00:00:00.000Z' },
+    { version: 4, checksum: 'checksum-004', applied_at: '2026-09-04T00:00:00.000Z' },
   ]]).adapter;
   await assert.rejects(
     () => runScheduledSyncReadinessProbe(sourceThatSucceeds(), unexpected),
@@ -198,6 +200,11 @@ test('YDB readiness read failures are stage-specific, sanitized, and never open 
       expectedCode: 'YDB_CATEGORIES_SCHEMA_READ_FAILED',
       expectedStatements: 5,
     },
+    {
+      reads: [[], [], validMigrationRows, [], [], new Error('private-ydb-endpoint synthetic-manifest-table-missing')],
+      expectedCode: 'YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED',
+      expectedStatements: 6,
+    },
   ];
 
   for (const { reads, expectedCode, expectedStatements } of cases) {
@@ -219,7 +226,7 @@ test('YDB readiness read failures are stage-specific, sanitized, and never open 
 
 function runtimeForLifecycle(options = {}) {
   const state = { closed: 0, sourceCreated: 0, clientCreated: 0 };
-  const rows = options.rows ?? [[], [], validMigrationRows, [], []];
+  const rows = options.rows ?? [[], [], validMigrationRows, [], [], []];
   let readIndex = 0;
   const transport = {
     async executeRead() {

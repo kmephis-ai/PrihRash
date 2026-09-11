@@ -17,6 +17,11 @@
 - `NO_CHANGE` — свежий digest точно равен digest последнего COMMITTED baseline; новый MigrationRun не создаётся;
 - `START_INCREMENTAL` — clean COMMITTED baseline существует и fresh digest изменился.
 
+
+## Schema prerequisite
+
+Real initial bootstrap и subsequent scheduled sync используют exact financial schema version `3`: ledger versions `1..3`, migration-002 normalized source-label columns и physical `initial_bootstrap_identity_manifests`. Readiness проверяет это read-only. Scheduled runtime не применяет migrations и при отсутствии schema-v3 provider evidence не должен запускать financial mutation; migration `003` имеет отдельный one-shot gate `R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md`.
+
 ## Fail-closed rules
 
 - `FAILED` MigrationRun никогда не является baseline;
