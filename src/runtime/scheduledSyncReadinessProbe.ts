@@ -24,7 +24,7 @@ import {
   type ScheduledSyncJobEnvironment,
 } from './scheduledSyncJob.js';
 
-export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 2 as const;
+export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 3 as const;
 
 export interface ScheduledSyncReadinessResult {
   readonly googleSource: 'READY';
@@ -66,6 +66,7 @@ export type ScheduledSyncReadinessErrorCode =
   | 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
   | 'YDB_ACCOUNTS_SCHEMA_READ_FAILED'
   | 'YDB_CATEGORIES_SCHEMA_READ_FAILED'
+  | 'YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED'
   | 'MALFORMED_SCHEMA_MIGRATION_EVIDENCE'
   | 'MISSING_REQUIRED_SCHEMA_MIGRATION'
   | 'UNEXPECTED_SCHEMA_MIGRATION'
@@ -247,6 +248,14 @@ export async function runScheduledSyncReadinessProbe(
     await adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0'));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_CATEGORIES_SCHEMA_READ_FAILED');
+  }
+
+  try {
+    await adapter.read(readStatement(
+      'SELECT migration_run_id, source_snapshot_id, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, binding_count, bindings FROM initial_bootstrap_identity_manifests LIMIT 0',
+    ));
+  } catch {
+    throw new ScheduledSyncReadinessError('YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED');
   }
 
   return Object.freeze({

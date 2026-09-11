@@ -422,6 +422,8 @@ Invariant:
 
 Initial bootstrap до любых verified-current mutations обязан сначала закрепить durable writer identity и все уже принятые row identity decisions.
 
+Production prerequisite: перед первым real initial bootstrap `schema_migrations` обязан содержать exact applied versions `1..3`, а physical `initial_bootstrap_identity_manifests` — проходить read-only required-column probe. Migration `003_initial_bootstrap_identity_manifest.sql` применяется только отдельным bounded provider gate `docs/R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md`; scheduled/readiness runtime не выполняет DDL автоматически. Отсутствующий/partial schema-v3 state блокирует initial bootstrap до provider recovery и не разрешает fallback identity storage.
+
 Минимальный протокол:
 
 1. один serializable YDB claim атомарно проверяет отсутствие другого `STAGING/VALIDATED` run и отсутствие уже существующего `COMMITTED` bootstrap baseline;

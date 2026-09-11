@@ -19,7 +19,7 @@ test('readiness entrypoint invokes only the injected read-only readiness job wit
   const safeResult = Object.freeze({
     googleSource: 'READY',
     ydbSchema: 'READY',
-    requiredMigrationVersion: 2,
+    requiredMigrationVersion: 3,
   });
 
   const result = await executeYandexScheduledSyncReadinessFunction(
