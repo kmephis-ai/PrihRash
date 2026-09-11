@@ -25,6 +25,7 @@ const SAFE_PROBE_FAILURES = Object.freeze([
   ['GOOGLE_SOURCE_READ_FAILED', 'READINESS_GOOGLE_SOURCE_READ_FAILED'],
   ['YDB_CLIENT_CREATE_FAILED', 'READINESS_YDB_CLIENT_CREATE_FAILED'],
   ['YDB_QUERY_HEALTH_READ_FAILED', 'READINESS_YDB_QUERY_HEALTH_READ_FAILED'],
+  ['YDB_MIGRATION_TABLE_READ_FAILED', 'READINESS_YDB_MIGRATION_TABLE_READ_FAILED'],
   ['YDB_MIGRATION_SCHEMA_READ_FAILED', 'READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED'],
   ['YDB_MIGRATION_EVIDENCE_READ_FAILED', 'READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED'],
   ['YDB_ACCOUNTS_SCHEMA_READ_FAILED', 'READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED'],
@@ -95,7 +96,7 @@ process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requ
   assertSafeOutput(result, { status: 'PASS', code: 'READINESS_READY' });
 });
 
-test('non-zero yc failure is collapsed without echoing raw stdout or stderr', async () => {
+test('non-zero yc failure without an allowlisted marker is classified without echoing raw stdout or stderr', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stdout.write('${PRIVATE_LOOKING}');
@@ -105,7 +106,7 @@ process.exit(17);
   });
 
   assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
 test('one allowlisted sanitized readiness marker is classified without echoing provider output', async () => {
@@ -122,7 +123,7 @@ process.exit(17);
   }
 });
 
-test('ambiguous sanitized readiness markers still fail closed to the generic invoke code', async () => {
+test('ambiguous sanitized readiness markers are classified without exposing captured provider detail', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stderr.write(${JSON.stringify(`GOOGLE_SOURCE_READ_FAILED YDB_MIGRATION_EVIDENCE_READ_FAILED\n${PRIVATE_LOOKING}`)});
@@ -131,10 +132,10 @@ process.exit(17);
   });
 
   assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_MARKER_AMBIGUOUS' });
 });
 
-test('malformed or unexpected provider output fails closed without echoing it', async () => {
+test('malformed or unexpected successful provider output is classified without echoing it', async () => {
   const outputs = [
     PRIVATE_LOOKING,
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY' }),
@@ -145,7 +146,7 @@ test('malformed or unexpected provider output fails closed without echoing it', 
   for (const output of outputs) {
     const result = await runInvoker({ fakeSource: `process.stdout.write(${JSON.stringify(output)});` });
     assert.equal(result.exitCode, 2);
-    assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+    assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_OUTPUT_INVALID' });
   }
 });
 
@@ -159,7 +160,7 @@ test('missing function id fails before yc is executed', async () => {
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_CONFIG_INVALID' });
 });
 
-test('missing yc CLI fails closed with the same provider-safe code', async () => {
+test('missing yc CLI fails closed with the generic invoke code', async () => {
   const result = await runInvoker({
     fakeSource: null,
     ycPath: resolve(tmpdir(), 'prihrash-definitely-missing-yc'),
