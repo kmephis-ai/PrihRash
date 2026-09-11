@@ -201,13 +201,14 @@ Secret injection:
 {"googleSource":"READY","ydbSchema":"READY","requiredMigrationVersion":2}
 ```
 
-Malformed/non-exact success payload, spawn/timeout/buffer error или provider failure без единственного распознанного safe marker →
+Safe invoke taxonomy различает только форму результата и количество allowlisted markers; raw stdout/stderr, provider IDs и payload не публикуются:
 
-```json
-{"status":"FAIL","code":"READINESS_INVOKE_FAILED"}
-```
+- successful `yc invoke` с malformed/non-exact stdout → `READINESS_INVOKE_OUTPUT_INVALID`;
+- non-zero `yc invoke` без allowlisted runtime marker → `READINESS_INVOKE_NONZERO_UNCLASSIFIED`;
+- non-zero `yc invoke` с двумя или более allowlisted runtime markers → `READINESS_INVOKE_MARKER_AMBIGUOUS`;
+- spawn/timeout/buffer и прочий transport-level failure, для которого нельзя доказать numeric provider exit → `READINESS_INVOKE_FAILED`.
 
-Если non-zero invocation содержит **ровно один** allowlisted value-free runtime marker, wrapper не печатает captured stdout/stderr и возвращает соответствующий safe code. Ноль или больше одного распознанного marker остаются generic fail-closed. Для Google source разрешены:
+Если non-zero invocation содержит **ровно один** allowlisted value-free runtime marker, wrapper не печатает captured stdout/stderr и возвращает соответствующий safe code. Для Google source разрешены:
 
 - `READINESS_GOOGLE_SPREADSHEET_ID_INVALID` — source config отклонён до чтения;
 - `READINESS_GOOGLE_CREDENTIALS_INVALID` — service-account email/private-key validation отклонена до token acquisition;
