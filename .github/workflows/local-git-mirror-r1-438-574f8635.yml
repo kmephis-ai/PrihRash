@@ -1,9 +1,7 @@
 name: Local Git Mirror Bootstrap
 
 on:
-  push:
-    branches:
-      - tmp/local-git-mirror-r1-438-574f8635-20260911
+  workflow_dispatch:
 
 permissions:
   contents: read
