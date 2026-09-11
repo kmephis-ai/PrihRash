@@ -47,6 +47,7 @@ function fakeClient(options = {}) {
   const tables = new Set(options.tables ?? []);
   const columns002 = new Set(options.columns002 ?? []);
   const ledger = [...(options.ledger ?? [])];
+  const insertedVersions = new Set();
   const calls = [];
   let profileReady = options.profileReady ?? false;
   let closed = false;
@@ -62,7 +63,21 @@ function fakeClient(options = {}) {
         if (text === 'SELECT 1 AS schema_bootstrap_health') return { rows: [] };
         if (text.startsWith('SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations')) {
           if (!tables.has('schema_migrations')) throw providerError(StatusIds_StatusCode.SCHEME_ERROR);
-          return { rows: ledger.map((row) => ({ ...row })) };
+          return {
+            rows: ledger.map((row) => {
+              const version = Number(row.version);
+              const appliedAt = row.applied_at;
+              return {
+                ...row,
+                checksum: insertedVersions.has(version) && options.malformedEvidenceAfterWriteVersion === version
+                  ? 'sha256:post-write-readback-mismatch'
+                  : row.checksum,
+                applied_at: typeof appliedAt === 'string' && Number.isFinite(Date.parse(appliedAt))
+                  ? new Date(appliedAt)
+                  : appliedAt,
+              };
+            }),
+          };
         }
         if (text.includes('FROM finance_profiles') && text.includes('WHERE id = Uuid(')) {
           if (!tables.has('finance_profiles')) throw providerError(StatusIds_StatusCode.SCHEME_ERROR);
@@ -118,6 +133,7 @@ function fakeClient(options = {}) {
         const appliedAt = parameterValue(statement, '$applied_at');
         if (ledger.some((row) => Number(row.version) === version)) throw providerError(StatusIds_StatusCode.PRECONDITION_FAILED);
         ledger.push({ version: BigInt(version), checksum, applied_at: appliedAt });
+        insertedVersions.add(version);
         ledger.sort((left, right) => Number(left.version - right.version));
         return { rows: [] };
       }
@@ -274,6 +290,22 @@ test('migration 001/002 execution failure is stage-specific and never advances l
   });
   await expectCode('MIGRATION_002_APPLY_FAILED', () => runYdbSchemaBootstrap(second.client, MIGRATIONS, CLOCK));
   assert.equal(second.ledger.length, 1);
+});
+
+test('post-write evidence mismatch is reported at the exact migration stage', async () => {
+  const first = fakeClient({ malformedEvidenceAfterWriteVersion: 1 });
+  await expectCode('MIGRATION_001_EVIDENCE_FAILED', () => runYdbSchemaBootstrap(first.client, MIGRATIONS, CLOCK));
+  assert.deepEqual(first.ledger.map((row) => Number(row.version)), [1]);
+  assert.equal(first.columns002.size, 0);
+
+  const second = fakeClient({
+    tables: TABLES_001,
+    ledger: expectedLedger(1),
+    profileReady: true,
+    malformedEvidenceAfterWriteVersion: 2,
+  });
+  await expectCode('MIGRATION_002_EVIDENCE_FAILED', () => runYdbSchemaBootstrap(second.client, MIGRATIONS, CLOCK));
+  assert.deepEqual(second.ledger.map((row) => Number(row.version)), [1, 2]);
 });
 
 test('migration bundle validation rejects changed statement shape instead of widening allowlist', () => {

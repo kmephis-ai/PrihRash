@@ -280,6 +280,7 @@ function migrationVersion(value: unknown): number {
 }
 
 function validAppliedAt(value: unknown): boolean {
+  if (value instanceof Date) return Number.isFinite(value.getTime());
   if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) return false;
   return Number.isFinite(Date.parse(value));
 }
@@ -464,8 +465,7 @@ export async function runYdbSchemaBootstrap(
     try {
       await insertEvidence(client, migrations[0], nowIso(clock));
       await assertExactEvidenceAfterWrite(client, migrations, 1);
-    } catch (error) {
-      if (error instanceof YdbSchemaBootstrapError && error.code === 'UNEXPECTED_MIGRATION_EVIDENCE') throw error;
+    } catch {
       throw new YdbSchemaBootstrapError('MIGRATION_001_EVIDENCE_FAILED');
     }
     evidenceVersion = 1;
@@ -484,8 +484,7 @@ export async function runYdbSchemaBootstrap(
     try {
       await insertEvidence(client, migrations[1], nowIso(clock));
       await assertExactEvidenceAfterWrite(client, migrations, 2);
-    } catch (error) {
-      if (error instanceof YdbSchemaBootstrapError && error.code === 'UNEXPECTED_MIGRATION_EVIDENCE') throw error;
+    } catch {
       throw new YdbSchemaBootstrapError('MIGRATION_002_EVIDENCE_FAILED');
     }
   }
