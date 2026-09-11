@@ -1,6 +1,6 @@
 name: R1 441 Publish Verified Local Tree
 
-# Disposable transport attempt 3 after complete chunk set.
+# Disposable transport attempt 4: workflow blob is already exact on target branch.
 on:
   push:
     branches:
@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     env:
       TARGET_BRANCH: r1-441-production-schema-bootstrap
-      EXPECTED_BASE_SHA: 14bb8ff38d62a9669e14703e5384bf94dfe030d7
+      EXPECTED_BASE_SHA: 500a265c65da226b5ff6c4121bc9deb3130e4a37
       EXPECTED_TREE_SHA: f3afbedd85401465317b6b119f3684d883768858
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -43,7 +43,7 @@ jobs:
           test "${ACTUAL_BASE_SHA}" = "${EXPECTED_BASE_SHA}"
 
           git switch --detach "${ACTUAL_BASE_SHA}"
-          git apply --index /tmp/r1-441.patch
+          git apply --index --exclude='.github/workflows/r1-ydb-schema-bootstrap.yml' /tmp/r1-441.patch
           git diff --cached --check
 
           ACTUAL_TREE_SHA="$(git write-tree)"
