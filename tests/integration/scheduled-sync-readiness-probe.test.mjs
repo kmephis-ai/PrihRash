@@ -181,7 +181,7 @@ test('YDB readiness read failures are stage-specific, sanitized, and never open 
     {
       reads: [[], new Error('private-ydb-endpoint synthetic-migration-schema-missing')],
       expectedCode: 'YDB_MIGRATION_SCHEMA_READ_FAILED',
-      expectedStatements: 2,
+      expectedStatements: 3,
     },
     {
       reads: [[], [], new Error('private-ydb-endpoint synthetic-migration-evidence-failure')],
