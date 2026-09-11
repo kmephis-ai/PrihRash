@@ -57,6 +57,7 @@ export type ScheduledSyncReadinessErrorCode =
   | 'GOOGLE_SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
   | 'YDB_QUERY_HEALTH_READ_FAILED'
+  | 'YDB_MIGRATION_TABLE_READ_FAILED'
   | 'YDB_MIGRATION_SCHEMA_READ_FAILED'
   | 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
   | 'YDB_ACCOUNTS_SCHEMA_READ_FAILED'
@@ -193,6 +194,13 @@ export async function runScheduledSyncReadinessProbe(
       'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0',
     ));
   } catch {
+    try {
+      await adapter.read(readStatement(
+        'SELECT 1 AS readiness_table_probe FROM schema_migrations LIMIT 0',
+      ));
+    } catch {
+      throw new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_READ_FAILED');
+    }
     throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
   }
 
