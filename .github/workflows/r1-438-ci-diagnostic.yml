@@ -1,0 +1,44 @@
+name: R1 438 CI Diagnostic
+
+on:
+  push:
+    branches:
+      - tmp/local-git-mirror-r1-438-574f8635-20260911
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 574f8635c1bb4fce9c529068f8fe35e03a2709bd
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Capture check output
+        shell: bash
+        run: |
+          set +e
+          npm run check > r1-438-check.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > r1-438-exit-code.txt
+          exit 0
+      - name: Upload diagnostic output
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r1-438-check-diagnostic
+          path: |
+            r1-438-check.log
+            r1-438-exit-code.txt
+          if-no-files-found: error
+          retention-days: 1
+      - name: Preserve check result
+        shell: bash
+        run: exit "$(cat r1-438-exit-code.txt)"
