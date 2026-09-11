@@ -1,3 +1,5 @@
+import { StatusIds_StatusCode } from '@ydbjs/api/operation';
+
 import { createCanonicalSourceDigest, type CanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
 import { FullSourceSnapshotError } from '../integration/google/fullSourceSnapshot.js';
 import {
@@ -57,6 +59,8 @@ export type ScheduledSyncReadinessErrorCode =
   | 'GOOGLE_SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
   | 'YDB_QUERY_HEALTH_READ_FAILED'
+  | 'YDB_MIGRATION_TABLE_RESOLUTION_FAILED'
+  | 'YDB_MIGRATION_TABLE_ACCESS_DENIED'
   | 'YDB_MIGRATION_TABLE_READ_FAILED'
   | 'YDB_MIGRATION_SCHEMA_READ_FAILED'
   | 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
@@ -140,6 +144,22 @@ function migrationVersion(value: unknown): number {
   throw new ScheduledSyncReadinessError('MALFORMED_SCHEMA_MIGRATION_EVIDENCE');
 }
 
+function ydbProviderStatus(error: unknown): unknown {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return null;
+  return Reflect.get(error, 'code');
+}
+
+function classifyMigrationTableReadFailure(error: unknown): ScheduledSyncReadinessError {
+  const status = ydbProviderStatus(error);
+  if (status === StatusIds_StatusCode.SCHEME_ERROR || status === StatusIds_StatusCode.NOT_FOUND) {
+    return new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_RESOLUTION_FAILED');
+  }
+  if (status === StatusIds_StatusCode.UNAUTHORIZED) {
+    return new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_ACCESS_DENIED');
+  }
+  return new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_READ_FAILED');
+}
+
 function validateSchemaMigrationEvidence(rows: readonly Readonly<SchemaMigrationEvidenceRow>[]): void {
   const seen = new Set<number>();
   for (const row of rows) {
@@ -198,8 +218,8 @@ export async function runScheduledSyncReadinessProbe(
       await adapter.read(readStatement(
         'SELECT 1 AS readiness_table_probe FROM schema_migrations LIMIT 0',
       ));
-    } catch {
-      throw new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_READ_FAILED');
+    } catch (error) {
+      throw classifyMigrationTableReadFailure(error);
     }
     throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
   }
