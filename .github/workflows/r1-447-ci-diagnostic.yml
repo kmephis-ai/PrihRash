@@ -1,0 +1,48 @@
+name: R1 447 CI Diagnostic
+
+on:
+  push:
+    branches:
+      - ai/r1-447-ci-diagnostic-20260911-2114
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run canonical subchecks and record exit codes
+        shell: bash
+        run: |
+          set +e
+          : > ci-status.txt
+          failed=0
+          for script in privacy lint typecheck test build package:function package:schema-bootstrap; do
+            npm run "$script" >/tmp/prih-rash-check.log 2>&1
+            code=$?
+            printf '%s=%s\n' "$script" "$code" | tee -a ci-status.txt
+            if [ "$code" -ne 0 ]; then
+              failed=1
+            fi
+          done
+          printf 'overall=%s\n' "$failed" >> ci-status.txt
+          exit 0
+      - name: Upload diagnostic status
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-447-ci-status
+          path: ci-status.txt
+          if-no-files-found: error
+          retention-days: 1
+      - name: Fail if any canonical subcheck failed
+        shell: bash
+        run: |
+          grep -q '^overall=0$' ci-status.txt
