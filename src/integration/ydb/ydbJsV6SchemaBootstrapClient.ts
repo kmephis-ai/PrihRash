@@ -39,6 +39,7 @@ interface YdbJsV6SchemaBootstrapClientConfig {
 
 interface YdbSqlQueryBuilder extends PromiseLike<unknown> {
   parameter(name: string, value: unknown): YdbSqlQueryBuilder;
+  idempotent(idempotent?: boolean): YdbSqlQueryBuilder;
 }
 
 interface YdbSqlExecutor {
@@ -114,12 +115,18 @@ async function executeStatement<Row>(
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
 ): Promise<YdbQueryResult<Row>> {
   let query = executor(statement.text);
-  if (query === null || typeof query !== 'object' || typeof query.parameter !== 'function') {
+  if (
+    query === null
+    || typeof query !== 'object'
+    || typeof query.parameter !== 'function'
+    || typeof query.idempotent !== 'function'
+  ) {
     fail('SDK_SHAPE_INVALID');
   }
   for (const [name, parameter] of Object.entries(statement.parameters)) {
     query = query.parameter(name, mapParameter(parameter));
   }
+  if (statement.kind === 'READ') query = query.idempotent(true);
   const resultSets = await query;
   const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
     ? resultSets[0] as readonly Row[]

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { writeStatement } from '../../dist/integration/ydb/adapter.js';
+import { readStatement, writeStatement } from '../../dist/integration/ydb/adapter.js';
 import { stringParameter, timestampParameter, uint64Parameter } from '../../dist/integration/ydb/parameters.js';
 import {
   createYdbJsV6SchemaBootstrapExecutor,
@@ -29,6 +29,10 @@ function makeExecutor(events, rows = []) {
     return Object.assign(Promise.resolve([rows]), {
       parameter(name, value) {
         events.push(['parameter', name, value]);
+        return this;
+      },
+      idempotent(value = true) {
+        events.push(['idempotent', value]);
         return this;
       },
     });
@@ -60,6 +64,22 @@ test('schema bootstrap executor runs trusted DDL directly and binds its narrow l
     '$checksum',
     '$applied_at',
   ]);
+  assert.equal(events.some(([kind]) => kind === 'idempotent'), false);
+});
+
+test('schema bootstrap executor marks only read statements idempotent for SDK retry', async () => {
+  const events = [];
+  const executor = createYdbJsV6SchemaBootstrapExecutor(
+    makeExecutor(events, [{ version: 1n }]),
+    createYdbJsV6SchemaBootstrapParameterMapper(fakeSdk()),
+  );
+  const statement = readStatement('SELECT version FROM schema_migrations ORDER BY version ASC');
+
+  const result = await executor.execute(statement);
+
+  assert.deepEqual(result.rows, [{ version: 1n }]);
+  assert.deepEqual(events.filter(([kind]) => kind === 'idempotent'), [['idempotent', true]]);
+  assert.equal(events.some(([kind]) => kind === 'parameter'), false);
 });
 
 test('schema bootstrap parameter mapper rejects unsupported application parameter types', () => {
