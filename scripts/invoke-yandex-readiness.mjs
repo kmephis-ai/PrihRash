@@ -13,6 +13,9 @@ const SAFE_READY = Object.freeze({
 const SAFE_PASS = Object.freeze({ status: 'PASS', code: 'READINESS_READY' });
 const SAFE_CONFIG_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_CONFIG_INVALID' });
 const SAFE_INVOKE_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
+const SAFE_INVOKE_OUTPUT_INVALID = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_OUTPUT_INVALID' });
+const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
+const SAFE_INVOKE_MARKER_AMBIGUOUS = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_MARKER_AMBIGUOUS' });
 const SAFE_PROBE_FAILURE_CODE_BY_MARKER = Object.freeze({
   CONFIG_INVALID: 'READINESS_RUNTIME_CONFIG_INVALID',
   GOOGLE_SPREADSHEET_ID_INVALID: 'READINESS_GOOGLE_SPREADSHEET_ID_INVALID',
@@ -91,8 +94,18 @@ function safeInvokeFailure(error) {
   const captured = `${capturedErrorField(error, 'stdout')}\n${capturedErrorField(error, 'stderr')}`;
   const matches = Object.entries(SAFE_PROBE_FAILURE_CODE_BY_MARKER)
     .filter(([marker]) => captured.includes(marker));
-  if (matches.length !== 1) return SAFE_INVOKE_FAILURE;
-  return Object.freeze({ status: 'FAIL', code: matches[0][1] });
+  if (matches.length === 1) {
+    return Object.freeze({ status: 'FAIL', code: matches[0][1] });
+  }
+  if (matches.length > 1) return SAFE_INVOKE_MARKER_AMBIGUOUS;
+  if (
+    error !== null
+    && (typeof error === 'object' || typeof error === 'function')
+    && typeof Reflect.get(error, 'code') === 'number'
+  ) {
+    return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+  }
+  return SAFE_INVOKE_FAILURE;
 }
 
 async function invokeReadiness(environment = process.env) {
@@ -123,7 +136,7 @@ async function invokeReadiness(environment = process.env) {
         windowsHide: true,
       },
     );
-    return exactReadinessEvidence(stdout) ? SAFE_PASS : SAFE_INVOKE_FAILURE;
+    return exactReadinessEvidence(stdout) ? SAFE_PASS : SAFE_INVOKE_OUTPUT_INVALID;
   } catch (error) {
     return safeInvokeFailure(error);
   }
