@@ -156,17 +156,20 @@ repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
 
 Не добавлять wildcard repository/branch subject.
 
-### 6. GitHub locator secret
+### 6. GitHub locator secrets
 
-Добавить только non-credential locator:
+Добавить только non-credential locators:
 
 ```text
 YC_R1_SCHEMA_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID
+YC_R1_SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_ID
 ```
+
+`YC_R1_SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_ID` содержит exact ID dedicated secret `prihrash-r1-schema-bootstrap`. Он нужен только для direct resource lookup под resource-scoped `lockbox.viewer`: workflow получает secret через `--id` и fail-closed сверяет returned `id`, `name` и `folder_id` до использования current version. Это не Lockbox payload и не credential.
 
 Workflow также использует existing `YC_R1_FOLDER_ID` как non-credential locator.
 
-Не хранить в GitHub Yandex authorized key/OAuth token/IAM token, YDB connection string, Lockbox payload или provider private configuration.
+Не хранить в GitHub Yandex authorized key/OAuth token/IAM token, YDB connection string, Lockbox payload или другие provider credentials. Locator IDs не публиковать в logs/Issues/PR evidence.
 
 ## Canonical workflow
 

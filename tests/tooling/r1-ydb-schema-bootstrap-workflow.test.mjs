@@ -25,6 +25,7 @@ test('R1 schema bootstrap workflow is manual main-only OIDC and dedicated-identi
   assert.match(workflow, /github\.repository == 'kmephis-ai\/PrihRash'/);
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /YC_R1_SCHEMA_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID/);
+  assert.match(workflow, /YC_R1_SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_ID/);
   assert.doesNotMatch(workflow, /YC_R1_WIF_SERVICE_ACCOUNT_ID/);
   assert.doesNotMatch(workflow, /secrets\.[A-Z0-9_]*(YC_SA_JSON|PRIVATE_KEY|AUTHORIZED_KEY|YDB_CONNECTION)/i);
 
@@ -49,6 +50,9 @@ test('R1 schema bootstrap deploys only dedicated private trigger-free 001→002 
   assert.match(workflow, /serverless trigger list/);
   assert.doesNotMatch(workflow, /serverless trigger create/);
   assert.match(workflow, /key=ydb_connection_string/);
+  assert.match(workflow, /lockbox secret get --id "\$YC_LOCKBOX_SECRET_ID"/);
+  assert.doesNotMatch(workflow, /lockbox secret get --name "\$LOCKBOX_SECRET_NAME"/);
+  assert.match(workflow, /SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_METADATA_INVALID/);
   assert.doesNotMatch(workflow, /google_spreadsheet_id|google_service_account_email|google_service_account_private_key/);
   assert.doesNotMatch(workflow, /index\.(?:readinessHandler|handler)(?:\s|$)/);
   assert.doesNotMatch(workflow, /003_initial_bootstrap_identity_manifest|db\/auth/);
@@ -83,6 +87,7 @@ test('provider runbook keeps write authority separate and defines retirement aft
   assert.match(runbook, /prihrash-github-schema-bootstrap/);
   assert.match(runbook, /Deployment identity \*\*не получает\*\* `ydb\.editor`/);
   assert.match(runbook, /YC_R1_SCHEMA_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID/);
+  assert.match(runbook, /YC_R1_SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_ID/);
   assert.match(runbook, /READINESS_READY/);
   assert.match(runbook, /Retirement condition/);
   assert.match(runbook, /снять `ydb\.editor`/);
