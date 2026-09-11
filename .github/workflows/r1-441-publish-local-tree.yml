@@ -27,9 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat \
-            tools/local-git-mirror/r1-441-publish/patch.01 \
-            tools/local-git-mirror/r1-441-publish/patch.02 \
+          cat tools/local-git-mirror/r1-441-publish/patch.* \
             | base64 --decode \
             | gzip --decompress \
             > /tmp/r1-441.patch
