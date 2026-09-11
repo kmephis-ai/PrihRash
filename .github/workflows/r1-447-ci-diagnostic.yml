@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  diagnose-test:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -19,30 +19,23 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Run canonical subchecks and record exit codes
+      - name: Run synthetic test suite
         shell: bash
         run: |
           set +e
-          : > ci-status.txt
-          failed=0
-          for script in privacy lint typecheck test build package:function package:schema-bootstrap; do
-            npm run "$script" >/tmp/prih-rash-check.log 2>&1
-            code=$?
-            printf '%s=%s\n' "$script" "$code" | tee -a ci-status.txt
-            if [ "$code" -ne 0 ]; then
-              failed=1
-            fi
-          done
-          printf 'overall=%s\n' "$failed" >> ci-status.txt
+          npm test > test-output.txt 2>&1
+          code=$?
+          printf 'test_exit=%s\n' "$code" > test-status.txt
           exit 0
-      - name: Upload diagnostic status
+      - name: Upload synthetic test diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: r1-447-ci-status
-          path: ci-status.txt
+          name: r1-447-test-output
+          path: |
+            test-status.txt
+            test-output.txt
           if-no-files-found: error
           retention-days: 1
-      - name: Fail if any canonical subcheck failed
+      - name: Fail if tests failed
         shell: bash
-        run: |
-          grep -q '^overall=0$' ci-status.txt
+        run: grep -q '^test_exit=0$' test-status.txt
