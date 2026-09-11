@@ -19,9 +19,11 @@
     "test:schema": "node --test tests/schema/*.test.mjs",
     "test:ydb-adapter": "npm run build --silent && node --test tests/integration/*.test.mjs",
     "privacy": "node scripts/privacy-smoke.mjs",
-    "check": "npm run privacy && npm run lint && npm run typecheck && npm test && npm run build && npm run package:function",
+    "check": "npm run privacy && npm run lint && npm run typecheck && npm test && npm run build && npm run package:function && npm run package:schema-bootstrap",
     "preview:build": "node scripts/build-r2-ui-preview.mjs",
-    "preview:r2": "npm run preview:build --silent && node scripts/serve-r2-ui-preview.mjs"
+    "preview:r2": "npm run preview:build --silent && node scripts/serve-r2-ui-preview.mjs",
+    "package:schema-bootstrap": "npm run build --silent && node scripts/package-yandex-schema-bootstrap-function.mjs && node scripts/verify-yandex-schema-bootstrap-package.mjs",
+    "schema-bootstrap:invoke": "node scripts/invoke-yandex-schema-bootstrap.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3"

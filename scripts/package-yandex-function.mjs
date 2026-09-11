@@ -18,6 +18,19 @@ const runtimePackage = {
 await rm(ARTIFACT_ROOT, { recursive: true, force: true });
 await mkdir(ARTIFACT_ROOT, { recursive: true });
 await cp(DIST, resolve(ARTIFACT_ROOT, 'dist'), { recursive: true });
+for (const file of [
+  'runtime/yandexCloudSchemaBootstrapFunction.js',
+  'runtime/yandexCloudSchemaBootstrapFunction.js.map',
+  'runtime/yandexCloudSchemaBootstrapFunction.d.ts',
+  'runtime/ydbSchemaBootstrap.js',
+  'runtime/ydbSchemaBootstrap.js.map',
+  'runtime/ydbSchemaBootstrap.d.ts',
+  'integration/ydb/ydbJsV6SchemaBootstrapClient.js',
+  'integration/ydb/ydbJsV6SchemaBootstrapClient.js.map',
+  'integration/ydb/ydbJsV6SchemaBootstrapClient.d.ts',
+]) {
+  await rm(resolve(ARTIFACT_ROOT, 'dist', file), { force: true });
+}
 await writeFile(
   resolve(ARTIFACT_ROOT, 'index.js'),
   "export { handler, readinessHandler } from './dist/runtime/yandexCloudScheduledSyncFunction.js';\n",

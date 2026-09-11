@@ -1,0 +1,287 @@
+name: R1 YDB schema bootstrap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: r1-ydb-schema-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  schema-bootstrap:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUNCTION_NAME: prihrash-r1-schema-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-schema-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-schema-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_SCHEMA_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify immutable source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Verify and package exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run check
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange GitHub OIDC token for short-lived Yandex IAM token
+        id: yandex-auth
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-schema-bootstrap-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+
+          if ! oidc_status="$(curl --silent --show-error \
+            --output "$tmp/oidc.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" \
+            2>"$tmp/oidc.err")"; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          case "$oidc_status" in
+            2??) ;;
+            *)
+              echo 'SCHEMA_BOOTSTRAP_OIDC_REQUEST_FAILED'
+              exit 1
+              ;;
+          esac
+          if ! oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          echo "::add-mask::${oidc_token}"
+
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *)
+              echo 'SCHEMA_BOOTSTRAP_OIDC_CLAIMS_INVALID'
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>"$tmp/claims.err"; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_CLAIMS_INVALID'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_ISSUER" '.iss == $expected' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_ISSUER_MISMATCH'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_AUDIENCE" '(.aud == $expected) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $expected)' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_AUDIENCE_MISMATCH'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$OIDC_SUBJECT" '.sub == $expected' "$tmp/claims.json" >/dev/null 2>&1; then
+            echo 'SCHEMA_BOOTSTRAP_OIDC_SUBJECT_MISMATCH'
+            exit 1
+          fi
+
+          if ! iam_status="$(curl --silent --show-error \
+            --output "$tmp/iam.json" \
+            --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            2>"$tmp/iam.err")"; then
+            echo 'SCHEMA_BOOTSTRAP_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          case "$iam_status" in
+            2??) ;;
+            *)
+              wif_error="$(jq -r '.error // empty' "$tmp/iam.json" 2>/dev/null || true)"
+              case "$wif_error" in
+                invalid_request) echo 'SCHEMA_BOOTSTRAP_WIF_INVALID_REQUEST' ;;
+                invalid_grant) echo 'SCHEMA_BOOTSTRAP_WIF_INVALID_GRANT' ;;
+                invalid_target) echo 'SCHEMA_BOOTSTRAP_WIF_INVALID_TARGET' ;;
+                unauthorized_client) echo 'SCHEMA_BOOTSTRAP_WIF_UNAUTHORIZED_CLIENT' ;;
+                unsupported_grant_type) echo 'SCHEMA_BOOTSTRAP_WIF_UNSUPPORTED_GRANT_TYPE' ;;
+                *) echo 'SCHEMA_BOOTSTRAP_WIF_EXCHANGE_FAILED' ;;
+              esac
+              exit 1
+              ;;
+          esac
+          if ! iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Fail closed if provider boundary is unsafe
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-schema-bootstrap-provider"
+          mkdir -p "$tmp"
+
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+
+          yc serverless function list-access-bindings --id "$function_id" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")"
+
+          secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          secret_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$secret_json")"
+          secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json")"
+
+          echo "::add-mask::${function_id}"
+          echo "::add-mask::${runtime_sa_id}"
+          echo "::add-mask::${secret_id}"
+          echo "::add-mask::${secret_version_id}"
+          {
+            printf 'PRIHRASH_YC_FUNCTION_ID=%s\n' "$function_id"
+            printf 'PRIHRASH_YC_FUNCTION_SA_ID=%s\n' "$runtime_sa_id"
+            printf 'PRIHRASH_LOCKBOX_SECRET_ID=%s\n' "$secret_id"
+            printf 'PRIHRASH_LOCKBOX_VERSION_ID=%s\n' "$secret_version_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Deploy schema-bootstrap-only function version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-schema-bootstrap-deploy"
+          mkdir -p "$tmp"
+          if ! yc serverless function version create \
+            --function-id "$PRIHRASH_YC_FUNCTION_ID" \
+            --runtime nodejs22 \
+            --entrypoint index.schemaBootstrapHandler \
+            --memory 128m \
+            --execution-timeout 120s \
+            --source-path .artifacts/yandex-schema-bootstrap-function \
+            --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --tags r1-schema-bootstrap \
+            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+            --no-logging \
+            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
+            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+            echo 'SCHEMA_BOOTSTRAP_DEPLOY_FAILED'
+            exit 1
+          fi
+
+      - name: Re-verify private trigger-free boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-schema-bootstrap-postflight"
+          mkdir -p "$tmp"
+
+          yc serverless function list-access-bindings --id "$PRIHRASH_YC_FUNCTION_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+              exit 1
+            }
+          if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+
+      - name: Invoke exact schema bootstrap tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRIHRASH_YANDEX_SCHEMA_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+          npm run schema-bootstrap:invoke
