@@ -112,9 +112,10 @@ const BASELINE_TABLE_PROBES = Object.freeze([
   'SELECT id FROM source_snapshots LIMIT 0',
   'SELECT id FROM migration_runs LIMIT 0',
 ]);
+const MIGRATION_002_COLUMN_NAME = 'normalized_source_label';
 const MIGRATION_002_PROBES = Object.freeze([
-  'SELECT normalized_source_label FROM accounts LIMIT 0',
-  'SELECT normalized_source_label FROM categories LIMIT 0',
+  `SELECT ${MIGRATION_002_COLUMN_NAME} FROM accounts LIMIT 0`,
+  `SELECT ${MIGRATION_002_COLUMN_NAME} FROM categories LIMIT 0`,
 ]);
 const FINANCE_PROFILE_READBACK = [
   'SELECT CAST(timezone AS Utf8) AS timezone, target_close_day, version',
@@ -269,6 +270,39 @@ function isMissing(error: unknown): boolean {
   return status === StatusIds_StatusCode.SCHEME_ERROR || status === StatusIds_StatusCode.NOT_FOUND;
 }
 
+function providerIssues(error: unknown): readonly unknown[] {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return [];
+  const issues = Reflect.get(error, 'issues');
+  return Array.isArray(issues) ? issues : [];
+}
+
+function issueTreeHasExactMessage(root: unknown, expectedMessage: string): boolean {
+  const pending: unknown[] = [root];
+  const seen = new Set<object>();
+
+  while (pending.length > 0 && seen.size < 64) {
+    const current = pending.pop();
+    if (current === null || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+
+    if (Reflect.get(current, 'message') === expectedMessage) return true;
+    const nested = Reflect.get(current, 'issues');
+    if (Array.isArray(nested)) pending.push(...nested);
+  }
+  return false;
+}
+
+function isExpectedMissingColumn(error: unknown, columnName: string): boolean {
+  if (providerStatus(error) !== StatusIds_StatusCode.GENERIC_ERROR) return false;
+  const expectedMessage = `Member not found: ${columnName}`;
+  return providerIssues(error).some((issue) => (
+    issue !== null
+    && typeof issue === 'object'
+    && Reflect.get(issue, 'issueCode') === 1030
+    && issueTreeHasExactMessage(issue, expectedMessage)
+  ));
+}
+
 function isUnauthorized(error: unknown): boolean {
   return providerStatus(error) === StatusIds_StatusCode.UNAUTHORIZED;
 }
@@ -331,6 +365,21 @@ async function probeTableExists(
   }
 }
 
+async function probeExpectedColumnExists(
+  client: Readonly<YdbSchemaBootstrapClient>,
+  query: string,
+  columnName: string,
+): Promise<boolean> {
+  try {
+    await client.execute(readStatement(query));
+    return true;
+  } catch (error) {
+    if (isMissing(error) || isExpectedMissingColumn(error, columnName)) return false;
+    if (isUnauthorized(error)) throw new YdbSchemaBootstrapError('YDB_ACCESS_DENIED');
+    throw new YdbSchemaBootstrapError('YDB_PREFLIGHT_READ_FAILED');
+  }
+}
+
 async function assertFreshEmptySchema(client: Readonly<YdbSchemaBootstrapClient>): Promise<void> {
   for (const probe of BASELINE_TABLE_PROBES) {
     if (await probeTableExists(client, probe)) {
@@ -352,7 +401,7 @@ async function migration2PhysicalState(
 ): Promise<0 | 1 | 2> {
   let present = 0;
   for (const probe of MIGRATION_002_PROBES) {
-    if (await probeTableExists(client, probe)) present += 1;
+    if (await probeExpectedColumnExists(client, probe, MIGRATION_002_COLUMN_NAME)) present += 1;
   }
   return present as 0 | 1 | 2;
 }
