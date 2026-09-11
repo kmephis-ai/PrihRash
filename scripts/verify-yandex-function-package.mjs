@@ -48,6 +48,13 @@ for (const forbiddenKey of ['devDependencies', 'scripts', 'optionalDependencies'
 }
 
 const files = await filesUnder(ARTIFACT_ROOT);
+for (const forbidden of [
+  'dist/runtime/yandexCloudSchemaBootstrapFunction.js',
+  'dist/runtime/ydbSchemaBootstrap.js',
+  'dist/integration/ydb/ydbJsV6SchemaBootstrapClient.js',
+]) {
+  if (files.includes(forbidden)) fail(`privileged schema-bootstrap runtime leaked into scheduled package: ${forbidden}`);
+}
 const forbiddenPrefixes = ['tests/', 'docs/', 'db/', 'scripts/', '.github/', 'private/', 'node_modules/'];
 for (const file of files) {
   if (forbiddenPrefixes.some((prefix) => file.startsWith(prefix))) fail(`forbidden path: ${file}`);
