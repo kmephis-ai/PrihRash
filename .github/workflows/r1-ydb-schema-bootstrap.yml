@@ -174,48 +174,60 @@ jobs:
           tmp="$RUNNER_TEMP/r1-schema-bootstrap-provider"
           mkdir -p "$tmp"
 
-          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
-          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+          if ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
+            echo 'SCHEMA_BOOTSTRAP_FUNCTION_RESOLUTION_FAILED'
+            exit 1
+          fi
+          if ! function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_FUNCTION_METADATA_INVALID'
+            exit 1
+          fi
 
-          yc serverless function list-access-bindings --id "$function_id" \
-            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
+          if ! yc serverless function list-access-bindings --id "$function_id" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err"; then
+            echo 'SCHEMA_BOOTSTRAP_FUNCTION_BINDINGS_READ_FAILED'
+            exit 1
+          fi
           if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
             "$tmp/bindings.json" >/dev/null; then
-            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            echo 'SCHEMA_BOOTSTRAP_FUNCTION_PUBLIC'
             exit 1
           fi
 
-          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
+          if ! yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err"; then
+            echo 'SCHEMA_BOOTSTRAP_TRIGGER_LIST_FAILED'
+            exit 1
+          fi
           if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
-            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            echo 'SCHEMA_BOOTSTRAP_FUNCTION_TRIGGER_PRESENT'
             exit 1
           fi
 
-          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
-          runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")"
+          if ! runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")"; then
+            echo 'SCHEMA_BOOTSTRAP_RUNTIME_SA_RESOLUTION_FAILED'
+            exit 1
+          fi
+          if ! runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_RUNTIME_SA_METADATA_INVALID'
+            exit 1
+          fi
 
-          secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
-          secret_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$secret_json")"
-          secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json")"
+          if ! secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")"; then
+            echo 'SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_RESOLUTION_FAILED'
+            exit 1
+          fi
+          if ! secret_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$secret_json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_LOCKBOX_SECRET_METADATA_INVALID'
+            exit 1
+          fi
+          if ! secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json" 2>/dev/null)"; then
+            echo 'SCHEMA_BOOTSTRAP_LOCKBOX_VERSION_RESOLUTION_FAILED'
+            exit 1
+          fi
 
           echo "::add-mask::${function_id}"
           echo "::add-mask::${runtime_sa_id}"
@@ -258,24 +270,24 @@ jobs:
           tmp="$RUNNER_TEMP/r1-schema-bootstrap-postflight"
           mkdir -p "$tmp"
 
-          yc serverless function list-access-bindings --id "$PRIHRASH_YC_FUNCTION_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
+          if ! yc serverless function list-access-bindings --id "$PRIHRASH_YC_FUNCTION_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err"; then
+            echo 'SCHEMA_BOOTSTRAP_POSTFLIGHT_FUNCTION_BINDINGS_READ_FAILED'
+            exit 1
+          fi
           if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
             "$tmp/bindings.json" >/dev/null; then
-            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            echo 'SCHEMA_BOOTSTRAP_POSTFLIGHT_FUNCTION_PUBLIC'
             exit 1
           fi
 
-          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
-              echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
-              exit 1
-            }
+          if ! yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err"; then
+            echo 'SCHEMA_BOOTSTRAP_POSTFLIGHT_TRIGGER_LIST_FAILED'
+            exit 1
+          fi
           if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
-            echo 'SCHEMA_BOOTSTRAP_PROVIDER_CONFIG_INVALID'
+            echo 'SCHEMA_BOOTSTRAP_POSTFLIGHT_FUNCTION_TRIGGER_PRESENT'
             exit 1
           fi
 
