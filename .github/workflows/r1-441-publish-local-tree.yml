@@ -1,0 +1,60 @@
+name: R1 441 Publish Verified Local Tree
+
+on:
+  push:
+    branches:
+      - tmp/local-git-mirror-r1-441-14bb8ff-20260911
+    paths:
+      - '.github/workflows/r1-441-publish-local-tree.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      TARGET_BRANCH: r1-441-production-schema-bootstrap
+      EXPECTED_BASE_SHA: 14bb8ff38d62a9669e14703e5384bf94dfe030d7
+      EXPECTED_TREE_SHA: f3afbedd85401465317b6b119f3684d883768858
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct verified local patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            tools/local-git-mirror/r1-441-publish/patch.01 \
+            tools/local-git-mirror/r1-441-publish/patch.02 \
+            | base64 --decode \
+            | gzip --decompress \
+            > /tmp/r1-441.patch
+          test -s /tmp/r1-441.patch
+
+      - name: Publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "+refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          ACTUAL_BASE_SHA="$(git rev-parse "refs/remotes/origin/${TARGET_BRANCH}")"
+          test "${ACTUAL_BASE_SHA}" = "${EXPECTED_BASE_SHA}"
+
+          git switch --detach "${ACTUAL_BASE_SHA}"
+          git apply --index /tmp/r1-441.patch
+          git diff --cached --check
+
+          ACTUAL_TREE_SHA="$(git write-tree)"
+          test "${ACTUAL_TREE_SHA}" = "${EXPECTED_TREE_SHA}"
+
+          git config user.name "kmephis-ai"
+          git config user.email "kmephis@gmail.com"
+          git commit -m "R1 #441: добавить one-shot schema bootstrap 001→002"
+          git push origin HEAD:"refs/heads/${TARGET_BRANCH}"
+
+          PUBLISHED_TREE_SHA="$(git rev-parse HEAD^{tree})"
+          test "${PUBLISHED_TREE_SHA}" = "${EXPECTED_TREE_SHA}"
+          printf 'PUBLISHED_TREE=%s\n' "${PUBLISHED_TREE_SHA}"
