@@ -1,0 +1,85 @@
+name: R1 #448 verified tree transport
+
+on:
+  push:
+    branches:
+      - ai/r1-448-publish-20260912-2127
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: 22b32caa98578651119efefd2927f8517e4c7715
+  EXPECTED_TREE: e2480ba9051ab3dc4267790aba4c48ed953c17ff
+  TARGET_BRANCH: ai/r1-448-schema-v3
+  EXPECTED_TARGET_OLD_SHA: 22b32caa98578651119efefd2927f8517e4c7715
+  PATCH_SHA256: 29f28fdba020f09b07aa72efd20df8040f60224b09bee895b5effa7ca76db7ab
+  PATCH_BYTES: '101482'
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct exact local patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH_B64="$RUNNER_TEMP/r1-448.patch.gz.b64"
+          PATCH_GZ="$RUNNER_TEMP/r1-448.patch.gz"
+          PATCH="$RUNNER_TEMP/r1-448.patch"
+          cat tools/local-git-mirror/r1-448-publish/patch.00 \
+              tools/local-git-mirror/r1-448-publish/patch.01 \
+              tools/local-git-mirror/r1-448-publish/patch.02 \
+              tools/local-git-mirror/r1-448-publish/patch.03 > "$PATCH_B64"
+          base64 --decode "$PATCH_B64" > "$PATCH_GZ"
+          gzip --decompress --stdout "$PATCH_GZ" > "$PATCH"
+          test "$(wc -c < "$PATCH" | tr -d ' ')" = "$PATCH_BYTES"
+          echo "$PATCH_SHA256  $PATCH" | sha256sum --check --status
+
+      - name: Apply verified local commit to exact main
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH="$RUNNER_TEMP/r1-448.patch"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git checkout --detach --quiet "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git config user.name "OpenAI"
+          git config user.email "noreply@openai.com"
+          git am "$PATCH"
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+
+      - name: Verify target branch has not moved
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          test "$(git rev-parse "refs/remotes/origin/${TARGET_BRANCH}")" = "$EXPECTED_TARGET_OLD_SHA"
+
+      - name: Publish verified tree with lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push \
+            --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_TARGET_OLD_SHA}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Verify remote tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          REMOTE_SHA="$(git ls-remote --heads origin "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          test -n "$REMOTE_SHA"
+          git fetch --quiet origin "$REMOTE_SHA"
+          test "$(git rev-parse "${REMOTE_SHA}^{tree}")" = "$EXPECTED_TREE"
+          test "$(git rev-parse "${REMOTE_SHA}^")" = "$SOURCE_SHA"
+          echo "PUBLISH_READY tree=${EXPECTED_TREE}"
