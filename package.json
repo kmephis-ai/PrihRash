@@ -27,10 +27,12 @@
     "package:schema-upgrade-003": "npm run build --silent && node scripts/package-yandex-schema-upgrade-003-function.mjs && node scripts/verify-yandex-schema-upgrade-003-package.mjs",
     "schema-upgrade-003:invoke": "node scripts/invoke-yandex-schema-upgrade-003.mjs",
     "package:initial-bootstrap": "npm run build --silent && node scripts/package-yandex-initial-bootstrap-function.mjs && node scripts/verify-yandex-initial-bootstrap-package.mjs",
-    "initial-bootstrap:invoke": "node scripts/invoke-yandex-initial-bootstrap.mjs"
+    "initial-bootstrap:invoke": "node scripts/invoke-yandex-initial-bootstrap.mjs",
+    "test:browser": "npm run preview:build --silent && playwright test --config=playwright.config.mjs"
   },
   "devDependencies": {
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "@playwright/test": "1.63.0"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.12.0",
