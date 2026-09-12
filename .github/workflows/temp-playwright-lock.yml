@@ -1,0 +1,27 @@
+name: Temp Playwright Lockfile
+
+on:
+  push:
+    branches: [transport/playwright-lock-1-63]
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve exact Playwright lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-dev --save-exact @playwright/test@1.63.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playwright-lock-1-63
+          path: |
+            package.json
+            package-lock.json
+          retention-days: 1
