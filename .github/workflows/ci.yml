@@ -24,7 +24,15 @@ jobs:
         run: npm run lint
       - name: Diagnostic typecheck
         run: npm run typecheck
-      - name: Diagnostic test
+      - name: Diagnostic build for tests
+        run: npm run build --silent
+      - name: Diagnostic private evidence test
+        run: node --test tests/migration-simulation/initial-bootstrap-private-evidence.test.mjs
+      - name: Diagnostic runtime primitives test
+        run: node --test tests/migration-simulation/initial-bootstrap-runtime-primitives.test.mjs
+      - name: Diagnostic durable reconciliation test
+        run: node --test tests/migration-simulation/initial-bootstrap-durable-reconciliation.test.mjs
+      - name: Diagnostic full test suite
         run: npm test
       - name: Diagnostic build
         run: npm run build
