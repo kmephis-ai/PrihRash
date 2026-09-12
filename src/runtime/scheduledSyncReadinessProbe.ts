@@ -25,6 +25,8 @@ import {
 } from './scheduledSyncJob.js';
 
 export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 3 as const;
+export const SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const;
+export const SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const;
 
 export interface ScheduledSyncReadinessResult {
   readonly googleSource: 'READY';
@@ -80,6 +82,46 @@ export class ScheduledSyncReadinessError extends Error {
     this.name = 'ScheduledSyncReadinessError';
     this.code = code;
   }
+}
+
+class ScheduledSyncReadinessDeadlineExceededError extends Error {
+  constructor() {
+    super('READINESS_DEADLINE_EXCEEDED');
+    this.name = 'ScheduledSyncReadinessDeadlineExceededError';
+  }
+}
+
+interface ScheduledSyncReadinessDeadline {
+  run<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+function createScheduledSyncReadinessDeadline(timeoutMs: number): Readonly<ScheduledSyncReadinessDeadline> {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new ScheduledSyncReadinessError('CONFIG_INVALID');
+  }
+  const expiresAt = Date.now() + timeoutMs;
+
+  return Object.freeze({
+    async run<T>(operation: () => Promise<T>): Promise<T> {
+      const remainingMs = expiresAt - Date.now();
+      if (remainingMs <= 0) throw new ScheduledSyncReadinessDeadlineExceededError();
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          operation(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(new ScheduledSyncReadinessDeadlineExceededError()),
+              remainingMs,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    },
+  });
 }
 
 function classifyGoogleSourceFailure(error: unknown): ScheduledSyncReadinessError {
@@ -197,63 +239,67 @@ function validateSchemaMigrationEvidence(rows: readonly Readonly<SchemaMigration
   }
 }
 
-export async function runScheduledSyncReadinessProbe(
+async function runScheduledSyncReadinessProbeWithinDeadline(
   source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>,
   adapter: YdbAdapter,
+  deadline: Readonly<ScheduledSyncReadinessDeadline>,
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
   try {
-    await source.readFullSnapshotObservation();
+    await deadline.run(() => source.readFullSnapshotObservation());
   } catch (error) {
     throw classifyGoogleSourceFailure(error);
   }
 
   try {
-    await adapter.read(readStatement('SELECT 1 AS readiness_probe'));
+    await deadline.run(() => adapter.read(readStatement('SELECT 1 AS readiness_probe')));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_QUERY_HEALTH_READ_FAILED');
   }
 
   try {
-    await adapter.read(readStatement(
+    await deadline.run(() => adapter.read(readStatement(
       'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0',
-    ));
-  } catch {
+    )));
+  } catch (error) {
+    if (error instanceof ScheduledSyncReadinessDeadlineExceededError) {
+      throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
+    }
     try {
-      await adapter.read(readStatement(
+      await deadline.run(() => adapter.read(readStatement(
         'SELECT 1 AS readiness_table_probe FROM schema_migrations LIMIT 0',
-      ));
-    } catch (error) {
-      throw classifyMigrationTableReadFailure(error);
+      )));
+    } catch (fallbackError) {
+      throw classifyMigrationTableReadFailure(fallbackError);
     }
     throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
   }
 
   let migrationEvidence;
   try {
-    migrationEvidence = await adapter.read<SchemaMigrationEvidenceRow>(readStatement(
+    migrationEvidence = await deadline.run(() => adapter.read<SchemaMigrationEvidenceRow>(readStatement(
       'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC',
-    ));
+    )));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_MIGRATION_EVIDENCE_READ_FAILED');
   }
   validateSchemaMigrationEvidence(migrationEvidence.rows);
 
   try {
-    await adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0'));
+    await deadline.run(() => adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0')));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_ACCOUNTS_SCHEMA_READ_FAILED');
   }
 
   try {
-    await adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0'));
+    await deadline.run(() => adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0')));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_CATEGORIES_SCHEMA_READ_FAILED');
   }
 
   try {
-    await adapter.read(readStatement(
+    await deadline.run(() => adapter.read(readStatement(
       'SELECT migration_run_id, source_snapshot_id, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, binding_count, bindings FROM initial_bootstrap_identity_manifests LIMIT 0',
-    ));
+    )));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED');
   }
@@ -263,6 +309,17 @@ export async function runScheduledSyncReadinessProbe(
     ydbSchema: 'READY' as const,
     requiredMigrationVersion: REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION,
   });
+}
+
+export function runScheduledSyncReadinessProbe(
+  source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>,
+  adapter: YdbAdapter,
+): Promise<Readonly<ScheduledSyncReadinessResult>> {
+  return runScheduledSyncReadinessProbeWithinDeadline(
+    source,
+    adapter,
+    createScheduledSyncReadinessDeadline(SCHEDULED_SYNC_READINESS_DEADLINE_MS),
+  );
 }
 
 const productionRuntime: Readonly<ScheduledSyncReadinessRuntime> = Object.freeze({
@@ -292,7 +349,14 @@ const productionRuntime: Readonly<ScheduledSyncReadinessRuntime> = Object.freeze
 export async function executeScheduledSyncReadinessProbe(
   config: Readonly<ScheduledSyncJobConfig>,
   runtime: Readonly<ScheduledSyncReadinessRuntime>,
+  options: Readonly<{
+    deadlineMs?: number;
+    closeTimeoutMs?: number;
+  }> = {},
 ): Promise<Readonly<ScheduledSyncReadinessResult>> {
+  const deadline = createScheduledSyncReadinessDeadline(
+    options.deadlineMs ?? SCHEDULED_SYNC_READINESS_DEADLINE_MS,
+  );
   const digest = createCanonicalSourceDigest();
   let source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>;
   try {
@@ -303,7 +367,7 @@ export async function executeScheduledSyncReadinessProbe(
 
   let ydbClient: Readonly<ScheduledSyncReadinessYdbClient>;
   try {
-    ydbClient = await runtime.createYdbClient(config);
+    ydbClient = await deadline.run(() => runtime.createYdbClient(config));
   } catch {
     throw new ScheduledSyncReadinessError('YDB_CLIENT_CREATE_FAILED');
   }
@@ -311,13 +375,16 @@ export async function executeScheduledSyncReadinessProbe(
   let primaryError: unknown = null;
 
   try {
-    return await runScheduledSyncReadinessProbe(source, adapter);
+    return await runScheduledSyncReadinessProbeWithinDeadline(source, adapter, deadline);
   } catch (error) {
     primaryError = error;
     throw error;
   } finally {
     try {
-      await ydbClient.close();
+      const closeDeadline = createScheduledSyncReadinessDeadline(
+        options.closeTimeoutMs ?? SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS,
+      );
+      await closeDeadline.run(() => ydbClient.close());
     } catch {
       if (primaryError === null) {
         throw new ScheduledSyncReadinessError('YDB_CLIENT_CLOSE_FAILED');
