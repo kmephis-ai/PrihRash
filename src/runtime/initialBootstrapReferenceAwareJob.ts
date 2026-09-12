@@ -7,7 +7,7 @@ import {
   type GoogleSheetsFullSnapshotLease,
 } from '../integration/google/googleSheetsFullSnapshotReader.js';
 import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integration/google/googleServiceAccountTokenProvider.js';
-import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
+import { YdbAdapter } from '../integration/ydb/adapter.js';
 import {
   createYdbJsV6MetadataDataClient,
   type YdbJsDataClient,
@@ -60,7 +60,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
   let referencePlan: Readonly<InitialReferenceBootstrapPlan> | null = null;
 
-  return Object.freeze({
+  const runtime: InitialBootstrapJobRuntime = {
     createDigest(): Readonly<CanonicalSourceDigest> {
       digest = createCanonicalSourceDigest();
       return digest;
@@ -140,7 +140,8 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         adapter,
       }));
     },
-  });
+  };
+  return Object.freeze(runtime);
 }
 
 export function runInitialBootstrapReferenceAwareJob(
