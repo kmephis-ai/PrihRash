@@ -1,6 +1,9 @@
 import {
   YdbAdapter,
+  type YdbQueryResult,
+  type YdbStatement,
   type YdbTransport,
+  type YdbTransportTransaction,
 } from '../integration/ydb/adapter.js';
 import {
   applyInitialReferenceBootstrapPlan,
@@ -13,18 +16,27 @@ export function createInitialBootstrapReferenceClaimAdapter(
 ): YdbAdapter {
   let claimed = false;
   const transport: YdbTransport = Object.freeze({
-    executeRead(statement) {
-      return base.read(statement);
+    executeRead<Row = Readonly<Record<string, unknown>>>(
+      statement: YdbStatement,
+    ): Promise<YdbQueryResult<Row>> {
+      return base.read<Row>(statement);
     },
-    serializableReadWrite(work) {
+    serializableReadWrite<T>(
+      work: (transaction: YdbTransportTransaction) => Promise<T>,
+    ): Promise<T> {
       return base.serializableReadWrite(async (transaction) => {
         if (!claimed) {
           claimed = true;
           await applyInitialReferenceBootstrapPlan(transaction, plan);
         }
-        return work(Object.freeze({
-          execute: (statement) => transaction.execute(statement),
-        }));
+        const delegated: YdbTransportTransaction = Object.freeze({
+          execute<Row = Readonly<Record<string, unknown>>>(
+            statement: YdbStatement,
+          ): Promise<YdbQueryResult<Row>> {
+            return transaction.execute<Row>(statement);
+          },
+        });
+        return work(delegated);
       });
     },
   });
