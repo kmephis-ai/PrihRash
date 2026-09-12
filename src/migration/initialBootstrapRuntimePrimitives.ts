@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
+import type { InitialReferenceBootstrapIdentityAllocator } from '../reference/initialBootstrapReferencePlan.js';
 import type {
   InitialBootstrapApplicationClock,
   InitialBootstrapIdentityAllocator,
@@ -22,6 +23,7 @@ export interface InitialBootstrapRuntimePrimitiveDependencies {
 
 export interface InitialBootstrapRuntimePrimitives {
   readonly identityAllocator: Readonly<InitialBootstrapIdentityAllocator>;
+  readonly referenceIdentityAllocator: Readonly<InitialReferenceBootstrapIdentityAllocator>;
   readonly clock: Readonly<InitialBootstrapApplicationClock>;
 }
 
@@ -78,8 +80,11 @@ export function createInitialBootstrapRuntimePrimitives(
     allocateSourceRecordId: nextUuid,
     allocateTransactionId: nextUuid,
   });
+  const referenceIdentityAllocator: InitialReferenceBootstrapIdentityAllocator = Object.freeze({
+    allocateReferenceId: nextUuid,
+  });
 
-  return Object.freeze({ identityAllocator, clock });
+  return Object.freeze({ identityAllocator, referenceIdentityAllocator, clock });
 }
 
 export function createNodeInitialBootstrapRuntimePrimitives(): Readonly<InitialBootstrapRuntimePrimitives> {
