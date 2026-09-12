@@ -219,7 +219,7 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 `BASELINE_EXISTS` — безопасный NOOP, но **не** доказательство, что этот workflow выполнил первый bootstrap; invoker завершает его non-zero.
 
-`CONTROLLED_REBUILD_REQUIRED` не разрешает auto-rebuild и не разрешает автоматически повышать cap.
+`CONTROLLED_REBUILD_REQUIRED` запрещает auto-rebuild и автоматическое повышение cap.
 
 ## Failure / retry policy
 
