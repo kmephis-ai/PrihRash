@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  YandexScheduledSyncReadinessFunctionError,
   YandexTimerScheduledSyncFunctionError,
   executeYandexScheduledSyncReadinessFunction,
   executeYandexTimerScheduledSyncFunction,
@@ -35,34 +34,28 @@ test('readiness entrypoint invokes only the injected read-only readiness job wit
 });
 
 
-test('readiness entrypoint sanitizes unknown provider failure without retaining private detail', async () => {
+test('readiness entrypoint returns a generic safe result for unknown provider failure without retaining private detail', async () => {
   const privateDetail = 'private-spreadsheet-id grpcs://private-ydb-id secret-token';
 
-  await assert.rejects(
-    () => executeYandexScheduledSyncReadinessFunction(
-      ENVIRONMENT,
-      async () => { throw new Error(privateDetail); },
-    ),
-    (error) => error instanceof YandexScheduledSyncReadinessFunctionError
-      && error.code === 'READINESS_FAILED'
-      && error.message === 'READINESS_FAILED'
-      && !JSON.stringify(error).includes(privateDetail)
-      && !Object.hasOwn(error, 'cause'),
+  const result = await executeYandexScheduledSyncReadinessFunction(
+    ENVIRONMENT,
+    async () => { throw new Error(privateDetail); },
   );
+
+  assert.deepEqual(result, { readinessFailure: 'READINESS_FAILED' });
+  assert.equal(JSON.stringify(result).includes(privateDetail), false);
 });
 
-test('readiness entrypoint preserves only already-sanitized readiness errors', async () => {
+test('readiness entrypoint transports only an already-sanitized readiness failure code', async () => {
   const safeFailure = new ScheduledSyncReadinessError('YDB_MIGRATION_EVIDENCE_READ_FAILED');
 
-  await assert.rejects(
-    () => executeYandexScheduledSyncReadinessFunction(
-      ENVIRONMENT,
-      async () => { throw safeFailure; },
-    ),
-    (error) => error === safeFailure
-      && error.message === 'YDB_MIGRATION_EVIDENCE_READ_FAILED'
-      && !Object.hasOwn(error, 'cause'),
+  const result = await executeYandexScheduledSyncReadinessFunction(
+    ENVIRONMENT,
+    async () => { throw safeFailure; },
   );
+
+  assert.deepEqual(result, { readinessFailure: 'YDB_MIGRATION_EVIDENCE_READ_FAILED' });
+  assert.equal(Object.hasOwn(result, 'cause'), false);
 });
 
 function timerEvent(overrides = {}) {
