@@ -10,8 +10,10 @@ import {
   type InitialValidationBlockerCode,
 } from '../migration/initialValidationGate.js';
 import {
+  runInitialBootstrapReferenceAwareJobFromEnvironment,
+} from './initialBootstrapReferenceAwareJob.js';
+import {
   InitialBootstrapJobError,
-  runInitialBootstrapJobFromEnvironment,
   type InitialBootstrapJobEnvironment,
 } from './initialBootstrapJob.js';
 
@@ -227,6 +229,6 @@ export async function initialBootstrapHandler(
 ): Promise<Readonly<YandexInitialBootstrapFunctionResult>> {
   return executeYandexInitialBootstrapFunction(
     process.env,
-    runInitialBootstrapJobFromEnvironment,
+    runInitialBootstrapReferenceAwareJobFromEnvironment,
   );
 }
