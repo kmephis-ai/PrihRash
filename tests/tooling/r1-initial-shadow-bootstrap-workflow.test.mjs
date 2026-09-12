@@ -110,6 +110,8 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
   assert.match(runbook, /independent post-COMMITTED/);
   assert.match(runbook, /Не делать blind retry/);
   assert.match(runbook, /`ydb\.editor`/);
+  assert.match(runbook, /`functions\.auditor` только на target PrihRash folder/u);
+  assert.match(runbook, /снять temporary folder-scoped `functions\.auditor`/u);
   assert.match(runbook, /Retirement после successful bootstrap/);
   assert.match(runbook, /Timer остаётся выключен|timer всё ещё выключен/);
   assert.match(runbook, /YDB остаётся shadow/);
