@@ -191,6 +191,12 @@ jobs:
             echo 'READINESS_PROVIDER_CONFIG_INVALID'
             exit 1
           fi
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | any(.type == "serviceAccount" and .id == $expected)' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
 
           yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
             --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
@@ -269,6 +275,12 @@ jobs:
           if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
             "$tmp/bindings.json" >/dev/null; then
             echo 'READINESS_PROVIDER_CONFIG_INVALID'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | any(.type == "serviceAccount" and .id == $expected)' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'READINESS_PROVIDER_INVOKER_BINDING_MISSING'
             exit 1
           fi
 
