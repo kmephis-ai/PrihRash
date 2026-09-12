@@ -1,1 +1,3 @@
-// Initial reference bootstrap implementation is added in the next commit.
+export * from './initialBootstrapReferencePersistence.js';
+export * from './initialBootstrapReferencePlan.js';
+export * from './initialBootstrapReferenceVocabulary.js';
