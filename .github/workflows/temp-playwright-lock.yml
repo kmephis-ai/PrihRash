@@ -1,0 +1,33 @@
+name: Temp Playwright Lockfile
+
+on:
+  push:
+    branches: [quality-432-playwright-browser-gate]
+    paths:
+      - package.json
+      - .github/workflows/temp-playwright-lock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Resolve exact Playwright lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund --save-dev --save-exact @playwright/test@1.63.0
+      - name: Commit lockfile if changed
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'QUALITY #432: update Playwright lockfile'
+          git push origin HEAD:${GITHUB_REF_NAME}
