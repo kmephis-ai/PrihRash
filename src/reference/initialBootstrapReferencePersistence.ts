@@ -12,6 +12,7 @@ import type { InitialReferenceBootstrapPlan } from './initialBootstrapReferenceP
 import { readYdbReferenceMappingEvidence } from './ydbReferenceEvidenceReader.js';
 
 export type InitialReferenceBootstrapPersistenceErrorCode =
+  | 'ACCOUNT_REFERENCE_SEMANTICS_UNKNOWN'
   | 'VIKA_REFERENCE_CONFLICT'
   | 'REFERENCE_READBACK_MISMATCH';
 
@@ -28,10 +29,33 @@ export class InitialReferenceBootstrapPersistenceError extends Error {
 const VIKA_MEMBER_NAME = 'Вика';
 const ACTIVE_STATUS = 'ACTIVE';
 
+type AccountReferenceKind = 'CASH' | 'DEBIT_CARD' | 'CREDIT_CARD' | 'UNKNOWN';
+type AccountReferenceBalanceNature = 'ASSET' | 'LIABILITY' | 'UNKNOWN';
+
+interface AccountReferenceSemantics {
+  readonly kind: AccountReferenceKind;
+  readonly balanceNature: AccountReferenceBalanceNature;
+}
+
+const ACCOUNT_REFERENCE_SEMANTICS: Readonly<Record<string, Readonly<AccountReferenceSemantics>>> = Object.freeze({
+  'Карта Visa': Object.freeze({ kind: 'DEBIT_CARD', balanceNature: 'ASSET' }),
+  'Карта Credit': Object.freeze({ kind: 'CREDIT_CARD', balanceNature: 'LIABILITY' }),
+  'Наличка': Object.freeze({ kind: 'CASH', balanceNature: 'ASSET' }),
+  'Приход': Object.freeze({ kind: 'UNKNOWN', balanceNature: 'UNKNOWN' }),
+});
+
 interface VikaMemberRow {
   readonly id?: unknown;
   readonly name?: unknown;
   readonly status?: unknown;
+}
+
+function accountReferenceSemantics(sourceLabel: string): Readonly<AccountReferenceSemantics> {
+  const semantics = ACCOUNT_REFERENCE_SEMANTICS[sourceLabel];
+  if (semantics === undefined) {
+    throw new InitialReferenceBootstrapPersistenceError('ACCOUNT_REFERENCE_SEMANTICS_UNKNOWN');
+  }
+  return semantics;
 }
 
 export async function readCurrentVikaMemberId(scope: YdbReadScope): Promise<string | null> {
@@ -57,13 +81,17 @@ export function prepareAccountReferenceInsert(
   id: string,
   sourceLabel: string,
 ): Readonly<YdbStatement> {
+  const semantics = accountReferenceSemantics(sourceLabel);
   return writeStatement(
-    'INSERT INTO accounts (id, name, currency, normalized_source_label) '
-      + 'VALUES ($id, $name, $currency, $normalized_source_label)',
+    'INSERT INTO accounts (id, name, kind, balance_nature, currency, status, normalized_source_label) '
+      + 'VALUES ($id, $name, $kind, $balance_nature, $currency, $status, $normalized_source_label)',
     {
       id: uuidParameter(id),
       name: utf8Parameter(sourceLabel),
+      kind: utf8Parameter(semantics.kind),
+      balance_nature: utf8Parameter(semantics.balanceNature),
       currency: utf8Parameter('RUB'),
+      status: utf8Parameter(ACTIVE_STATUS),
       normalized_source_label: utf8Parameter(sourceLabel),
     },
   );
@@ -75,12 +103,13 @@ export function prepareCategoryReferenceInsert(
   sourceLabel: string,
 ): Readonly<YdbStatement> {
   return writeStatement(
-    'INSERT INTO categories (id, name, kind, normalized_source_label) '
-      + 'VALUES ($id, $name, $kind, $normalized_source_label)',
+    'INSERT INTO categories (id, name, kind, status, normalized_source_label) '
+      + 'VALUES ($id, $name, $kind, $status, $normalized_source_label)',
     {
       id: uuidParameter(id),
       name: utf8Parameter(sourceLabel),
       kind: utf8Parameter(kind),
+      status: utf8Parameter(ACTIVE_STATUS),
       normalized_source_label: utf8Parameter(sourceLabel),
     },
   );
