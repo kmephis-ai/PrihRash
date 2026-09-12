@@ -99,6 +99,17 @@ process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requ
   assertSafeOutput(result, { status: 'PASS', code: 'READINESS_READY' });
 });
 
+test('exact structured readiness failure results are allowlist-classified without provider exception text', async () => {
+  for (const [marker, code] of SAFE_PROBE_FAILURES) {
+    const result = await runInvoker({
+      fakeSource: `process.stdout.write(JSON.stringify({readinessFailure:${JSON.stringify(marker)}}));`,
+    });
+
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, { status: 'FAIL', code });
+  }
+});
+
 test('non-zero yc failure without an allowlisted marker is classified without echoing raw stdout or stderr', async () => {
   const result = await runInvoker({
     fakeSource: `
@@ -112,7 +123,7 @@ process.exit(17);
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
-test('one allowlisted sanitized readiness marker is classified without echoing provider output', async () => {
+test('one allowlisted sanitized readiness marker in a non-zero provider failure remains safely classified', async () => {
   for (const [marker, code] of SAFE_PROBE_FAILURES) {
     const result = await runInvoker({
       fakeSource: `
@@ -144,6 +155,8 @@ test('malformed or unexpected successful provider output is classified without e
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY' }),
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY', requiredMigrationVersion: 3, extra: PRIVATE_LOOKING }),
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'NOT_READY', requiredMigrationVersion: 3 }),
+    JSON.stringify({ readinessFailure: 'NOT_ALLOWLISTED' }),
+    JSON.stringify({ readinessFailure: 'YDB_MIGRATION_EVIDENCE_READ_FAILED', extra: PRIVATE_LOOKING }),
   ];
 
   for (const output of outputs) {
