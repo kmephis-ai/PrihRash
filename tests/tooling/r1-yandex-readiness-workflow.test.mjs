@@ -58,6 +58,17 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /npm run readiness:invoke/);
 });
 
+test('R1 readiness workflow proves the exact WIF service account can invoke while staying private', async () => {
+  const workflow = await text(WORKFLOW);
+
+  assert.equal((workflow.match(/READINESS_PROVIDER_INVOKER_BINDING_MISSING/g) ?? []).length, 2);
+  assert.equal((workflow.match(/--arg expected "\$YC_WIF_SERVICE_ACCOUNT_ID"/g) ?? []).length, 2);
+  assert.equal((workflow.match(/\.type == "serviceAccount" and \.id == \$expected/g) ?? []).length, 2);
+  assert.match(workflow, /allUsers/);
+  assert.match(workflow, /allAuthenticatedUsers/);
+  assert.doesNotMatch(workflow, /add-access-binding|set-access-bindings|allow-unauthenticated-invoke/);
+});
+
 test('R1 readiness workflow never transports Lockbox payload through GitHub', async () => {
   const workflow = await text(WORKFLOW);
 
@@ -77,4 +88,5 @@ test('canonical runbook binds WIF identity to immutable exact repository main su
   assert.match(runbook, /YC_R1_FOLDER_ID/);
   assert.match(runbook, /YC_R1_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(runbook, /Long-lived Yandex authorized key\/OAuth token в GitHub не используется/);
+  assert.match(runbook, /READINESS_PROVIDER_INVOKER_BINDING_MISSING/);
 });
