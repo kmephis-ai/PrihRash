@@ -545,6 +545,82 @@ test('unknown account fails closed after durable claim/evidence and never promot
   assert.deepEqual(ids.calls, ['source', 'snapshot', 'run']);
 });
 
+test('AMBIGUOUS source evidence preserves durable identity without inventing a transaction', async () => {
+  const db = fakeDatabase();
+  const ids = allocator();
+  const lifecycleClock = clock(STARTED_AT, PROMOTED_AT, FINISHED_AT);
+  const ambiguousPayload = Object.freeze({ ...expense(), expense_amount: N('0') });
+  const ambiguousObservation = observation([
+    { rowHint: 2, digest: 'synthetic-ambiguous-row', rawPayload: ambiguousPayload, aggregatePeriodMonth: null },
+  ]);
+
+  const result = await runInitialBootstrapApplication(
+    ambiguousObservation,
+    dependencies(db, ids, lifecycleClock),
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).rows_ambiguous, 1n);
+  assert.equal(db.state.sourceRecords.get(SOURCE_1).classification, 'AMBIGUOUS');
+  assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, null);
+  assert.equal(db.state.transactions.size, 0);
+  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run']);
+});
+
+test('invalid projection evidence blocks validation and leaves verified current untouched', async () => {
+  const db = fakeDatabase();
+  const ids = allocator();
+  const lifecycleClock = clock(STARTED_AT);
+  const invalidPayload = Object.freeze({ ...expense(), date: S('not-a-google-serial') });
+  const invalidObservation = observation([
+    { rowHint: 2, digest: 'synthetic-invalid-row', rawPayload: invalidPayload, aggregatePeriodMonth: null },
+  ]);
+
+  const result = await runInitialBootstrapApplication(
+    invalidObservation,
+    dependencies(db, ids, lifecycleClock),
+  );
+
+  assert.equal(result.status, 'VALIDATION_BLOCKED');
+  assert.equal(result.blockers.some((blocker) => blocker.code === 'INVALID_ROWS_PRESENT'), true);
+  assert.equal(result.blockers.some((blocker) => blocker.code === 'PROJECTION_FAILURES_PRESENT'), true);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run']);
+});
+
+test('MISSING reconciliation mismatch blocks promotion without guessed identity reassignment', async () => {
+  const db = fakeDatabase();
+  const ids = allocator();
+  const lifecycleClock = clock(STARTED_AT);
+  const missingMismatch = Object.freeze({
+    async reconcile() {
+      const evidence = matchedReconciliation();
+      return Object.freeze({
+        ...evidence,
+        checks: Object.freeze({
+          ...evidence.checks,
+          INVALID_AMBIGUOUS_MISSING_COUNTS: 'MISMATCH',
+        }),
+      });
+    },
+  });
+
+  const result = await runInitialBootstrapApplication(
+    observation(),
+    dependencies(db, ids, lifecycleClock, { reconciliation: missingMismatch }),
+  );
+
+  assert.equal(result.status, 'VALIDATION_BLOCKED');
+  assert.equal(result.blockers.some(
+    (blocker) => blocker.code === 'RECONCILIATION_CHECK_NOT_MATCHED'
+      && blocker.check === 'INVALID_AMBIGUOUS_MISSING_COUNTS',
+  ), true);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run']);
+});
+
 test('duplicate allocated SourceRecord identity fails before durable claim instead of deduping rows', async () => {
   const db = fakeDatabase();
   const ids = allocator({ sourceIds: [SOURCE_1, SOURCE_1], transactionIds: [TX_1, TX_2] });
