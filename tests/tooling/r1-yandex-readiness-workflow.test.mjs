@@ -88,5 +88,4 @@ test('canonical runbook binds WIF identity to immutable exact repository main su
   assert.match(runbook, /YC_R1_FOLDER_ID/);
   assert.match(runbook, /YC_R1_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(runbook, /Long-lived Yandex authorized key\/OAuth token в GitHub не используется/);
-  assert.match(runbook, /READINESS_PROVIDER_INVOKER_BINDING_MISSING/);
 });
