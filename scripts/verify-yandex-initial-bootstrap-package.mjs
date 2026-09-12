@@ -25,6 +25,8 @@ const requiredFiles = [
   'index.js',
   'package.json',
   'dist/runtime/initialBootstrapJob.js',
+  'dist/runtime/initialBootstrapReferenceAwareJob.js',
+  'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
@@ -51,6 +53,12 @@ const allowedRuntimeFiles = [
   'dist/runtime/initialBootstrapJob.d.ts',
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapJob.js.map',
+  'dist/runtime/initialBootstrapReferenceAwareJob.d.ts',
+  'dist/runtime/initialBootstrapReferenceAwareJob.js',
+  'dist/runtime/initialBootstrapReferenceAwareJob.js.map',
+  'dist/runtime/initialBootstrapReferenceClaimAdapter.d.ts',
+  'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
+  'dist/runtime/initialBootstrapReferenceClaimAdapter.js.map',
   'dist/runtime/yandexCloudInitialBootstrapFunction.d.ts',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js.map',

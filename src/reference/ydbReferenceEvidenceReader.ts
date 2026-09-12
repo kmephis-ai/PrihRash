@@ -1,4 +1,4 @@
-import { readStatement, YdbAdapter, type YdbReadScope } from '../integration/ydb/adapter.js';
+import { readStatement, type YdbAdapter, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { utf8Parameter } from '../integration/ydb/parameters.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import { normalizeSourceLabel, type CategoryKind } from './bootstrap.js';
@@ -127,9 +127,9 @@ function vikaMemberId(rows: readonly Readonly<FamilyMemberReferenceRow>[]): stri
 }
 
 export async function readYdbReferenceMappingEvidence(
-  adapter: YdbAdapter,
+  scope: YdbReadScope,
 ): Promise<Readonly<YdbReferenceMappingEvidence>> {
-  return readMappings(adapter);
+  return readMappings(scope);
 }
 
 export async function readYdbReferenceResolverSnapshot(
