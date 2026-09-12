@@ -60,7 +60,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           npm run check
 
-      - name: Require exact current main and failed bootstrap attempt on this SHA
+      - name: Require exact current main and exact failed bootstrap attempt
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
