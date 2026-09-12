@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+import {
+  InitialReferenceBootstrapPersistenceError,
+  prepareAccountReferenceInsert,
+} from '../../dist/reference/initialBootstrapReferencePersistence.js';
 import { planInitialReferenceBootstrap } from '../../dist/reference/initialBootstrapReferencePlan.js';
 
 const ACCOUNT = '00000000-0000-0000-0000-000000007001';
@@ -59,11 +63,23 @@ test('empty YDB references produce deterministic missing-reference writes and in
   assert.equal(plan.writes.length, 3);
   assert.deepEqual(plan.writes.map((statement) => statement.kind), ['WRITE', 'WRITE', 'WRITE']);
   assert.match(plan.writes[0].text, /^INSERT INTO accounts/u);
+  assert.deepEqual(plan.writes[0].parameters.kind, { type: 'Utf8', value: 'DEBIT_CARD' });
+  assert.deepEqual(plan.writes[0].parameters.balance_nature, { type: 'Utf8', value: 'ASSET' });
+  assert.deepEqual(plan.writes[0].parameters.status, { type: 'Utf8', value: 'ACTIVE' });
   assert.match(plan.writes[1].text, /^INSERT INTO categories/u);
+  assert.deepEqual(plan.writes[1].parameters.status, { type: 'Utf8', value: 'ACTIVE' });
   assert.match(plan.writes[2].text, /^INSERT INTO family_members/u);
   assert.equal(plan.resolver.resolveAccountId('Карта Visa'), ACCOUNT);
   assert.equal(plan.resolver.resolveCategoryId('EXPENSE', 'Synthetic Expense'), CATEGORY);
   assert.equal(plan.resolver.vikaMemberId, MEMBER);
+});
+
+test('unknown account bootstrap semantics fail closed before persistence', () => {
+  assert.throws(
+    () => prepareAccountReferenceInsert(ACCOUNT, 'Synthetic Unknown Account'),
+    (error) => error instanceof InitialReferenceBootstrapPersistenceError
+      && error.code === 'ACCOUNT_REFERENCE_SEMANTICS_UNKNOWN',
+  );
 });
 
 test('existing exact references are reused without rewrite or new identity allocation', async () => {
