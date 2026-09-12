@@ -71,20 +71,41 @@ function safeChildEnvironment(environment) {
   );
 }
 
-function exactReadinessEvidence(stdout) {
+function parseProviderOutput(stdout) {
   let value;
   try {
     value = JSON.parse(stdout.trim());
   } catch {
-    return false;
+    return SAFE_INVOKE_OUTPUT_INVALID;
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return SAFE_INVOKE_OUTPUT_INVALID;
+  }
+
   const keys = Object.keys(value).sort();
-  const expectedKeys = Object.keys(SAFE_READY).sort();
-  if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) return false;
-  return value.googleSource === SAFE_READY.googleSource
+  const expectedReadyKeys = Object.keys(SAFE_READY).sort();
+  if (
+    JSON.stringify(keys) === JSON.stringify(expectedReadyKeys)
+    && value.googleSource === SAFE_READY.googleSource
     && value.ydbSchema === SAFE_READY.ydbSchema
-    && value.requiredMigrationVersion === SAFE_READY.requiredMigrationVersion;
+    && value.requiredMigrationVersion === SAFE_READY.requiredMigrationVersion
+  ) {
+    return SAFE_PASS;
+  }
+
+  if (
+    keys.length === 1
+    && keys[0] === 'readinessFailure'
+    && typeof value.readinessFailure === 'string'
+    && Object.hasOwn(SAFE_PROBE_FAILURE_CODE_BY_MARKER, value.readinessFailure)
+  ) {
+    return Object.freeze({
+      status: 'FAIL',
+      code: SAFE_PROBE_FAILURE_CODE_BY_MARKER[value.readinessFailure],
+    });
+  }
+
+  return SAFE_INVOKE_OUTPUT_INVALID;
 }
 
 function capturedErrorField(error, field) {
@@ -139,7 +160,7 @@ async function invokeReadiness(environment = process.env) {
         windowsHide: true,
       },
     );
-    return exactReadinessEvidence(stdout) ? SAFE_PASS : SAFE_INVOKE_OUTPUT_INVALID;
+    return parseProviderOutput(stdout);
   } catch (error) {
     return safeInvokeFailure(error);
   }
