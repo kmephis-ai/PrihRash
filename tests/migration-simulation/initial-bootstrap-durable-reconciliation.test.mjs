@@ -121,9 +121,6 @@ function matchingTransport({ includeRevision = true } = {}) {
           if (text.includes('FROM `source_records` GROUP BY classification, state')) {
             return { rows: [{ classification: 'FINANCIAL_RECORD', state: null, row_count: 1n }] };
           }
-          if (text.includes('FROM `transactions` GROUP BY type')) {
-            return { rows: [{ type: 'EXPENSE', row_count: 1n, total_amount_minor: 1234n }] };
-          }
           if (text.includes('category_id AS dimension_id')) {
             return { rows: [{ type: 'EXPENSE', dimension_id: CATEGORY, row_count: 1n, total_amount_minor: 1234n }] };
           }
@@ -132,6 +129,9 @@ function matchingTransport({ includeRevision = true } = {}) {
           }
           if (text.includes("to_account_id AS dimension_id") && text.includes("WHERE type = 'INCOME'")) {
             return { rows: [] };
+          }
+          if (text.includes('FROM `transactions` GROUP BY type')) {
+            return { rows: [{ type: 'EXPENSE', row_count: 1n, total_amount_minor: 1234n }] };
           }
           throw new Error(`unexpected transaction read: ${text}`);
         },
