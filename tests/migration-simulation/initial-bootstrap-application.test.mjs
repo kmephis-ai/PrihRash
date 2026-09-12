@@ -36,7 +36,7 @@ function expense(description = 'Synthetic bootstrap expense') {
     adapter_schema_version: 3,
     date: N('45292.5'),
     operation_type: S('Расход'),
-    expense_account: S('Synthetic Visa'),
+    expense_account: S('Карта Visa'),
     expense_category: S('Synthetic Expense'),
     description: S(description),
     expense_amount: N('12.34'),
@@ -60,7 +60,7 @@ const projectionContext = Object.freeze({
   refs: Object.freeze({
     vikaMemberId: VIKA_ID,
     resolveAccountId(label) {
-      return label === 'Synthetic Visa' ? ACCOUNT_ID : null;
+      return label === 'Карта Visa' ? ACCOUNT_ID : null;
     },
     resolveCategoryId(kind, label) {
       return kind === 'EXPENSE' && label === 'Synthetic Expense' ? CATEGORY_ID : null;
@@ -473,6 +473,7 @@ test('exact STAGING claim resumes durable identities without allocator reuse and
 });
 
 
+
 test('existing COMMITTED baseline blocks a second initial bootstrap before any new identity allocation', async () => {
   const committed = {
     id: RUN_ID,
@@ -547,7 +548,7 @@ test('unknown account fails closed after durable claim/evidence and never promot
 test('duplicate allocated SourceRecord identity fails before durable claim instead of deduping rows', async () => {
   const db = fakeDatabase();
   const ids = allocator({ sourceIds: [SOURCE_1, SOURCE_1], transactionIds: [TX_1, TX_2] });
-  const lifecycleClock = clock();
+  const lifecycleClock = clock(STARTED_AT);
   const duplicateRows = observation([
     { rowHint: 2, digest: 'synthetic-row-1', rawPayload: expense(), aggregatePeriodMonth: null },
     { rowHint: 3, digest: 'synthetic-row-2', rawPayload: expense(), aggregatePeriodMonth: null },
