@@ -12,9 +12,13 @@ const refs = {
     return label === 'Карта Visa' ? '00000000-0000-0000-0000-000000000902' : null;
   },
   resolveCategoryId(kind, label) {
-    return kind === 'EXPENSE' && label === 'Synthetic Expense'
-      ? '00000000-0000-0000-0000-000000000904'
-      : null;
+    if (kind === 'EXPENSE' && label === 'Synthetic Expense') {
+      return '00000000-0000-0000-0000-000000000904';
+    }
+    if (kind === 'INCOME' && label === 'Synthetic Income') {
+      return '00000000-0000-0000-0000-000000000905';
+    }
+    return null;
   },
 };
 
@@ -30,6 +34,23 @@ function expense() {
     income_account: null,
     income_category: null,
     income_amount: null,
+    vika_flag: null,
+    note: null,
+  };
+}
+
+function income() {
+  return {
+    adapter_schema_version: 2,
+    date: N('45292.5'),
+    operation_type: S('Доход'),
+    expense_account: null,
+    expense_category: null,
+    description: S('Synthetic income'),
+    expense_amount: null,
+    income_account: S('Карта Visa'),
+    income_category: S('Synthetic Income'),
+    income_amount: N('123.45'),
     vika_flag: null,
     note: null,
   };
@@ -120,4 +141,25 @@ test('initial wrapper remains semantically identical for bootstrap coarse and it
     aggregatePeriodMonth: '2024-01-01',
   }, { refs });
   assert.deepEqual(initialAggregate, explicitAggregate);
+});
+
+test('initial wrapper scopes private aggregate-month evidence to coarse expense rows', () => {
+  const context = {
+    refs,
+    granularityEvidence: {
+      coarseExpenseOrdinalRange: { startInclusive: 5, endExclusive: 10 },
+    },
+  };
+
+  const result = projectInitialFinancialTransaction({
+    rawPayload: income(),
+    initialSourceOrdinal: 7,
+    aggregatePeriodMonth: '2024-01-01',
+  }, context);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.transaction.type, 'INCOME');
+  assert.equal(result.transaction.recordGranularity, 'UNKNOWN');
+  assert.equal(result.transaction.datePrecision, 'UNKNOWN');
+  assert.equal(result.transaction.aggregatePeriodMonth, null);
 });
