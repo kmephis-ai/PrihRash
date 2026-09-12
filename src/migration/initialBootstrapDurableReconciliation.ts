@@ -71,6 +71,7 @@ export function createInitialBootstrapDurableReconciliation(
 
   const port: InitialBootstrapReconciliationPort = Object.freeze({
     async reconcile(input: Readonly<InitialBootstrapReconciliationInput>) {
+      historicalEvidence.assertCompatibleRowCount(input.lineage.revisions.length);
       const persistence = await planInitialSourceRevisionEvidenceResume(adapter, input.lineage.revisions);
       if (
         persistence.missingRevisions.length !== 0

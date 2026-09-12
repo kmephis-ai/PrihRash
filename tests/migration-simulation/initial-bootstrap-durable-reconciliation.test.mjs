@@ -6,7 +6,10 @@ import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
 } from '../../dist/migration/initialBootstrapDurableReconciliation.js';
-import { parseInitialBootstrapPrivateHistoricalEvidence } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
+import {
+  InitialBootstrapPrivateEvidenceError,
+  parseInitialBootstrapPrivateHistoricalEvidence,
+} from '../../dist/migration/initialBootstrapPrivateEvidence.js';
 import { projectInitialSnapshot } from '../../dist/migration/initialSnapshotProjection.js';
 
 const SOURCE = '00000000-0000-0000-0000-000000000101';
@@ -35,9 +38,9 @@ const serializedRawPayload = JSON.stringify(rawPayload);
 
 const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
   schema_version: 1,
-  coarse_expense_ordinal_range: { start_inclusive: 10, end_exclusive: 11 },
+  coarse_expense_ordinal_range: { start_inclusive: 0, end_exclusive: 1 },
   aggregate_period_month_ranges: [
-    { start_inclusive: 10, end_exclusive: 11, aggregate_period_month: '2024-01-01' },
+    { start_inclusive: 0, end_exclusive: 1, aggregate_period_month: '2024-01-01' },
   ],
 }));
 
@@ -58,7 +61,7 @@ function input() {
       sourceRecordId: SOURCE,
       sourceOrdinal: 0,
       rawPayload,
-      aggregatePeriodMonth: null,
+      aggregatePeriodMonth: historicalEvidence.aggregatePeriodMonthForSourceOrdinal(0),
     }),
   ], projectionContext);
   return Object.freeze({
@@ -166,5 +169,27 @@ test('durable initial reconciliation refuses to infer MATCHED when persisted rev
     () => reconciliation.port.reconcile(input()),
     (error) => error instanceof InitialBootstrapDurableReconciliationError
       && error.code === 'DURABLE_REVISION_EVIDENCE_INCOMPLETE',
+  );
+});
+
+test('durable initial reconciliation rejects private historical evidence outside the leased source row count', async () => {
+  const incompatibleEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
+    schema_version: 1,
+    coarse_expense_ordinal_range: { start_inclusive: 10, end_exclusive: 11 },
+    aggregate_period_month_ranges: [
+      { start_inclusive: 10, end_exclusive: 11, aggregate_period_month: '2024-01-01' },
+    ],
+  }));
+  const adapter = new YdbAdapter(matchingTransport());
+  const reconciliation = createInitialBootstrapDurableReconciliation(
+    adapter,
+    Object.freeze({ ...projectionContext, granularityEvidence: incompatibleEvidence.granularityEvidence }),
+    incompatibleEvidence,
+  );
+
+  await assert.rejects(
+    () => reconciliation.port.reconcile(input()),
+    (error) => error instanceof InitialBootstrapPrivateEvidenceError
+      && error.code === 'COARSE_RANGE_OUTSIDE_SOURCE',
   );
 });
