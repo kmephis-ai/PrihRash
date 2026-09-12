@@ -618,7 +618,7 @@ test('MISSING reconciliation mismatch blocks promotion without guessed identity 
   ), true);
   assert.equal(db.state.sourceRecords.size, 0);
   assert.equal(db.state.transactions.size, 0);
-  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run']);
+  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run', 'transaction']);
 });
 
 test('duplicate allocated SourceRecord identity fails before durable claim instead of deduping rows', async () => {
