@@ -18,4 +18,19 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run check
+      - name: Diagnostic privacy
+        run: npm run privacy
+      - name: Diagnostic lint
+        run: npm run lint
+      - name: Diagnostic typecheck
+        run: npm run typecheck
+      - name: Diagnostic test
+        run: npm test
+      - name: Diagnostic build
+        run: npm run build
+      - name: Diagnostic package function
+        run: npm run package:function
+      - name: Diagnostic package schema bootstrap
+        run: npm run package:schema-bootstrap
+      - name: Diagnostic package schema upgrade 003
+        run: npm run package:schema-upgrade-003
