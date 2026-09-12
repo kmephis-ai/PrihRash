@@ -18,27 +18,4 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Diagnostic privacy
-        run: npm run privacy
-      - name: Diagnostic lint
-        run: npm run lint
-      - name: Diagnostic typecheck
-        run: npm run typecheck
-      - name: Diagnostic build for tests
-        run: npm run build --silent
-      - name: Diagnostic private evidence test
-        run: node --test tests/migration-simulation/initial-bootstrap-private-evidence.test.mjs
-      - name: Diagnostic runtime primitives test
-        run: node --test tests/migration-simulation/initial-bootstrap-runtime-primitives.test.mjs
-      - name: Diagnostic durable reconciliation test
-        run: node --test tests/migration-simulation/initial-bootstrap-durable-reconciliation.test.mjs
-      - name: Diagnostic full test suite
-        run: npm test
-      - name: Diagnostic build
-        run: npm run build
-      - name: Diagnostic package function
-        run: npm run package:function
-      - name: Diagnostic package schema bootstrap
-        run: npm run package:schema-bootstrap
-      - name: Diagnostic package schema upgrade 003
-        run: npm run package:schema-upgrade-003
+      - run: npm run check
