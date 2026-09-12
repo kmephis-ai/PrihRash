@@ -1,0 +1,32 @@
+name: Browser Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install pinned Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run Chromium critical flows
+        run: npm run test:browser
+      - name: Upload browser failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-quality-failure-${{ github.run_id }}
+          path: .artifacts/playwright
+          if-no-files-found: ignore
+          retention-days: 3
