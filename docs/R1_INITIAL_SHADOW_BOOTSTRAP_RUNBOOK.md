@@ -80,11 +80,13 @@ Function должна быть:
 
 Минимальная цель IAM:
 
-- metadata lookup dedicated resources, необходимый workflow;
+- временный `functions.auditor` только на target PrihRash folder — исключительно для read-only `yc serverless trigger list`, который независимо доказывает `triggers=0` до и после deploy; роль не даёт управления triggers и снимается после successful bootstrap;
 - `functions.editor` только на `prihrash-r1-initial-bootstrap` Function;
 - `functions.functionInvoker` только на эту Function;
 - `iam.serviceAccounts.user` только в объёме, необходимом для attachment `prihrash-initial-bootstrap` к Function version;
 - `lockbox.viewer` только на dedicated bootstrap secret для lookup metadata/current version.
+
+Folder-scoped `functions.auditor` — единственное намеренное расширение metadata visibility за пределы dedicated Function: Yandex Cloud trigger-list API перечисляет triggers на уровне folder, а workflow fail-closed фильтрует этот список по exact Function ID. Не заменять эту роль на `functions.viewer`, `functions.editor`, primitive `viewer`/`auditor` или более широкую folder/cloud authority.
 
 WIF credential/binding должен принимать только canonical GitHub identity:
 
@@ -249,11 +251,12 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 1. снять `ydb.editor` с `prihrash-initial-bootstrap` на target database;
 2. снять dedicated `lockbox.payloadViewer`;
-3. снять exact KMS role, если он был нужен этому secret;
-4. деактивировать dedicated Lockbox secret;
-5. отвязать/delete dedicated WIF federated credential для `prihrash-github-initial-bootstrap`;
-6. удалить GitHub locator `YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID` после retirement соответствующей identity;
-7. dedicated Function удалить либо оставить только как private trigger-free recovery scaffold без YDB write/secret payload authority.
+3. снять temporary folder-scoped `functions.auditor` с `prihrash-github-initial-bootstrap`;
+4. снять exact KMS role, если он был нужен этому secret;
+5. деактивировать dedicated Lockbox secret;
+6. отвязать/delete dedicated WIF federated credential для `prihrash-github-initial-bootstrap`;
+7. удалить GitHub locator `YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID` после retirement соответствующей identity;
+8. dedicated Function удалить либо оставить только как private trigger-free recovery scaffold без YDB write/secret payload authority.
 
 Deployment service account можно оставить без usable WIF binding либо удалить позже отдельным cleanup. `YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID` сам по себе не credential; после деактивации secret его removal из GitHub — optional cleanup, не retirement gate.
 
