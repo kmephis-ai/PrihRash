@@ -6,6 +6,7 @@ import type { ScheduledSyncInvocationResult } from '../migration/scheduledSyncIn
 import {
   ScheduledSyncReadinessError,
   runScheduledSyncReadinessProbeFromEnvironment,
+  type ScheduledSyncReadinessErrorCode,
   type ScheduledSyncReadinessResult,
 } from './scheduledSyncReadinessProbe.js';
 
@@ -33,15 +34,13 @@ export interface YandexScheduledSyncReadinessJob {
 
 export type YandexScheduledSyncReadinessFunctionErrorCode = 'READINESS_FAILED';
 
-export class YandexScheduledSyncReadinessFunctionError extends Error {
-  readonly code: YandexScheduledSyncReadinessFunctionErrorCode;
-
-  constructor(code: YandexScheduledSyncReadinessFunctionErrorCode) {
-    super(code);
-    this.name = 'YandexScheduledSyncReadinessFunctionError';
-    this.code = code;
-  }
+export interface YandexScheduledSyncReadinessFailureResult {
+  readonly readinessFailure: ScheduledSyncReadinessErrorCode | YandexScheduledSyncReadinessFunctionErrorCode;
 }
+
+export type YandexScheduledSyncReadinessFunctionResult =
+  | ScheduledSyncReadinessResult
+  | YandexScheduledSyncReadinessFailureResult;
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 
@@ -86,19 +85,21 @@ export async function handler(
 export async function executeYandexScheduledSyncReadinessFunction(
   environment: ScheduledSyncJobEnvironment,
   runReadiness: YandexScheduledSyncReadinessJob,
-): Promise<Readonly<ScheduledSyncReadinessResult>> {
+): Promise<Readonly<YandexScheduledSyncReadinessFunctionResult>> {
   try {
     return await runReadiness(environment);
   } catch (error) {
-    if (error instanceof ScheduledSyncReadinessError) throw error;
-    throw new YandexScheduledSyncReadinessFunctionError('READINESS_FAILED');
+    if (error instanceof ScheduledSyncReadinessError) {
+      return Object.freeze({ readinessFailure: error.code });
+    }
+    return Object.freeze({ readinessFailure: 'READINESS_FAILED' as const });
   }
 }
 
 export async function readinessHandler(
   _event: unknown,
   _context: unknown,
-): Promise<Readonly<ScheduledSyncReadinessResult>> {
+): Promise<Readonly<YandexScheduledSyncReadinessFunctionResult>> {
   return executeYandexScheduledSyncReadinessFunction(
     process.env,
     runScheduledSyncReadinessProbeFromEnvironment,
