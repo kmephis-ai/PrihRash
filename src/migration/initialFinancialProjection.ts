@@ -49,6 +49,8 @@ export function projectInitialFinancialTransaction(
     rawPayload: input.rawPayload,
     recordGranularity: granularity.recordGranularity,
     datePrecision: granularity.datePrecision,
-    aggregatePeriodMonth: input.aggregatePeriodMonth,
+    aggregatePeriodMonth: granularity.recordGranularity === 'PERIOD_AGGREGATE'
+      ? input.aggregatePeriodMonth
+      : null,
   }, { refs: context.refs });
 }
