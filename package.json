@@ -30,7 +30,6 @@
     "initial-bootstrap:invoke": "node scripts/invoke-yandex-initial-bootstrap.mjs",
     "package:initial-bootstrap-recovery": "npm run build --silent && node scripts/package-yandex-initial-bootstrap-recovery-function.mjs && node scripts/verify-yandex-initial-bootstrap-recovery-package.mjs",
     "initial-bootstrap-recovery:invoke": "node scripts/invoke-yandex-initial-bootstrap-recovery.mjs",
-    "initial-bootstrap-recovery:diagnose": "node scripts/invoke-yandex-initial-bootstrap-recovery-diagnostic.mjs",
     "test:browser": "npm run preview:build --silent && playwright test --config=playwright.config.mjs"
   },
   "devDependencies": {
