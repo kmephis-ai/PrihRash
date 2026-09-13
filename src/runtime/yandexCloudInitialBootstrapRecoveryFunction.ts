@@ -5,7 +5,6 @@ import type {
 } from '../migration/initialBootstrapRecoveryProbe.js';
 import {
   InitialBootstrapRecoveryJobError,
-  runInitialBootstrapRecoveryDiagnosticJobFromEnvironment,
   runInitialBootstrapRecoveryJobFromEnvironment,
   type InitialBootstrapRecoveryJobEnvironment,
 } from './initialBootstrapRecoveryJob.js';
@@ -15,31 +14,14 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       status: 'PASS';
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED';
       verdict: InitialBootstrapRecoveryVerdict;
+      reason: InitialBootstrapRecoveryReason;
     }>
   | Readonly<{
       status: 'FAIL';
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CONFIG_INVALID' | 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED';
     }>;
 
-export type YandexInitialBootstrapRecoveryDiagnosticFunctionResult =
-  | Readonly<{
-      status: 'PASS';
-      code: 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_CLASSIFIED';
-      verdict: InitialBootstrapRecoveryVerdict;
-      reason: InitialBootstrapRecoveryReason;
-    }>
-  | Readonly<{
-      status: 'FAIL';
-      code:
-        | 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_CONFIG_INVALID'
-        | 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_RUNTIME_FAILED';
-    }>;
-
 export interface YandexInitialBootstrapRecoveryJob {
-  (environment: InitialBootstrapRecoveryJobEnvironment): Promise<InitialBootstrapRecoveryVerdict>;
-}
-
-export interface YandexInitialBootstrapRecoveryDiagnosticJob {
   (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoveryClassification>>;
 }
 
@@ -58,9 +40,7 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoveryReason>([
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
 
-function validDiagnosticClassification(
-  value: Readonly<InitialBootstrapRecoveryClassification>,
-): boolean {
+function validClassification(value: Readonly<InitialBootstrapRecoveryClassification>): boolean {
   if (value.verdict === 'APPLIED') return value.reason === 'COMMITTED_DURABLE_STATE';
   if (value.verdict === 'NOT_APPLIED') return value.reason === 'EMPTY_DURABLE_STATE';
   return value.verdict === 'RECOVERY_REQUIRED' && RECOVERY_REQUIRED_REASONS.has(value.reason);
@@ -71,8 +51,8 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
   runJob: YandexInitialBootstrapRecoveryJob,
 ): Promise<Readonly<YandexInitialBootstrapRecoveryFunctionResult>> {
   try {
-    const verdict = await runJob(environment);
-    if (verdict !== 'APPLIED' && verdict !== 'NOT_APPLIED' && verdict !== 'RECOVERY_REQUIRED') {
+    const classification = await runJob(environment);
+    if (!validClassification(classification)) {
       return Object.freeze({
         status: 'FAIL' as const,
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' as const,
@@ -81,7 +61,8 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
     return Object.freeze({
       status: 'PASS' as const,
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED' as const,
-      verdict,
+      verdict: classification.verdict,
+      reason: classification.reason,
     });
   } catch (error) {
     if (
@@ -100,41 +81,6 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
   }
 }
 
-export async function executeYandexInitialBootstrapRecoveryDiagnosticFunction(
-  environment: InitialBootstrapRecoveryJobEnvironment,
-  runJob: YandexInitialBootstrapRecoveryDiagnosticJob,
-): Promise<Readonly<YandexInitialBootstrapRecoveryDiagnosticFunctionResult>> {
-  try {
-    const classification = await runJob(environment);
-    if (!validDiagnosticClassification(classification)) {
-      return Object.freeze({
-        status: 'FAIL' as const,
-        code: 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_RUNTIME_FAILED' as const,
-      });
-    }
-    return Object.freeze({
-      status: 'PASS' as const,
-      code: 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_CLASSIFIED' as const,
-      verdict: classification.verdict,
-      reason: classification.reason,
-    });
-  } catch (error) {
-    if (
-      error instanceof InitialBootstrapRecoveryJobError
-      && error.code === 'INVALID_YDB_CONNECTION_STRING'
-    ) {
-      return Object.freeze({
-        status: 'FAIL' as const,
-        code: 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_CONFIG_INVALID' as const,
-      });
-    }
-    return Object.freeze({
-      status: 'FAIL' as const,
-      code: 'INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_RUNTIME_FAILED' as const,
-    });
-  }
-}
-
 export async function initialBootstrapRecoveryHandler(
   _event: unknown,
   _context: unknown,
@@ -142,15 +88,5 @@ export async function initialBootstrapRecoveryHandler(
   return executeYandexInitialBootstrapRecoveryFunction(
     process.env,
     runInitialBootstrapRecoveryJobFromEnvironment,
-  );
-}
-
-export async function initialBootstrapRecoveryDiagnosticHandler(
-  _event: unknown,
-  _context: unknown,
-): Promise<Readonly<YandexInitialBootstrapRecoveryDiagnosticFunctionResult>> {
-  return executeYandexInitialBootstrapRecoveryDiagnosticFunction(
-    process.env,
-    runInitialBootstrapRecoveryDiagnosticJobFromEnvironment,
   );
 }
