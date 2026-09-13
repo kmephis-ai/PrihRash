@@ -25,6 +25,8 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
 
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
+  assert.match(workflow, /--memory 256m/);
+  assert.match(workflow, /--execution-timeout 150s/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
@@ -36,6 +38,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
 
 test('initial bootstrap recovery invoker exposes enum-only classification evidence', () => {
   assert.match(invoker, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
+  assert.match(invoker, /INVOKE_TIMEOUT_MS = 180_000/);
   assert.match(invoker, /exactKeys\(result, \['status', 'code', 'verdict', 'reason'\]\)/);
   assert.match(invoker, /COMMITTED_DURABLE_STATE/);
   assert.match(invoker, /RESIDUAL_REFERENCE_STATE_WITHOUT_RUN/);

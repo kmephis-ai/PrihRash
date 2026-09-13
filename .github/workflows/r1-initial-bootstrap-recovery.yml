@@ -309,8 +309,8 @@ jobs:
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
             --entrypoint index.initialBootstrapRecoveryHandler \
-            --memory 128m \
-            --execution-timeout 60s \
+            --memory 256m \
+            --execution-timeout 150s \
             --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-bootstrap-recovery \
