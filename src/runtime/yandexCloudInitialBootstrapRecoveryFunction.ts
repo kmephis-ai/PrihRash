@@ -1,6 +1,8 @@
 import type {
-  InitialBootstrapRecoveryClassification,
-  InitialBootstrapRecoveryReason,
+  InitialBootstrapRecoverySurfaceClassification,
+  InitialBootstrapRecoverySurfaceReason,
+} from '../migration/initialBootstrapResidualSurface.js';
+import type {
   InitialBootstrapRecoveryVerdict,
 } from '../migration/initialBootstrapRecoveryProbe.js';
 import {
@@ -14,7 +16,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       status: 'PASS';
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED';
       verdict: InitialBootstrapRecoveryVerdict;
-      reason: InitialBootstrapRecoveryReason;
+      reason: InitialBootstrapRecoverySurfaceReason;
     }>
   | Readonly<{
       status: 'FAIL';
@@ -22,13 +24,17 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
     }>;
 
 export interface YandexInitialBootstrapRecoveryJob {
-  (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoveryClassification>>;
+  (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
 }
 
-const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoveryReason>([
+const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>([
   'READ_FAILED',
   'RUN_STATE_COUNT_INCONSISTENT',
   'RESIDUAL_STATE_WITHOUT_RUN',
+  'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN',
+  'RESIDUAL_METADATA_STATE_WITHOUT_RUN',
+  'RESIDUAL_CURRENT_OR_LINEAGE_STATE_WITHOUT_RUN',
+  'RESIDUAL_MIXED_STATE_WITHOUT_RUN',
   'MULTIPLE_MIGRATION_RUNS',
   'STAGING_RUN_PRESENT',
   'VALIDATED_RUN_PRESENT',
@@ -40,7 +46,7 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoveryReason>([
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
 
-function validClassification(value: Readonly<InitialBootstrapRecoveryClassification>): boolean {
+function validClassification(value: Readonly<InitialBootstrapRecoverySurfaceClassification>): boolean {
   if (value.verdict === 'APPLIED') return value.reason === 'COMMITTED_DURABLE_STATE';
   if (value.verdict === 'NOT_APPLIED') return value.reason === 'EMPTY_DURABLE_STATE';
   return value.verdict === 'RECOVERY_REQUIRED' && RECOVERY_REQUIRED_REASONS.has(value.reason);

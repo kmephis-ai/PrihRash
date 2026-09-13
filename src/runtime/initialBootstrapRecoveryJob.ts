@@ -4,9 +4,9 @@ import {
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
-  diagnoseInitialBootstrapRecovery,
-  type InitialBootstrapRecoveryClassification,
-} from '../migration/initialBootstrapRecoveryProbe.js';
+  diagnoseInitialBootstrapRecoverySurface,
+  type InitialBootstrapRecoverySurfaceClassification,
+} from '../migration/initialBootstrapResidualSurface.js';
 
 export const INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV = Object.freeze({
   ydbConnectionString: 'PRIHRASH_YDB_CONNECTION_STRING',
@@ -70,7 +70,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
-): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
+): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
   const validated = Object.freeze({
     ydbConnectionString: requiredConnectionString(config.ydbConnectionString),
   });
@@ -79,7 +79,7 @@ export async function executeInitialBootstrapRecoveryJob(
   let primaryError: unknown = null;
 
   try {
-    return await diagnoseInitialBootstrapRecovery(adapter);
+    return await diagnoseInitialBootstrapRecoverySurface(adapter);
   } catch (error) {
     primaryError = error;
     throw error;
@@ -94,12 +94,12 @@ export async function executeInitialBootstrapRecoveryJob(
 
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
-): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
+): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
   return executeInitialBootstrapRecoveryJob(config, productionRuntime);
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
   environment: InitialBootstrapRecoveryJobEnvironment = process.env,
-): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
+): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
   return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
 }
