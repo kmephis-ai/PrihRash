@@ -15,7 +15,9 @@ const SAFE_CONFIG_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_CON
 const SAFE_INVOKE_FAILURE = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FAILED' });
 const SAFE_INVOKE_OUTPUT_INVALID = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_OUTPUT_INVALID' });
 const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
+const SAFE_INVOKE_FUNCTION_TIMEOUT = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FUNCTION_TIMEOUT' });
 const SAFE_INVOKE_MARKER_AMBIGUOUS = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_MARKER_AMBIGUOUS' });
+const YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout (504)';
 const SAFE_PROBE_FAILURE_CODE_BY_MARKER = Object.freeze({
   CONFIG_INVALID: 'READINESS_RUNTIME_CONFIG_INVALID',
   GOOGLE_SPREADSHEET_ID_INVALID: 'READINESS_GOOGLE_SPREADSHEET_ID_INVALID',
@@ -122,6 +124,7 @@ function safeInvokeFailure(error) {
     return Object.freeze({ status: 'FAIL', code: matches[0][1] });
   }
   if (matches.length > 1) return SAFE_INVOKE_MARKER_AMBIGUOUS;
+  if (captured.includes(YANDEX_FUNCTION_TIMEOUT_MARKER)) return SAFE_INVOKE_FUNCTION_TIMEOUT;
   if (
     error !== null
     && (typeof error === 'object' || typeof error === 'function')
