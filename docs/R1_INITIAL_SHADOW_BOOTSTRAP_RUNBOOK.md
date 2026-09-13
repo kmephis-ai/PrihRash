@@ -223,6 +223,14 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 `CONTROLLED_REBUILD_REQUIRED` запрещает auto-rebuild и автоматическое повышение cap.
 
+## Read-only recovery classification contract
+
+При ambiguous invoke outcome используется существующий manual-only `R1 initial bootstrap recovery` workflow и existing tag `r1-initial-bootstrap-recovery`. Он получает только YDB connection evidence, выполняет только READ statements и не имеет Google/private historical input.
+
+Successful recovery classification публикует только exact sanitized shape `status/code/verdict/reason`, где `verdict` принадлежит `APPLIED | NOT_APPLIED | RECOVERY_REQUIRED`, а `reason` — allowlisted enum, согласованный с verdict. Row counts, IDs, amounts, descriptions, raw provider rows и exception text в result/log evidence не публикуются. `READ_FAILED` и любая неизвестная/несогласованная форма остаются fail-closed и не разрешают replay.
+
+Этот diagnostic reason — временная stage-specific evidence surface для #453; после снятия recovery ambiguity отдельное расширение operational surface не требуется.
+
 ## Failure / retry policy
 
 Не делать blind retry.

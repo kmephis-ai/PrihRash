@@ -5,8 +5,9 @@ import test from 'node:test';
 const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery.yml', 'utf8');
 const packageScript = await readFile('scripts/package-yandex-initial-bootstrap-recovery-function.mjs', 'utf8');
 const verifier = await readFile('scripts/verify-yandex-initial-bootstrap-recovery-package.mjs', 'utf8');
+const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap-recovery.mjs', 'utf8');
 
-test('initial bootstrap recovery workflow is manual-only and exact-main guarded', () => {
+test('initial bootstrap recovery workflow stays manual-only and exact-main guarded', () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
@@ -19,15 +20,24 @@ test('initial bootstrap recovery workflow is manual-only and exact-main guarded'
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN/);
   assert.doesNotMatch(workflow, /\.head_sha == \$sha/);
   assert.match(workflow, /\.conclusion == "failure"/);
+  assert.doesNotMatch(workflow, /r1-initial-bootstrap-recovery-diagnostic/);
 });
 
-test('initial bootstrap recovery deploy exposes only YDB secret to recovery handler', () => {
+test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_GOOGLE_/);
   assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
+});
+
+test('initial bootstrap recovery invoker exposes enum-only classification evidence', () => {
+  assert.match(invoker, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
+  assert.match(invoker, /exactKeys\(result, \['status', 'code', 'verdict', 'reason'\]\)/);
+  assert.match(invoker, /COMMITTED_DURABLE_STATE/);
+  assert.match(invoker, /STAGING_RUN_PRESENT/);
+  assert.doesNotMatch(invoker, /row_count|rows_seen|committedRowsSeen|sourceRecords/);
 });
 
 test('initial bootstrap recovery package excludes write-capable runtime entrypoints', () => {
