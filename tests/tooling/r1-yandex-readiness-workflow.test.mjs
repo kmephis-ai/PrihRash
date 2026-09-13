@@ -6,6 +6,8 @@ import test from 'node:test';
 const ROOT = resolve(import.meta.dirname, '../..');
 const WORKFLOW = resolve(ROOT, '.github/workflows/r1-yandex-readiness.yml');
 const RUNBOOK = resolve(ROOT, 'docs/R1_YANDEX_READINESS_RUNBOOK.md');
+const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-readiness.mjs');
+const READINESS_PROBE = resolve(ROOT, 'src/runtime/scheduledSyncReadinessProbe.ts');
 
 async function text(path) {
   return readFile(path, 'utf8');
@@ -56,6 +58,23 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /serverless trigger list/);
   assert.doesNotMatch(workflow, /serverless trigger create/);
   assert.match(workflow, /npm run readiness:invoke/);
+});
+
+test('R1 readiness timeout envelopes preserve the bounded application deadline with transport headroom', async () => {
+  const [workflow, invoker, probe, runbook] = await Promise.all([
+    text(WORKFLOW),
+    text(INVOKER),
+    text(READINESS_PROBE),
+    text(RUNBOOK),
+  ]);
+
+  assert.match(probe, /SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const/);
+  assert.match(probe, /SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const/);
+  assert.match(workflow, /--execution-timeout 45s/);
+  assert.match(invoker, /const INVOKE_TIMEOUT_MS = 60_000;/);
+  assert.match(runbook, /execution timeout: 45s/);
+  assert.match(runbook, /application deadline: 20s/);
+  assert.match(runbook, /invoker transport timeout: 60s/);
 });
 
 test('R1 readiness workflow proves the exact WIF service account can invoke while staying private', async () => {

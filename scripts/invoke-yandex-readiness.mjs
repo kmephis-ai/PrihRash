@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const READINESS_TAG = 'r1-readiness';
 const MAX_CAPTURE_BYTES = 64 * 1024;
-const INVOKE_TIMEOUT_MS = 30_000;
+const INVOKE_TIMEOUT_MS = 60_000;
 const SAFE_READY = Object.freeze({
   googleSource: 'READY',
   ydbSchema: 'READY',

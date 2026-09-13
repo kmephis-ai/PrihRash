@@ -172,11 +172,13 @@ Version configuration:
 ```text
 runtime: nodejs22
 memory: 128m
-execution timeout: 30s
+execution timeout: 45s
 tag: r1-readiness
 logging: disabled
 runtime service account: prihrash-backend
 ```
+
+Operational timeout layering для readiness: application deadline: 20s, bounded YDB close timeout: 2s, Function execution timeout: 45s, invoker transport timeout: 60s. Внешние 45s/60s — только provider/transport headroom; они не расширяют read-only application budget и не разрешают retries/writes.
 
 Secret injection:
 
