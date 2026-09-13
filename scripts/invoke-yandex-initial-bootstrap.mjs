@@ -14,6 +14,15 @@ const SAFE_INVOKE_FAILURE = Object.freeze({
   status: 'FAIL',
   code: 'INITIAL_BOOTSTRAP_INVOKE_FAILED',
 });
+const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED',
+});
+const SAFE_INVOKE_FUNCTION_TIMEOUT = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT',
+});
+const YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout (504)';
 const SAFE_INVOKE_OUTPUT_INVALID = Object.freeze({
   status: 'FAIL',
   code: 'INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID',
@@ -197,6 +206,25 @@ function parseExactFunctionResult(stdout) {
   return null;
 }
 
+function capturedErrorField(error, field) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return '';
+  const value = Reflect.get(error, field);
+  return typeof value === 'string' ? value : '';
+}
+
+function safeInvokeFailure(error) {
+  const captured = `${capturedErrorField(error, 'stdout')}\n${capturedErrorField(error, 'stderr')}`;
+  if (captured.includes(YANDEX_FUNCTION_TIMEOUT_MARKER)) return SAFE_INVOKE_FUNCTION_TIMEOUT;
+  if (
+    error !== null
+    && (typeof error === 'object' || typeof error === 'function')
+    && typeof Reflect.get(error, 'code') === 'number'
+  ) {
+    return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+  }
+  return SAFE_INVOKE_FAILURE;
+}
+
 async function invokeInitialBootstrap(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
   const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
@@ -215,8 +243,8 @@ async function invokeInitialBootstrap(environment = process.env) {
       },
     );
     return parseExactFunctionResult(stdout) ?? SAFE_INVOKE_OUTPUT_INVALID;
-  } catch {
-    return SAFE_INVOKE_FAILURE;
+  } catch (error) {
+    return safeInvokeFailure(error);
   }
 }
 
