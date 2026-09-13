@@ -138,7 +138,7 @@ test('malformed, extra-field and non-allowlisted successful provider output fail
   }
 });
 
-test('non-zero provider failure never echoes captured stdout or stderr', async () => {
+test('non-zero provider failure is classified without echoing captured stdout or stderr', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stdout.write('${PRIVATE_LOOKING}');
@@ -148,7 +148,31 @@ process.exit(17);
   });
 
   assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FAILED' });
+  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
+});
+
+test('known Yandex Function execution timeout is classified without echoing provider detail', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (504)\n${PRIVATE_LOOKING}`)});
+process.exit(1);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT' });
+});
+
+test('near-miss Function timeout remains fail-closed and unclassified', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (503)\n${PRIVATE_LOOKING}`)});
+process.exit(1);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
 test('missing function id fails before yc executes', async () => {
