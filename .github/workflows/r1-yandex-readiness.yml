@@ -245,7 +245,7 @@ jobs:
             --runtime nodejs22 \
             --entrypoint index.readinessHandler \
             --memory 128m \
-            --execution-timeout 30s \
+            --execution-timeout 45s \
             --source-path .artifacts/yandex-scheduled-sync-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-readiness \
