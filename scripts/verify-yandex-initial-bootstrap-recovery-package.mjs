@@ -27,6 +27,7 @@ const requiredFiles = [
   'dist/runtime/initialBootstrapRecoveryJob.js',
   'dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js',
   'dist/migration/initialBootstrapRecoveryProbe.js',
+  'dist/migration/initialBootstrapResidualSurface.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
 
@@ -76,9 +77,14 @@ for (const forbidden of [
   if (files.includes(forbidden)) fail(`forbidden runtime content: ${forbidden}`);
 }
 
-const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', 'initialBootstrapRecoveryProbe.js'), 'utf8');
-if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
-  fail('recovery probe contains a write-capable statement or transaction call');
+for (const recoveryModule of [
+  'initialBootstrapRecoveryProbe.js',
+  'initialBootstrapResidualSurface.js',
+]) {
+  const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
+  if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
+    fail(`recovery module contains a write-capable statement or transaction call: ${recoveryModule}`);
+  }
 }
 
 const forbiddenPrefixes = ['tests/', 'docs/', 'db/', 'scripts/', '.github/', 'private/', 'node_modules/'];
