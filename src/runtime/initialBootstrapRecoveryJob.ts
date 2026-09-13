@@ -5,9 +5,7 @@ import {
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
   diagnoseInitialBootstrapRecovery,
-  probeInitialBootstrapRecovery,
   type InitialBootstrapRecoveryClassification,
-  type InitialBootstrapRecoveryVerdict,
 } from '../migration/initialBootstrapRecoveryProbe.js';
 
 export const INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV = Object.freeze({
@@ -72,31 +70,6 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
-): Promise<InitialBootstrapRecoveryVerdict> {
-  const validated = Object.freeze({
-    ydbConnectionString: requiredConnectionString(config.ydbConnectionString),
-  });
-  const ydbClient = await runtime.createYdbClient(validated);
-  const adapter = new YdbAdapter(ydbClient.transport);
-  let primaryError: unknown = null;
-
-  try {
-    return await probeInitialBootstrapRecovery(adapter);
-  } catch (error) {
-    primaryError = error;
-    throw error;
-  } finally {
-    try {
-      await ydbClient.close();
-    } catch {
-      if (primaryError === null) throw new InitialBootstrapRecoveryJobError('YDB_CLIENT_CLOSE_FAILED');
-    }
-  }
-}
-
-export async function executeInitialBootstrapRecoveryDiagnosticJob(
-  config: Readonly<InitialBootstrapRecoveryJobConfig>,
-  runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
 ): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
   const validated = Object.freeze({
     ydbConnectionString: requiredConnectionString(config.ydbConnectionString),
@@ -119,26 +92,14 @@ export async function executeInitialBootstrapRecoveryDiagnosticJob(
   }
 }
 
-export function runInitialBootstrapRecoveryDiagnosticJob(
-  config: Readonly<InitialBootstrapRecoveryJobConfig>,
-): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
-  return executeInitialBootstrapRecoveryDiagnosticJob(config, productionRuntime);
-}
-
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
-): Promise<InitialBootstrapRecoveryVerdict> {
+): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
   return executeInitialBootstrapRecoveryJob(config, productionRuntime);
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
   environment: InitialBootstrapRecoveryJobEnvironment = process.env,
-): Promise<InitialBootstrapRecoveryVerdict> {
-  return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
-}
-
-export function runInitialBootstrapRecoveryDiagnosticJobFromEnvironment(
-  environment: InitialBootstrapRecoveryJobEnvironment = process.env,
 ): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
-  return runInitialBootstrapRecoveryDiagnosticJob(readInitialBootstrapRecoveryJobConfig(environment));
+  return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
 }
