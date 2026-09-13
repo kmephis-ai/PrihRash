@@ -4,8 +4,8 @@ import {
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
-  probeInitialBootstrapRecovery,
-  type InitialBootstrapRecoveryVerdict,
+  diagnoseInitialBootstrapRecovery,
+  type InitialBootstrapRecoveryClassification,
 } from '../migration/initialBootstrapRecoveryProbe.js';
 
 export const INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV = Object.freeze({
@@ -70,7 +70,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
-): Promise<InitialBootstrapRecoveryVerdict> {
+): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
   const validated = Object.freeze({
     ydbConnectionString: requiredConnectionString(config.ydbConnectionString),
   });
@@ -79,7 +79,7 @@ export async function executeInitialBootstrapRecoveryJob(
   let primaryError: unknown = null;
 
   try {
-    return await probeInitialBootstrapRecovery(adapter);
+    return await diagnoseInitialBootstrapRecovery(adapter);
   } catch (error) {
     primaryError = error;
     throw error;
@@ -94,12 +94,12 @@ export async function executeInitialBootstrapRecoveryJob(
 
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
-): Promise<InitialBootstrapRecoveryVerdict> {
+): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
   return executeInitialBootstrapRecoveryJob(config, productionRuntime);
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
   environment: InitialBootstrapRecoveryJobEnvironment = process.env,
-): Promise<InitialBootstrapRecoveryVerdict> {
+): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
   return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
 }

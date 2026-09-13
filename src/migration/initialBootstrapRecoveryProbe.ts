@@ -2,6 +2,27 @@ import { readStatement, type YdbAdapter } from '../integration/ydb/adapter.js';
 
 export type InitialBootstrapRecoveryVerdict = 'APPLIED' | 'NOT_APPLIED' | 'RECOVERY_REQUIRED';
 
+export type InitialBootstrapRecoveryReason =
+  | 'EMPTY_DURABLE_STATE'
+  | 'COMMITTED_DURABLE_STATE'
+  | 'READ_FAILED'
+  | 'RUN_STATE_COUNT_INCONSISTENT'
+  | 'RESIDUAL_STATE_WITHOUT_RUN'
+  | 'MULTIPLE_MIGRATION_RUNS'
+  | 'STAGING_RUN_PRESENT'
+  | 'VALIDATED_RUN_PRESENT'
+  | 'FAILED_RUN_PRESENT'
+  | 'COMMITTED_ROWS_SEEN_MISSING'
+  | 'COMMITTED_SOURCE_SNAPSHOT_COUNT_INVALID'
+  | 'COMMITTED_IDENTITY_MANIFEST_COUNT_INVALID'
+  | 'COMMITTED_SOURCE_RECORD_COUNT_MISMATCH'
+  | 'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH';
+
+export interface InitialBootstrapRecoveryClassification {
+  readonly verdict: InitialBootstrapRecoveryVerdict;
+  readonly reason: InitialBootstrapRecoveryReason;
+}
+
 export interface InitialBootstrapRecoveryEvidence {
   readonly migrationRuns: number;
   readonly committedRuns: number;
@@ -55,6 +76,13 @@ function safeCount(value: unknown): number | null {
   return null;
 }
 
+function classification(
+  verdict: InitialBootstrapRecoveryVerdict,
+  reason: InitialBootstrapRecoveryReason,
+): Readonly<InitialBootstrapRecoveryClassification> {
+  return Object.freeze({ verdict, reason });
+}
+
 function allBootstrapTouchedStateEmpty(evidence: Readonly<InitialBootstrapRecoveryEvidence>): boolean {
   return evidence.migrationRuns === 0
     && evidence.sourceSnapshots === 0
@@ -67,37 +95,63 @@ function allBootstrapTouchedStateEmpty(evidence: Readonly<InitialBootstrapRecove
     && evidence.familyMembers === 0;
 }
 
-export function classifyInitialBootstrapRecoveryEvidence(
+export function diagnoseInitialBootstrapRecoveryEvidence(
   evidence: Readonly<InitialBootstrapRecoveryEvidence>,
-): InitialBootstrapRecoveryVerdict {
+): Readonly<InitialBootstrapRecoveryClassification> {
   const knownRunCount = evidence.committedRuns
     + evidence.stagingRuns
     + evidence.validatedRuns
     + evidence.failedRuns;
   if (!Number.isSafeInteger(knownRunCount) || knownRunCount !== evidence.migrationRuns) {
-    return 'RECOVERY_REQUIRED';
+    return classification('RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT');
   }
 
   if (evidence.migrationRuns === 0) {
-    return allBootstrapTouchedStateEmpty(evidence) ? 'NOT_APPLIED' : 'RECOVERY_REQUIRED';
+    return allBootstrapTouchedStateEmpty(evidence)
+      ? classification('NOT_APPLIED', 'EMPTY_DURABLE_STATE')
+      : classification('RECOVERY_REQUIRED', 'RESIDUAL_STATE_WITHOUT_RUN');
   }
 
-  if (
-    evidence.migrationRuns === 1
-    && evidence.committedRuns === 1
-    && evidence.stagingRuns === 0
-    && evidence.validatedRuns === 0
-    && evidence.failedRuns === 0
-    && evidence.committedRowsSeen !== null
-    && evidence.sourceSnapshots === 1
-    && evidence.identityManifests === 1
-    && evidence.sourceRecords === evidence.committedRowsSeen
-    && evidence.sourceRecordRevisions === evidence.committedRowsSeen
-  ) {
-    return 'APPLIED';
+  if (evidence.migrationRuns > 1) {
+    return classification('RECOVERY_REQUIRED', 'MULTIPLE_MIGRATION_RUNS');
   }
 
-  return 'RECOVERY_REQUIRED';
+  if (evidence.stagingRuns === 1) {
+    return classification('RECOVERY_REQUIRED', 'STAGING_RUN_PRESENT');
+  }
+  if (evidence.validatedRuns === 1) {
+    return classification('RECOVERY_REQUIRED', 'VALIDATED_RUN_PRESENT');
+  }
+  if (evidence.failedRuns === 1) {
+    return classification('RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT');
+  }
+
+  if (evidence.committedRuns === 1) {
+    if (evidence.committedRowsSeen === null) {
+      return classification('RECOVERY_REQUIRED', 'COMMITTED_ROWS_SEEN_MISSING');
+    }
+    if (evidence.sourceSnapshots !== 1) {
+      return classification('RECOVERY_REQUIRED', 'COMMITTED_SOURCE_SNAPSHOT_COUNT_INVALID');
+    }
+    if (evidence.identityManifests !== 1) {
+      return classification('RECOVERY_REQUIRED', 'COMMITTED_IDENTITY_MANIFEST_COUNT_INVALID');
+    }
+    if (evidence.sourceRecords !== evidence.committedRowsSeen) {
+      return classification('RECOVERY_REQUIRED', 'COMMITTED_SOURCE_RECORD_COUNT_MISMATCH');
+    }
+    if (evidence.sourceRecordRevisions !== evidence.committedRowsSeen) {
+      return classification('RECOVERY_REQUIRED', 'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH');
+    }
+    return classification('APPLIED', 'COMMITTED_DURABLE_STATE');
+  }
+
+  return classification('RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT');
+}
+
+export function classifyInitialBootstrapRecoveryEvidence(
+  evidence: Readonly<InitialBootstrapRecoveryEvidence>,
+): InitialBootstrapRecoveryVerdict {
+  return diagnoseInitialBootstrapRecoveryEvidence(evidence).verdict;
 }
 
 async function readCount(adapter: YdbAdapter, text: string): Promise<number> {
@@ -139,12 +193,18 @@ export async function readInitialBootstrapRecoveryEvidence(
   return Object.freeze(evidence);
 }
 
+export async function diagnoseInitialBootstrapRecovery(
+  adapter: YdbAdapter,
+): Promise<Readonly<InitialBootstrapRecoveryClassification>> {
+  try {
+    return diagnoseInitialBootstrapRecoveryEvidence(await readInitialBootstrapRecoveryEvidence(adapter));
+  } catch {
+    return classification('RECOVERY_REQUIRED', 'READ_FAILED');
+  }
+}
+
 export async function probeInitialBootstrapRecovery(
   adapter: YdbAdapter,
 ): Promise<InitialBootstrapRecoveryVerdict> {
-  try {
-    return classifyInitialBootstrapRecoveryEvidence(await readInitialBootstrapRecoveryEvidence(adapter));
-  } catch {
-    return 'RECOVERY_REQUIRED';
-  }
+  return (await diagnoseInitialBootstrapRecovery(adapter)).verdict;
 }
