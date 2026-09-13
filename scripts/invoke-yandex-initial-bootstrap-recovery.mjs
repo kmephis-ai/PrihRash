@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const RECOVERY_TAG = 'r1-initial-bootstrap-recovery';
 const MAX_CAPTURE_BYTES = 16 * 1024;
-const INVOKE_TIMEOUT_MS = 60_000;
+const INVOKE_TIMEOUT_MS = 180_000;
 
 const SAFE_CONFIG_FAILURE = Object.freeze({
   status: 'FAIL',
