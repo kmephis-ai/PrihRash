@@ -123,6 +123,30 @@ process.exit(17);
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
+test('known Yandex Function execution timeout is classified without echoing provider detail', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (504)\n${PRIVATE_LOOKING}`)});
+process.exit(1);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FUNCTION_TIMEOUT' });
+});
+
+test('near-miss provider timeout remains fail-closed and unclassified', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (503)\n${PRIVATE_LOOKING}`)});
+process.exit(1);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
+});
+
 test('one allowlisted sanitized readiness marker in a non-zero provider failure remains safely classified', async () => {
   for (const [marker, code] of SAFE_PROBE_FAILURES) {
     const result = await runInvoker({
