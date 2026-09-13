@@ -92,6 +92,11 @@ test('safe non-success Function results remain exact bounded output and exit non
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECONCILIATION_FAILED' },
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RESULT_INVALID' },
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+    },
   ];
 
   for (const value of values) {
@@ -114,6 +119,16 @@ test('malformed, extra-field and non-allowlisted successful provider output fail
       blockers: [{ code: 'RECONCILIATION_CHECK_NOT_MATCHED', check: 'PRIVATE_CHECK' }],
     }),
     JSON.stringify({ status: 'FAIL', code: 'PRIVATE_FAILURE' }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'PRIVATE_RUNTIME_CODE',
+    }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID',
+      runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+    }),
   ];
 
   for (const output of outputs) {

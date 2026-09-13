@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { InitialBootstrapPrivateEvidenceError } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
+import {
+  InitialBootstrapReferenceAwareRuntimeError,
+} from '../../dist/runtime/initialBootstrapReferenceAwareJob.js';
 import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob.js';
 import {
   executeYandexInitialBootstrapFunction,
@@ -117,6 +120,31 @@ test('private evidence and job config failures collapse to one safe config code'
   assert.deepEqual(
     await execute(new InitialBootstrapJobError('INVALID_YDB_CONNECTION_STRING')),
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID' },
+  );
+});
+
+test('reference-aware runtime failures expose only the bounded runtime taxonomy', async () => {
+  for (const runtimeCode of [
+    'REFERENCE_RUNTIME_STATE_INVALID',
+    'REFERENCE_BOOTSTRAP_RESUME_UNSAFE',
+    'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+  ]) {
+    assert.deepEqual(
+      await execute(new InitialBootstrapReferenceAwareRuntimeError(runtimeCode)),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+        runtimeCode,
+      },
+    );
+  }
+
+  const untrustedError = Object.assign(new Error('private provider error text'), {
+    code: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+  });
+  assert.deepEqual(
+    await execute(untrustedError),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' },
   );
 });
 

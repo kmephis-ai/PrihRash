@@ -10,7 +10,9 @@ import {
   type InitialValidationBlockerCode,
 } from '../migration/initialValidationGate.js';
 import {
+  InitialBootstrapReferenceAwareRuntimeError,
   runInitialBootstrapReferenceAwareJobFromEnvironment,
+  type InitialBootstrapReferenceAwareRuntimeErrorCode,
 } from './initialBootstrapReferenceAwareJob.js';
 import {
   InitialBootstrapJobError,
@@ -61,8 +63,12 @@ export type YandexInitialBootstrapFunctionResult =
       code:
         | 'INITIAL_BOOTSTRAP_CONFIG_INVALID'
         | 'INITIAL_BOOTSTRAP_RECONCILIATION_FAILED'
-        | 'INITIAL_BOOTSTRAP_RESULT_INVALID'
-        | 'INITIAL_BOOTSTRAP_RUNTIME_FAILED';
+        | 'INITIAL_BOOTSTRAP_RESULT_INVALID';
+    }>
+  | Readonly<{
+      status: 'FAIL';
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED';
+      runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode;
     }>;
 
 export interface YandexInitialBootstrapJob {
@@ -109,6 +115,17 @@ function failure(
     | 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
 ): Readonly<YandexInitialBootstrapFunctionResult> {
   return Object.freeze({ status: 'FAIL' as const, code });
+}
+
+function runtimeFailure(
+  runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode,
+): Readonly<YandexInitialBootstrapFunctionResult> {
+  if (runtimeCode === undefined) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
+  return Object.freeze({
+    status: 'FAIL' as const,
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' as const,
+    runtimeCode,
+  });
 }
 
 function validationBlocker(value: unknown): Readonly<YandexInitialBootstrapValidationBlocker> | null {
@@ -212,14 +229,17 @@ export async function executeYandexInitialBootstrapFunction(
     if (error instanceof InitialBootstrapPrivateEvidenceError) {
       return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
     }
+    if (error instanceof InitialBootstrapReferenceAwareRuntimeError) {
+      return runtimeFailure(error.code);
+    }
     if (error instanceof InitialBootstrapJobError) {
       if (isConfigError(error.code)) return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
       if (error.code === 'COMMITTED_RECONCILIATION_MISMATCH') {
         return failure('INITIAL_BOOTSTRAP_RECONCILIATION_FAILED');
       }
-      return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
+      return runtimeFailure();
     }
-    return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
+    return runtimeFailure();
   }
 }
 
