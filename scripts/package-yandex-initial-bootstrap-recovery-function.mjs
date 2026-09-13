@@ -43,7 +43,7 @@ for (const file of [
 
 await writeFile(
   resolve(ARTIFACT_ROOT, 'index.js'),
-  "export { initialBootstrapRecoveryHandler } from './dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js';\n",
+  "export { initialBootstrapRecoveryDiagnosticHandler } from './dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js';\n",
   'utf8',
 );
 await writeFile(
