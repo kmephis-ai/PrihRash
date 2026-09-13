@@ -9,6 +9,11 @@ import { utf8Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import { buildReferenceResolverSnapshot } from './resolver.js';
 import type { InitialReferenceBootstrapPlan } from './initialBootstrapReferencePlan.js';
+import {
+  INITIAL_REFERENCE_ACTIVE_STATUS,
+  INITIAL_REFERENCE_VIKA_MEMBER_NAME,
+  initialReferenceAccountSemantics,
+} from './initialBootstrapReferenceSemantics.js';
 import { readYdbReferenceMappingEvidence } from './ydbReferenceEvidenceReader.js';
 
 export type InitialReferenceBootstrapPersistenceErrorCode =
@@ -26,33 +31,15 @@ export class InitialReferenceBootstrapPersistenceError extends Error {
   }
 }
 
-const VIKA_MEMBER_NAME = 'Вика';
-const ACTIVE_STATUS = 'ACTIVE';
-
-type AccountReferenceKind = 'CASH' | 'DEBIT_CARD' | 'CREDIT_CARD' | 'UNKNOWN';
-type AccountReferenceBalanceNature = 'ASSET' | 'LIABILITY' | 'UNKNOWN';
-
-interface AccountReferenceSemantics {
-  readonly kind: AccountReferenceKind;
-  readonly balanceNature: AccountReferenceBalanceNature;
-}
-
-const ACCOUNT_REFERENCE_SEMANTICS: Readonly<Record<string, Readonly<AccountReferenceSemantics>>> = Object.freeze({
-  'Карта Visa': Object.freeze({ kind: 'DEBIT_CARD', balanceNature: 'ASSET' }),
-  'Карта Credit': Object.freeze({ kind: 'CREDIT_CARD', balanceNature: 'LIABILITY' }),
-  'Наличка': Object.freeze({ kind: 'CASH', balanceNature: 'ASSET' }),
-  'Приход': Object.freeze({ kind: 'UNKNOWN', balanceNature: 'UNKNOWN' }),
-});
-
 interface VikaMemberRow {
   readonly id?: unknown;
   readonly name?: unknown;
   readonly status?: unknown;
 }
 
-function accountReferenceSemantics(sourceLabel: string): Readonly<AccountReferenceSemantics> {
-  const semantics = ACCOUNT_REFERENCE_SEMANTICS[sourceLabel];
-  if (semantics === undefined) {
+function accountReferenceSemantics(sourceLabel: string) {
+  const semantics = initialReferenceAccountSemantics(sourceLabel);
+  if (semantics === null) {
     throw new InitialReferenceBootstrapPersistenceError('ACCOUNT_REFERENCE_SEMANTICS_UNKNOWN');
   }
   return semantics;
@@ -61,15 +48,15 @@ function accountReferenceSemantics(sourceLabel: string): Readonly<AccountReferen
 export async function readCurrentVikaMemberId(scope: YdbReadScope): Promise<string | null> {
   const rows = (await scope.read<VikaMemberRow>(readStatement(
     'SELECT id, name, status FROM family_members WHERE name = $name',
-    { name: utf8Parameter(VIKA_MEMBER_NAME) },
+    { name: utf8Parameter(INITIAL_REFERENCE_VIKA_MEMBER_NAME) },
   ))).rows;
   if (rows.length === 0) return null;
   const row = rows[0];
   if (
     rows.length !== 1
     || row === undefined
-    || row.name !== VIKA_MEMBER_NAME
-    || row.status !== ACTIVE_STATUS
+    || row.name !== INITIAL_REFERENCE_VIKA_MEMBER_NAME
+    || row.status !== INITIAL_REFERENCE_ACTIVE_STATUS
     || typeof row.id !== 'string'
   ) {
     throw new InitialReferenceBootstrapPersistenceError('VIKA_REFERENCE_CONFLICT');
@@ -91,7 +78,7 @@ export function prepareAccountReferenceInsert(
       kind: utf8Parameter(semantics.kind),
       balance_nature: utf8Parameter(semantics.balanceNature),
       currency: utf8Parameter('RUB'),
-      status: utf8Parameter(ACTIVE_STATUS),
+      status: utf8Parameter(INITIAL_REFERENCE_ACTIVE_STATUS),
       normalized_source_label: utf8Parameter(sourceLabel),
     },
   );
@@ -109,7 +96,7 @@ export function prepareCategoryReferenceInsert(
       id: uuidParameter(id),
       name: utf8Parameter(sourceLabel),
       kind: utf8Parameter(kind),
-      status: utf8Parameter(ACTIVE_STATUS),
+      status: utf8Parameter(INITIAL_REFERENCE_ACTIVE_STATUS),
       normalized_source_label: utf8Parameter(sourceLabel),
     },
   );
@@ -120,8 +107,8 @@ export function prepareVikaReferenceInsert(id: string): Readonly<YdbStatement> {
     'INSERT INTO family_members (id, name, status) VALUES ($id, $name, $status)',
     {
       id: uuidParameter(id),
-      name: utf8Parameter(VIKA_MEMBER_NAME),
-      status: utf8Parameter(ACTIVE_STATUS),
+      name: utf8Parameter(INITIAL_REFERENCE_VIKA_MEMBER_NAME),
+      status: utf8Parameter(INITIAL_REFERENCE_ACTIVE_STATUS),
     },
   );
 }

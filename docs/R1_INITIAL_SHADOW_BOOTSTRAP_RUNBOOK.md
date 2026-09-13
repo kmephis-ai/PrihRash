@@ -225,9 +225,15 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 ## Read-only recovery classification contract
 
-При ambiguous invoke outcome используется существующий manual-only `R1 initial bootstrap recovery` workflow и existing tag `r1-initial-bootstrap-recovery`. Он получает только YDB connection evidence, выполняет только READ statements и не имеет Google/private historical input.
+При ambiguous invoke outcome используется существующий manual-only `R1 initial bootstrap recovery` workflow и existing tag `r1-initial-bootstrap-recovery`. Он всегда начинает с read-only durable YDB classification и не имеет write-capable runtime path.
 
-Successful recovery classification публикует только exact sanitized shape `status/code/verdict/reason`, где `verdict` принадлежит `APPLIED | NOT_APPLIED | RECOVERY_REQUIRED`, а `reason` — allowlisted enum, согласованный с verdict. Row counts, IDs, amounts, descriptions, raw provider rows и exception text в result/log evidence не публикуются. `READ_FAILED` и любая неизвестная/несогласованная форма остаются fail-closed и не разрешают replay.
+Если durable classification точно равна `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN`, тот же recovery invocation выполняет один fresh authoritative Google read через canonical `Ответы на форму (11)` A:K reader и Google readonly scope. Он использует только `google_spreadsheet_id`, `google_service_account_email`, `google_service_account_private_key` и `ydb_connection_string` из уже существующего dedicated Lockbox secret; private historical bootstrap evidence в recovery Function не передаётся. Для любого другого durable reason Google не читается.
+
+Reference reconciliation сравнивает derived authoritative bootstrap vocabulary с полным durable `accounts/categories/family_members` state: exact account/category identity keys, canonical account semantics, RUB/status/display/source labels, пустые bootstrap-only category hierarchy fields и единственного ACTIVE member `Вика`. IDs проверяются только как opaque valid UUID и наружу не публикуются. Missing/extra/duplicate/malformed/drifted row даёт `RESIDUAL_REFERENCE_STATE_MISMATCH`; exact equality даёт `RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE`; source/provider/read instability даёт `REFERENCE_RECONCILIATION_FAILED`. Все три результата сохраняют verdict `RECOVERY_REQUIRED` и сами по себе **не** разрешают replay, cleanup или rebuild.
+
+До и после detailed reference read runtime повторно подтверждает, что durable surface всё ещё классифицируется как `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN`; изменение слоя во время reconciliation fail-closed превращается в `REFERENCE_RECONCILIATION_FAILED`. Recovery выполняет только provider READ operations; `serializableReadWrite` и write statements запрещены package verifier-ом.
+
+Successful recovery classification публикует только exact sanitized shape `status/code/verdict/reason`, где `verdict` принадлежит `APPLIED | NOT_APPLIED | RECOVERY_REQUIRED`, а `reason` — allowlisted enum, согласованный с verdict. Row counts, IDs, account/category labels, amounts, descriptions, raw Google/YDB rows, snapshot digests и exception text в result/log evidence не публикуются. `READ_FAILED`, `REFERENCE_RECONCILIATION_FAILED` и любая неизвестная/несогласованная форма остаются fail-closed и не разрешают replay.
 
 Этот diagnostic reason — временная stage-specific evidence surface для #453; после снятия recovery ambiguity отдельное расширение operational surface не требуется.
 

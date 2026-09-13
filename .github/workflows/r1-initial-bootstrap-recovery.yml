@@ -316,6 +316,9 @@ jobs:
             --tags r1-initial-bootstrap-recovery \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
             --no-logging \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED'
