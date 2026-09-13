@@ -31,7 +31,7 @@ const requiredFiles = [
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
 
 const indexSource = await readFile(resolve(ARTIFACT_ROOT, 'index.js'), 'utf8');
-if (indexSource !== "export { initialBootstrapRecoveryDiagnosticHandler } from './dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js';\n") {
+if (indexSource !== "export { initialBootstrapRecoveryHandler } from './dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js';\n") {
   fail('root index.js is not the reviewed recovery-only handler shim');
 }
 
