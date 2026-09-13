@@ -19,6 +19,13 @@ import {
   createInitialBootstrapDurableReconciliation,
 } from '../migration/initialBootstrapDurableReconciliation.js';
 import {
+  reconcileInitialBootstrapReferenceState,
+} from '../migration/initialBootstrapReferenceReconciliation.js';
+import {
+  diagnoseInitialBootstrapRecoverySurface,
+  type InitialBootstrapRecoverySurfaceClassification,
+} from '../migration/initialBootstrapResidualSurface.js';
+import {
   parseInitialBootstrapPrivateHistoricalEvidence,
 } from '../migration/initialBootstrapPrivateEvidence.js';
 import {
@@ -31,6 +38,9 @@ import {
   planInitialReferenceBootstrap,
   type InitialReferenceBootstrapPlan,
 } from '../reference/initialBootstrapReferencePlan.js';
+import type {
+  InitialReferenceBootstrapObservationRow,
+} from '../reference/initialBootstrapReferenceVocabulary.js';
 import { createInitialBootstrapReferenceClaimAdapter } from './initialBootstrapReferenceClaimAdapter.js';
 import {
   executeInitialBootstrapJob,
@@ -42,7 +52,33 @@ import {
 
 export type InitialBootstrapReferenceAwareRuntimeErrorCode =
   | 'REFERENCE_RUNTIME_STATE_INVALID'
-  | 'REFERENCE_BOOTSTRAP_RESUME_UNSAFE';
+  | 'REFERENCE_BOOTSTRAP_RESUME_UNSAFE'
+  | 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE';
+
+export function isInitialBootstrapResidualReferenceRecoveryAuthorized(
+  before: Readonly<InitialBootstrapRecoverySurfaceClassification>,
+  reconciled: Readonly<InitialBootstrapRecoverySurfaceClassification>,
+  after: Readonly<InitialBootstrapRecoverySurfaceClassification>,
+  plannedWriteCount: number,
+): boolean {
+  return Number.isSafeInteger(plannedWriteCount)
+    && plannedWriteCount === 0
+    && before.verdict === 'RECOVERY_REQUIRED'
+    && before.reason === 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN'
+    && reconciled.verdict === 'RECOVERY_REQUIRED'
+    && reconciled.reason === 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE'
+    && after.verdict === 'RECOVERY_REQUIRED'
+    && after.reason === 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN';
+}
+
+function isUnsafeNoRunRecoverySurface(
+  surface: Readonly<InitialBootstrapRecoverySurfaceClassification>,
+): boolean {
+  return surface.reason === 'READ_FAILED'
+    || surface.reason === 'RESIDUAL_METADATA_STATE_WITHOUT_RUN'
+    || surface.reason === 'RESIDUAL_CURRENT_OR_LINEAGE_STATE_WITHOUT_RUN'
+    || surface.reason === 'RESIDUAL_MIXED_STATE_WITHOUT_RUN';
+}
 
 export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
@@ -58,6 +94,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
   let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
   let digest: Readonly<CanonicalSourceDigest> | null = null;
   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
+  let referenceRows: readonly Readonly<InitialReferenceBootstrapObservationRow>[] | null = null;
   let referencePlan: Readonly<InitialReferenceBootstrapPlan> | null = null;
 
   const runtime: InitialBootstrapJobRuntime = {
@@ -102,12 +139,13 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RUNTIME_STATE_INVALID');
       }
       const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
+      referenceRows = Object.freeze(projected.rows.map((row, sourceOrdinal) => Object.freeze({
+        sourceOrdinal,
+        rawPayload: row.rawPayload,
+      })));
       referencePlan = await planInitialReferenceBootstrap(
         adapter,
-        projected.rows.map((row, sourceOrdinal) => Object.freeze({
-          sourceOrdinal,
-          rawPayload: row.rawPayload,
-        })),
+        referenceRows,
         primitives.referenceIdentityAllocator,
       );
       return referencePlan.resolver;
@@ -120,8 +158,29 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
       );
     },
     async runApplication(observation, dependencies) {
-      if (referencePlan === null) {
+      if (referencePlan === null || referenceRows === null) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RUNTIME_STATE_INVALID');
+      }
+
+      const recoverySurface = await diagnoseInitialBootstrapRecoverySurface(dependencies.adapter);
+      if (recoverySurface.reason === 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') {
+        const reconciled = await reconcileInitialBootstrapReferenceState(
+          dependencies.adapter,
+          referenceRows,
+        );
+        const after = await diagnoseInitialBootstrapRecoverySurface(dependencies.adapter);
+        if (!isInitialBootstrapResidualReferenceRecoveryAuthorized(
+          recoverySurface,
+          reconciled,
+          after,
+          referencePlan.writes.length,
+        )) {
+          throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
+        }
+        return runInitialBootstrapApplication(observation, dependencies);
+      }
+      if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
+        throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
       }
       if (referencePlan.writes.length === 0) {
         return runInitialBootstrapApplication(observation, dependencies);
