@@ -56,6 +56,11 @@ const FUNCTION_FAILURE_CODES = new Set([
   'INITIAL_BOOTSTRAP_RESULT_INVALID',
   'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
 ]);
+const REFERENCE_AWARE_RUNTIME_CODES = new Set([
+  'REFERENCE_RUNTIME_STATE_INVALID',
+  'REFERENCE_BOOTSTRAP_RESUME_UNSAFE',
+  'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+]);
 
 function nonBlank(value) {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
@@ -167,6 +172,19 @@ function parseExactFunctionResult(stdout) {
       status: 'STOP',
       code: 'INITIAL_BOOTSTRAP_VALIDATION_BLOCKED',
       blockers: Object.freeze(blockers),
+    });
+  }
+  if (
+    result.status === 'FAIL'
+    && result.code === 'INITIAL_BOOTSTRAP_RUNTIME_FAILED'
+    && exactKeys(result, ['status', 'code', 'runtimeCode'])
+    && typeof result.runtimeCode === 'string'
+    && REFERENCE_AWARE_RUNTIME_CODES.has(result.runtimeCode)
+  ) {
+    return Object.freeze({
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: result.runtimeCode,
     });
   }
   if (
