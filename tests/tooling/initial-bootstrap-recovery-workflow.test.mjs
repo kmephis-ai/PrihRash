@@ -27,7 +27,9 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
-  assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_GOOGLE_/);
+  assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
+  assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL/);
+  assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
   assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
 });
@@ -38,6 +40,9 @@ test('initial bootstrap recovery invoker exposes enum-only classification eviden
   assert.match(invoker, /COMMITTED_DURABLE_STATE/);
   assert.match(invoker, /RESIDUAL_REFERENCE_STATE_WITHOUT_RUN/);
   assert.match(invoker, /RESIDUAL_MIXED_STATE_WITHOUT_RUN/);
+  assert.match(invoker, /RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE/);
+  assert.match(invoker, /RESIDUAL_REFERENCE_STATE_MISMATCH/);
+  assert.match(invoker, /REFERENCE_RECONCILIATION_FAILED/);
   assert.doesNotMatch(invoker, /row_count|rows_seen|committedRowsSeen|sourceRecords/);
 });
 
@@ -46,6 +51,8 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
   assert.match(packageScript, /yandexCloudInitialBootstrapRecoveryFunction\.js/);
   assert.doesNotMatch(packageScript, /'initialBootstrapJob\.js'/);
   assert.match(verifier, /initialBootstrapResidualSurface\.js/);
+  assert.match(verifier, /initialBootstrapReferenceReconciliation\.js/);
+  assert.match(verifier, /initialBootstrapReferenceSemantics\.js/);
   assert.match(verifier, /recovery module contains a write-capable statement or transaction call/);
   assert.match(verifier, /dist\/runtime\/yandexCloudInitialBootstrapFunction\.js/);
   assert.match(verifier, /dist\/runtime\/scheduledSyncJob\.js/);

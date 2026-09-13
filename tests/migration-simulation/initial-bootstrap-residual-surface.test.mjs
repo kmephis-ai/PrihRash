@@ -96,6 +96,17 @@ test('Yandex recovery handler accepts only allowlisted residual surface reason',
     reason: 'RESIDUAL_METADATA_STATE_WITHOUT_RUN',
   });
 
+  const authoritativeMatch = await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE',
+  }));
+  assert.deepEqual(authoritativeMatch, {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE',
+  });
+
   const invalid = await executeYandexInitialBootstrapRecoveryFunction({}, async () => /** @type {any} */ ({
     verdict: 'RECOVERY_REQUIRED',
     reason: 'PRIVATE_TABLE_NAME',

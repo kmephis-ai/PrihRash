@@ -28,6 +28,8 @@ const requiredFiles = [
   'dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js',
   'dist/migration/initialBootstrapRecoveryProbe.js',
   'dist/migration/initialBootstrapResidualSurface.js',
+  'dist/migration/initialBootstrapReferenceReconciliation.js',
+  'dist/reference/initialBootstrapReferenceSemantics.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
 
@@ -80,10 +82,21 @@ for (const forbidden of [
 for (const recoveryModule of [
   'initialBootstrapRecoveryProbe.js',
   'initialBootstrapResidualSurface.js',
+  'initialBootstrapReferenceReconciliation.js',
 ]) {
   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
   if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
     fail(`recovery module contains a write-capable statement or transaction call: ${recoveryModule}`);
+  }
+}
+
+for (const recoveryRuntime of [
+  'initialBootstrapRecoveryJob.js',
+  'yandexCloudInitialBootstrapRecoveryFunction.js',
+]) {
+  const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'runtime', recoveryRuntime), 'utf8');
+  if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
+    fail(`recovery runtime contains a write-capable statement or transaction call: ${recoveryRuntime}`);
   }
 }
 

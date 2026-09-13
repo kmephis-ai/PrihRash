@@ -35,6 +35,9 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
   'RESIDUAL_METADATA_STATE_WITHOUT_RUN',
   'RESIDUAL_CURRENT_OR_LINEAGE_STATE_WITHOUT_RUN',
   'RESIDUAL_MIXED_STATE_WITHOUT_RUN',
+  'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE',
+  'RESIDUAL_REFERENCE_STATE_MISMATCH',
+  'REFERENCE_RECONCILIATION_FAILED',
   'MULTIPLE_MIGRATION_RUNS',
   'STAGING_RUN_PRESENT',
   'VALIDATED_RUN_PRESENT',
@@ -73,7 +76,7 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
   } catch (error) {
     if (
       error instanceof InitialBootstrapRecoveryJobError
-      && error.code === 'INVALID_YDB_CONNECTION_STRING'
+      && error.code.startsWith('INVALID_')
     ) {
       return Object.freeze({
         status: 'FAIL' as const,
