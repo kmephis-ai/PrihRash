@@ -19,6 +19,22 @@ const SAFE_OUTPUT_FAILURE = Object.freeze({
   code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
 });
 const VERDICTS = new Set(['APPLIED', 'NOT_APPLIED', 'RECOVERY_REQUIRED']);
+const REASONS = new Set([
+  'EMPTY_DURABLE_STATE',
+  'COMMITTED_DURABLE_STATE',
+  'READ_FAILED',
+  'RUN_STATE_COUNT_INCONSISTENT',
+  'RESIDUAL_STATE_WITHOUT_RUN',
+  'MULTIPLE_MIGRATION_RUNS',
+  'STAGING_RUN_PRESENT',
+  'VALIDATED_RUN_PRESENT',
+  'FAILED_RUN_PRESENT',
+  'COMMITTED_ROWS_SEEN_MISSING',
+  'COMMITTED_SOURCE_SNAPSHOT_COUNT_INVALID',
+  'COMMITTED_IDENTITY_MANIFEST_COUNT_INVALID',
+  'COMMITTED_SOURCE_RECORD_COUNT_MISMATCH',
+  'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
+]);
 const FUNCTION_FAILURE_CODES = new Set([
   'INITIAL_BOOTSTRAP_RECOVERY_CONFIG_INVALID',
   'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
@@ -49,6 +65,14 @@ function exactKeys(value, expected) {
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
+function validPair(verdict, reason) {
+  if (verdict === 'APPLIED') return reason === 'COMMITTED_DURABLE_STATE';
+  if (verdict === 'NOT_APPLIED') return reason === 'EMPTY_DURABLE_STATE';
+  return verdict === 'RECOVERY_REQUIRED'
+    && reason !== 'COMMITTED_DURABLE_STATE'
+    && reason !== 'EMPTY_DURABLE_STATE';
+}
+
 function parseExactResult(stdout) {
   let value;
   try {
@@ -62,11 +86,19 @@ function parseExactResult(stdout) {
   if (
     result.status === 'PASS'
     && result.code === 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED'
-    && exactKeys(result, ['status', 'code', 'verdict'])
+    && exactKeys(result, ['status', 'code', 'verdict', 'reason'])
     && typeof result.verdict === 'string'
     && VERDICTS.has(result.verdict)
+    && typeof result.reason === 'string'
+    && REASONS.has(result.reason)
+    && validPair(result.verdict, result.reason)
   ) {
-    return Object.freeze({ status: 'PASS', code: result.code, verdict: result.verdict });
+    return Object.freeze({
+      status: 'PASS',
+      code: result.code,
+      verdict: result.verdict,
+      reason: result.reason,
+    });
   }
   if (
     result.status === 'FAIL'
