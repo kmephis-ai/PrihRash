@@ -36,7 +36,8 @@ test('initial bootstrap recovery invoker exposes enum-only classification eviden
   assert.match(invoker, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
   assert.match(invoker, /exactKeys\(result, \['status', 'code', 'verdict', 'reason'\]\)/);
   assert.match(invoker, /COMMITTED_DURABLE_STATE/);
-  assert.match(invoker, /STAGING_RUN_PRESENT/);
+  assert.match(invoker, /RESIDUAL_REFERENCE_STATE_WITHOUT_RUN/);
+  assert.match(invoker, /RESIDUAL_MIXED_STATE_WITHOUT_RUN/);
   assert.doesNotMatch(invoker, /row_count|rows_seen|committedRowsSeen|sourceRecords/);
 });
 
@@ -44,7 +45,8 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
   assert.match(packageScript, /initialBootstrapRecoveryJob\.js/);
   assert.match(packageScript, /yandexCloudInitialBootstrapRecoveryFunction\.js/);
   assert.doesNotMatch(packageScript, /'initialBootstrapJob\.js'/);
-  assert.match(verifier, /recovery probe contains a write-capable statement or transaction call/);
+  assert.match(verifier, /initialBootstrapResidualSurface\.js/);
+  assert.match(verifier, /recovery module contains a write-capable statement or transaction call/);
   assert.match(verifier, /dist\/runtime\/yandexCloudInitialBootstrapFunction\.js/);
   assert.match(verifier, /dist\/runtime\/scheduledSyncJob\.js/);
 });
