@@ -53,7 +53,7 @@ function expectReadinessCode(expectedCode) {
     && !Object.hasOwn(error, 'cause');
 }
 
-test('readiness deadline sanitizes a stalled YDB client creation', async () => {
+test('readiness deadline is distinct from a YDB client creation failure', async () => {
   const runtime = Object.freeze({
     createSource: successfulSource,
     async createYdbClient() {
@@ -63,11 +63,11 @@ test('readiness deadline sanitizes a stalled YDB client creation', async () => {
 
   await assert.rejects(
     () => executeScheduledSyncReadinessProbe(syntheticConfig, runtime, { deadlineMs: 10 }),
-    expectReadinessCode('YDB_CLIENT_CREATE_FAILED'),
+    expectReadinessCode('DEADLINE_EXCEEDED'),
   );
 });
 
-test('readiness deadline sanitizes a stalled Google source read and still closes YDB', async () => {
+test('readiness deadline is distinct from a Google source failure and still closes YDB', async () => {
   let closeCalls = 0;
   const runtime = Object.freeze({
     createSource() {
@@ -91,12 +91,12 @@ test('readiness deadline sanitizes a stalled Google source read and still closes
       runtime,
       { deadlineMs: 10, closeTimeoutMs: 25 },
     ),
-    expectReadinessCode('GOOGLE_SOURCE_READ_FAILED'),
+    expectReadinessCode('DEADLINE_EXCEEDED'),
   );
   assert.equal(closeCalls, 1);
 });
 
-test('readiness deadline sanitizes a stalled YDB health read and still closes YDB', async () => {
+test('readiness deadline is distinct from a YDB health read failure and still closes YDB', async () => {
   let closeCalls = 0;
   const runtime = Object.freeze({
     createSource: successfulSource,
@@ -116,7 +116,32 @@ test('readiness deadline sanitizes a stalled YDB health read and still closes YD
       runtime,
       { deadlineMs: 10, closeTimeoutMs: 25 },
     ),
-    expectReadinessCode('YDB_QUERY_HEALTH_READ_FAILED'),
+    expectReadinessCode('DEADLINE_EXCEEDED'),
+  );
+  assert.equal(closeCalls, 1);
+});
+
+test('readiness deadline at categories does not masquerade as categories schema failure', async () => {
+  let closeCalls = 0;
+  const runtime = Object.freeze({
+    createSource: successfulSource,
+    async createYdbClient() {
+      return Object.freeze({
+        transport: transportWithReads([[], [], validMigrationRows, [], 'STALL']),
+        async close() {
+          closeCalls += 1;
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => executeScheduledSyncReadinessProbe(
+      syntheticConfig,
+      runtime,
+      { deadlineMs: 10, closeTimeoutMs: 25 },
+    ),
+    expectReadinessCode('DEADLINE_EXCEEDED'),
   );
   assert.equal(closeCalls, 1);
 });
