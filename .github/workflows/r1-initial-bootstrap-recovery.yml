@@ -380,10 +380,12 @@ jobs:
           mkdir -p "$evidence_dir"
           npm run initial-bootstrap-recovery:invoke | tee "$tmp"
           tail -n 1 "$tmp" | jq -c -e '
-            type == "object"
-            and (keys | sort) == ["code", "reason", "status", "verdict"]
-            and .status == "PASS"
-            and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+            select(
+              type == "object"
+              and (keys | sort) == ["code", "reason", "status", "verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+            )
           ' > "$evidence_dir/classification.json" || {
             echo 'INITIAL_BOOTSTRAP_RECOVERY_EVIDENCE_INVALID'
             exit 1
