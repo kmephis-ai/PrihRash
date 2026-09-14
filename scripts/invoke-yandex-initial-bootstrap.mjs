@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 const BOOTSTRAP_TAG = 'r1-initial-bootstrap';
+const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const INVOKE_TIMEOUT_MS = 180_000;
 
@@ -10,23 +7,30 @@ const SAFE_CONFIG_FAILURE = Object.freeze({
   status: 'FAIL',
   code: 'INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID',
 });
-const SAFE_INVOKE_FAILURE = Object.freeze({
+const SAFE_INVOKE_TRANSPORT_FAILED = Object.freeze({
   status: 'FAIL',
-  code: 'INITIAL_BOOTSTRAP_INVOKE_FAILED',
+  code: 'INITIAL_BOOTSTRAP_INVOKE_TRANSPORT_FAILED',
 });
-const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({
+const SAFE_INVOKE_TRANSPORT_TIMEOUT = Object.freeze({
   status: 'FAIL',
-  code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED',
+  code: 'INITIAL_BOOTSTRAP_INVOKE_TRANSPORT_TIMEOUT',
 });
-const SAFE_INVOKE_FUNCTION_TIMEOUT = Object.freeze({
-  status: 'FAIL',
-  code: 'INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT',
-});
-const YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout (504)';
 const SAFE_INVOKE_OUTPUT_INVALID = Object.freeze({
   status: 'FAIL',
   code: 'INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID',
 });
+
+const SAFE_HTTP_STATUS = new Map([
+  [400, 'HTTP_400'],
+  [403, 'HTTP_403'],
+  [404, 'HTTP_404'],
+  [413, 'HTTP_413'],
+  [429, 'HTTP_429'],
+  [500, 'HTTP_500'],
+  [502, 'HTTP_502'],
+  [503, 'HTTP_503'],
+  [504, 'HTTP_504'],
+]);
 
 const RECOVERY_REASONS = new Set([
   'CLAIM_OUTCOME_UNKNOWN',
@@ -82,16 +86,6 @@ const REFERENCE_AWARE_RUNTIME_CODES = new Set([
 
 function nonBlank(value) {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
-}
-
-function safeChildEnvironment(environment) {
-  const allowed = [
-    'PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'XDG_CONFIG_HOME',
-    'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'YC_IAM_TOKEN',
-  ];
-  return Object.fromEntries(
-    allowed.filter((name) => nonBlank(environment[name])).map((name) => [name, environment[name]]),
-  );
 }
 
 function record(value) {
@@ -215,80 +209,93 @@ function parseExactFunctionResult(stdout) {
   return null;
 }
 
-function capturedErrorField(error, field) {
-  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return '';
-  const value = Reflect.get(error, field);
-  return typeof value === 'string' ? value : '';
+function safeHttpStatus(status) {
+  const exact = SAFE_HTTP_STATUS.get(status);
+  if (exact !== undefined) return exact;
+  if (status >= 400 && status < 500) return 'HTTP_4XX_OTHER';
+  if (status >= 500 && status < 600) return 'HTTP_5XX_OTHER';
+  return 'HTTP_OTHER';
 }
 
-function safeCapturedShape(value) {
-  if (value.length === 0) return 'EMPTY';
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return 'TEXT';
-
-  let parsed;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return 'TEXT';
-  }
-
-  if (parsed === null) return 'JSON_NULL';
-  if (Array.isArray(parsed)) return 'JSON_ARRAY';
-  if (typeof parsed === 'object') return 'JSON_OBJECT';
-  if (typeof parsed === 'string') return 'JSON_STRING';
-  if (typeof parsed === 'number') return 'JSON_NUMBER';
-  if (typeof parsed === 'boolean') return 'JSON_BOOLEAN';
-  return 'TEXT';
-}
-
-function safeNonzeroUnclassified(stdout, stderr, environment) {
-  if (environment.GITHUB_ACTIONS !== 'true') return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+function safeHttpFailure(response) {
   return Object.freeze({
-    ...SAFE_INVOKE_NONZERO_UNCLASSIFIED,
-    outputShape: `STDOUT_${safeCapturedShape(stdout)}__STDERR_${safeCapturedShape(stderr)}`,
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED',
+    httpStatus: safeHttpStatus(response.status),
+    functionError: response.headers.get('x-function-error')?.toLowerCase() === 'true'
+      ? 'PRESENT'
+      : 'ABSENT',
   });
 }
 
-function safeInvokeFailure(error, environment) {
-  const stdout = capturedErrorField(error, 'stdout');
-  const stderr = capturedErrorField(error, 'stderr');
-  const exactResult = parseExactFunctionResult(stdout);
-  if (exactResult !== null && exactResult.status !== 'PASS') return exactResult;
-
-  const captured = `${stdout}\n${stderr}`;
-  if (captured.includes(YANDEX_FUNCTION_TIMEOUT_MARKER)) return SAFE_INVOKE_FUNCTION_TIMEOUT;
-  if (
-    error !== null
-    && (typeof error === 'object' || typeof error === 'function')
-    && typeof Reflect.get(error, 'code') === 'number'
-  ) {
-    return safeNonzeroUnclassified(stdout, stderr, environment);
+async function readLimitedUtf8(response) {
+  if (response.body === null) return '';
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!(value instanceof Uint8Array)) return null;
+      total += value.byteLength;
+      if (total > MAX_CAPTURE_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return SAFE_INVOKE_FAILURE;
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function isTransportTimeout(error) {
+  return error !== null
+    && (typeof error === 'object' || typeof error === 'function')
+    && Reflect.get(error, 'name') === 'TimeoutError';
 }
 
 async function invokeInitialBootstrap(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
-  const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
-  if (!nonBlank(functionId) || !nonBlank(ycBinary)) return SAFE_CONFIG_FAILURE;
+  const iamToken = environment.YC_IAM_TOKEN;
+  if (!nonBlank(functionId) || !nonBlank(iamToken)) return SAFE_CONFIG_FAILURE;
 
+  const url = new URL(`${FUNCTIONS_ORIGIN}/${encodeURIComponent(functionId)}`);
+  url.searchParams.set('tag', BOOTSTRAP_TAG);
+  url.searchParams.set('integration', 'raw');
+
+  let response;
   try {
-    const { stdout } = await execFileAsync(
-      ycBinary,
-      ['serverless', 'function', 'invoke', '--id', functionId, '--tag', BOOTSTRAP_TAG, '--retry', '0', '--no-user-output'],
-      {
-        encoding: 'utf8',
-        env: safeChildEnvironment(environment),
-        timeout: INVOKE_TIMEOUT_MS,
-        maxBuffer: MAX_CAPTURE_BYTES,
-        windowsHide: true,
-      },
-    );
-    return parseExactFunctionResult(stdout) ?? SAFE_INVOKE_OUTPUT_INVALID;
+    response = await fetch(url, {
+      method: 'POST',
+      headers: Object.freeze({ Authorization: `Bearer ${iamToken}` }),
+      signal: AbortSignal.timeout(INVOKE_TIMEOUT_MS),
+    });
   } catch (error) {
-    return safeInvokeFailure(error, environment);
+    return isTransportTimeout(error) ? SAFE_INVOKE_TRANSPORT_TIMEOUT : SAFE_INVOKE_TRANSPORT_FAILED;
   }
+
+  if (response.status !== 200) {
+    if (response.body !== null) await response.body.cancel().catch(() => {});
+    return safeHttpFailure(response);
+  }
+
+  const body = await readLimitedUtf8(response);
+  if (body === null) return SAFE_INVOKE_OUTPUT_INVALID;
+  return parseExactFunctionResult(body) ?? SAFE_INVOKE_OUTPUT_INVALID;
 }
 
 const result = await invokeInitialBootstrap();
