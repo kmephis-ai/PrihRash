@@ -19,6 +19,7 @@ import {
   runInitialBootstrapApplication,
 } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
+import { ControlledRebuildEvidenceReaderError } from '../migration/initialControlledRebuildEvidenceReader.js';
 import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
@@ -131,6 +132,7 @@ function classifyApplicationRuntimeError(
     || error instanceof InitialBootstrapError
     || error instanceof MigrationRunStateError
     || error instanceof InitialBootstrapDurableReconciliationError
+    || error instanceof ControlledRebuildEvidenceReaderError
     || error instanceof InitialSnapshotProjectionStructuralError
     || error instanceof SourceSnapshotSemanticProjectionStructuralError
   ) {

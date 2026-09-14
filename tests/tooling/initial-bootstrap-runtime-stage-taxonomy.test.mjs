@@ -33,6 +33,7 @@ test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics
   assert.match(runtime, /InitialBootstrapError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /MigrationRunStateError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialBootstrapDurableReconciliationError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /ControlledRebuildEvidenceReaderError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialSnapshotProjectionStructuralError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /SourceSnapshotSemanticProjectionStructuralError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialBootstrapMetadataExecutorError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
@@ -48,6 +49,7 @@ test('application taxonomy covers known pre-write structural and metadata errors
   assert.match(runtime, /InitialSnapshotProjectionStructuralError/);
   assert.match(runtime, /SourceSnapshotSemanticProjectionStructuralError/);
   assert.match(runtime, /InitialBootstrapPersistenceError/);
+  assert.match(runtime, /ControlledRebuildEvidenceReaderError/);
   assert.doesNotMatch(runtime, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
 });
 
