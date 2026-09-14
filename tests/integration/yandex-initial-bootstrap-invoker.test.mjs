@@ -151,6 +151,50 @@ process.exit(17);
   assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
+test('one exact allowlisted non-pass Function result line inside provider stderr is recovered without echoing wrapper text', async () => {
+  const exact = {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+  };
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`provider wrapper\n${JSON.stringify(exact)}\n${PRIVATE_LOOKING}`)});
+process.exit(17);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, exact);
+});
+
+test('multiple exact non-pass Function result lines in stderr remain fail-closed and unclassified', async () => {
+  const first = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID' });
+  const second = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RESULT_INVALID' });
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`${first}\n${second}\n${PRIVATE_LOOKING}`)});
+process.exit(17);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
+});
+
+test('PASS result line on a non-zero stderr path is ignored and remains fail-closed', async () => {
+  const pass = JSON.stringify({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED' });
+  const result = await runInvoker({
+    fakeSource: `
+process.stderr.write(${JSON.stringify(`${pass}\n${PRIVATE_LOOKING}`)});
+process.exit(17);
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
+});
+
 test('known Yandex Function execution timeout is classified without echoing provider detail', async () => {
   const result = await runInvoker({
     fakeSource: `
