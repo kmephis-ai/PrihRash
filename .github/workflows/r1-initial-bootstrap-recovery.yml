@@ -375,4 +375,27 @@ jobs:
         run: |
           set -euo pipefail
           export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
-          npm run initial-bootstrap-recovery:invoke
+          tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-invoke.log"
+          evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-recovery-evidence"
+          mkdir -p "$evidence_dir"
+          npm run initial-bootstrap-recovery:invoke | tee "$tmp"
+          tail -n 1 "$tmp" | jq -c -e '
+            select(
+              type == "object"
+              and (keys | sort) == ["code", "reason", "status", "verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+            )
+          ' > "$evidence_dir/classification.json" || {
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_EVIDENCE_INVALID'
+            exit 1
+          }
+          rm -f "$tmp"
+
+      - name: Publish enum-only recovery evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-bootstrap-recovery-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 1

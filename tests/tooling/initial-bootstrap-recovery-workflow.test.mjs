@@ -36,6 +36,17 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
 });
 
+test('initial bootstrap recovery persists only enum-only classification evidence', () => {
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_EVIDENCE_INVALID/);
+  assert.match(workflow, /\(keys \| sort\) == \["code", "reason", "status", "verdict"\]/);
+  assert.match(workflow, /\.status == "PASS"/);
+  assert.match(workflow, /\.code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"/);
+  assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+  assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /classification\.json/);
+  assert.match(workflow, /retention-days: 1/);
+});
+
 test('initial bootstrap recovery invoker exposes enum-only classification evidence', () => {
   assert.match(invoker, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
   assert.match(invoker, /INVOKE_TIMEOUT_MS = 180_000/);
