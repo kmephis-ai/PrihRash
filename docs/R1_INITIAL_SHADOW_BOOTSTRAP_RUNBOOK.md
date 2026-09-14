@@ -214,8 +214,12 @@ FAIL / INITIAL_BOOTSTRAP_RESULT_INVALID
 FAIL / INITIAL_BOOTSTRAP_RUNTIME_FAILED
 FAIL / INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID
 FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED
+FAIL / INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT
+FAIL / INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED
 FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 ```
+
+`INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` означает только exact privacy-safe classification provider envelope `Function execution timeout (504)`. `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` означает numeric non-zero provider exit без доказанного allowlisted marker. Оба кода являются non-success diagnostic evidence и сами по себе **не** разрешают retry/replay bootstrap.
 
 `VALIDATION_BLOCKED` может вернуть только allowlisted blocker taxonomy и optional allowlisted reconciliation check. `RECOVERY_REQUIRED` возвращает только allowlisted recovery reason. Run IDs, source IDs, row counts, amounts, raw payload, descriptions, provider exception text и credentials наружу не возвращаются.
 
@@ -245,6 +249,7 @@ Successful recovery classification публикует только exact sanitiz
 
 - Если workflow остановился **до** шага `Invoke exact initial bootstrap tag once`, финансовый bootstrap invocation не начинался. После устранения причины допустим новый manual run с новым exact-main/readiness reconciliation; ранее созданная private trigger-free Function version сама по себе финансовых writes не делает.
 - Если invoke step начался, либо получен `RECOVERY_REQUIRED`, либо outcome не доказан, повторный bootstrap запрещён до чтения durable migration state и отдельного bounded recovery decision.
+- `INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` и `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` подтверждают только sanitized provider-envelope classification; они не доказывают отсутствие application writes и не являются разрешением на automatic retry/replay.
 - Unknown provider/transport detail не интерпретировать как success или safe replay.
 - Не выполнять controlled rebuild автоматически.
 
