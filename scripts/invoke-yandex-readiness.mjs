@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 const READINESS_TAG = 'r1-readiness';
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const INVOKE_TIMEOUT_MS = 60_000;
+const TRANSPORT_RETRY_DELAY_MS = 1_000;
 const SAFE_READY = Object.freeze({
   googleSource: 'READY',
   ydbSchema: 'READY',
@@ -18,6 +19,10 @@ const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({ status: 'FAIL', code: '
 const SAFE_INVOKE_FUNCTION_TIMEOUT = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FUNCTION_TIMEOUT' });
 const SAFE_INVOKE_MARKER_AMBIGUOUS = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_MARKER_AMBIGUOUS' });
 const YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout (504)';
+const RETRYABLE_TRANSPORT_CODES = new Set([
+  SAFE_INVOKE_NONZERO_UNCLASSIFIED.code,
+  SAFE_INVOKE_FUNCTION_TIMEOUT.code,
+]);
 const SAFE_PROBE_FAILURE_CODE_BY_MARKER = Object.freeze({
   CONFIG_INVALID: 'READINESS_RUNTIME_CONFIG_INVALID',
   GOOGLE_SPREADSHEET_ID_INVALID: 'READINESS_GOOGLE_SPREADSHEET_ID_INVALID',
@@ -135,11 +140,11 @@ function safeInvokeFailure(error) {
   return SAFE_INVOKE_FAILURE;
 }
 
-async function invokeReadiness(environment = process.env) {
-  const functionId = environment.PRIHRASH_YANDEX_READINESS_FUNCTION_ID;
-  const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
-  if (!nonBlank(functionId) || !nonBlank(ycBinary)) return SAFE_CONFIG_FAILURE;
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
+async function invokeReadinessOnce(functionId, ycBinary, environment) {
   try {
     const { stdout } = await execFileAsync(
       ycBinary,
@@ -167,6 +172,18 @@ async function invokeReadiness(environment = process.env) {
   } catch (error) {
     return safeInvokeFailure(error);
   }
+}
+
+async function invokeReadiness(environment = process.env) {
+  const functionId = environment.PRIHRASH_YANDEX_READINESS_FUNCTION_ID;
+  const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
+  if (!nonBlank(functionId) || !nonBlank(ycBinary)) return SAFE_CONFIG_FAILURE;
+
+  const first = await invokeReadinessOnce(functionId, ycBinary, environment);
+  if (!RETRYABLE_TRANSPORT_CODES.has(first.code)) return first;
+
+  await delay(TRANSPORT_RETRY_DELAY_MS);
+  return invokeReadinessOnce(functionId, ycBinary, environment);
 }
 
 const result = await invokeReadiness();
