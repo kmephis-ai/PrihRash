@@ -67,6 +67,12 @@ test('R1 readiness persists only allowlisted enum-only evidence while preserving
   assert.match(workflow, /npm run readiness:invoke \| tee "\$tmp"/);
   assert.match(workflow, /invoke_status="\$\{PIPESTATUS\[0\]\}"/);
   assert.match(workflow, /\(keys \| sort\) == \["code", "status"\]/);
+  assert.match(workflow, /\(keys \| sort\) == \["code", "outputShape", "status"\]/);
+  assert.match(workflow, /\.code != "READINESS_INVOKE_NONZERO_UNCLASSIFIED"/);
+  assert.match(workflow, /\.code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"/);
+  assert.match(workflow, /\^STDOUT_\(EMPTY\|TEXT\|JSON_OBJECT\|JSON_ARRAY\|JSON_STRING\|JSON_NUMBER\|JSON_BOOLEAN\|JSON_NULL\)__STDERR_/);
+  assert.match(workflow, /then \{status, code, outputShape\}/);
+  assert.match(workflow, /else \{status, code\}/);
   assert.match(workflow, /READINESS_READY/);
   assert.match(workflow, /READINESS_INVOKE_FUNCTION_TIMEOUT/);
   assert.match(workflow, /READINESS_GOOGLE_SOURCE_READ_FAILED/);
