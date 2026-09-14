@@ -18,13 +18,16 @@ const SAFE_INVOKE_OUTPUT_INVALID = Object.freeze({ status: 'FAIL', code: 'READIN
 const SAFE_INVOKE_NONZERO_UNCLASSIFIED = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 const SAFE_INVOKE_FUNCTION_TIMEOUT = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_FUNCTION_TIMEOUT' });
 const SAFE_INVOKE_MARKER_AMBIGUOUS = Object.freeze({ status: 'FAIL', code: 'READINESS_INVOKE_MARKER_AMBIGUOUS' });
+const SAFE_READINESS_DEADLINE_EXCEEDED = Object.freeze({ status: 'FAIL', code: 'READINESS_DEADLINE_EXCEEDED' });
 const YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout (504)';
-const RETRYABLE_TRANSPORT_CODES = new Set([
+const RETRYABLE_READINESS_CODES = new Set([
   SAFE_INVOKE_NONZERO_UNCLASSIFIED.code,
   SAFE_INVOKE_FUNCTION_TIMEOUT.code,
+  SAFE_READINESS_DEADLINE_EXCEEDED.code,
 ]);
 const SAFE_PROBE_FAILURE_CODE_BY_MARKER = Object.freeze({
   CONFIG_INVALID: 'READINESS_RUNTIME_CONFIG_INVALID',
+  DEADLINE_EXCEEDED: SAFE_READINESS_DEADLINE_EXCEEDED.code,
   GOOGLE_SPREADSHEET_ID_INVALID: 'READINESS_GOOGLE_SPREADSHEET_ID_INVALID',
   GOOGLE_CREDENTIALS_INVALID: 'READINESS_GOOGLE_CREDENTIALS_INVALID',
   GOOGLE_TOKEN_ACQUISITION_FAILED: 'READINESS_GOOGLE_TOKEN_ACQUISITION_FAILED',
@@ -180,7 +183,7 @@ async function invokeReadiness(environment = process.env) {
   if (!nonBlank(functionId) || !nonBlank(ycBinary)) return SAFE_CONFIG_FAILURE;
 
   const first = await invokeReadinessOnce(functionId, ycBinary, environment);
-  if (!RETRYABLE_TRANSPORT_CODES.has(first.code)) return first;
+  if (!RETRYABLE_READINESS_CODES.has(first.code)) return first;
 
   await delay(TRANSPORT_RETRY_DELAY_MS);
   return invokeReadinessOnce(functionId, ycBinary, environment);
