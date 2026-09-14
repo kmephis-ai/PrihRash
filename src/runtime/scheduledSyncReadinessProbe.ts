@@ -49,6 +49,7 @@ export interface ScheduledSyncReadinessRuntime {
 
 export type ScheduledSyncReadinessErrorCode =
   | 'CONFIG_INVALID'
+  | 'DEADLINE_EXCEEDED'
   | 'GOOGLE_SPREADSHEET_ID_INVALID'
   | 'GOOGLE_CREDENTIALS_INVALID'
   | 'GOOGLE_TOKEN_ACQUISITION_FAILED'
@@ -124,7 +125,16 @@ function createScheduledSyncReadinessDeadline(timeoutMs: number): Readonly<Sched
   });
 }
 
+function deadlineExceeded(error: unknown): ScheduledSyncReadinessError | null {
+  return error instanceof ScheduledSyncReadinessDeadlineExceededError
+    ? new ScheduledSyncReadinessError('DEADLINE_EXCEEDED')
+    : null;
+}
+
 function classifyGoogleSourceFailure(error: unknown): ScheduledSyncReadinessError {
+  const deadline = deadlineExceeded(error);
+  if (deadline !== null) return deadline;
+
   if (error instanceof GoogleServiceAccountTokenProviderError) {
     switch (error.code) {
       case 'INVALID_SERVICE_ACCOUNT_EMAIL':
@@ -193,6 +203,9 @@ function ydbProviderStatus(error: unknown): unknown {
 }
 
 function classifyMigrationTableReadFailure(error: unknown): ScheduledSyncReadinessError {
+  const deadline = deadlineExceeded(error);
+  if (deadline !== null) return deadline;
+
   const status = ydbProviderStatus(error);
   if (status === StatusIds_StatusCode.SCHEME_ERROR || status === StatusIds_StatusCode.NOT_FOUND) {
     return new ScheduledSyncReadinessError('YDB_MIGRATION_TABLE_RESOLUTION_FAILED');
@@ -239,6 +252,13 @@ function validateSchemaMigrationEvidence(rows: readonly Readonly<SchemaMigration
   }
 }
 
+function stageReadFailure(
+  error: unknown,
+  code: ScheduledSyncReadinessErrorCode,
+): ScheduledSyncReadinessError {
+  return deadlineExceeded(error) ?? new ScheduledSyncReadinessError(code);
+}
+
 async function runScheduledSyncReadinessProbeWithinDeadline(
   source: AuthoritativeFullSnapshotLeaseReader<GoogleSheetsImmutableSnapshot>,
   adapter: YdbAdapter,
@@ -252,8 +272,8 @@ async function runScheduledSyncReadinessProbeWithinDeadline(
 
   try {
     await deadline.run(() => adapter.read(readStatement('SELECT 1 AS readiness_probe')));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_QUERY_HEALTH_READ_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_QUERY_HEALTH_READ_FAILED');
   }
 
   try {
@@ -261,9 +281,8 @@ async function runScheduledSyncReadinessProbeWithinDeadline(
       'SELECT version, checksum, applied_at FROM schema_migrations LIMIT 0',
     )));
   } catch (error) {
-    if (error instanceof ScheduledSyncReadinessDeadlineExceededError) {
-      throw new ScheduledSyncReadinessError('YDB_MIGRATION_SCHEMA_READ_FAILED');
-    }
+    const deadlineFailure = deadlineExceeded(error);
+    if (deadlineFailure !== null) throw deadlineFailure;
     try {
       await deadline.run(() => adapter.read(readStatement(
         'SELECT 1 AS readiness_table_probe FROM schema_migrations LIMIT 0',
@@ -279,29 +298,29 @@ async function runScheduledSyncReadinessProbeWithinDeadline(
     migrationEvidence = await deadline.run(() => adapter.read<SchemaMigrationEvidenceRow>(readStatement(
       'SELECT version, CAST(checksum AS Utf8) AS checksum, applied_at FROM schema_migrations ORDER BY version ASC',
     )));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_MIGRATION_EVIDENCE_READ_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_MIGRATION_EVIDENCE_READ_FAILED');
   }
   validateSchemaMigrationEvidence(migrationEvidence.rows);
 
   try {
     await deadline.run(() => adapter.read(readStatement('SELECT normalized_source_label FROM accounts LIMIT 0')));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_ACCOUNTS_SCHEMA_READ_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_ACCOUNTS_SCHEMA_READ_FAILED');
   }
 
   try {
     await deadline.run(() => adapter.read(readStatement('SELECT normalized_source_label FROM categories LIMIT 0')));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_CATEGORIES_SCHEMA_READ_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_CATEGORIES_SCHEMA_READ_FAILED');
   }
 
   try {
     await deadline.run(() => adapter.read(readStatement(
       'SELECT migration_run_id, source_snapshot_id, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, binding_count, bindings FROM initial_bootstrap_identity_manifests LIMIT 0',
     )));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED');
   }
 
   return Object.freeze({
@@ -368,8 +387,8 @@ export async function executeScheduledSyncReadinessProbe(
   let ydbClient: Readonly<ScheduledSyncReadinessYdbClient>;
   try {
     ydbClient = await deadline.run(() => runtime.createYdbClient(config));
-  } catch {
-    throw new ScheduledSyncReadinessError('YDB_CLIENT_CREATE_FAILED');
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_CLIENT_CREATE_FAILED');
   }
   const adapter = new YdbAdapter(ydbClient.transport);
   let primaryError: unknown = null;
