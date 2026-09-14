@@ -88,14 +88,17 @@ test('bootstrap package exports only the dedicated handler and removes scheduled
   assert.match(verifier, /ydbJsV6SchemaBootstrapClient\.js/);
 });
 
-test('bootstrap invoker is retry-zero, exact-tag and never classifies non-PASS as success', async () => {
+test('bootstrap invoker is retry-zero, exact-tag and exposes only bounded privacy-safe invoke failure taxonomy', async () => {
   const invoker = await text(INVOKER);
 
   assert.match(invoker, /BOOTSTRAP_TAG = 'r1-initial-bootstrap'/);
   assert.match(invoker, /'--retry', '0'/);
   assert.match(invoker, /'--no-user-output'/);
   assert.match(invoker, /if \(result\.status !== 'PASS'\) process\.exitCode = 2/);
-  assert.doesNotMatch(invoker, /capturedErrorField|SAFE_FAILURE_CODE_BY_MARKER/);
+  assert.match(invoker, /YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout \(504\)'/);
+  assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT/);
+  assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED/);
+  assert.doesNotMatch(invoker, /SAFE_FAILURE_CODE_BY_MARKER|new Map\s*\(/);
 });
 
 test('runbook keeps Google authoritative, forbids blind retry/timer and requires retirement after committed reconciliation', async () => {
