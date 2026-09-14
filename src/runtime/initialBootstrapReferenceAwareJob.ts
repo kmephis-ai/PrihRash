@@ -10,14 +10,17 @@ import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integrat
 import { YdbAdapter } from '../integration/ydb/adapter.js';
 import {
   createYdbJsV6MetadataDataClient,
+  YdbJsV6DataTransportError,
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
+  InitialBootstrapApplicationError,
   runInitialBootstrapApplication,
 } from '../migration/initialBootstrapApplication.js';
 import {
   createInitialBootstrapDurableReconciliation,
 } from '../migration/initialBootstrapDurableReconciliation.js';
+import { InitialBootstrapMetadataExecutorError } from '../migration/initialBootstrapMetadataExecutor.js';
 import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
@@ -33,7 +36,10 @@ import {
   type InitialBootstrapRuntimePrimitives,
 } from '../migration/initialBootstrapRuntimePrimitives.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
-import { readScheduledSyncAdmissionEvidence } from '../migration/scheduledSyncAdmissionEvidence.js';
+import {
+  readScheduledSyncAdmissionEvidence,
+  ScheduledSyncAdmissionEvidenceError,
+} from '../migration/scheduledSyncAdmissionEvidence.js';
 import {
   planInitialReferenceBootstrap,
   type InitialReferenceBootstrapPlan,
@@ -56,6 +62,10 @@ export type InitialBootstrapReferenceAwareRuntimeErrorCode =
   | 'REFERENCE_YDB_CLIENT_CREATE_FAILED'
   | 'REFERENCE_RESOLUTION_FAILED'
   | 'REFERENCE_ADMISSION_READ_FAILED'
+  | 'REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED'
+  | 'REFERENCE_APPLICATION_SEMANTIC_FAILED'
+  | 'REFERENCE_APPLICATION_METADATA_FAILED'
+  | 'REFERENCE_APPLICATION_YDB_DATA_FAILED'
   | 'REFERENCE_APPLICATION_RUNTIME_FAILED'
   | 'REFERENCE_BOOTSTRAP_RESUME_UNSAFE'
   | 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE';
@@ -95,14 +105,32 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   }
 }
 
+function classifyApplicationRuntimeError(
+  error: unknown,
+): InitialBootstrapReferenceAwareRuntimeErrorCode {
+  if (error instanceof ScheduledSyncAdmissionEvidenceError) {
+    return 'REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED';
+  }
+  if (error instanceof InitialBootstrapApplicationError) {
+    return 'REFERENCE_APPLICATION_SEMANTIC_FAILED';
+  }
+  if (error instanceof InitialBootstrapMetadataExecutorError) {
+    return 'REFERENCE_APPLICATION_METADATA_FAILED';
+  }
+  if (error instanceof YdbJsV6DataTransportError) {
+    return 'REFERENCE_APPLICATION_YDB_DATA_FAILED';
+  }
+  return 'REFERENCE_APPLICATION_RUNTIME_FAILED';
+}
+
 async function runApplicationSafely(
   observation: Parameters<typeof runInitialBootstrapApplication>[0],
   dependencies: Parameters<typeof runInitialBootstrapApplication>[1],
 ) {
   try {
     return await runInitialBootstrapApplication(observation, dependencies);
-  } catch {
-    throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_APPLICATION_RUNTIME_FAILED');
+  } catch (error) {
+    throw new InitialBootstrapReferenceAwareRuntimeError(classifyApplicationRuntimeError(error));
   }
 }
 
