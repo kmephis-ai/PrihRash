@@ -28,6 +28,7 @@ export type YdbJsV6DataTransportErrorCode =
   | 'PARAMETER_VALUE_INVALID'
   | 'PARAMETER_TYPE_UNSUPPORTED'
   | 'TIMESTAMP_PRECISION_UNSUPPORTED'
+  | 'QUERY_EXECUTION_FAILED'
   | 'CLIENT_CONFIG_INVALID';
 
 export class YdbJsV6DataTransportError extends Error {
@@ -162,18 +163,23 @@ async function executeStatement<Row>(
   statement: Readonly<YdbStatement>,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
 ): Promise<YdbQueryResult<Row>> {
-  let query = executor(statement.text);
-  if (query === null || typeof query !== 'object' || typeof query.parameter !== 'function') {
-    fail('SDK_SHAPE_INVALID');
+  try {
+    let query = executor(statement.text);
+    if (query === null || typeof query !== 'object' || typeof query.parameter !== 'function') {
+      fail('SDK_SHAPE_INVALID');
+    }
+    for (const [name, parameter] of Object.entries(statement.parameters)) {
+      query = query.parameter(name, mapParameter(parameter));
+    }
+    const resultSets = await query;
+    const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
+      ? resultSets[0] as readonly Row[]
+      : [];
+    return Object.freeze({ rows: Object.freeze([...rows]) });
+  } catch (error) {
+    if (error instanceof YdbJsV6DataTransportError) throw error;
+    throw new YdbJsV6DataTransportError('QUERY_EXECUTION_FAILED');
   }
-  for (const [name, parameter] of Object.entries(statement.parameters)) {
-    query = query.parameter(name, mapParameter(parameter));
-  }
-  const resultSets = await query;
-  const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
-    ? resultSets[0] as readonly Row[]
-    : [];
-  return Object.freeze({ rows: Object.freeze([...rows]) });
 }
 
 export function createYdbJsV6DataTransport(
