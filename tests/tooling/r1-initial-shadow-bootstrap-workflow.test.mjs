@@ -82,12 +82,24 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /REFERENCE_APPLICATION_YDB_DATA_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED/);
+  assert.match(workflow, /outputShape:/);
+  assert.match(workflow, /\$code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"/);
+  assert.match(workflow, /\^STDOUT_\(EMPTY\|TEXT\|JSON_OBJECT\|JSON_ARRAY\|JSON_STRING\|JSON_NUMBER\|JSON_BOOLEAN\|JSON_NULL\)__STDERR_/);
+  assert.match(workflow, /then \.outputShape/);
   assert.match(workflow, /Publish enum-only bootstrap evidence/);
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /r1-initial-bootstrap-evidence\/classification\.json/);
   assert.match(workflow, /retention-days:\s*1/);
   assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
+
+  const projection = workflow.match(/\| \{[\s\S]*?\n\s+\}\n\s+' > "\$candidate"/)?.[0];
+  assert.ok(projection, 'enum-only evidence projection must remain explicit');
+  assert.match(projection, /status: \$status/);
+  assert.match(projection, /code: \$code/);
+  assert.match(projection, /runtimeCode:/);
+  assert.match(projection, /outputShape:/);
+  assert.doesNotMatch(projection, /\.(?:stdout|stderr|message|payload|details)\b/i);
 });
 
 test('bootstrap package exports only the dedicated handler and removes scheduled/schema runtime entrypoints', async () => {
