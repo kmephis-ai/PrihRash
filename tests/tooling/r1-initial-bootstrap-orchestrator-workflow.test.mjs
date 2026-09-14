@@ -69,7 +69,7 @@ test('non-success after a reached bootstrap invoke gets one read-only classifica
   assert.doesNotMatch(workflow, /controlled.*rebuild|cleanup|timer|cutover/i);
 });
 
-test('child dispatcher can launch only the canonical readiness and bootstrap workflows on exact main', async () => {
+test('child dispatcher can launch only canonical child workflows and fails closed on concurrency or inconsistent success evidence', async () => {
   const dispatcher = await text(DISPATCHER);
 
   assert.match(dispatcher, /readiness: 'r1-yandex-readiness\.yml'/);
@@ -77,11 +77,15 @@ test('child dispatcher can launch only the canonical readiness and bootstrap wor
   assert.match(dispatcher, /repository !== REPOSITORY/);
   assert.match(dispatcher, /branch\?\.commit\?\.sha !== expectedSha/);
   assert.match(dispatcher, /branch\?\.protected !== true/);
+  assert.match(dispatcher, /activeMainDispatch/);
   assert.match(dispatcher, /event === 'workflow_dispatch'/);
   assert.match(dispatcher, /body: JSON\.stringify\(\{ ref: 'main' \}\)/);
   assert.match(dispatcher, /CHILD_WORKFLOW_ALREADY_ACTIVE/);
   assert.match(dispatcher, /CHILD_WORKFLOW_AMBIGUOUS/);
   assert.match(dispatcher, /Invoke exact initial bootstrap tag once/);
+  assert.match(dispatcher, /run\.conclusion === 'success' && invokeStepConclusion !== 'success'/);
+  assert.match(dispatcher, /result\.conclusion = 'inconsistent'/);
+  assert.match(dispatcher, /result\.invokeStepConclusion = 'UNKNOWN'/);
 });
 
 test('orchestrator publishes one short-lived privacy-safe evidence artifact', async () => {
