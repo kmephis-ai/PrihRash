@@ -60,6 +60,29 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /npm run readiness:invoke/);
 });
 
+test('R1 readiness persists only allowlisted enum-only evidence while preserving invoke failure', async () => {
+  const workflow = await text(WORKFLOW);
+
+  assert.match(workflow, /id:\s*readiness-invoke/);
+  assert.match(workflow, /npm run readiness:invoke \| tee "\$tmp"/);
+  assert.match(workflow, /invoke_status="\$\{PIPESTATUS\[0\]\}"/);
+  assert.match(workflow, /\(keys \| sort\) == \["code", "status"\]/);
+  assert.match(workflow, /READINESS_READY/);
+  assert.match(workflow, /READINESS_INVOKE_FUNCTION_TIMEOUT/);
+  assert.match(workflow, /READINESS_GOOGLE_SOURCE_READ_FAILED/);
+  assert.match(workflow, /READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED/);
+  assert.match(workflow, /READINESS_EVIDENCE_INVALID/);
+  assert.match(workflow, /exit "\$invoke_status"/);
+  assert.doesNotMatch(workflow, /continue-on-error:/);
+  assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+  assert.match(workflow, /steps\.readiness-invoke\.outcome == 'success'/);
+  assert.match(workflow, /steps\.readiness-invoke\.outcome == 'failure'/);
+  assert.match(workflow, /r1-yandex-readiness-evidence-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /r1-yandex-readiness-evidence\/classification\.json/);
+  assert.match(workflow, /if-no-files-found:\s*error/);
+  assert.match(workflow, /retention-days:\s*1/);
+});
+
 test('R1 readiness timeout envelopes preserve the bounded application deadline with transport headroom', async () => {
   const [workflow, invoker, probe, runbook] = await Promise.all([
     text(WORKFLOW),
