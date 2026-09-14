@@ -62,10 +62,16 @@ function exactRun(run, expectedSha) {
     && run?.event === 'workflow_dispatch';
 }
 
+function activeMainDispatch(run) {
+  return run?.head_branch === 'main'
+    && run?.event === 'workflow_dispatch'
+    && ACTIVE_STATUSES.has(run?.status);
+}
+
 async function dispatchAndResolveRun(token, workflow, expectedSha) {
   await requireExactMain(token, expectedSha);
   const beforeRuns = await listDispatchRuns(token, workflow);
-  if (beforeRuns.some((run) => exactRun(run, expectedSha) && ACTIVE_STATUSES.has(run.status))) {
+  if (beforeRuns.some(activeMainDispatch)) {
     throw new Error('CHILD_WORKFLOW_ALREADY_ACTIVE');
   }
   const beforeIds = new Set(beforeRuns.map((run) => run.id));
@@ -141,7 +147,13 @@ async function main() {
       conclusion: run.conclusion,
     };
     if (kind === 'bootstrap') {
-      result.invokeStepConclusion = await bootstrapInvokeConclusion(token, runId);
+      const invokeStepConclusion = await bootstrapInvokeConclusion(token, runId);
+      if (run.conclusion === 'success' && invokeStepConclusion !== 'success') {
+        result.conclusion = 'inconsistent';
+        result.invokeStepConclusion = 'UNKNOWN';
+      } else {
+        result.invokeStepConclusion = invokeStepConclusion;
+      }
     }
     safeJson(result);
   } catch {
