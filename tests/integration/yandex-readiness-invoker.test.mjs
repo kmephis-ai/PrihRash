@@ -110,7 +110,45 @@ test('exact structured readiness failure results are allowlist-classified withou
   }
 });
 
-test('non-zero yc failure without an allowlisted marker is classified without echoing raw stdout or stderr', async () => {
+test('semantic readiness failures are not retried', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+const fs = require('node:fs');
+const state = __filename + '.attempt';
+const attempt = fs.existsSync(state) ? Number(fs.readFileSync(state, 'utf8')) : 0;
+fs.writeFileSync(state, String(attempt + 1));
+if (attempt === 0) {
+  process.stdout.write(JSON.stringify({readinessFailure:'YDB_QUERY_HEALTH_READ_FAILED'}));
+} else {
+  process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+}
+`,
+  });
+
+  assert.equal(result.exitCode, 2);
+  assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_YDB_QUERY_HEALTH_READ_FAILED' });
+});
+
+test('one transport-level non-zero readiness failure is retried once and can recover', async () => {
+  const result = await runInvoker({
+    fakeSource: `
+const fs = require('node:fs');
+const state = __filename + '.attempt';
+const attempt = fs.existsSync(state) ? Number(fs.readFileSync(state, 'utf8')) : 0;
+fs.writeFileSync(state, String(attempt + 1));
+if (attempt === 0) {
+  process.stderr.write(${JSON.stringify(`temporary provider failure\n${PRIVATE_LOOKING}`)});
+  process.exit(17);
+}
+process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+`,
+  });
+
+  assert.equal(result.exitCode, 0);
+  assertSafeOutput(result, { status: 'PASS', code: 'READINESS_READY' });
+});
+
+test('non-zero yc failure without an allowlisted marker remains classified after the single bounded retry without echoing raw stdout or stderr', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stdout.write('${PRIVATE_LOOKING}');
@@ -123,7 +161,7 @@ process.exit(17);
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
-test('known Yandex Function execution timeout is classified without echoing provider detail', async () => {
+test('known Yandex Function execution timeout remains classified after the single bounded retry without echoing provider detail', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (504)\n${PRIVATE_LOOKING}`)});
@@ -135,7 +173,7 @@ process.exit(1);
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_FUNCTION_TIMEOUT' });
 });
 
-test('near-miss provider timeout remains fail-closed and unclassified', async () => {
+test('near-miss provider timeout remains fail-closed and unclassified after the single bounded retry', async () => {
   const result = await runInvoker({
     fakeSource: `
 process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (503)\n${PRIVATE_LOOKING}`)});
@@ -147,7 +185,7 @@ process.exit(1);
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED' });
 });
 
-test('one allowlisted sanitized readiness marker in a non-zero provider failure remains safely classified', async () => {
+test('one allowlisted sanitized readiness marker in a non-zero provider failure remains safely classified without retry', async () => {
   for (const [marker, code] of SAFE_PROBE_FAILURES) {
     const result = await runInvoker({
       fakeSource: `
@@ -200,7 +238,7 @@ test('missing function id fails before yc is executed', async () => {
   assertSafeOutput(result, { status: 'FAIL', code: 'READINESS_CONFIG_INVALID' });
 });
 
-test('missing yc CLI fails closed with the generic invoke code', async () => {
+test('missing yc CLI fails closed with the generic invoke code without retrying a semantic result', async () => {
   const result = await runInvoker({
     fakeSource: null,
     ycPath: resolve(tmpdir(), 'prihrash-definitely-missing-yc'),
