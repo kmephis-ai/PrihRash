@@ -295,8 +295,79 @@ jobs:
           fi
 
       - name: Invoke exact readiness tag
+        id: readiness-invoke
         shell: bash
         run: |
           set -euo pipefail
           export PRIHRASH_YANDEX_READINESS_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
-          npm run readiness:invoke
+          tmp="$RUNNER_TEMP/r1-readiness-invoke.log"
+          evidence_dir="$RUNNER_TEMP/r1-yandex-readiness-evidence"
+          candidate="$evidence_dir/classification.tmp"
+          mkdir -p "$evidence_dir"
+
+          set +e
+          npm run readiness:invoke | tee "$tmp"
+          invoke_status="${PIPESTATUS[0]}"
+          set -e
+
+          if ! tail -n 1 "$tmp" | jq -c -e '
+            select(
+              type == "object"
+              and (keys | sort) == ["code", "status"]
+              and (.code as $code | ([
+                "READINESS_READY",
+                "READINESS_CONFIG_INVALID",
+                "READINESS_INVOKE_FAILED",
+                "READINESS_INVOKE_OUTPUT_INVALID",
+                "READINESS_INVOKE_NONZERO_UNCLASSIFIED",
+                "READINESS_INVOKE_FUNCTION_TIMEOUT",
+                "READINESS_INVOKE_MARKER_AMBIGUOUS",
+                "READINESS_RUNTIME_CONFIG_INVALID",
+                "READINESS_GOOGLE_SPREADSHEET_ID_INVALID",
+                "READINESS_GOOGLE_CREDENTIALS_INVALID",
+                "READINESS_GOOGLE_TOKEN_ACQUISITION_FAILED",
+                "READINESS_GOOGLE_SHEETS_ACCESS_FAILED",
+                "READINESS_GOOGLE_SHEETS_RESPONSE_INVALID",
+                "READINESS_GOOGLE_SOURCE_METADATA_MISMATCH",
+                "READINESS_GOOGLE_SOURCE_SHEET_MISSING",
+                "READINESS_GOOGLE_SOURCE_SCHEMA_MISMATCH",
+                "READINESS_GOOGLE_SOURCE_VALUE_UNSUPPORTED",
+                "READINESS_GOOGLE_SOURCE_READ_FAILED",
+                "READINESS_YDB_CLIENT_CREATE_FAILED",
+                "READINESS_YDB_QUERY_HEALTH_READ_FAILED",
+                "READINESS_YDB_MIGRATION_TABLE_RESOLUTION_FAILED",
+                "READINESS_YDB_MIGRATION_TABLE_ACCESS_DENIED",
+                "READINESS_YDB_MIGRATION_TABLE_READ_FAILED",
+                "READINESS_YDB_MIGRATION_SCHEMA_READ_FAILED",
+                "READINESS_YDB_MIGRATION_EVIDENCE_READ_FAILED",
+                "READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED",
+                "READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED",
+                "READINESS_YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED",
+                "READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE",
+                "READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION",
+                "READINESS_UNEXPECTED_SCHEMA_MIGRATION",
+                "READINESS_YDB_CLIENT_CLOSE_FAILED",
+                "READINESS_RUNTIME_FAILED"
+              ] | index($code)) != null)
+              and (
+                (.status == "PASS" and .code == "READINESS_READY")
+                or (.status == "FAIL" and .code != "READINESS_READY")
+              )
+            )
+          ' > "$candidate"; then
+            rm -f "$candidate" "$tmp"
+            echo 'READINESS_EVIDENCE_INVALID'
+            exit 1
+          fi
+          mv "$candidate" "$evidence_dir/classification.json"
+          rm -f "$tmp"
+          exit "$invoke_status"
+
+      - name: Publish enum-only readiness evidence
+        if: ${{ always() && (steps.readiness-invoke.outcome == 'success' || steps.readiness-invoke.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-yandex-readiness-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-yandex-readiness-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 1
