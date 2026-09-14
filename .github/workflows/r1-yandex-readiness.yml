@@ -313,7 +313,15 @@ jobs:
           if ! tail -n 1 "$tmp" | jq -c -e '
             select(
               type == "object"
-              and (keys | sort) == ["code", "status"]
+              and (
+                ((keys | sort) == ["code", "status"] and .code != "READINESS_INVOKE_NONZERO_UNCLASSIFIED")
+                or (
+                  (keys | sort) == ["code", "outputShape", "status"]
+                  and .code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"
+                  and (.outputShape | type) == "string"
+                  and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
+                )
+              )
               and (.code as $code | ([
                 "READINESS_READY",
                 "READINESS_CONFIG_INVALID",
@@ -354,6 +362,10 @@ jobs:
                 or (.status == "FAIL" and .code != "READINESS_READY")
               )
             )
+            | if .code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"
+              then {status, code, outputShape}
+              else {status, code}
+              end
           ' > "$candidate"; then
             rm -f "$candidate" "$tmp"
             echo 'READINESS_EVIDENCE_INVALID'
