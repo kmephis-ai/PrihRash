@@ -48,12 +48,13 @@ async function runInvoker(fakeSource, extraEnvironment = {}) {
   }
 }
 
-function assertSafeShape(result, outputShape) {
+function assertSafeShape(result, outputShape, transportClass) {
   assert.equal(result.exitCode, 2);
   assert.deepEqual(JSON.parse(result.stdout), {
     status: 'FAIL',
     code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED',
     outputShape,
+    transportClass,
   });
   assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes(PRIVATE_LOOKING), false);
@@ -67,7 +68,7 @@ process.stderr.write('${PRIVATE_LOOKING}');
 process.exit(17);
 `);
 
-  assertSafeShape(result, 'STDOUT_TEXT__STDERR_TEXT');
+  assertSafeShape(result, 'STDOUT_TEXT__STDERR_TEXT', 'OTHER');
 });
 
 test('GitHub Actions evidence distinguishes JSON object stdout without keys or values', async () => {
@@ -76,7 +77,25 @@ process.stdout.write(JSON.stringify({private:'${PRIVATE_LOOKING}'}));
 process.exit(17);
 `);
 
-  assertSafeShape(result, 'STDOUT_JSON_OBJECT__STDERR_EMPTY');
+  assertSafeShape(result, 'STDOUT_JSON_OBJECT__STDERR_EMPTY', 'EMPTY');
+});
+
+test('GitHub Actions evidence classifies provider transport stderr without publishing text', async () => {
+  const result = await runInvoker(`
+process.stderr.write('rpc error: code = PermissionDenied details=${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'AUTH');
+});
+
+test('GitHub Actions evidence classifies deadline transport stderr without publishing text', async () => {
+  const result = await runInvoker(`
+process.stderr.write('rpc error: code = DeadlineExceeded details=${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'DEADLINE');
 });
 
 test('non-GitHub invoker contract stays exact status/code without output shape', async () => {
