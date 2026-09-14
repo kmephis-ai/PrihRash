@@ -52,6 +52,11 @@ import {
 
 export type InitialBootstrapReferenceAwareRuntimeErrorCode =
   | 'REFERENCE_RUNTIME_STATE_INVALID'
+  | 'REFERENCE_SOURCE_READ_FAILED'
+  | 'REFERENCE_YDB_CLIENT_CREATE_FAILED'
+  | 'REFERENCE_RESOLUTION_FAILED'
+  | 'REFERENCE_ADMISSION_READ_FAILED'
+  | 'REFERENCE_APPLICATION_RUNTIME_FAILED'
   | 'REFERENCE_BOOTSTRAP_RESUME_UNSAFE'
   | 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE';
 
@@ -90,6 +95,17 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   }
 }
 
+async function runApplicationSafely(
+  observation: Parameters<typeof runInitialBootstrapApplication>[0],
+  dependencies: Parameters<typeof runInitialBootstrapApplication>[1],
+) {
+  try {
+    return await runInitialBootstrapApplication(observation, dependencies);
+  } catch {
+    throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_APPLICATION_RUNTIME_FAILED');
+  }
+}
+
 function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
   let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
   let digest: Readonly<CanonicalSourceDigest> | null = null;
@@ -119,8 +135,12 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
       });
       return Object.freeze({
         async readFullSnapshotObservation() {
-          lease = await reader.readFullSnapshotObservation();
-          return lease;
+          try {
+            lease = await reader.readFullSnapshotObservation();
+            return lease;
+          } catch {
+            throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_SOURCE_READ_FAILED');
+          }
         },
       });
     },
@@ -128,27 +148,35 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
       primitives = createNodeInitialBootstrapRuntimePrimitives();
       return primitives;
     },
-    createYdbClient(config: Readonly<InitialBootstrapJobConfig>): Promise<Readonly<YdbJsDataClient>> {
-      return createYdbJsV6MetadataDataClient({
-        connectionString: config.ydbConnectionString,
-        poolMaxSize: 1,
-      });
+    async createYdbClient(config: Readonly<InitialBootstrapJobConfig>): Promise<Readonly<YdbJsDataClient>> {
+      try {
+        return await createYdbJsV6MetadataDataClient({
+          connectionString: config.ydbConnectionString,
+          poolMaxSize: 1,
+        });
+      } catch {
+        throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_YDB_CLIENT_CREATE_FAILED');
+      }
     },
     async readReferenceResolver(adapter: YdbAdapter) {
       if (lease === null || digest === null || primitives === null) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RUNTIME_STATE_INVALID');
       }
-      const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
-      referenceRows = Object.freeze(projected.rows.map((row, sourceOrdinal) => Object.freeze({
-        sourceOrdinal,
-        rawPayload: row.rawPayload,
-      })));
-      referencePlan = await planInitialReferenceBootstrap(
-        adapter,
-        referenceRows,
-        primitives.referenceIdentityAllocator,
-      );
-      return referencePlan.resolver;
+      try {
+        const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
+        referenceRows = Object.freeze(projected.rows.map((row, sourceOrdinal) => Object.freeze({
+          sourceOrdinal,
+          rawPayload: row.rawPayload,
+        })));
+        referencePlan = await planInitialReferenceBootstrap(
+          adapter,
+          referenceRows,
+          primitives.referenceIdentityAllocator,
+        );
+        return referencePlan.resolver;
+      } catch {
+        throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RESOLUTION_FAILED');
+      }
     },
     createReconciliation(adapter, projectionContext, historicalEvidence) {
       return createInitialBootstrapDurableReconciliation(
@@ -177,16 +205,21 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         )) {
           throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
         }
-        return runInitialBootstrapApplication(observation, dependencies);
+        return runApplicationSafely(observation, dependencies);
       }
       if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
       }
       if (referencePlan.writes.length === 0) {
-        return runInitialBootstrapApplication(observation, dependencies);
+        return runApplicationSafely(observation, dependencies);
       }
 
-      const admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
+      let admission;
+      try {
+        admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
+      } catch {
+        throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_ADMISSION_READ_FAILED');
+      }
       if (admission.committedBaselineRun !== null || admission.incompleteRuns.length !== 0) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RESUME_UNSAFE');
       }
@@ -194,7 +227,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         dependencies.adapter,
         referencePlan,
       );
-      return runInitialBootstrapApplication(observation, Object.freeze({
+      return runApplicationSafely(observation, Object.freeze({
         ...dependencies,
         adapter,
       }));
