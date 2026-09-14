@@ -316,10 +316,12 @@ jobs:
               and (
                 ((keys | sort) == ["code", "status"] and .code != "READINESS_INVOKE_NONZERO_UNCLASSIFIED")
                 or (
-                  (keys | sort) == ["code", "outputShape", "status"]
+                  (keys | sort) == ["code", "outputShape", "status", "transportClass"]
                   and .code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"
                   and (.outputShape | type) == "string"
                   and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
+                  and (.transportClass | type) == "string"
+                  and (.transportClass | test("^(EMPTY|AUTH|NOT_FOUND|RATE_LIMIT|DEADLINE|UNAVAILABLE|INVALID_REQUEST|FAILED_PRECONDITION|INTERNAL|OTHER)$"))
                 )
               )
               and (.code as $code | ([
@@ -363,7 +365,7 @@ jobs:
               )
             )
             | if .code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"
-              then {status, code, outputShape}
+              then {status, code, outputShape, transportClass}
               else {status, code}
               end
           ' > "$candidate"; then
