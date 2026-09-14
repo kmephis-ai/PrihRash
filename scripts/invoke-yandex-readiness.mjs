@@ -122,8 +122,37 @@ function capturedErrorField(error, field) {
   return typeof value === 'string' ? value : '';
 }
 
-function safeInvokeFailure(error) {
-  const captured = `${capturedErrorField(error, 'stdout')}\n${capturedErrorField(error, 'stderr')}`;
+function safeCapturedShape(value) {
+  if (value.length === 0) return 'EMPTY';
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return 'TEXT';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return 'TEXT';
+  }
+
+  if (parsed === null) return 'JSON_NULL';
+  if (Array.isArray(parsed)) return 'JSON_ARRAY';
+  if (typeof parsed === 'object') return 'JSON_OBJECT';
+  if (typeof parsed === 'string') return 'JSON_STRING';
+  if (typeof parsed === 'number') return 'JSON_NUMBER';
+  if (typeof parsed === 'boolean') return 'JSON_BOOLEAN';
+  return 'TEXT';
+}
+
+function reportSafeNonzeroShape(stdout, stderr, environment) {
+  if (environment.GITHUB_ACTIONS !== 'true') return;
+  const shape = `STDOUT_${safeCapturedShape(stdout)}__STDERR_${safeCapturedShape(stderr)}`;
+  process.stderr.write(`READINESS_INVOKE_OUTPUT_SHAPE=${shape}\n`);
+}
+
+function safeInvokeFailure(error, environment) {
+  const stdout = capturedErrorField(error, 'stdout');
+  const stderr = capturedErrorField(error, 'stderr');
+  const captured = `${stdout}\n${stderr}`;
   const matches = Object.entries(SAFE_PROBE_FAILURE_CODE_BY_MARKER)
     .filter(([marker]) => captured.includes(marker));
   if (matches.length === 1) {
@@ -136,6 +165,7 @@ function safeInvokeFailure(error) {
     && (typeof error === 'object' || typeof error === 'function')
     && typeof Reflect.get(error, 'code') === 'number'
   ) {
+    reportSafeNonzeroShape(stdout, stderr, environment);
     return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
   }
   return SAFE_INVOKE_FAILURE;
@@ -171,7 +201,7 @@ async function invokeReadinessOnce(functionId, ycBinary, environment) {
     );
     return parseProviderOutput(stdout);
   } catch (error) {
-    return safeInvokeFailure(error);
+    return safeInvokeFailure(error, environment);
   }
 }
 
