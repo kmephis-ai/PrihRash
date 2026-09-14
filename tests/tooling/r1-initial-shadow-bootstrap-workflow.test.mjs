@@ -72,6 +72,24 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.doesNotMatch(workflow, /npm run (?:readiness|schema-bootstrap|schema-upgrade-003):invoke/);
 });
 
+test('reached bootstrap invoke publishes one short-lived enum-only artifact without changing retry semantics', async () => {
+  const workflow = await text(WORKFLOW);
+
+  assert.match(workflow, /id:\s*bootstrap-invoke/);
+  assert.match(workflow, /npm run initial-bootstrap:invoke \| tee/);
+  assert.match(workflow, /invoke_status="\$\{PIPESTATUS\[0\]\}"/);
+  assert.match(workflow, /exit "\$invoke_status"/);
+  assert.match(workflow, /runtimeCode:/);
+  assert.match(workflow, /REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED/);
+  assert.match(workflow, /Publish enum-only bootstrap evidence/);
+  assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
+  assert.match(workflow, /r1-initial-bootstrap-evidence-\$\{\{ github\.run_id \}\}/);
+  assert.match(workflow, /r1-initial-bootstrap-evidence\/classification\.json/);
+  assert.match(workflow, /retention-days:\s*1/);
+  assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
+});
+
 test('bootstrap package exports only the dedicated handler and removes scheduled/schema runtime entrypoints', async () => {
   const packageScript = await text(PACKAGE_SCRIPT);
   const verifier = await text(PACKAGE_VERIFY);
