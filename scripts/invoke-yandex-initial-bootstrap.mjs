@@ -215,6 +215,16 @@ function parseExactFunctionResult(stdout) {
   return null;
 }
 
+function parseUniqueExactNonPassFunctionResultFromLines(value) {
+  const matches = [];
+  for (const line of value.split(/\r?\n/u)) {
+    if (line.trim().length === 0) continue;
+    const result = parseExactFunctionResult(line);
+    if (result !== null && result.status !== 'PASS') matches.push(result);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 function capturedErrorField(error, field) {
   if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return '';
   const value = Reflect.get(error, field);
@@ -258,6 +268,10 @@ function safeInvokeFailure(error, environment) {
 
   const captured = `${stdout}\n${stderr}`;
   if (captured.includes(YANDEX_FUNCTION_TIMEOUT_MARKER)) return SAFE_INVOKE_FUNCTION_TIMEOUT;
+
+  const stderrExactResult = parseUniqueExactNonPassFunctionResultFromLines(stderr);
+  if (stderrExactResult !== null) return stderrExactResult;
+
   if (
     error !== null
     && (typeof error === 'object' || typeof error === 'function')
