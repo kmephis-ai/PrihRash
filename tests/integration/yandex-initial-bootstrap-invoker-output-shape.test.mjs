@@ -47,26 +47,27 @@ async function runInvoker(fakeSource) {
   }
 }
 
-function assertSafeShape(result, outputShape) {
+function assertSafeShape(result, outputShape, transportClass) {
   assert.equal(result.exitCode, 2);
   assert.deepEqual(JSON.parse(result.stdout), {
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED',
     outputShape,
+    transportClass,
   });
   assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes(PRIVATE_LOOKING), false);
   assert.equal(result.stderr.includes(PRIVATE_LOOKING), false);
 }
 
-test('GitHub Actions observability reports only enum shape for private text output', async () => {
+test('GitHub Actions observability reports only enum shape and OTHER class for private text output', async () => {
   const result = await runInvoker(`
 process.stdout.write('${PRIVATE_LOOKING}');
 process.stderr.write('${PRIVATE_LOOKING}');
 process.exit(17);
 `);
 
-  assertSafeShape(result, 'STDOUT_TEXT__STDERR_TEXT');
+  assertSafeShape(result, 'STDOUT_TEXT__STDERR_TEXT', 'OTHER');
 });
 
 test('GitHub Actions observability distinguishes empty stdout from provider stderr text', async () => {
@@ -75,7 +76,7 @@ process.stderr.write('${PRIVATE_LOOKING}');
 process.exit(17);
 `);
 
-  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT');
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'OTHER');
 });
 
 test('GitHub Actions observability reports JSON container type without keys or values', async () => {
@@ -84,5 +85,23 @@ process.stdout.write(JSON.stringify({private:'${PRIVATE_LOOKING}'}));
 process.exit(17);
 `);
 
-  assertSafeShape(result, 'STDOUT_JSON_OBJECT__STDERR_EMPTY');
+  assertSafeShape(result, 'STDOUT_JSON_OBJECT__STDERR_EMPTY', 'EMPTY');
+});
+
+test('GitHub Actions observability classifies authorization transport text without preserving it', async () => {
+  const result = await runInvoker(`
+process.stderr.write('PermissionDenied: synthetic authorization failure ${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'AUTH');
+});
+
+test('GitHub Actions observability classifies deadline transport text without preserving it', async () => {
+  const result = await runInvoker(`
+process.stderr.write('context deadline exceeded ${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'DEADLINE');
 });
