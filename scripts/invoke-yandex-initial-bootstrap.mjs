@@ -221,7 +221,36 @@ function capturedErrorField(error, field) {
   return typeof value === 'string' ? value : '';
 }
 
-function safeInvokeFailure(error) {
+function safeCapturedShape(value) {
+  if (value.length === 0) return 'EMPTY';
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return 'TEXT';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return 'TEXT';
+  }
+
+  if (parsed === null) return 'JSON_NULL';
+  if (Array.isArray(parsed)) return 'JSON_ARRAY';
+  if (typeof parsed === 'object') return 'JSON_OBJECT';
+  if (typeof parsed === 'string') return 'JSON_STRING';
+  if (typeof parsed === 'number') return 'JSON_NUMBER';
+  if (typeof parsed === 'boolean') return 'JSON_BOOLEAN';
+  return 'TEXT';
+}
+
+function safeNonzeroUnclassified(stdout, stderr, environment) {
+  if (environment.GITHUB_ACTIONS !== 'true') return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+  return Object.freeze({
+    ...SAFE_INVOKE_NONZERO_UNCLASSIFIED,
+    outputShape: `STDOUT_${safeCapturedShape(stdout)}__STDERR_${safeCapturedShape(stderr)}`,
+  });
+}
+
+function safeInvokeFailure(error, environment) {
   const stdout = capturedErrorField(error, 'stdout');
   const stderr = capturedErrorField(error, 'stderr');
   const exactResult = parseExactFunctionResult(stdout);
@@ -234,7 +263,7 @@ function safeInvokeFailure(error) {
     && (typeof error === 'object' || typeof error === 'function')
     && typeof Reflect.get(error, 'code') === 'number'
   ) {
-    return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+    return safeNonzeroUnclassified(stdout, stderr, environment);
   }
   return SAFE_INVOKE_FAILURE;
 }
@@ -258,7 +287,7 @@ async function invokeInitialBootstrap(environment = process.env) {
     );
     return parseExactFunctionResult(stdout) ?? SAFE_INVOKE_OUTPUT_INVALID;
   } catch (error) {
-    return safeInvokeFailure(error);
+    return safeInvokeFailure(error, environment);
   }
 }
 
