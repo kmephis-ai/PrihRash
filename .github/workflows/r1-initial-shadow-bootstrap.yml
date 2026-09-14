@@ -448,6 +448,14 @@ jobs:
                   then .runtimeCode
                   else null
                   end
+                ),
+                outputShape: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                     and (.outputShape | type) == "string"
+                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
+                  then .outputShape
+                  else null
+                  end
                 )
               }
           ' > "$candidate"; then
