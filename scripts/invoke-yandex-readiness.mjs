@@ -147,13 +147,13 @@ function safeTransportClass(stderr) {
   if (stderr.length === 0) return 'EMPTY';
   const normalized = stderr.toLowerCase();
   const rules = [
-    [/(permission[_ ]denied|unauthenticated|unauthorized|authentication failed|access denied)/, 'AUTH'],
-    [/(not[_ ]found|not found|does not exist)/, 'NOT_FOUND'],
-    [/(resource[_ ]exhausted|too many requests|rate limit|\b429\b)/, 'RATE_LIMIT'],
-    [/(deadline[_ ]exceeded|deadline exceeded|context deadline|timed out|timeout|\b504\b)/, 'DEADLINE'],
+    [/(permission(?:[_ ]?denied)|unauthenticated|unauthorized|authentication failed|access denied)/, 'AUTH'],
+    [/(not(?:[_ ]?found)|does not exist)/, 'NOT_FOUND'],
+    [/(resource(?:[_ ]?exhausted)|too many requests|rate limit|\b429\b)/, 'RATE_LIMIT'],
+    [/(deadline(?:[_ ]?exceeded)|context deadline|timed out|timeout|\b504\b)/, 'DEADLINE'],
     [/(unavailable|service unavailable|connection refused|connection reset|network is unreachable|temporary failure|\b503\b)/, 'UNAVAILABLE'],
-    [/(invalid[_ ]argument|invalid argument|unknown flag|usage:)/, 'INVALID_REQUEST'],
-    [/(failed[_ ]precondition|failed precondition)/, 'FAILED_PRECONDITION'],
+    [/(invalid(?:[_ ]?argument)|unknown flag|usage:)/, 'INVALID_REQUEST'],
+    [/(failed(?:[_ ]?precondition))/, 'FAILED_PRECONDITION'],
     [/(internal error|\binternal\b)/, 'INTERNAL'],
   ];
   return rules.find(([pattern]) => pattern.test(normalized))?.[1] ?? 'OTHER';
