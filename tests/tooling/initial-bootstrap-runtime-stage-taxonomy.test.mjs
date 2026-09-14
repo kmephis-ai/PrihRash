@@ -33,12 +33,22 @@ test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics
   assert.match(runtime, /InitialBootstrapError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /MigrationRunStateError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialBootstrapDurableReconciliationError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /InitialSnapshotProjectionStructuralError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /SourceSnapshotSemanticProjectionStructuralError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialBootstrapMetadataExecutorError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
   assert.match(runtime, /InitialBootstrapIdentityManifestError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
+  assert.match(runtime, /InitialBootstrapPersistenceError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
   assert.match(runtime, /YdbParameterError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
   assert.match(runtime, /YdbJsV6DataTransportError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
   assert.match(runtime, /InitialBootstrapRuntimePrimitiveError[\s\S]*REFERENCE_RUNTIME_STATE_INVALID/);
   assert.match(runtime, /return 'REFERENCE_APPLICATION_RUNTIME_FAILED'/);
+});
+
+test('application taxonomy covers known pre-write structural and metadata errors before generic fallback', () => {
+  assert.match(runtime, /InitialSnapshotProjectionStructuralError/);
+  assert.match(runtime, /SourceSnapshotSemanticProjectionStructuralError/);
+  assert.match(runtime, /InitialBootstrapPersistenceError/);
+  assert.doesNotMatch(runtime, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
 });
 
 test('application taxonomy stays category-only and keeps generic fallback', () => {
