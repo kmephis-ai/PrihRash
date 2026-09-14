@@ -25,6 +25,7 @@ import {
 } from '../migration/initialBootstrapDurableReconciliation.js';
 import { InitialBootstrapIdentityManifestError } from '../migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapMetadataExecutorError } from '../migration/initialBootstrapMetadataExecutor.js';
+import { InitialBootstrapPersistenceError } from '../migration/initialBootstrapPersistence.js';
 import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
@@ -42,11 +43,17 @@ import {
 } from '../migration/initialBootstrapRuntimePrimitives.js';
 import { InitialBootstrapError } from '../migration/initialSnapshot.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+import {
+  InitialSnapshotProjectionStructuralError,
+} from '../migration/initialSnapshotProjection.js';
 import { MigrationRunStateError } from '../migration/migrationRunState.js';
 import {
   readScheduledSyncAdmissionEvidence,
   ScheduledSyncAdmissionEvidenceError,
 } from '../migration/scheduledSyncAdmissionEvidence.js';
+import {
+  SourceSnapshotSemanticProjectionStructuralError,
+} from '../migration/sourceSnapshotSemanticProjection.js';
 import {
   planInitialReferenceBootstrap,
   type InitialReferenceBootstrapPlan,
@@ -124,12 +131,15 @@ function classifyApplicationRuntimeError(
     || error instanceof InitialBootstrapError
     || error instanceof MigrationRunStateError
     || error instanceof InitialBootstrapDurableReconciliationError
+    || error instanceof InitialSnapshotProjectionStructuralError
+    || error instanceof SourceSnapshotSemanticProjectionStructuralError
   ) {
     return 'REFERENCE_APPLICATION_SEMANTIC_FAILED';
   }
   if (
     error instanceof InitialBootstrapMetadataExecutorError
     || error instanceof InitialBootstrapIdentityManifestError
+    || error instanceof InitialBootstrapPersistenceError
     || error instanceof YdbParameterError
   ) {
     return 'REFERENCE_APPLICATION_METADATA_FAILED';
