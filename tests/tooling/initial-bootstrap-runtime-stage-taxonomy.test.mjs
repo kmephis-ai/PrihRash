@@ -10,6 +10,10 @@ const STAGE_CODES = Object.freeze([
   'REFERENCE_YDB_CLIENT_CREATE_FAILED',
   'REFERENCE_RESOLUTION_FAILED',
   'REFERENCE_ADMISSION_READ_FAILED',
+  'REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED',
+  'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+  'REFERENCE_APPLICATION_METADATA_FAILED',
+  'REFERENCE_APPLICATION_YDB_DATA_FAILED',
   'REFERENCE_APPLICATION_RUNTIME_FAILED',
 ]);
 
@@ -23,7 +27,17 @@ test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics
   assert.match(runtime, /createYdbJsV6MetadataDataClient[\s\S]*REFERENCE_YDB_CLIENT_CREATE_FAILED/);
   assert.match(runtime, /planInitialReferenceBootstrap[\s\S]*REFERENCE_RESOLUTION_FAILED/);
   assert.match(runtime, /readScheduledSyncAdmissionEvidence[\s\S]*REFERENCE_ADMISSION_READ_FAILED/);
-  assert.match(runtime, /runInitialBootstrapApplication[\s\S]*REFERENCE_APPLICATION_RUNTIME_FAILED/);
+  assert.match(runtime, /ScheduledSyncAdmissionEvidenceError[\s\S]*REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED/);
+  assert.match(runtime, /InitialBootstrapApplicationError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /InitialBootstrapMetadataExecutorError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
+  assert.match(runtime, /YdbJsV6DataTransportError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(runtime, /return 'REFERENCE_APPLICATION_RUNTIME_FAILED'/);
+});
+
+test('application taxonomy stays category-only and keeps generic fallback', () => {
+  assert.match(runtime, /classifyApplicationRuntimeError\(\s*error: unknown/);
+  assert.match(runtime, /catch \(error\)[\s\S]*classifyApplicationRuntimeError\(error\)/);
+  assert.doesNotMatch(runtime, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
 });
 
 test('stage taxonomy does not expose exception text or provider payload through the invoker', () => {
