@@ -75,6 +75,20 @@ function makeExecutor(events, rows = []) {
   };
 }
 
+function makeRejectingExecutor(error) {
+  return function executor() {
+    const builder = {
+      parameter() {
+        return builder;
+      },
+      then(resolve, reject) {
+        return Promise.reject(error).then(resolve, reject);
+      },
+    };
+    return builder;
+  };
+}
+
 function makeSql(options = {}) {
   const events = [];
   const sql = makeExecutor(events, options.readRows ?? []);
@@ -160,6 +174,34 @@ test('concrete transport binds values separately and supports adapter read plus 
     [{ isolation: 'serializableReadWrite', idempotent: false }],
   );
   assert.equal(events.some(([kind, name]) => kind === 'parameter' && name === 'digest'), true);
+});
+
+test('driver query rejection becomes privacy-safe transport code for reads and transaction statements', async () => {
+  const providerFailure = new Error('synthetic private provider detail');
+  const sql = makeRejectingExecutor(providerFailure);
+  sql.begin = async (_options, work) => work(makeRejectingExecutor(providerFailure));
+  const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+    sql,
+    createYdbJsV6ParameterMapper(fakeSdk()),
+  ));
+
+  const assertSanitized = (error) => {
+    assert.equal(error instanceof YdbJsV6DataTransportError, true);
+    assert.equal(error.code, 'QUERY_EXECUTION_FAILED');
+    assert.equal(error.message, 'QUERY_EXECUTION_FAILED');
+    assert.equal(error.message.includes('provider detail'), false);
+    assert.equal('cause' in error, false);
+    return true;
+  };
+
+  await assert.rejects(
+    () => adapter.read(readStatement('SELECT 1')),
+    assertSanitized,
+  );
+  await assert.rejects(
+    () => adapter.serializableReadWrite((transaction) => transaction.execute(writeStatement('UPSERT INTO synthetic SELECT 1'))),
+    assertSanitized,
+  );
 });
 
 test('transaction body failure stays definite while post-body commit failure becomes outcome unknown', async () => {
