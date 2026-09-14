@@ -1,0 +1,97 @@
+name: R1 initial bootstrap autocontinue
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+  issues: read
+
+concurrency:
+  group: r1-initial-bootstrap-autocontinue
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch guarded exact-main orchestrator only for active R1 #453 source
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          accept_header='Accept: application/vnd.github+json'
+
+          main_sha="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$main_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_MAIN_MOVED'
+            exit 0
+          fi
+
+          commit_title="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/commits/$SOURCE_SHA" | jq -er '.commit.message | split("\n")[0]')"
+          case "$commit_title" in
+            'R1 #453:'*) ;;
+            *)
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_NOT_R1_453_SOURCE'
+              exit 0
+              ;;
+          esac
+
+          issue_state="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/issues/453" | jq -er '.state')"
+          if [ "$issue_state" != 'open' ]; then
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_ISSUE_INACTIVE'
+            exit 0
+          fi
+
+          existing="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-orchestrator.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if jq -e --arg sha "$SOURCE_SHA" \
+            '.workflow_runs | any(.head_sha == $sha)' \
+            <<<"$existing" >/dev/null; then
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED'
+            exit 0
+          fi
+
+          current_sha="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$current_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_MAIN_MOVED_BEFORE_DISPATCH'
+            exit 0
+          fi
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            --header 'Content-Type: application/json' \
+            "$api/actions/workflows/r1-initial-bootstrap-orchestrator.yml/dispatches" \
+            --data '{"ref":"main"}'
+          echo 'R1_BOOTSTRAP_AUTOCONTINUE_DISPATCHED'
