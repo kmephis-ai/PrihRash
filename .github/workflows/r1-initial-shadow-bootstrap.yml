@@ -386,8 +386,84 @@ jobs:
           fi
 
       - name: Invoke exact initial bootstrap tag once
+        id: bootstrap-invoke
         shell: bash
         run: |
           set -euo pipefail
           export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
-          npm run initial-bootstrap:invoke
+          tmp="$RUNNER_TEMP/r1-initial-bootstrap-invoke.log"
+          evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-evidence"
+          candidate="$evidence_dir/classification.tmp"
+          mkdir -p "$evidence_dir"
+
+          set +e
+          npm run initial-bootstrap:invoke | tee "$tmp"
+          invoke_status="${PIPESTATUS[0]}"
+          set -e
+
+          if ! tail -n 1 "$tmp" | jq -c -e '
+            select(type == "object" and (.status | type == "string") and (.code | type == "string"))
+            | .status as $status
+            | .code as $code
+            | select(
+                ($status == "PASS" and $code == "INITIAL_BOOTSTRAP_COMMITTED")
+                or ($status == "NOOP" and $code == "INITIAL_BOOTSTRAP_BASELINE_EXISTS")
+                or ($status == "STOP" and ($code | IN(
+                  "INITIAL_BOOTSTRAP_CONTROLLED_REBUILD_REQUIRED",
+                  "INITIAL_BOOTSTRAP_RECOVERY_REQUIRED",
+                  "INITIAL_BOOTSTRAP_VALIDATION_BLOCKED"
+                )))
+                or ($status == "FAIL" and ($code | IN(
+                  "INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID",
+                  "INITIAL_BOOTSTRAP_INVOKE_FAILED",
+                  "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",
+                  "INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT",
+                  "INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID",
+                  "INITIAL_BOOTSTRAP_CONFIG_INVALID",
+                  "INITIAL_BOOTSTRAP_RECONCILIATION_FAILED",
+                  "INITIAL_BOOTSTRAP_RESULT_INVALID",
+                  "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
+                )))
+              )
+            | {
+                status: $status,
+                code: $code,
+                runtimeCode: (
+                  if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
+                     and (.runtimeCode | type) == "string"
+                     and (.runtimeCode | IN(
+                       "REFERENCE_RUNTIME_STATE_INVALID",
+                       "REFERENCE_SOURCE_READ_FAILED",
+                       "REFERENCE_YDB_CLIENT_CREATE_FAILED",
+                       "REFERENCE_RESOLUTION_FAILED",
+                       "REFERENCE_ADMISSION_READ_FAILED",
+                       "REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED",
+                       "REFERENCE_APPLICATION_SEMANTIC_FAILED",
+                       "REFERENCE_APPLICATION_METADATA_FAILED",
+                       "REFERENCE_APPLICATION_YDB_DATA_FAILED",
+                       "REFERENCE_APPLICATION_RUNTIME_FAILED",
+                       "REFERENCE_BOOTSTRAP_RESUME_UNSAFE",
+                       "REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE"
+                     ))
+                  then .runtimeCode
+                  else null
+                  end
+                )
+              }
+          ' > "$candidate"; then
+            rm -f "$candidate" "$tmp"
+            echo 'INITIAL_BOOTSTRAP_EVIDENCE_INVALID'
+            exit 1
+          fi
+          mv "$candidate" "$evidence_dir/classification.json"
+          rm -f "$tmp"
+          exit "$invoke_status"
+
+      - name: Publish enum-only bootstrap evidence
+        if: ${{ always() && (steps.bootstrap-invoke.outcome == 'success' || steps.bootstrap-invoke.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-bootstrap-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 1
