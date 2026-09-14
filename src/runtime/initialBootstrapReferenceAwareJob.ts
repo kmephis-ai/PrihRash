@@ -8,6 +8,7 @@ import {
 } from '../integration/google/googleSheetsFullSnapshotReader.js';
 import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integration/google/googleServiceAccountTokenProvider.js';
 import { YdbAdapter } from '../integration/ydb/adapter.js';
+import { YdbParameterError } from '../integration/ydb/parameters.js';
 import {
   createYdbJsV6MetadataDataClient,
   YdbJsV6DataTransportError,
@@ -17,9 +18,12 @@ import {
   InitialBootstrapApplicationError,
   runInitialBootstrapApplication,
 } from '../migration/initialBootstrapApplication.js';
+import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
 import {
   createInitialBootstrapDurableReconciliation,
+  InitialBootstrapDurableReconciliationError,
 } from '../migration/initialBootstrapDurableReconciliation.js';
+import { InitialBootstrapIdentityManifestError } from '../migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapMetadataExecutorError } from '../migration/initialBootstrapMetadataExecutor.js';
 import {
   reconcileInitialBootstrapReferenceState,
@@ -33,9 +37,12 @@ import {
 } from '../migration/initialBootstrapPrivateEvidence.js';
 import {
   createNodeInitialBootstrapRuntimePrimitives,
+  InitialBootstrapRuntimePrimitiveError,
   type InitialBootstrapRuntimePrimitives,
 } from '../migration/initialBootstrapRuntimePrimitives.js';
+import { InitialBootstrapError } from '../migration/initialSnapshot.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+import { MigrationRunStateError } from '../migration/migrationRunState.js';
 import {
   readScheduledSyncAdmissionEvidence,
   ScheduledSyncAdmissionEvidenceError,
@@ -111,14 +118,27 @@ function classifyApplicationRuntimeError(
   if (error instanceof ScheduledSyncAdmissionEvidenceError) {
     return 'REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED';
   }
-  if (error instanceof InitialBootstrapApplicationError) {
+  if (
+    error instanceof InitialBootstrapApplicationError
+    || error instanceof InitialBootstrapCandidateError
+    || error instanceof InitialBootstrapError
+    || error instanceof MigrationRunStateError
+    || error instanceof InitialBootstrapDurableReconciliationError
+  ) {
     return 'REFERENCE_APPLICATION_SEMANTIC_FAILED';
   }
-  if (error instanceof InitialBootstrapMetadataExecutorError) {
+  if (
+    error instanceof InitialBootstrapMetadataExecutorError
+    || error instanceof InitialBootstrapIdentityManifestError
+    || error instanceof YdbParameterError
+  ) {
     return 'REFERENCE_APPLICATION_METADATA_FAILED';
   }
   if (error instanceof YdbJsV6DataTransportError) {
     return 'REFERENCE_APPLICATION_YDB_DATA_FAILED';
+  }
+  if (error instanceof InitialBootstrapRuntimePrimitiveError) {
+    return 'REFERENCE_RUNTIME_STATE_INVALID';
   }
   return 'REFERENCE_APPLICATION_RUNTIME_FAILED';
 }

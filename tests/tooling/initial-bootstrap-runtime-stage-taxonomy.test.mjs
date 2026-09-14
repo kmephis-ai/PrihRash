@@ -29,8 +29,15 @@ test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics
   assert.match(runtime, /readScheduledSyncAdmissionEvidence[\s\S]*REFERENCE_ADMISSION_READ_FAILED/);
   assert.match(runtime, /ScheduledSyncAdmissionEvidenceError[\s\S]*REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED/);
   assert.match(runtime, /InitialBootstrapApplicationError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /InitialBootstrapCandidateError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /InitialBootstrapError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /MigrationRunStateError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /InitialBootstrapDurableReconciliationError[\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
   assert.match(runtime, /InitialBootstrapMetadataExecutorError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
+  assert.match(runtime, /InitialBootstrapIdentityManifestError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
+  assert.match(runtime, /YdbParameterError[\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
   assert.match(runtime, /YdbJsV6DataTransportError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(runtime, /InitialBootstrapRuntimePrimitiveError[\s\S]*REFERENCE_RUNTIME_STATE_INVALID/);
   assert.match(runtime, /return 'REFERENCE_APPLICATION_RUNTIME_FAILED'/);
 });
 
