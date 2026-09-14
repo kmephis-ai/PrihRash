@@ -20,7 +20,7 @@ async function fakeYc(source) {
   return { directory, path };
 }
 
-async function runInvoker(fakeSource) {
+async function runInvoker(fakeSource, extraEnvironment = {}) {
   const fake = await fakeYc(fakeSource);
   try {
     await execFileAsync(process.execPath, [INVOKER], {
@@ -32,6 +32,7 @@ async function runInvoker(fakeSource) {
         PRIHRASH_YC_BIN: fake.path,
         PRIHRASH_YANDEX_READINESS_FUNCTION_ID: FUNCTION_ID,
         YC_IAM_TOKEN: 'synthetic-short-lived-iam-token',
+        ...extraEnvironment,
       },
       encoding: 'utf8',
     });
@@ -52,19 +53,14 @@ function assertSafeShape(result, outputShape) {
   assert.deepEqual(JSON.parse(result.stdout), {
     status: 'FAIL',
     code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED',
+    outputShape,
   });
-  assert.deepEqual(
-    result.stderr.trim().split('\n'),
-    [
-      `READINESS_INVOKE_OUTPUT_SHAPE=${outputShape}`,
-      `READINESS_INVOKE_OUTPUT_SHAPE=${outputShape}`,
-    ],
-  );
+  assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes(PRIVATE_LOOKING), false);
   assert.equal(result.stderr.includes(PRIVATE_LOOKING), false);
 }
 
-test('GitHub Actions observability reports enum-only shape for both bounded private-text attempts', async () => {
+test('GitHub Actions evidence returns enum-only shape after bounded private-text attempts', async () => {
   const result = await runInvoker(`
 process.stdout.write('${PRIVATE_LOOKING}');
 process.stderr.write('${PRIVATE_LOOKING}');
@@ -74,11 +70,26 @@ process.exit(17);
   assertSafeShape(result, 'STDOUT_TEXT__STDERR_TEXT');
 });
 
-test('GitHub Actions observability distinguishes JSON object stdout without keys or values', async () => {
+test('GitHub Actions evidence distinguishes JSON object stdout without keys or values', async () => {
   const result = await runInvoker(`
 process.stdout.write(JSON.stringify({private:'${PRIVATE_LOOKING}'}));
 process.exit(17);
 `);
 
   assertSafeShape(result, 'STDOUT_JSON_OBJECT__STDERR_EMPTY');
+});
+
+test('non-GitHub invoker contract stays exact status/code without output shape', async () => {
+  const result = await runInvoker(`
+process.stdout.write('${PRIVATE_LOOKING}');
+process.exit(17);
+`, { GITHUB_ACTIONS: 'false' });
+
+  assert.equal(result.exitCode, 2);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: 'FAIL',
+    code: 'READINESS_INVOKE_NONZERO_UNCLASSIFIED',
+  });
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout.includes(PRIVATE_LOOKING), false);
 });
