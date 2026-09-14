@@ -1,6 +1,6 @@
 # R1: первый initial shadow bootstrap Google → YDB
 
-Статус этого runbook: manual-only provider gate для #453. Он не включает timer, cutover или передачу authoritative роли YDB.
+Статус этого runbook: manual-entry provider gate для #453. Основной Owner path — один ручной запуск `R1 initial bootstrap orchestrator`; отдельные readiness/bootstrap/recovery workflows остаются stage-specific provider primitives и не требуют ручной choreography владельца. Gate не включает timer, cutover или передачу authoritative роли YDB.
 
 До завершения bootstrap и отдельного будущего cutover действует финансовая истина:
 
@@ -10,35 +10,39 @@ Authoritative transactional source остаётся только `Ответы �
 
 ## Что делает этот gate
 
-Один ручной запуск `R1 initial shadow bootstrap`:
+Один ручной запуск `R1 initial bootstrap orchestrator`:
 
-1. работает только из `main` canonical repository `kmephis-ai/PrihRash`;
-2. выполняет canonical `npm run check` и собирает dedicated bootstrap-only Function artifact;
-3. fail-closed требует закрытый #433, защищённый `main` и current `main SHA == GITHUB_SHA`;
-4. требует успешный manual `R1 Yandex readiness` на **том же exact SHA**;
-5. через dedicated WIF deployment identity проверяет заранее подготовленную private trigger-free Function, runtime service account и dedicated Lockbox secret;
-6. создаёт только новую version dedicated initial-bootstrap Function;
-7. ещё раз проверяет private + triggers=0 и exact current `main`;
-8. один раз вызывает exact tag `r1-initial-bootstrap` с `--retry 0`;
-9. считает успехом только sanitized `INITIAL_BOOTSTRAP_COMMITTED`;
-10. после доказанного успеха временная bootstrap authority должна быть retired до любых timer/scheduled-sync действий.
+1. работает только из защищённого exact `main` canonical repository `kmephis-ai/PrihRash` и требует successful canonical CI на этом SHA;
+2. собирает exact-main recovery-only Function artifact и через dedicated WIF deployment identity проверяет заранее подготовленную private trigger-free Function, runtime service account и dedicated Lockbox secret;
+3. до любой новой write-capable попытки разворачивает exact read-only recovery version и выполняет durable classification;
+4. разрешает продолжить orchestration только из `NOT_APPLIED / EMPTY_DURABLE_STATE` либо `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE`;
+5. автоматически dispatch-ит canonical `R1 Yandex readiness`, ждёт его завершения на том же exact SHA и проверяет short-lived enum-only `PASS / READINESS_READY` artifact;
+6. повторно проверяет exact current `main`;
+7. автоматически dispatch-ит существующий canonical `R1 initial shadow bootstrap` **ровно один раз**; сам bootstrap child сохраняет собственные #433/exact-main/readiness/provider gates, canonical `npm run check`, private trigger-free deployment и `--retry 0`;
+8. считает успешным orchestration только successful bootstrap child, чей единственный successful invoke contract — sanitized `INITIAL_BOOTSTRAP_COMMITTED` после independent post-COMMITTED reconciliation;
+9. если bootstrap child достиг invoke и завершился non-success/unknown, выполняет ровно одну read-only recovery classification в том же orchestrator run и останавливается;
+10. никогда не выполняет второй bootstrap invoke, controlled rebuild, cleanup, timer, cutover или автоматическое расширение authority; публикует один short-lived privacy-safe orchestrator artifact.
 
-Workflow **не создаёт** IAM roles, service accounts, secrets, Function, triggers или timers. Provider resources и least-privilege bindings создаются Owner/provider-admin отдельно и только после quality gate #433.
+`RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes.
+
+Standalone `R1 Yandex readiness`, `R1 initial shadow bootstrap` и `R1 initial bootstrap recovery` сохраняются как reviewed stage-specific primitives / diagnostic fallback, но пока #453 активен нормальный Owner path — orchestrator. Никакие child workflows не должны запускаться владельцем между шагами orchestrator run.
+
+Workflows **не создают** IAM roles, service accounts, secrets, Function, triggers или timers. Provider resources и least-privilege bindings создаются Owner/provider-admin отдельно и только после quality gate #433.
 
 ## Жёсткая граница #433
 
-До закрытия #433 запрещены setup/deploy/invoke provider resources этого gate.
+До закрытия #433 запрещены setup/deploy/invoke write-capable provider resources этого gate.
 
-Сам workflow дополнительно проверяет перед OIDC exchange:
+Write-capable bootstrap child дополнительно проверяет перед OIDC exchange:
 
 - Issue #433 имеет `state=closed`;
 - GitHub сообщает `main.protected=true`;
 - current `main` указывает на exact `GITHUB_SHA` workflow run;
 - для exact `GITHUB_SHA` существует successful `R1 Yandex readiness`, запущенный через `workflow_dispatch` из `main`.
 
-Перед `function version create` и ещё раз перед bootstrap invoke workflow повторно читает current `main` и останавливается, если SHA изменился.
+Orchestrator dispatch-ит readiness именно через `workflow_dispatch`, ждёт его terminal success и отдельно проверяет enum-only `READINESS_READY` artifact. Перед запуском bootstrap child orchestrator ещё раз читает current `main`. Сам bootstrap child повторяет exact-main check перед `function version create` и перед bootstrap invoke.
 
-Это означает, что repository-side workflow можно review/merge заранее, но current незакрытый #433 структурно блокирует live provider boundary.
+Это означает, что repository-side workflow можно review/merge заранее, но current незакрытый #433 структурно блокирует live write-capable provider boundary.
 
 ## Dedicated provider resources
 
@@ -48,7 +52,8 @@ Workflow **не создаёт** IAM roles, service accounts, secrets, Function,
 - runtime service account: `prihrash-initial-bootstrap`;
 - Lockbox secret: `prihrash-r1-initial-bootstrap`;
 - GitHub deployment service account: `prihrash-github-initial-bootstrap`;
-- Function tag: `r1-initial-bootstrap`.
+- Function tag: `r1-initial-bootstrap`;
+- read-only recovery tag: `r1-initial-bootstrap-recovery`.
 
 Function должна быть:
 
@@ -58,7 +63,8 @@ Function должна быть:
 - runtime `nodejs22`;
 - memory `256m`;
 - execution timeout `150s`;
-- entrypoint `index.initialBootstrapHandler`.
+- write-capable entrypoint `index.initialBootstrapHandler` только в bootstrap version;
+- read-only entrypoint `index.initialBootstrapRecoveryHandler` только в recovery version.
 
 Не создавать trigger даже временно. Timer остаётся выключен.
 
@@ -122,7 +128,7 @@ initial_bootstrap_private_historical_evidence
 
 Последний key содержит private, Owner-verified historical granularity/month evidence для initial bootstrap. Реальные ordinal ranges/month mapping не публикуются в GitHub, Issues, PR, Actions logs или fixtures.
 
-Function получает server-side bindings:
+Write-capable bootstrap Function получает server-side bindings:
 
 - `PRIHRASH_GOOGLE_SPREADSHEET_ID` ← `google_spreadsheet_id`;
 - `PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL` ← `google_service_account_email`;
@@ -130,11 +136,13 @@ Function получает server-side bindings:
 - `PRIHRASH_YDB_CONNECTION_STRING` ← `ydb_connection_string`;
 - `PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE` ← `initial_bootstrap_private_historical_evidence`.
 
+Recovery-only version получает только Google readonly credentials + `ydb_connection_string`; private historical bootstrap evidence в неё не передаётся.
+
 Private historical evidence parser fail-closed проверяет exact schema, range coverage и совместимость с фактическим количеством leased source rows.
 
-## Deployment artifact
+## Deployment artifacts
 
-Canonical command:
+Write-capable canonical command:
 
 ```text
 npm run package:initial-bootstrap
@@ -152,19 +160,27 @@ Root shim экспортирует только:
 index.initialBootstrapHandler
 ```
 
-Verifier требует bootstrap-only `dist/runtime` surface и запрещает scheduled/readiness/schema Function runtimes и schema-bootstrap YDB client.
+Read-only recovery artifact orchestrator собирает через:
+
+```text
+npm run package:initial-bootstrap-recovery
+```
+
+Verifier-ы требуют разделённые runtime surfaces: bootstrap package не включает scheduled/readiness/schema entrypoints, а recovery package запрещает write-capable statements/transactions и write-capable bootstrap Function entrypoint.
 
 ## Fresh readiness перед live bootstrap
 
+Owner больше не должен вручную переносить состояние между recovery/readiness/bootstrap.
+
 После merge final #453 source в `main`, закрытого #433 и provider setup:
 
-1. прочитать exact current `main`;
-2. вручную запустить canonical `R1 Yandex readiness` из `main`;
-3. дождаться successful workflow run на этом exact SHA;
-4. не менять `main` между readiness и bootstrap;
-5. только затем вручную dispatch `R1 initial shadow bootstrap`.
+1. убедиться, что canonical `main` содержит нужный source и CI green;
+2. вручную запустить **только** `R1 initial bootstrap orchestrator` из `main`;
+3. не запускать параллельно standalone readiness/bootstrap/recovery workflows;
+4. orchestrator сам выполнит read-only durable classification, fresh exact-main readiness и максимум один bootstrap child;
+5. если `main` изменится на любой критической границе, текущий run fail-closed остановится; для нового SHA нужен новый manual orchestrator run.
 
-Если `main` изменился, bootstrap workflow остановится. Нужен новый readiness на новом exact SHA.
+Один dispatch orchestrator = максимум одна новая write-capable bootstrap attempt. Ручной запуск child bootstrap внутри того же цикла запрещён.
 
 ## Что делает runtime
 
@@ -219,7 +235,9 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED
 FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 ```
 
-`INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` означает только exact privacy-safe classification provider envelope `Function execution timeout (504)`. `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` означает numeric non-zero provider exit без доказанного allowlisted marker. Оба кода являются non-success diagnostic evidence и сами по себе **не** разрешают retry/replay bootstrap.
+При numeric non-zero transport exit invoker сначала пытается строго распознать exact allowlisted **non-PASS** Function result из captured stdout; provider/private detail не публикуется. `PASS / INITIAL_BOOTSTRAP_COMMITTED` при transport non-zero не принимается как success и остаётся fail-closed.
+
+`INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` означает только exact privacy-safe classification provider envelope `Function execution timeout (504)`. `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` означает numeric non-zero provider exit без доказанного allowlisted non-success result/marker. Оба кода являются non-success diagnostic evidence и сами по себе **не** разрешают retry/replay bootstrap.
 
 `VALIDATION_BLOCKED` может вернуть только allowlisted blocker taxonomy и optional allowlisted reconciliation check. `RECOVERY_REQUIRED` возвращает только allowlisted recovery reason. Run IDs, source IDs, row counts, amounts, raw payload, descriptions, provider exception text и credentials наружу не возвращаются.
 
@@ -229,7 +247,7 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 ## Read-only recovery classification contract
 
-При ambiguous invoke outcome используется существующий manual-only `R1 initial bootstrap recovery` workflow и existing tag `r1-initial-bootstrap-recovery`. Он всегда начинает с read-only durable YDB classification и не имеет write-capable runtime path.
+Orchestrator до любой новой write attempt разворачивает exact-main recovery-only Function version под tag `r1-initial-bootstrap-recovery` и вызывает её один раз. Этот путь всегда начинает с read-only durable YDB classification и не имеет write-capable runtime path. Standalone `R1 initial bootstrap recovery` остаётся diagnostic fallback, но нормальный Owner path не зависит от hardcoded failed-run rebinding.
 
 Если durable classification точно равна `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN`, тот же recovery invocation выполняет один fresh authoritative Google read через canonical `Ответы на форму (11)` A:K reader и Google readonly scope. Он использует только `google_spreadsheet_id`, `google_service_account_email`, `google_service_account_private_key` и `ydb_connection_string` из уже существующего dedicated Lockbox secret; private historical bootstrap evidence в recovery Function не передаётся. Для любого другого durable reason Google не читается.
 
@@ -241,30 +259,47 @@ Reference reconciliation сравнивает derived authoritative bootstrap vo
 
 Successful recovery classification публикует только exact sanitized shape `status/code/verdict/reason`, где `verdict` принадлежит `APPLIED | NOT_APPLIED | RECOVERY_REQUIRED`, а `reason` — allowlisted enum, согласованный с verdict. Row counts, IDs, account/category labels, amounts, descriptions, raw Google/YDB rows, snapshot digests и exception text в result/log evidence не публикуются. `READ_FAILED`, `REFERENCE_RECONCILIATION_FAILED` и любая неизвестная/несогласованная форма остаются fail-closed и не разрешают replay.
 
-Этот diagnostic reason — временная stage-specific evidence surface для #453; после снятия recovery ambiguity отдельное расширение operational surface не требуется.
+### Bounded orchestrator decision
+
+После initial read-only classification orchestrator может войти в fresh readiness/bootstrap path только в двух случаях:
+
+- `NOT_APPLIED / EMPTY_DURABLE_STATE` — durable writes предыдущей попытки не обнаружены;
+- `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` — durable reference-only residue доказано совпадает с fresh authoritative-derived vocabulary, **но** окончательное разрешение application path остаётся внутри same-fresh-snapshot reference-aware bootstrap guard.
+
+`APPLIED / COMMITTED_DURABLE_STATE`, mismatch, mixed/metadata/current-lineage residue, failed/staging/validated run, read instability и любые другие причины не запускают новый bootstrap автоматически.
+
+Если единственный bootstrap child в текущем orchestrator run достиг invoke и завершился non-success/unknown, orchestrator вызывает уже развёрнутый read-only recovery tag ещё ровно один раз, фиксирует sanitized classification и завершает run. Эта post-invoke classification не инициирует второй bootstrap в том же run.
+
+Этот diagnostic/orchestration surface временный для #453; после снятия recovery ambiguity и successful bootstrap он подлежит retirement, а не превращению в постоянный migration scheduler.
 
 ## Failure / retry policy
 
 Не делать blind retry.
 
-- Если workflow остановился **до** шага `Invoke exact initial bootstrap tag once`, финансовый bootstrap invocation не начинался. После устранения причины допустим новый manual run с новым exact-main/readiness reconciliation; ранее созданная private trigger-free Function version сама по себе финансовых writes не делает.
-- Если invoke step начался, либо получен `RECOVERY_REQUIRED`, либо outcome не доказан, повторный bootstrap запрещён до чтения durable migration state и отдельного bounded recovery decision.
+- Один manual dispatch `R1 initial bootstrap orchestrator` = максимум один write-capable bootstrap child и максимум один его invoke.
+- Если bootstrap child остановился **до** шага `Invoke exact initial bootstrap tag once`, финансовый bootstrap invocation не начинался. Orchestrator не запускает recovery-after-write; после устранения причины новый manual orchestrator run снова начнётся с read-only durable classification и fresh readiness.
+- Если invoke step начался и child завершился non-success/unknown, тот же orchestrator run выполняет одну read-only recovery classification и останавливается. Второй bootstrap в этом run структурно отсутствует.
+- Новый orchestrator run после ambiguous write может продолжить путь только через fresh initial recovery gate. `RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` не даёт replay permission само по себе: write-capable runtime повторно доказывает same-snapshot reference guard и zero planned reference writes до application path.
 - `INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` и `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` подтверждают только sanitized provider-envelope classification; они не доказывают отсутствие application writes и не являются разрешением на automatic retry/replay.
 - Unknown provider/transport detail не интерпретировать как success или safe replay.
-- Не выполнять controlled rebuild автоматически.
+- Не выполнять controlled rebuild, cleanup или automatic cap increase.
+- Не запускать standalone bootstrap вручную для обхода blocked orchestrator state.
 
-## Privacy-safe evidence после PASS
+## Privacy-safe evidence
 
-В Issue/PR можно фиксировать только:
+Orchestrator публикует один short-lived `classification.json` artifact с фиксированным privacy-safe surface: orchestrator `status/code`, exact source SHA, child run IDs/conclusions, sanitized recovery verdict/reason и readiness code. Он не содержит financial rows/totals/amounts/descriptions/notes, raw Google/YDB snapshots, source IDs/digests, credentials, Lockbox payload или provider identifiers.
+
+После PASS в Issue/PR можно фиксировать только:
 
 - exact source SHA;
-- readiness workflow run = success;
-- bootstrap workflow run = success;
-- sanitized code `INITIAL_BOOTSTRAP_COMMITTED`;
-- факт независимого reconciliation PASS;
+- orchestrator workflow run = success;
+- readiness child workflow run = success и `READINESS_READY`;
+- bootstrap child workflow run = success;
+- sanitized bootstrap contract `INITIAL_BOOTSTRAP_COMMITTED`;
+- факт independent post-COMMITTED reconciliation PASS;
 - факт retirement temporary authority.
 
-Не публиковать реальные rows, totals, amounts, descriptions, notes, raw Google snapshots, private historical ranges/month mapping, credentials, Lockbox payload или provider IDs.
+При non-success можно фиксировать только sanitized orchestrator/recovery/bootstrap enum evidence и run IDs, без provider exception payload или financial detail.
 
 ## Retirement после successful bootstrap
 
@@ -277,7 +312,8 @@ Successful recovery classification публикует только exact sanitiz
 5. деактивировать dedicated Lockbox secret;
 6. отвязать/delete dedicated WIF federated credential для `prihrash-github-initial-bootstrap`;
 7. удалить GitHub locator `YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID` после retirement соответствующей identity;
-8. dedicated Function удалить либо оставить только как private trigger-free recovery scaffold без YDB write/secret payload authority.
+8. dedicated Function удалить либо оставить только как private trigger-free recovery scaffold без YDB write/secret payload authority;
+9. после фиксации provider evidence удалить/отключить stage-specific `R1 initial bootstrap orchestrator` и больше не использовать direct bootstrap/recovery workflows как operational path.
 
 Deployment service account можно оставить без usable WIF binding либо удалить позже отдельным cleanup. `YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID` сам по себе не credential; после деактивации secret его removal из GitHub — optional cleanup, не retirement gate.
 
@@ -288,13 +324,17 @@ Retirement — Owner/provider-admin boundary. Workflow намеренно не �
 #453 может считаться provider-complete только когда доказаны все пункты:
 
 ```text
-#433 closed + main protected
+#433 closed + main protected + canonical CI PASS
 → exact current main
-→ fresh READINESS_READY on exact SHA
-→ one manual private trigger-free bootstrap invoke
+→ one manual R1 initial bootstrap orchestrator
+→ read-only durable recovery gate
+→ fresh READINESS_READY child on exact SHA
+→ at most one private trigger-free bootstrap child/invoke
 → INITIAL_BOOTSTRAP_COMMITTED
 → independent post-COMMITTED reconciliation PASS
-→ temporary bootstrap authority retired
+→ temporary bootstrap authority + stage-specific orchestration retired
 ```
 
-После этого Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
+При non-success после write boundary путь заканчивается `one read-only recovery classification → STOP`; automatic second bootstrap отсутствует.
+
+После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.

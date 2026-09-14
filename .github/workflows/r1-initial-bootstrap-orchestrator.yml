@@ -1,0 +1,618 @@
+name: R1 initial bootstrap orchestrator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: r1-initial-bootstrap-orchestrator
+  cancel-in-progress: false
+
+jobs:
+  orchestrate:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify immutable orchestrator source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test -n "$YC_LOCKBOX_SECRET_ID"
+
+      - name: Require protected exact main and successful canonical CI
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-repository-gates"
+          mkdir -p "$tmp"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+
+          curl --fail --silent --show-error --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/branches/main" --output "$tmp/main.json" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_MAIN_READ_FAILED'
+              exit 1
+            }
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha == $sha and .protected == true' \
+            "$tmp/main.json" >/dev/null 2>&1 || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_MAIN_NOT_READY'
+              exit 1
+            }
+
+          curl --fail --silent --show-error --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/actions/runs?head_sha=${GITHUB_SHA}&per_page=100" --output "$tmp/runs.json" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_CI_READ_FAILED'
+              exit 1
+            }
+          jq -e --arg sha "$GITHUB_SHA" '
+            .workflow_runs | any(
+              .name == "CI"
+              and .head_sha == $sha
+              and .head_branch == "main"
+              and .event == "push"
+              and .conclusion == "success"
+            )
+          ' "$tmp/runs.json" >/dev/null 2>&1 || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_CI_MISSING'
+            exit 1
+          }
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Package exact read-only recovery source
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run package:initial-bootstrap-recovery
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange GitHub OIDC token for short-lived Yandex IAM token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+
+          if ! oidc_status="$(curl --silent --show-error \
+            --output "$tmp/oidc.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" \
+            2>"$tmp/oidc.err")"; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          case "$oidc_status" in
+            2??) ;;
+            *) echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_REQUEST_FAILED'; exit 1 ;;
+          esac
+          if ! oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json" 2>/dev/null)"; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          echo "::add-mask::${oidc_token}"
+
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *) echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>"$tmp/claims.err" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_CLAIMS_INVALID'
+            exit 1
+          }
+          jq -e --arg expected "$OIDC_ISSUER" '.iss == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_ISSUER_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_AUDIENCE" '(.aud == $expected) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $expected)' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_AUDIENCE_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_SUBJECT" '.sub == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_OIDC_SUBJECT_MISMATCH'; exit 1;
+          }
+
+          if ! iam_status="$(curl --silent --show-error \
+            --output "$tmp/iam.json" \
+            --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            2>"$tmp/iam.err")"; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          case "$iam_status" in
+            2??) ;;
+            *) echo 'R1_BOOTSTRAP_ORCHESTRATOR_WIF_EXCHANGE_FAILED'; exit 1 ;;
+          esac
+          if ! iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json" 2>/dev/null)"; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Resolve and verify read-only recovery provider boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-provider"
+          mkdir -p "$tmp"
+
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_RESOLUTION_FAILED'; exit 1;
+            }
+          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+
+          yc serverless function list-access-bindings --id "$function_id" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_BINDINGS_READ_FAILED'; exit 1;
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_PUBLIC'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | any(.type == "serviceAccount" and .id == $expected)' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_TRIGGER_LIST_FAILED'; exit 1;
+            }
+          if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_TRIGGER_PRESENT'
+            exit 1
+          fi
+
+          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_RUNTIME_SA_RESOLUTION_FAILED'; exit 1;
+            }
+          runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")"
+
+          echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+          secret_json="$(yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_LOCKBOX_SECRET_RESOLUTION_FAILED'; exit 1;
+            }
+          if ! jq -e \
+            --arg expected_id "$YC_LOCKBOX_SECRET_ID" \
+            --arg expected_name "$LOCKBOX_SECRET_NAME" \
+            --arg expected_folder_id "$YC_FOLDER_ID" \
+            '(.id == $expected_id) and (.name == $expected_name) and ((.folder_id // .folderId) == $expected_folder_id)' \
+            <<<"$secret_json" >/dev/null 2>&1; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_LOCKBOX_SECRET_METADATA_INVALID'
+            exit 1
+          fi
+          secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json")"
+
+          echo "::add-mask::${function_id}"
+          echo "::add-mask::${runtime_sa_id}"
+          echo "::add-mask::${secret_version_id}"
+          {
+            printf 'PRIHRASH_YC_FUNCTION_ID=%s\n' "$function_id"
+            printf 'PRIHRASH_YC_FUNCTION_SA_ID=%s\n' "$runtime_sa_id"
+            printf 'PRIHRASH_LOCKBOX_VERSION_ID=%s\n' "$secret_version_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Re-verify exact current main before recovery deployment
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_MAIN_MOVED_BEFORE_RECOVERY_DEPLOY'
+            exit 1
+          }
+
+      - name: Deploy exact read-only recovery version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-recovery-deploy"
+          mkdir -p "$tmp"
+          yc serverless function version create \
+            --function-id "$PRIHRASH_YC_FUNCTION_ID" \
+            --runtime nodejs22 \
+            --entrypoint index.initialBootstrapRecoveryHandler \
+            --memory 256m \
+            --execution-timeout 150s \
+            --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
+            --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --tags r1-initial-bootstrap-recovery \
+            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+            --no-logging \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
+            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_DEPLOY_FAILED'
+              exit 1
+            }
+
+      - name: Re-verify private trigger-free recovery boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-recovery-postflight"
+          mkdir -p "$tmp"
+          yc serverless function list-access-bindings --id "$PRIHRASH_YC_FUNCTION_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_BINDINGS_READ_FAILED'; exit 1;
+            }
+          if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_PUBLIC'
+            exit 1
+          fi
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_TRIGGER_LIST_FAILED'; exit 1;
+            }
+          if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_TRIGGER_PRESENT'
+            exit 1
+          fi
+
+      - name: Re-verify exact current main before initial recovery
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_MAIN_MOVED_BEFORE_RECOVERY'
+            exit 1
+          }
+
+      - name: Classify durable state read-only before any new bootstrap
+        id: initial-recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-initial-recovery.log"
+          set +e
+          npm run initial-bootstrap-recovery:invoke | tee "$tmp"
+          invoke_status="${PIPESTATUS[0]}"
+          set -e
+          if [ "$invoke_status" -ne 0 ]; then
+            rm -f "$tmp"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_FAILED'
+            exit 1
+          fi
+          classification="$(tail -n 1 "$tmp" | jq -c -e '
+            select(
+              type == "object"
+              and (keys | sort) == ["code", "reason", "status", "verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+              and (.verdict | IN("APPLIED", "NOT_APPLIED", "RECOVERY_REQUIRED"))
+              and (.reason | type == "string")
+            )
+          ')" || {
+            rm -f "$tmp"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
+            exit 1
+          }
+          rm -f "$tmp"
+          verdict="$(jq -r '.verdict' <<<"$classification")"
+          reason="$(jq -r '.reason' <<<"$classification")"
+          printf 'verdict=%s\nreason=%s\n' "$verdict" "$reason" >> "$GITHUB_OUTPUT"
+
+          if [ "$verdict" = 'NOT_APPLIED' ] && [ "$reason" = 'EMPTY_DURABLE_STATE' ]; then
+            exit 0
+          fi
+          if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE' ]; then
+            exit 0
+          fi
+          echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED'
+          exit 1
+
+      - name: Dispatch and wait for fresh exact-main readiness
+        id: readiness
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs readiness)"
+          printf '%s\n' "$result" | jq -e '
+            .status == "PASS"
+            and .code == "R1_BOOTSTRAP_ORCHESTRATOR_CHILD_WORKFLOW_COMPLETED"
+            and .workflow == "readiness"
+            and (.runId | type == "number")
+            and (.conclusion | type == "string")
+          ' >/dev/null || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_READINESS_DISPATCH_FAILED'
+            exit 1
+          }
+          run_id="$(jq -r '.runId' <<<"$result")"
+          conclusion="$(jq -r '.conclusion' <<<"$result")"
+          printf 'run_id=%s\nconclusion=%s\n' "$run_id" "$conclusion" >> "$GITHUB_OUTPUT"
+          if [ "$conclusion" != 'success' ]; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_READINESS_WORKFLOW_FAILED'
+            exit 1
+          fi
+
+      - name: Verify enum-only readiness evidence
+        id: readiness-evidence
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          READINESS_RUN_ID: ${{ steps.readiness.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-readiness"
+          mkdir -p "$tmp"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          curl --fail --silent --show-error --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/actions/runs/${READINESS_RUN_ID}/artifacts" --output "$tmp/artifacts.json"
+          artifact_url="$(jq -er --arg expected "r1-yandex-readiness-evidence-${READINESS_RUN_ID}" '
+            [.artifacts[] | select(.name == $expected and .expired == false)]
+            | select(length == 1)
+            | .[0].archive_download_url
+          ' "$tmp/artifacts.json")" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_READINESS_ARTIFACT_MISSING'
+            exit 1
+          }
+          curl --fail --silent --show-error --location --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$artifact_url" --output "$tmp/evidence.zip"
+          unzip -p "$tmp/evidence.zip" classification.json > "$tmp/classification.json" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_READINESS_ARTIFACT_INVALID'
+            exit 1
+          }
+          jq -e '
+            type == "object"
+            and (keys | sort) == ["code", "status"]
+            and .status == "PASS"
+            and .code == "READINESS_READY"
+          ' "$tmp/classification.json" >/dev/null || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_READINESS_NOT_READY'
+            exit 1
+          }
+          printf 'status=PASS\ncode=READINESS_READY\n' >> "$GITHUB_OUTPUT"
+
+      - name: Re-verify exact current main before the single write-capable child
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_MAIN_MOVED_BEFORE_BOOTSTRAP'
+            exit 1
+          }
+
+      - name: Dispatch and wait for exactly one initial bootstrap attempt
+        id: bootstrap
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs bootstrap)"
+          printf '%s\n' "$result" | jq -e '
+            .status == "PASS"
+            and .code == "R1_BOOTSTRAP_ORCHESTRATOR_CHILD_WORKFLOW_COMPLETED"
+            and .workflow == "bootstrap"
+            and (.runId | type == "number")
+            and (.conclusion | type == "string")
+            and (.invokeStepConclusion | type == "string")
+          ' >/dev/null || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_DISPATCH_FAILED'
+            exit 1
+          }
+          run_id="$(jq -r '.runId' <<<"$result")"
+          conclusion="$(jq -r '.conclusion' <<<"$result")"
+          invoke_step="$(jq -r '.invokeStepConclusion' <<<"$result")"
+          {
+            printf 'run_id=%s\n' "$run_id"
+            printf 'conclusion=%s\n' "$conclusion"
+            printf 'invoke_step=%s\n' "$invoke_step"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$conclusion" = 'success' ]; then
+            test "$invoke_step" = 'success' || {
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_RESULT_INCONSISTENT'
+              exit 1
+            }
+            exit 0
+          fi
+          if [ "$invoke_step" = 'NOT_REACHED' ] || [ "$invoke_step" = 'skipped' ]; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_FAILED_BEFORE_INVOKE'
+            exit 1
+          fi
+          echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_INVOKE_NON_SUCCESS'
+          exit 1
+
+      - name: Classify durable state read-only after non-successful bootstrap invoke
+        id: post-recovery
+        if: ${{ always() && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.conclusion != 'success' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+          tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-post-recovery.log"
+          set +e
+          npm run initial-bootstrap-recovery:invoke | tee "$tmp"
+          invoke_status="${PIPESTATUS[0]}"
+          set -e
+          if [ "$invoke_status" -ne 0 ]; then
+            rm -f "$tmp"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_POST_RECOVERY_FAILED'
+            exit 1
+          fi
+          classification="$(tail -n 1 "$tmp" | jq -c -e '
+            select(
+              type == "object"
+              and (keys | sort) == ["code", "reason", "status", "verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+              and (.verdict | IN("APPLIED", "NOT_APPLIED", "RECOVERY_REQUIRED"))
+              and (.reason | type == "string")
+            )
+          ')" || {
+            rm -f "$tmp"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_POST_RECOVERY_EVIDENCE_INVALID'
+            exit 1
+          }
+          rm -f "$tmp"
+          printf 'verdict=%s\n' "$(jq -r '.verdict' <<<"$classification")" >> "$GITHUB_OUTPUT"
+          printf 'reason=%s\n' "$(jq -r '.reason' <<<"$classification")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish one enum-only orchestrator evidence artifact
+        if: ${{ always() }}
+        shell: bash
+        env:
+          INITIAL_VERDICT: ${{ steps.initial-recovery.outputs.verdict }}
+          INITIAL_REASON: ${{ steps.initial-recovery.outputs.reason }}
+          READINESS_RUN_ID: ${{ steps.readiness.outputs.run_id }}
+          READINESS_CODE: ${{ steps.readiness-evidence.outputs.code }}
+          BOOTSTRAP_RUN_ID: ${{ steps.bootstrap.outputs.run_id }}
+          BOOTSTRAP_CONCLUSION: ${{ steps.bootstrap.outputs.conclusion }}
+          BOOTSTRAP_INVOKE_STEP: ${{ steps.bootstrap.outputs.invoke_step }}
+          POST_VERDICT: ${{ steps.post-recovery.outputs.verdict }}
+          POST_REASON: ${{ steps.post-recovery.outputs.reason }}
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-orchestrator-evidence"
+          mkdir -p "$evidence_dir"
+
+          status='FAIL'
+          code='R1_BOOTSTRAP_ORCHESTRATOR_FAILED'
+          if [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
+            status='PASS'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED'
+          elif [ -n "$POST_VERDICT" ] && [ -n "$POST_REASON" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED'
+          elif [ -n "$BOOTSTRAP_RUN_ID" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_NON_SUCCESS'
+          elif [ -n "$READINESS_RUN_ID" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_READINESS_BLOCKED'
+          elif [ -n "$INITIAL_VERDICT" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED'
+          fi
+
+          jq -cn \
+            --arg status "$status" \
+            --arg code "$code" \
+            --arg sourceSha "$GITHUB_SHA" \
+            --arg initialRecoveryVerdict "$INITIAL_VERDICT" \
+            --arg initialRecoveryReason "$INITIAL_REASON" \
+            --arg readinessRunId "$READINESS_RUN_ID" \
+            --arg readinessCode "$READINESS_CODE" \
+            --arg bootstrapRunId "$BOOTSTRAP_RUN_ID" \
+            --arg bootstrapConclusion "$BOOTSTRAP_CONCLUSION" \
+            --arg bootstrapInvokeStep "$BOOTSTRAP_INVOKE_STEP" \
+            --arg postRecoveryVerdict "$POST_VERDICT" \
+            --arg postRecoveryReason "$POST_REASON" \
+            '{
+              status: $status,
+              code: $code,
+              sourceSha: $sourceSha,
+              initialRecoveryVerdict: ($initialRecoveryVerdict | select(length > 0) // null),
+              initialRecoveryReason: ($initialRecoveryReason | select(length > 0) // null),
+              readinessRunId: (if $readinessRunId == "" then null else ($readinessRunId | tonumber) end),
+              readinessCode: ($readinessCode | select(length > 0) // null),
+              bootstrapRunId: (if $bootstrapRunId == "" then null else ($bootstrapRunId | tonumber) end),
+              bootstrapConclusion: ($bootstrapConclusion | select(length > 0) // null),
+              bootstrapInvokeStep: ($bootstrapInvokeStep | select(length > 0) // null),
+              postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
+              postRecoveryReason: ($postRecoveryReason | select(length > 0) // null)
+            }' > "$evidence_dir/classification.json"
+
+      - name: Upload orchestrator evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-orchestrator-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-bootstrap-orchestrator-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 1
