@@ -12,8 +12,8 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);
-  assert.match(workflow, /EXPECTED_FAILED_BOOTSTRAP_RUN_ID: '34762929261'/);
-  assert.match(workflow, /EXPECTED_FAILED_BOOTSTRAP_SHA: 0a2fc24268cdd95b51c2555dd2d2930b30fc9f64/);
+  assert.match(workflow, /EXPECTED_FAILED_BOOTSTRAP_RUN_ID: '34806405103'/);
+  assert.match(workflow, /EXPECTED_FAILED_BOOTSTRAP_SHA: 2bb070e9c155a460ce06c4e76a3f29708c8b0f73/);
   assert.match(workflow, /actions\/runs\/\$\{EXPECTED_FAILED_BOOTSTRAP_RUN_ID\}/);
   assert.match(workflow, /\.head_sha == \$expected_sha/);
   assert.match(workflow, /Invoke exact initial bootstrap tag once/);
