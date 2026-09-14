@@ -143,10 +143,12 @@ function safeCapturedShape(value) {
   return 'TEXT';
 }
 
-function reportSafeNonzeroShape(stdout, stderr, environment) {
-  if (environment.GITHUB_ACTIONS !== 'true') return;
-  const shape = `STDOUT_${safeCapturedShape(stdout)}__STDERR_${safeCapturedShape(stderr)}`;
-  process.stderr.write(`READINESS_INVOKE_OUTPUT_SHAPE=${shape}\n`);
+function safeNonzeroUnclassified(stdout, stderr, environment) {
+  if (environment.GITHUB_ACTIONS !== 'true') return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+  return Object.freeze({
+    ...SAFE_INVOKE_NONZERO_UNCLASSIFIED,
+    outputShape: `STDOUT_${safeCapturedShape(stdout)}__STDERR_${safeCapturedShape(stderr)}`,
+  });
 }
 
 function safeInvokeFailure(error, environment) {
@@ -165,8 +167,7 @@ function safeInvokeFailure(error, environment) {
     && (typeof error === 'object' || typeof error === 'function')
     && typeof Reflect.get(error, 'code') === 'number'
   ) {
-    reportSafeNonzeroShape(stdout, stderr, environment);
-    return SAFE_INVOKE_NONZERO_UNCLASSIFIED;
+    return safeNonzeroUnclassified(stdout, stderr, environment);
   }
   return SAFE_INVOKE_FAILURE;
 }
