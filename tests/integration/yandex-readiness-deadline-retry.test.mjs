@@ -55,7 +55,7 @@ if (attempt === 0) {
   assert.equal(result.stderr, '');
 });
 
-test('persistent runtime readiness deadline remains a distinct safe code after the bounded retry', async () => {
+test('persistent runtime readiness deadline remains in the existing safe timeout contract after the bounded retry', async () => {
   let error;
   try {
     await runInvoker(`process.stdout.write(JSON.stringify({readinessFailure:'DEADLINE_EXCEEDED'}));`);
@@ -66,7 +66,7 @@ test('persistent runtime readiness deadline remains a distinct safe code after t
   assert.equal(error?.code, 2);
   assert.deepEqual(JSON.parse(error?.stdout ?? ''), {
     status: 'FAIL',
-    code: 'READINESS_DEADLINE_EXCEEDED',
+    code: 'READINESS_INVOKE_FUNCTION_TIMEOUT',
   });
   assert.equal(error?.stderr, '');
 });
