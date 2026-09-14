@@ -222,7 +222,12 @@ function capturedErrorField(error, field) {
 }
 
 function safeInvokeFailure(error) {
-  const captured = `${capturedErrorField(error, 'stdout')}\n${capturedErrorField(error, 'stderr')}`;
+  const stdout = capturedErrorField(error, 'stdout');
+  const stderr = capturedErrorField(error, 'stderr');
+  const exactResult = parseExactFunctionResult(stdout);
+  if (exactResult !== null && exactResult.status !== 'PASS') return exactResult;
+
+  const captured = `${stdout}\n${stderr}`;
   if (captured.includes(YANDEX_FUNCTION_TIMEOUT_MARKER)) return SAFE_INVOKE_FUNCTION_TIMEOUT;
   if (
     error !== null
