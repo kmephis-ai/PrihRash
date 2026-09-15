@@ -10,7 +10,7 @@ R3A synthetic preview доказывает local-first UX и offline-write ме�
 Google authoritative → YDB shadow
 ```
 
-Writer подключается только через synthetic `preview-bootstrap.mjs`. Панели явно помечены `Новый расход · демо`, `Новый доход · демо` и `Новый перевод · демо`; реальные финансовые данные и production Writer path не используются.
+Writer подключается только через synthetic `preview-bootstrap.mjs`. EXPENSE/INCOME представлены как один compact primary entry с явным переключателем типа; TRANSFER находится в отдельном свернутом по умолчанию блоке. Реальные финансовые данные и production Writer path не используются.
 
 ## Quick EXPENSE preview contract
 
@@ -21,8 +21,10 @@ Writer подключается только через synthetic `preview-boots
 - source account из exact `syntheticPreviewEvidence.accounts`;
 - category из exact `syntheticPreviewEvidence.categories` только при `kind=EXPENSE`;
 - optional payer из exact synthetic member references, независимо от payment account; `Не указан` сохраняется как `null`, без inference другого member;
-- optional literal description;
+- **required** literal description; пустая/whitespace-only строка не создаёт intent;
 - optional literal note.
+
+Новая пустая форма выставляет `occurred_on` в текущий financial day по `Europe/Moscow`; пользователь может изменить дату вручную. Amount/account/category/description проверяются до local commit, `paid_by member` остаётся optional и blank сохраняется как `null` без inference.
 
 ## Quick INCOME preview contract
 
@@ -31,6 +33,7 @@ Writer подключается только через synthetic `preview-boots
 - account является **destination account**;
 - category принимается только при exact `kind=INCOME`;
 - durable payload содержит `toAccount`, а не `fromAccount`;
+- description обязателен как literal text;
 - никакой provenance/source inference из income category или description не выполняется.
 
 Пустые optional form values сохраняются как `null`. Непустой текст не классифицируется, не тегируется и не используется для financial inference.
@@ -43,6 +46,7 @@ Writer подключается только через synthetic `preview-boots
 - destination account выбирается как exact `toAccount` из того же списка;
 - source и destination обязаны различаться;
 - category отсутствует;
+- description обязателен как literal text;
 - durable payload хранит `flowKind=null` **явно**; ни labels счетов, ни направление, ни description/note не превращаются в `OWN_FUNDS_TRANSFER`, `CREDIT_DRAW` или `CREDIT_REPAYMENT`;
 - до отдельного доказанного UX/semantics item preview показывает обычный «Перевод» без guessed classification.
 
@@ -73,6 +77,12 @@ VOID_TRANSACTION / PENDING
 ```
 
 Unknown kind/schema/state и malformed durable rows fail-closed и не считаются валидными pending intents. Browser ничего не normalizes/fixes при чтении повреждённого evidence.
+
+### Owner-visible local queue
+
+Synthetic preview показывает одну owner-visible очередь для `CREATE_EXPENSE`, `CREATE_INCOME` и `CREATE_TRANSFER`. Каждая строка показывает type, amount, `occurred_on`, literal description и exact account/category context. Статус честно означает только `Сохранено локально`.
+
+До delivery пользователь может открыть pending create intent на редактирование. Сохранение изменения выполняет exact-key replace той же durable строки: `intentId`, `kind`, `state=PENDING` и `createdAt` сохраняются, новый второй intent не создаётся. Replace fail-closed, если exact row отсутствует или его kind не совпадает. Это не optimistic edit подтверждённой transaction и не network retry.
 
 EXPENSE durable intent для новых local saves:
 

@@ -28,8 +28,9 @@ async function waitForPreview(page) {
   await expect(page.locator('[data-synthetic-preview="true"]')).toContainText('только синтетические данные');
   await expect(page.locator('[data-sync-state]')).toHaveText('Обновлено');
   await expect(page.locator('[data-preview-writer="expense"]')).toBeVisible();
-  await expect(page.locator('[data-preview-writer="income"]')).toBeVisible();
+  await expect(page.locator('[data-preview-writer="income"]')).toBeHidden();
   await expect(page.locator('[data-preview-writer="transfer"]')).toBeVisible();
+  await expect(page.locator('[data-preview-writer-queue]')).toBeVisible();
   await expect(page.locator('[data-preview-transaction-void]')).toBeVisible();
 }
 
@@ -79,7 +80,9 @@ test('mobile critical controls stay accessible and INCOME/TRANSFER local-first s
     await expect(page.locator('.bottom-nav')).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 
+    await page.locator('[data-preview-writer="expense"] [data-preview-writer-type="income"]').click();
     const income = page.locator('[data-preview-writer="income"]');
+    await expect(income).toBeVisible();
     await fillCreateForm(income, {
       amount: '1234,56',
       occurredOn: '2026-09-10',
@@ -92,6 +95,8 @@ test('mobile critical controls stay accessible and INCOME/TRANSFER local-first s
     await expect(income.locator('[data-preview-income-pending-count]')).toContainText(': 1');
 
     const transfer = page.locator('[data-preview-writer="transfer"]');
+    await expect(transfer).toHaveJSProperty('open', false);
+    await transfer.locator('summary').click();
     await fillCreateForm(transfer, {
       amount: '500,00',
       occurredOn: '2026-09-10',
@@ -132,7 +137,9 @@ test('EXPENSE draft survives reload, offline create is durable, and only validat
     await expect(restoredExpense.locator('[data-preview-expense-writer-status]')).toContainText('Сохранено локально');
     await expect(restoredExpense.locator('[data-preview-expense-pending-count]')).toContainText(': 1');
 
+    await page.locator('[data-preview-writer="expense"] [data-preview-writer-type="income"]').click();
     const income = page.locator('[data-preview-writer="income"]');
+    await expect(income).toBeVisible();
     await fillCreateForm(income, {
       amount: '100,00',
       occurredOn: '2026-09-11',
@@ -197,6 +204,59 @@ test('EXPENSE draft survives reload, offline create is durable, and only validat
       afterValid: ['CREATE_INCOME'],
       outcome: 'CREATED',
     });
+  });
+});
+
+test('Owner UAT compact entry defaults Moscow date, validates fields, keeps transfer collapsed and edits exact local queue row', async ({ page }) => {
+  await guardedBrowser(page, async () => {
+    await page.goto('/');
+    await waitForPreview(page);
+
+    const expense = page.locator('[data-preview-writer="expense"]');
+    const expectedMoscowDate = await page.evaluate(() => {
+      const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}`;
+    });
+    await expect(expense.locator('input[name="occurredOn"]')).toHaveValue(expectedMoscowDate);
+
+    await expense.locator('input[name="amount"]').fill('12abc,345');
+    await expect(expense.locator('input[name="amount"]')).toHaveValue('12,34');
+    await expense.locator('[data-preview-expense-save]').click();
+    await expect(expense.locator('[data-preview-field-error="accountId"]')).toHaveText('Выберите счёт.');
+    await expect(expense.locator('[data-preview-field-error="categoryId"]')).toHaveText('Выберите категорию.');
+    await expect(expense.locator('[data-preview-field-error="description"]')).toHaveText('Введите описание.');
+
+    await expense.locator('select[name="accountId"]').selectOption({ index: 1 });
+    await expense.locator('select[name="categoryId"]').selectOption({ index: 1 });
+    await expense.locator('input[name="description"]').fill('Очередь · browser demo');
+    await expense.locator('[data-preview-expense-save]').click();
+    await expect(expense.locator('[data-preview-expense-writer-status]')).toContainText('Сохранено локально');
+
+    const transfer = page.locator('[data-preview-writer="transfer"]');
+    await expect(transfer).toHaveJSProperty('open', false);
+
+    const queue = page.locator('[data-preview-writer-queue]');
+    await expect(queue.locator('[data-preview-queue-count]')).toHaveText('1');
+    const row = queue.locator('[data-preview-queue-intent]').first();
+    await expect(row).toContainText('Очередь · browser demo');
+    await expect(row).toContainText('12,34');
+    await row.locator('[data-preview-queue-edit]').click();
+    await expect(expense.locator('[data-preview-expense-save]')).toHaveText('Сохранить изменения');
+    await expense.locator('input[name="amount"]').fill('99,90');
+    await expense.locator('input[name="description"]').fill('Очередь исправлена · browser demo');
+    await expense.locator('[data-preview-expense-save]').click();
+    await expect(queue.locator('[data-preview-queue-count]')).toHaveText('1');
+    await expect(queue.locator('[data-preview-queue-intent]').first()).toContainText('Очередь исправлена · browser demo');
+    await expect(queue.locator('[data-preview-queue-intent]').first()).toContainText('99,90');
+
+    const pending = await page.evaluate(async () => {
+      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
+      return (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'CREATE_EXPENSE');
+    });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].payload.amountMinor).toBe(9990);
+    expect(pending[0].payload.description).toBe('Очередь исправлена · browser demo');
   });
 });
 

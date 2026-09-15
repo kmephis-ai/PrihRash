@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { createSyntheticPreviewFetch, syntheticPreviewEvidence } from '../../web/preview-transport.mjs';
+import { financialDateInMoscow } from '../../web/preview-writer.mjs';
 import { sanitizeReaderResponse, toOperationPresentation } from '../../web/presentation.mjs';
 import { sanitizeReaderFilterOptions } from '../../web/reader-filters.mjs';
 import { sanitizeReaderSyncStatus } from '../../web/reader-sync-status.mjs';
@@ -164,6 +165,7 @@ test('preview build emits static root without service worker or manifest deploym
   assert.match(bootstrap, /preview-writer\.mjs/u);
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer-outbox.mjs', import.meta.url));
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-writer-queue.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void-delivery.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.css', import.meta.url));
@@ -1022,8 +1024,8 @@ test('R3A draft mechanics remain preview-only and contain no network/provider wr
   assert.match(writerSource, /enqueuePreviewExpenseThenClearDraft/u);
   assert.match(writerSource, /enqueuePreviewIncomeThenClearDraft/u);
   assert.match(writerSource, /enqueuePreviewTransferThenClearDraft/u);
-  assert.match(writerSource, /Новый доход · демо/u);
-  assert.match(writerSource, /Новый перевод · демо/u);
+  assert.match(writerSource, /data-preview-writer-type="income"/u);
+  assert.match(writerSource, /Перевод между своими счетами · демо/u);
   assert.equal(previewOutboxContract.incomeDraftKey, 'quick-income');
   assert.equal(previewOutboxContract.transferDraftKey, 'quick-transfer');
   assert.match(storageSource, /createObjectStore\(DRAFT_STORE_NAME/u);
@@ -1050,12 +1052,68 @@ test('R3A synthetic TRANSFER panel has two account selectors, no category select
   assert.match(transferPanel, /name="fromAccountId"/u);
   assert.match(transferPanel, /name="toAccountId"/u);
   assert.doesNotMatch(transferPanel, /categoryId|Категория/u);
-  assert.match(transferPanel, /Вид перевода не угадывается и остаётся не задан/u);
+  assert.match(transferPanel, /Тип перевода не угадывается/u);
+  assert.match(transferPanel, /<details/u);
 
   const outboxSource = await readFile(new URL('../../web/preview-writer-outbox.mjs', import.meta.url), 'utf8');
   assert.match(outboxSource, /flowKind:\s*null/u);
   assert.doesNotMatch(outboxSource, /OWN_FUNDS_TRANSFER|CREDIT_DRAW|CREDIT_REPAYMENT/u);
   assert.doesNotMatch(writerSource, /OWN_FUNDS_TRANSFER|CREDIT_DRAW|CREDIT_REPAYMENT/u);
+});
+
+test('R3A Owner UAT uses Europe/Moscow financial date across UTC day boundary', () => {
+  assert.equal(financialDateInMoscow('2026-09-14T20:59:59.000Z'), '2026-09-14');
+  assert.equal(financialDateInMoscow('2026-09-14T21:00:00.000Z'), '2026-09-15');
+  assert.equal(financialDateInMoscow('2026-12-31T21:30:00.000Z'), '2027-01-01');
+});
+
+test('R3A Owner UAT requires literal description for all new create intents while payer remains optional', () => {
+  const commonExpense = { accounts: syntheticPreviewEvidence.accounts, categories: syntheticPreviewEvidence.categories, members: [SYNTHETIC_PAYER], randomUuid: () => '50000000-0000-0000-0000-000000000011', now: () => '2026-09-10T00:00:00.000Z' };
+  assert.throws(() => createPreviewExpenseIntent(previewExpenseInput({ description: '' }), commonExpense), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+  assert.throws(() => createPreviewExpenseIntent(previewExpenseInput({ description: '   ' }), commonExpense), /INVALID_PREVIEW_EXPENSE_INPUT/u);
+  assert.throws(() => createPreviewIncomeIntent(previewIncomeInput({ description: '' }), { accounts: syntheticPreviewEvidence.accounts, categories: syntheticPreviewEvidence.categories, randomUuid: () => '51000000-0000-0000-0000-000000000011', now: () => '2026-09-10T00:00:00.000Z' }), /INVALID_PREVIEW_INCOME_INPUT/u);
+  assert.throws(() => createPreviewTransferIntent(previewTransferInput({ description: '' }), { accounts: syntheticPreviewEvidence.accounts, randomUuid: () => '52000000-0000-0000-0000-000000000011', now: () => '2026-09-10T00:00:00.000Z' }), /INVALID_PREVIEW_TRANSFER_INPUT/u);
+  assert.equal(previewExpenseIntent().payload.paidByMember, null);
+});
+
+test('R3A local queue replace updates exact durable intent without creating a duplicate', async () => {
+  const original = previewExpenseIntent();
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(original);
+  const replacement = createPreviewExpenseIntent(previewExpenseInput({ amount: '333,45', description: 'Исправлено локально' }), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    members: [SYNTHETIC_PAYER],
+    randomUuid: () => original.intentId,
+    now: () => original.createdAt,
+  });
+  await outbox.replace(replacement);
+  assert.equal(await outbox.countPending(), 1);
+  assert.deepEqual(await outbox.read(original.intentId), replacement);
+  const incomeSameId = createPreviewIncomeIntent(previewIncomeInput(), {
+    accounts: syntheticPreviewEvidence.accounts,
+    categories: syntheticPreviewEvidence.categories,
+    randomUuid: () => original.intentId,
+    now: () => original.createdAt,
+  });
+  await assert.rejects(outbox.replace(incomeSameId), /PREVIEW_OUTBOX_REPLACE_KIND_MISMATCH/u);
+  assert.equal(await outbox.countPending(), 1);
+});
+
+test('R3A queue UI stays preview-only, shows context and edits by exact local intent', async () => {
+  const queueSource = await readFile(new URL('../../web/preview-writer-queue.mjs', import.meta.url), 'utf8');
+  const bootstrap = await readFile(new URL('../../web/preview-bootstrap.mjs', import.meta.url), 'utf8');
+  assert.match(queueSource, /Сохранено локально/u);
+  assert.match(queueSource, /Редактировать/u);
+  assert.match(queueSource, /amountMinor/u);
+  assert.match(queueSource, /previewWriterEvents\.editPending/u);
+  assert.match(bootstrap, /mountSyntheticPreviewWriterQueue/u);
+  for (const source of [queueSource]) {
+    assert.doesNotMatch(source, /\bfetch\s*\(/u);
+    assert.doesNotMatch(source, /\/api\//u);
+    assert.doesNotMatch(source, /YDB_WRITE_ENABLED|@ydb|ydbjs|google-auth-library|spreadsheets\./iu);
+  }
 });
 
 test('R3A preview delivery maps PENDING intent to minimal create request without local labels/metadata', () => {
