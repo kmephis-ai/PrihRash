@@ -1,0 +1,54 @@
+.mjs
+index 9e758b9..4d131af 100644
+--- a/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs
+@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
+ import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+ import { buildInitialBootstrapCandidate } from '../../dist/migration/initialBootstrapCandidate.js';
+ import {
++  InitialBootstrapIdentityManifestError,
+   buildInitialBootstrapIdentityManifest,
+   prepareInitialBootstrapIdentityManifestWrite,
+ } from '../../dist/migration/initialBootstrapIdentityManifest.js';
+@@ -106,6 +107,7 @@ function fakeTransport({
+   manifest = [],
+   admissionAfter = [],
+   failRunRead = false,
++  failManifestRead = false,
+   failPostAdmissionRead = false,
+ }) {
+   const events = [];
+@@ -133,7 +135,10 @@ function fakeTransport({
+             }
+             events.push('readback');
+             if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: snapshot };
+-            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: manifest };
++            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
++              if (failManifestRead) throw new Error('synthetic manifest read failure');
++              return { rows: manifest };
++            }
+             if (failRunRead) throw new Error('synthetic run read failure');
+             return { rows: run };
+           },
+@@ -158,6 +163,13 @@ function expectExecutorError(code, work) {
+   );
+ }
+ 
++function expectManifestError(code, work) {
++  return assert.rejects(
++    work,
++    (error) => error instanceof InitialBootstrapIdentityManifestError && error.code === code,
++  );
++}
++
+ test('atomically claims empty bootstrap state together with immutable identity manifest', async () => {
+   const input = candidate();
+   const writes = prepareInitialBootstrapMetadataWrites(input);
+@@ -233,7 +245,48 @@ test('existing COMMITTED baseline blocks a second initial bootstrap claim', asyn
+   assert.deepEqual(fake.events, ['begin', 'admission', 'rollback']);
+ });
+ 
+-test('identity manifest read-back mismatch rolls back the complete claim', async () => {
++test('identity manifest provider read failure rolls back the complete claim with a bounded code', async () => {
++  const input = candidate();
++  
