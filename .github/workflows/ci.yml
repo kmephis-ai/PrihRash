@@ -27,7 +27,14 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-exact-source-${{ github.sha }}
-          path: .artifacts/
+          path: |
+            .artifacts/exact-source-manifest.json
+            .artifacts/yandex-scheduled-sync-function/
+            .artifacts/yandex-schema-bootstrap-function/
+            .artifacts/yandex-schema-upgrade-003-function/
+            .artifacts/yandex-initial-bootstrap-function/
+            .artifacts/yandex-initial-bootstrap-recovery-function/
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+          include-hidden-files: true
