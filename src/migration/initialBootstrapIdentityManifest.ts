@@ -69,7 +69,14 @@ export type InitialBootstrapIdentityManifestErrorCode =
   | 'MISSING_TRANSACTION_ASSIGNMENT'
   | 'UNEXPECTED_TRANSACTION_ASSIGNMENT'
   | 'MALFORMED_ROW_CARDINALITY'
-  | 'MALFORMED_BINDINGS_PAYLOAD'
+  | 'MALFORMED_BINDINGS_VALUE_MISSING'
+  | 'MALFORMED_BINDINGS_VALUE_NULL'
+  | 'MALFORMED_BINDINGS_VALUE_BINARY'
+  | 'MALFORMED_BINDINGS_JSON_STRING_INVALID'
+  | 'MALFORMED_BINDINGS_ROOT_TYPE'
+  | 'MALFORMED_BINDINGS_SCHEMA_VERSION'
+  | 'MALFORMED_BINDINGS_ARRAY'
+  | 'MALFORMED_BINDINGS_ROOT_KEYS'
   | 'MALFORMED_BINDING_ENTRY'
   | 'MALFORMED_BINDING_SET'
   | 'MALFORMED_BINDING_COUNT'
@@ -314,20 +321,28 @@ function parseBinding(value: unknown): Readonly<InitialBootstrapIdentityBinding>
 }
 
 function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdentityBinding>[] {
-  const payloadCode = 'MALFORMED_BINDINGS_PAYLOAD' as const;
+  if (value === undefined) malformed('MALFORMED_BINDINGS_VALUE_MISSING');
+  if (value === null) malformed('MALFORMED_BINDINGS_VALUE_NULL');
+  if (value instanceof Uint8Array) malformed('MALFORMED_BINDINGS_VALUE_BINARY');
+
   let payload: unknown = value;
   if (typeof payload === 'string') {
     try {
       payload = JSON.parse(payload) as unknown;
     } catch {
-      malformed(payloadCode);
+      malformed('MALFORMED_BINDINGS_JSON_STRING_INVALID');
     }
   }
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed(payloadCode);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    malformed('MALFORMED_BINDINGS_ROOT_TYPE');
+  }
   const record = payload as Readonly<Record<string, unknown>>;
-  if (record.schema_version !== 1 || !Array.isArray(record.bindings)) malformed(payloadCode);
+  if (record.schema_version !== 1) malformed('MALFORMED_BINDINGS_SCHEMA_VERSION');
+  if (!Array.isArray(record.bindings)) malformed('MALFORMED_BINDINGS_ARRAY');
   const keys = Object.keys(record);
-  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) malformed(payloadCode);
+  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) {
+    malformed('MALFORMED_BINDINGS_ROOT_KEYS');
+  }
 
   const bindings = record.bindings.map(parseBinding).sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
   const sourceIds = new Set<string>();

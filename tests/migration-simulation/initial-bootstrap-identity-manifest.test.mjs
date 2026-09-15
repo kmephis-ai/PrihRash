@@ -195,7 +195,23 @@ test('manifest readback parser exposes structural failure class without row valu
   const validBindings = valid.bindings;
   const cases = [
     ['MALFORMED_ROW_CARDINALITY', [valid, valid]],
-    ['MALFORMED_BINDINGS_PAYLOAD', [{ ...valid, bindings: [] }]],
+    ['MALFORMED_BINDINGS_VALUE_MISSING', [{ ...valid, bindings: undefined }]],
+    ['MALFORMED_BINDINGS_VALUE_NULL', [{ ...valid, bindings: null }]],
+    ['MALFORMED_BINDINGS_VALUE_BINARY', [{ ...valid, bindings: new Uint8Array([123, 125]) }]],
+    ['MALFORMED_BINDINGS_JSON_STRING_INVALID', [{ ...valid, bindings: '{broken' }]],
+    ['MALFORMED_BINDINGS_ROOT_TYPE', [{ ...valid, bindings: [] }]],
+    ['MALFORMED_BINDINGS_SCHEMA_VERSION', [{
+      ...valid,
+      bindings: { ...validBindings, schema_version: 2 },
+    }]],
+    ['MALFORMED_BINDINGS_ARRAY', [{
+      ...valid,
+      bindings: { ...validBindings, bindings: null },
+    }]],
+    ['MALFORMED_BINDINGS_ROOT_KEYS', [{
+      ...valid,
+      bindings: { ...validBindings, extra: true },
+    }]],
     ['MALFORMED_BINDING_ENTRY', [{
       ...valid,
       bindings: { ...validBindings, bindings: [{ ...validBindings.bindings[0], source_record_id: null }, validBindings.bindings[1]] },
