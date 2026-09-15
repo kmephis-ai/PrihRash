@@ -20,6 +20,10 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.match(workflow, /metadataFailureCode:/);
   assert.match(workflow, /FRESH_CLAIM_WRITE/);
   assert.match(workflow, /METADATA_EXECUTOR_RUN_READBACK_MISMATCH/);
+  assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED/);
+  assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH/);
+  assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH/);
+  assert.match(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /httpStatus:/);
   assert.match(workflow, /functionError:/);

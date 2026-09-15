@@ -113,6 +113,20 @@ test('safe non-success Function results remain exact bounded output and exit non
       applicationPhase: 'FRESH_CLAIM_WRITE',
       metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
     },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+      applicationPhase: 'FRESH_CLAIM_WRITE',
+      metadataFailureCode: 'METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH',
+    },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+      applicationPhase: 'FRESH_CLAIM_WRITE',
+      metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW',
+    },
   ];
 
   for (const value of values) {

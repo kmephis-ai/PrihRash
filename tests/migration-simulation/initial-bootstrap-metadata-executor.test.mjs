@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { buildInitialBootstrapCandidate } from '../../dist/migration/initialBootstrapCandidate.js';
 import {
+  InitialBootstrapIdentityManifestError,
   buildInitialBootstrapIdentityManifest,
   prepareInitialBootstrapIdentityManifestWrite,
 } from '../../dist/migration/initialBootstrapIdentityManifest.js';
@@ -106,6 +107,7 @@ function fakeTransport({
   manifest = [],
   admissionAfter = [],
   failRunRead = false,
+  failManifestRead = false,
   failPostAdmissionRead = false,
 }) {
   const events = [];
@@ -133,7 +135,10 @@ function fakeTransport({
             }
             events.push('readback');
             if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: snapshot };
-            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: manifest };
+            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
+              if (failManifestRead) throw new Error('synthetic manifest read failure');
+              return { rows: manifest };
+            }
             if (failRunRead) throw new Error('synthetic run read failure');
             return { rows: run };
           },
@@ -155,6 +160,13 @@ function expectExecutorError(code, work) {
   return assert.rejects(
     work,
     (error) => error instanceof InitialBootstrapMetadataExecutorError && error.code === code,
+  );
+}
+
+function expectManifestError(code, work) {
+  return assert.rejects(
+    work,
+    (error) => error instanceof InitialBootstrapIdentityManifestError && error.code === code,
   );
 }
 
@@ -233,7 +245,48 @@ test('existing COMMITTED baseline blocks a second initial bootstrap claim', asyn
   assert.deepEqual(fake.events, ['begin', 'admission', 'rollback']);
 });
 
-test('identity manifest read-back mismatch rolls back the complete claim', async () => {
+test('identity manifest provider read failure rolls back the complete claim with a bounded code', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [expected.manifest],
+    admissionAfter: [expected.admission],
+    failManifestRead: true,
+  });
+
+  await expectExecutorError(
+    'IDENTITY_MANIFEST_READ_FAILED',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+test('missing identity manifest readback preserves the privacy-safe not-found parser code', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [],
+    admissionAfter: [expected.admission],
+  });
+
+  await expectManifestError(
+    'MANIFEST_NOT_FOUND',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+test('malformed identity manifest readback preserves the privacy-safe manifest parser code', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
   const manifestWrite = identityWrite(input);
@@ -246,8 +299,51 @@ test('identity manifest read-back mismatch rolls back the complete claim', async
     admissionAfter: [expected.admission],
   });
 
+  await expectManifestError(
+    'MALFORMED_MANIFEST_ROW',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+test('identity manifest joined context mismatch is distinct from manifest content mismatch', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [{ ...expected.manifest, run_state: 'VALIDATED' }],
+    admissionAfter: [expected.admission],
+  });
+
   await expectExecutorError(
-    'IDENTITY_MANIFEST_READBACK_MISMATCH',
+    'IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+test('identity manifest content mismatch is distinct after valid joined context', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [{
+      ...expected.manifest,
+      source_snapshot_id: '00000000-0000-0000-0000-000000000898',
+    }],
+    admissionAfter: [expected.admission],
+  });
+
+  await expectExecutorError(
+    'IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH',
     () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');
