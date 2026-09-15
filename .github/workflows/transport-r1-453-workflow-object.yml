@@ -33,83 +33,89 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_HEAD"
 
-          git apply - <<'PATCH'
-          diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
-          index 4af34c6..67bc53f 100644
-          --- a/.github/workflows/r1-initial-shadow-bootstrap.yml
-          +++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
-          @@ -416,7 +416,7 @@ jobs:
-                           "INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID",
-                           "INITIAL_BOOTSTRAP_INVOKE_FAILED",
-          -                "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",
-          +                "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",
-                           "INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT",
-                           "INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID",
-                           "INITIAL_BOOTSTRAP_CONFIG_INVALID",
-          @@ -426,21 +426,25 @@ jobs:
-                         )))
-                       )
-                     | select(
-          -                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-          +                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-                         or (
-          -                  (.transportClass | type) == "string"
-          -                  and (.transportClass | IN(
-          -                    "EMPTY",
-          -                    "AUTH",
-          -                    "NOT_FOUND",
-          -                    "RATE_LIMIT",
-          -                    "DEADLINE",
-          -                    "UNAVAILABLE",
-          -                    "INVALID_REQUEST",
-          -                    "FAILED_PRECONDITION",
-          -                    "INTERNAL",
-          -                    "OTHER"
-          +                  (.httpStatus | type) == "string"
-          +                  and (.httpStatus | IN(
-          +                    "HTTP_400",
-          +                    "HTTP_403",
-          +                    "HTTP_404",
-          +                    "HTTP_413",
-          +                    "HTTP_429",
-          +                    "HTTP_500",
-          +                    "HTTP_502",
-          +                    "HTTP_503",
-          +                    "HTTP_504",
-          +                    "HTTP_4XX_OTHER",
-          +                    "HTTP_5XX_OTHER",
-          +                    "HTTP_OTHER"
-                           ))
-          +                  and (.functionError | type) == "string"
-          +                  and (.functionError | IN("PRESENT", "ABSENT"))
-                         )
-                       )
-                     | {
-          @@ -540,17 +544,15 @@ jobs:
-                           else null
-                           end
-                         ),
-          -                outputShape: (
-          -                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-          -                     and (.outputShape | type) == "string"
-          -                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
-          -                  then .outputShape
-          +                httpStatus: (
-          +                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-          +                  then .httpStatus
-                           else null
-                           end
-                         ),
-          -                transportClass: (
-          -                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-          -                  then .transportClass
-          +                functionError: (
-          +                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-          +                  then .functionError
-                           else null
-                           end
-                         )
-          PATCH
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/r1-initial-shadow-bootstrap.yml')
+          text = path.read_text()
+          replacements = [
+              (
+                  '                  "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",',
+                  '                  "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",',
+              ),
+              (
+                  '''                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                or (
+                  (.transportClass | type) == "string"
+                  and (.transportClass | IN(
+                    "EMPTY",
+                    "AUTH",
+                    "NOT_FOUND",
+                    "RATE_LIMIT",
+                    "DEADLINE",
+                    "UNAVAILABLE",
+                    "INVALID_REQUEST",
+                    "FAILED_PRECONDITION",
+                    "INTERNAL",
+                    "OTHER"
+                  ))
+                )''',
+                  '''                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                or (
+                  (.httpStatus | type) == "string"
+                  and (.httpStatus | IN(
+                    "HTTP_400",
+                    "HTTP_403",
+                    "HTTP_404",
+                    "HTTP_413",
+                    "HTTP_429",
+                    "HTTP_500",
+                    "HTTP_502",
+                    "HTTP_503",
+                    "HTTP_504",
+                    "HTTP_4XX_OTHER",
+                    "HTTP_5XX_OTHER",
+                    "HTTP_OTHER"
+                  ))
+                  and (.functionError | type) == "string"
+                  and (.functionError | IN("PRESENT", "ABSENT"))
+                )''',
+              ),
+              (
+                  '''                outputShape: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                     and (.outputShape | type) == "string"
+                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
+                  then .outputShape
+                  else null
+                  end
+                ),
+                transportClass: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                  then .transportClass
+                  else null
+                  end
+                )''',
+                  '''                httpStatus: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                  then .httpStatus
+                  else null
+                  end
+                ),
+                functionError: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                  then .functionError
+                  else null
+                  end
+                )''',
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit('TRANSPORT_REPLACEMENT_MISMATCH')
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
 
           test "$(git hash-object .github/workflows/r1-initial-shadow-bootstrap.yml)" = "$EXPECTED_WORKFLOW_BLOB"
 
