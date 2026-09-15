@@ -362,8 +362,9 @@ function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdenti
 
 export function initialBootstrapIdentityManifestReadStatement(migrationRunId: string): YdbStatement {
   return readStatement(
-    'SELECT m.source_snapshot_id, CAST(m.source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
-      + 'm.binding_count, m.bindings, r.state AS run_state, '
+    'SELECT m.source_snapshot_id AS source_snapshot_id, '
+      + 'CAST(m.source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
+      + 'm.binding_count AS binding_count, m.bindings AS bindings, r.state AS run_state, '
       + 'CAST(r.source_snapshot_digest AS Utf8) AS run_snapshot_digest, '
       + 'CAST(s.snapshot_digest AS Utf8) AS snapshot_digest, s.row_count AS snapshot_row_count '
       + 'FROM initial_bootstrap_identity_manifests AS m '
