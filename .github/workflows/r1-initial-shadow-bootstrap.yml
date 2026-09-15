@@ -416,7 +416,7 @@ jobs:
                 or ($status == "FAIL" and ($code | IN(
                   "INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID",
                   "INITIAL_BOOTSTRAP_INVOKE_FAILED",
-                  "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",
+                  "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",
                   "INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT",
                   "INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID",
                   "INITIAL_BOOTSTRAP_CONFIG_INVALID",
@@ -426,21 +426,25 @@ jobs:
                 )))
               )
             | select(
-                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
                 or (
-                  (.transportClass | type) == "string"
-                  and (.transportClass | IN(
-                    "EMPTY",
-                    "AUTH",
-                    "NOT_FOUND",
-                    "RATE_LIMIT",
-                    "DEADLINE",
-                    "UNAVAILABLE",
-                    "INVALID_REQUEST",
-                    "FAILED_PRECONDITION",
-                    "INTERNAL",
-                    "OTHER"
+                  (.httpStatus | type) == "string"
+                  and (.httpStatus | IN(
+                    "HTTP_400",
+                    "HTTP_403",
+                    "HTTP_404",
+                    "HTTP_413",
+                    "HTTP_429",
+                    "HTTP_500",
+                    "HTTP_502",
+                    "HTTP_503",
+                    "HTTP_504",
+                    "HTTP_4XX_OTHER",
+                    "HTTP_5XX_OTHER",
+                    "HTTP_OTHER"
                   ))
+                  and (.functionError | type) == "string"
+                  and (.functionError | IN("PRESENT", "ABSENT"))
                 )
               )
             | {
@@ -540,17 +544,15 @@ jobs:
                   else null
                   end
                 ),
-                outputShape: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-                     and (.outputShape | type) == "string"
-                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
-                  then .outputShape
+                httpStatus: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                  then .httpStatus
                   else null
                   end
                 ),
-                transportClass: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-                  then .transportClass
+                functionError: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                  then .functionError
                   else null
                   end
                 )
