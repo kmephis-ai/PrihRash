@@ -25,7 +25,14 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH/);
   const structuralManifestCodes = [
     'MALFORMED_ROW_CARDINALITY',
-    'MALFORMED_BINDINGS_PAYLOAD',
+    'MALFORMED_BINDINGS_VALUE_MISSING',
+    'MALFORMED_BINDINGS_VALUE_NULL',
+    'MALFORMED_BINDINGS_VALUE_BINARY',
+    'MALFORMED_BINDINGS_JSON_STRING_INVALID',
+    'MALFORMED_BINDINGS_ROOT_TYPE',
+    'MALFORMED_BINDINGS_SCHEMA_VERSION',
+    'MALFORMED_BINDINGS_ARRAY',
+    'MALFORMED_BINDINGS_ROOT_KEYS',
     'MALFORMED_BINDING_ENTRY',
     'MALFORMED_BINDING_SET',
     'MALFORMED_BINDING_COUNT',
@@ -43,6 +50,8 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   }
   assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+  assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
+  assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /httpStatus:/);
   assert.match(workflow, /functionError:/);
