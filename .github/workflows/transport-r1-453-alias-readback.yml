@@ -1,0 +1,49 @@
+name: Transport R1 453 manifest readback alias blobs
+
+on:
+  push:
+    branches:
+      - transport/r1-453-alias-readback-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and publish exact verified blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch='transport/r1-453-alias-readback/patch.diff'
+          printf '%s  %s\n' 'b92c8897f278076ed84f9a281b01e00539e09d6bbe4a470002de1688a9fac57a' "$patch" | sha256sum --check --status
+          cp "$patch" "$RUNNER_TEMP/r1-453-alias-readback.patch"
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = 'b26a7ec8c61a524ad64ece71618c57f83a3affd1'
+          git checkout --detach b26a7ec8c61a524ad64ece71618c57f83a3affd1
+          git apply --check "$RUNNER_TEMP/r1-453-alias-readback.patch"
+          git apply --index "$RUNNER_TEMP/r1-453-alias-readback.patch"
+
+          tree="$(git write-tree)"
+          test "$tree" = '25fdec7a4da764740da56606a80770d2b27716c2'
+
+          declare -A expected=(
+            ['src/migration/initialBootstrapIdentityManifest.ts']='0d3cee7cdd94904970851ec908c5054c225b6ffc'
+            ['tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs']='e42eef9a30d204e01b33ad8f5683ac4a410798a6'
+          )
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for path in "${!expected[@]}"; do
+            blob="$(git hash-object "$path")"
+            test "$blob" = "${expected[$path]}"
+            tag="transport-r1-453-alias-blob-${blob:0:12}-20260915"
+            git tag -a "$tag" "$blob" -m "transport verified R1 manifest readback alias blob: $path"
+            git push origin "refs/tags/$tag"
+          done
