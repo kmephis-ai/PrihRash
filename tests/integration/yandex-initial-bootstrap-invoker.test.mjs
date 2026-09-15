@@ -95,6 +95,20 @@ test('safe non-success Function results remain exact bounded output and exit non
     {
       status: 'FAIL',
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_FUNCTION_MODULE_LOAD_FAILED',
+      applicationPhase: null,
+      metadataFailureCode: null,
+    },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_FUNCTION_HANDLER_UNCAUGHT',
+      applicationPhase: null,
+      metadataFailureCode: null,
+    },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
       runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
       applicationPhase: 'FRESH_CLAIM_WRITE',
       metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',

@@ -464,6 +464,8 @@ jobs:
                        "REFERENCE_APPLICATION_METADATA_FAILED",
                        "REFERENCE_APPLICATION_YDB_DATA_FAILED",
                        "REFERENCE_APPLICATION_RUNTIME_FAILED",
+                       "REFERENCE_FUNCTION_MODULE_LOAD_FAILED",
+                       "REFERENCE_FUNCTION_HANDLER_UNCAUGHT",
                        "REFERENCE_BOOTSTRAP_RESUME_UNSAFE",
                        "REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE"
                      ))

@@ -1,10 +1,46 @@
 import { access, readFile, readdir } from 'node:fs/promises';
 import { relative, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const ARTIFACT_ROOT = resolve(ROOT, '.artifacts', 'yandex-initial-bootstrap-function');
 const rootPackage = JSON.parse(await readFile(resolve(ROOT, 'package.json'), 'utf8'));
 const runtimePackage = JSON.parse(await readFile(resolve(ARTIFACT_ROOT, 'package.json'), 'utf8'));
+
+const EXPECTED_INDEX_SOURCE = `const MODULE_LOAD_FAILURE = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+  runtimeCode: 'REFERENCE_FUNCTION_MODULE_LOAD_FAILED',
+  applicationPhase: null,
+  metadataFailureCode: null,
+});
+const HANDLER_UNCAUGHT_FAILURE = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+  runtimeCode: 'REFERENCE_FUNCTION_HANDLER_UNCAUGHT',
+  applicationPhase: null,
+  metadataFailureCode: null,
+});
+
+export async function initialBootstrapHandler(event, context) {
+  let runtimeModule;
+  try {
+    runtimeModule = await import('./dist/runtime/yandexCloudInitialBootstrapFunction.js');
+  } catch {
+    return MODULE_LOAD_FAILURE;
+  }
+
+  if (typeof runtimeModule.initialBootstrapHandler !== 'function') {
+    return MODULE_LOAD_FAILURE;
+  }
+
+  try {
+    return await runtimeModule.initialBootstrapHandler(event, context);
+  } catch {
+    return HANDLER_UNCAUGHT_FAILURE;
+  }
+}
+`;
 
 const fail = (message) => {
   throw new Error(`YANDEX_INITIAL_BOOTSTRAP_PACKAGE_INVALID: ${message}`);
@@ -32,8 +68,19 @@ const requiredFiles = [
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
 
 const indexSource = await readFile(resolve(ARTIFACT_ROOT, 'index.js'), 'utf8');
-if (indexSource !== "export { initialBootstrapHandler } from './dist/runtime/yandexCloudInitialBootstrapFunction.js';\n") {
-  fail('root index.js is not the reviewed initial-bootstrap-only handler shim');
+if (indexSource !== EXPECTED_INDEX_SOURCE) {
+  fail('root index.js is not the reviewed initial-bootstrap-only guarded handler shim');
+}
+
+try {
+  const runtimeModule = await import(pathToFileURL(
+    resolve(ARTIFACT_ROOT, 'dist/runtime/yandexCloudInitialBootstrapFunction.js'),
+  ).href);
+  if (typeof runtimeModule.initialBootstrapHandler !== 'function') {
+    fail('bootstrap runtime handler export is missing');
+  }
+} catch {
+  fail('bootstrap runtime module import failed');
 }
 
 if (runtimePackage.name !== 'prihrash-yandex-initial-bootstrap-function') fail('unexpected package name');

@@ -30,6 +30,41 @@ const runtimePackage = {
   dependencies: rootPackage.dependencies,
 };
 
+const INDEX_SOURCE = `const MODULE_LOAD_FAILURE = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+  runtimeCode: 'REFERENCE_FUNCTION_MODULE_LOAD_FAILED',
+  applicationPhase: null,
+  metadataFailureCode: null,
+});
+const HANDLER_UNCAUGHT_FAILURE = Object.freeze({
+  status: 'FAIL',
+  code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+  runtimeCode: 'REFERENCE_FUNCTION_HANDLER_UNCAUGHT',
+  applicationPhase: null,
+  metadataFailureCode: null,
+});
+
+export async function initialBootstrapHandler(event, context) {
+  let runtimeModule;
+  try {
+    runtimeModule = await import('./dist/runtime/yandexCloudInitialBootstrapFunction.js');
+  } catch {
+    return MODULE_LOAD_FAILURE;
+  }
+
+  if (typeof runtimeModule.initialBootstrapHandler !== 'function') {
+    return MODULE_LOAD_FAILURE;
+  }
+
+  try {
+    return await runtimeModule.initialBootstrapHandler(event, context);
+  } catch {
+    return HANDLER_UNCAUGHT_FAILURE;
+  }
+}
+`;
+
 await rm(ARTIFACT_ROOT, { recursive: true, force: true });
 await mkdir(ARTIFACT_ROOT, { recursive: true });
 await cp(DIST, resolve(ARTIFACT_ROOT, 'dist'), { recursive: true });
@@ -49,7 +84,7 @@ for (const file of [
 
 await writeFile(
   resolve(ARTIFACT_ROOT, 'index.js'),
-  "export { initialBootstrapHandler } from './dist/runtime/yandexCloudInitialBootstrapFunction.js';\n",
+  INDEX_SOURCE,
   'utf8',
 );
 await writeFile(

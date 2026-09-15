@@ -81,6 +81,8 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /exit "\$invoke_status"/);
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(workflow, /REFERENCE_FUNCTION_MODULE_LOAD_FAILED/);
+  assert.match(workflow, /REFERENCE_FUNCTION_HANDLER_UNCAUGHT/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED/);
   assert.match(workflow, /httpStatus:/);
   assert.match(workflow, /functionError:/);
@@ -126,10 +128,16 @@ test('bootstrap package exports only the dedicated handler and removes scheduled
   const packageScript = await text(PACKAGE_SCRIPT);
   const verifier = await text(PACKAGE_VERIFY);
 
-  assert.match(packageScript, /export \{ initialBootstrapHandler \}/);
+  assert.match(packageScript, /export async function initialBootstrapHandler/);
+  assert.match(packageScript, /await import\('\.\/dist\/runtime\/yandexCloudInitialBootstrapFunction\.js'\)/);
+  assert.match(packageScript, /REFERENCE_FUNCTION_MODULE_LOAD_FAILED/);
+  assert.match(packageScript, /REFERENCE_FUNCTION_HANDLER_UNCAUGHT/);
+  assert.doesNotMatch(packageScript, /catch \(error\)/);
   assert.match(packageScript, /ALLOWED_RUNTIME_BASENAMES/);
   assert.match(packageScript, /initialBootstrapJob\.js/);
   assert.match(packageScript, /yandexCloudInitialBootstrapFunction\.js/);
+  assert.match(verifier, /bootstrap runtime module import failed/);
+  assert.match(verifier, /pathToFileURL/);
   assert.match(verifier, /runtime surface is not bootstrap-only/);
   assert.match(verifier, /yandexCloudScheduledSyncFunction\.js/);
   assert.match(verifier, /scheduledSyncJob\.js/);
