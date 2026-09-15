@@ -24,6 +24,11 @@ import {
   parsePreviewTransferCreateAck,
 } from '../../web/preview-transfer-writer-delivery.mjs';
 import {
+  createPreviewTransactionVoidRequest,
+  deliverPreviewTransactionVoidIntent,
+  parsePreviewTransactionVoidAck,
+} from '../../web/preview-transaction-void-delivery.mjs';
+import {
   createIndexedDbPreviewDraftStore,
   createIndexedDbPreviewIncomeDraftStore,
   createIndexedDbPreviewTransferDraftStore,
@@ -34,6 +39,7 @@ import {
   createPreviewIncomeIntent,
   createPreviewTransferDraft,
   createPreviewTransferIntent,
+  createPreviewVoidIntent,
   enqueuePreviewExpenseThenClearDraft,
   enqueuePreviewIncomeThenClearDraft,
   enqueuePreviewTransferThenClearDraft,
@@ -46,6 +52,7 @@ import {
   parsePreviewTransferAmountMinor,
   parsePreviewTransferDraft,
   parsePreviewTransferIntent,
+  parsePreviewVoidIntent,
   parsePreviewIntent,
   previewOutboxContract,
   restorePreviewExpenseDraft,
@@ -345,6 +352,18 @@ function previewTransferIntent(overrides = {}) {
   });
 }
 
+function previewVoidIntent(overrides = {}) {
+  return createPreviewVoidIntent({
+    transactionId: '63000000-0000-0000-0000-000000000001',
+    expectedVersion: 7,
+    ...(overrides.input ?? {}),
+  }, {
+    randomUuid: () => '53000000-0000-0000-0000-000000000001',
+    now: () => '2026-09-10T06:00:00.000Z',
+    ...overrides.options,
+  });
+}
+
 test('R3A preview amount parser uses exact RUB minor units without float rounding', () => {
   assert.equal(parsePreviewExpenseAmountMinor('1'), 100);
   assert.equal(parsePreviewExpenseAmountMinor('1,2'), 120);
@@ -541,15 +560,18 @@ test('R3A preview TRANSFER fails closed for same or unresolved accounts and neve
   assert.throws(() => parsePreviewTransferIntent({ ...intent, payload: { ...intent.payload, flowKind: 'OWN_FUNDS_TRANSFER' } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
 });
 
-test('R3A preview strict outbox union accepts EXPENSE, INCOME and TRANSFER while unknown kinds fail closed', async () => {
+test('R3A preview strict outbox union accepts create intents and VOID_TRANSACTION while unknown kinds fail closed', async () => {
   const expense = previewExpenseIntent();
   const income = previewIncomeIntent();
   const transfer = previewTransferIntent();
+  const voidIntent = previewVoidIntent();
   assert.equal(parsePreviewIntent(expense).kind, 'CREATE_EXPENSE');
   assert.equal(parsePreviewIntent(income).kind, 'CREATE_INCOME');
   assert.equal(parsePreviewIntent(transfer).kind, 'CREATE_TRANSFER');
+  assert.equal(parsePreviewIntent(voidIntent).kind, 'VOID_TRANSACTION');
   assert.equal(parsePreviewIncomeIntent(income).payload.toAccount.id, income.payload.toAccount.id);
   assert.equal(parsePreviewTransferIntent(transfer).payload.flowKind, null);
+  assert.equal(parsePreviewVoidIntent(voidIntent).payload.expectedVersion, 7);
   assert.throws(() => parsePreviewIncomeIntent({ ...income, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
   assert.throws(() => parsePreviewIncomeIntent({ ...income, payload: { ...income.payload, category: { ...income.payload.category, kind: 'EXPENSE' } } }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
   assert.throws(() => parsePreviewTransferIntent({ ...transfer, unexpected: true }), /INVALID_PREVIEW_OUTBOX_RECORD/u);
@@ -565,8 +587,49 @@ test('R3A preview strict outbox union accepts EXPENSE, INCOME and TRANSFER while
   await outbox.enqueue(expense);
   await outbox.enqueue(income);
   await outbox.enqueue(transfer);
-  assert.equal(await outbox.countPending(), 3);
-  assert.deepEqual((await outbox.listPending()).map((item) => item.kind).sort(), ['CREATE_EXPENSE', 'CREATE_INCOME', 'CREATE_TRANSFER']);
+  await outbox.enqueue(voidIntent);
+  assert.equal(await outbox.countPending(), 4);
+  assert.deepEqual((await outbox.listPending()).map((item) => item.kind).sort(), ['CREATE_EXPENSE', 'CREATE_INCOME', 'CREATE_TRANSFER', 'VOID_TRANSACTION']);
+});
+
+test('R3A preview VOID durable intent preserves exact local identity, transaction id and expected version', async () => {
+  const intent = previewVoidIntent();
+  assert.deepEqual(intent, {
+    schemaVersion: 1,
+    intentId: '53000000-0000-0000-0000-000000000001',
+    kind: 'VOID_TRANSACTION',
+    state: 'PENDING',
+    createdAt: '2026-09-10T06:00:00.000Z',
+    payload: {
+      transactionId: '63000000-0000-0000-0000-000000000001',
+      expectedVersion: 7,
+    },
+  });
+  assert.equal(Object.isFrozen(intent), true);
+  assert.equal(Object.isFrozen(intent.payload), true);
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  assert.deepEqual(await outbox.read(intent.intentId), intent);
+  assert.equal(await outbox.read('53000000-0000-0000-0000-000000000099'), null);
+});
+
+test('R3A preview VOID durable parser fails closed on malformed identity/version/evidence', () => {
+  const intent = previewVoidIntent();
+  for (const malformed of [
+    { ...intent, intentId: 'A3000000-0000-0000-0000-000000000001' },
+    { ...intent, state: 'SENT' },
+    { ...intent, payload: { ...intent.payload, transactionId: 'A3000000-0000-0000-0000-000000000001' } },
+    { ...intent, payload: { ...intent.payload, expectedVersion: 0 } },
+    { ...intent, payload: { ...intent.payload, expectedVersion: Number.MAX_SAFE_INTEGER + 1 } },
+    { ...intent, payload: { ...intent.payload, extra: true } },
+    { ...intent, extra: true },
+  ]) {
+    assert.throws(() => parsePreviewVoidIntent(malformed), /INVALID_PREVIEW_OUTBOX_RECORD/u);
+  }
+  assert.throws(() => previewVoidIntent({ input: { transactionId: 'not-a-uuid' } }), /INVALID_PREVIEW_VOID_INPUT/u);
+  assert.throws(() => previewVoidIntent({ input: { expectedVersion: 0 } }), /INVALID_PREVIEW_VOID_INPUT/u);
+  assert.throws(() => createPreviewVoidIntent({ transactionId: intent.payload.transactionId, expectedVersion: 7, extra: true }), /INVALID_PREVIEW_VOID_INPUT/u);
 });
 
 test('R3A preview preserves literal optional text while empty form values become null', () => {
@@ -1589,4 +1652,179 @@ test('R3A preview TRANSFER delivery remains transport-neutral and existing type-
   const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
   assert.doesNotMatch(productionApp, /preview-transfer-writer-delivery|sendTransferCreate/u);
   assert.doesNotMatch(productionServiceWorker, /preview-transfer-writer-delivery|sendTransferCreate/u);
+});
+
+
+test('R3A preview VOID delivery sends only transactionId/expectedVersion and never invents server idempotency', () => {
+  const intent = previewVoidIntent();
+  const request = createPreviewTransactionVoidRequest(intent);
+  assert.deepEqual(request, {
+    transactionId: intent.payload.transactionId,
+    expectedVersion: intent.payload.expectedVersion,
+  });
+  assert.equal(Object.isFrozen(request), true);
+  assert.equal('intentId' in request, false);
+  assert.equal('createdAt' in request, false);
+  assert.equal(JSON.stringify(request).includes(intent.intentId), false);
+});
+
+test('R3A preview VOID delivery acknowledges exact local intent only for validated terminal outcomes', async () => {
+  const intent = previewVoidIntent();
+  for (const [outcome, version] of [['VOIDED', 8], ['ALREADY_VOIDED', 7]]) {
+    const events = [];
+    const ack = await deliverPreviewTransactionVoidIntent({
+      intent,
+      sender: {
+        async sendTransactionVoid(request) {
+          events.push(['send', request.transactionId, request.expectedVersion]);
+          return { apiVersion: 1, outcome, transactionId: request.transactionId, version };
+        },
+      },
+      outbox: { async acknowledge(intentId) { events.push(['acknowledge', intentId]); } },
+    });
+    assert.equal(ack.outcome, outcome);
+    assert.equal(Object.isFrozen(ack), true);
+    assert.deepEqual(events, [
+      ['send', intent.payload.transactionId, 7],
+      ['acknowledge', intent.intentId],
+    ]);
+  }
+});
+
+test('R3A preview VOID VERSION_CONFLICT is non-terminal and never deletes the pending intent', async () => {
+  const intent = previewVoidIntent();
+  let acknowledged = false;
+  const ack = await deliverPreviewTransactionVoidIntent({
+    intent,
+    sender: {
+      async sendTransactionVoid(request) {
+        return { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 9 };
+      },
+    },
+    outbox: { async acknowledge() { acknowledged = true; } },
+  });
+  assert.deepEqual(ack, {
+    apiVersion: 1,
+    outcome: 'VERSION_CONFLICT',
+    transactionId: intent.payload.transactionId,
+    currentVersion: 9,
+  });
+  assert.equal(acknowledged, false);
+});
+
+
+test('R3A preview VOID IndexedDB row survives conflict and is removed only after validated terminal ACK', async () => {
+  const intent = previewVoidIntent();
+  const fake = createPreviewOutboxFakeIndexedDb();
+  const outbox = createIndexedDbPreviewOutbox(fake.indexedDb);
+  await outbox.enqueue(intent);
+  const conflict = await deliverPreviewTransactionVoidIntent({
+    intent,
+    outbox,
+    sender: {
+      async sendTransactionVoid(request) {
+        return { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 9 };
+      },
+    },
+  });
+  assert.equal(conflict.outcome, 'VERSION_CONFLICT');
+  assert.deepEqual(await outbox.read(intent.intentId), intent);
+  assert.equal(await outbox.countPending(), 1);
+
+  const terminal = await deliverPreviewTransactionVoidIntent({
+    intent,
+    outbox,
+    sender: {
+      async sendTransactionVoid(request) {
+        return { apiVersion: 1, outcome: 'VOIDED', transactionId: request.transactionId, version: 8 };
+      },
+    },
+  });
+  assert.equal(terminal.outcome, 'VOIDED');
+  assert.equal(await outbox.read(intent.intentId), null);
+  assert.equal(await outbox.countPending(), 0);
+});
+
+test('R3A preview VOID rejects malformed or mismatched ACK and preserves local intent', async () => {
+  const intent = previewVoidIntent();
+  const request = createPreviewTransactionVoidRequest(intent);
+  const badAcks = [
+    { apiVersion: 2, outcome: 'VOIDED', transactionId: request.transactionId, version: 8 },
+    { apiVersion: 1, outcome: 'VOIDED', transactionId: request.transactionId, version: 7 },
+    { apiVersion: 1, outcome: 'VOIDED', transactionId: '63000000-0000-0000-0000-000000000002', version: 8 },
+    { apiVersion: 1, outcome: 'ALREADY_VOIDED', transactionId: request.transactionId, version: 8 },
+    { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 7 },
+    { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 0 },
+    { apiVersion: 1, outcome: 'VOIDED', transactionId: request.transactionId, version: 8, extra: true },
+    null,
+  ];
+  for (const response of badAcks) {
+    let acknowledged = false;
+    await assert.rejects(deliverPreviewTransactionVoidIntent({
+      intent,
+      sender: { sendTransactionVoid: async () => response },
+      outbox: { acknowledge: async () => { acknowledged = true; } },
+    }), /INVALID_PREVIEW_VOID_ACK/u);
+    assert.equal(acknowledged, false);
+  }
+  assert.throws(() => parsePreviewTransactionVoidAck(
+    { apiVersion: 1, outcome: 'VOIDED', transactionId: request.transactionId, version: 8 },
+    { ...request, extra: true },
+  ), /INVALID_PREVIEW_VOID_ACK/u);
+});
+
+test('R3A preview VOID sender/local ACK failures are sanitized and uncertain replay conflict stays pending', async () => {
+  const intent = previewVoidIntent();
+  let acknowledged = false;
+  await assert.rejects(deliverPreviewTransactionVoidIntent({
+    intent,
+    sender: { async sendTransactionVoid() { throw new Error('private-provider-diagnostic'); } },
+    outbox: { async acknowledge() { acknowledged = true; } },
+  }), (error) => error?.message === 'PREVIEW_VOID_SEND_FAILED' && !String(error).includes('private-provider-diagnostic'));
+  assert.equal(acknowledged, false);
+
+  let attempt = 0;
+  let ackAttempts = 0;
+  const sender = {
+    async sendTransactionVoid(request) {
+      attempt += 1;
+      if (attempt === 1) return { apiVersion: 1, outcome: 'VOIDED', transactionId: request.transactionId, version: 8 };
+      return { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 8 };
+    },
+  };
+  const outbox = {
+    async acknowledge(intentId) {
+      assert.equal(intentId, intent.intentId);
+      ackAttempts += 1;
+      throw new Error('local-delete-failed');
+    },
+  };
+  await assert.rejects(deliverPreviewTransactionVoidIntent({ intent, sender, outbox }),
+    (error) => error?.message === 'PREVIEW_VOID_LOCAL_ACK_FAILED' && !String(error).includes('local-delete-failed'));
+  const conflict = await deliverPreviewTransactionVoidIntent({ intent, sender, outbox });
+  assert.equal(conflict.outcome, 'VERSION_CONFLICT');
+  assert.equal(attempt, 2);
+  assert.equal(ackAttempts, 1);
+});
+
+test('R3A preview VOID delivery fails before sender mutation without required ports and stays transport-neutral', async () => {
+  const intent = previewVoidIntent();
+  let sends = 0;
+  const sender = { async sendTransactionVoid() { sends += 1; return null; } };
+  await assert.rejects(deliverPreviewTransactionVoidIntent({ intent, sender, outbox: null }), /PREVIEW_VOID_DELIVERY_UNAVAILABLE/u);
+  await assert.rejects(deliverPreviewTransactionVoidIntent({ intent, sender: {}, outbox: { acknowledge: async () => {} } }), /PREVIEW_VOID_DELIVERY_UNAVAILABLE/u);
+  assert.equal(sends, 0);
+
+  const source = await readFile(new URL('../../web/preview-transaction-void-delivery.mjs', import.meta.url), 'utf8');
+  assert.match(source, /parsePreviewVoidIntent/u);
+  assert.match(source, /sendTransactionVoid/u);
+  assert.doesNotMatch(source, /idempotencyKey/u);
+  assert.doesNotMatch(source, /\bfetch\s*\(/u);
+  assert.doesNotMatch(source, /https?:\/\//u);
+  assert.doesNotMatch(source, /\/api\//u);
+  assert.doesNotMatch(source, /API Gateway|Yandex|YDB_WRITE_ENABLED|@ydb|ydbjs|cookie|Authorization/iu);
+  const productionApp = await readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8');
+  const productionServiceWorker = await readFile(new URL('../../web/sw.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(productionApp, /preview-transaction-void-delivery|sendTransactionVoid/u);
+  assert.doesNotMatch(productionServiceWorker, /preview-transaction-void-delivery|sendTransactionVoid/u);
 });
