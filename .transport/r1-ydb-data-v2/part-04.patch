@@ -1,0 +1,32 @@
++  assert.match(runtime, /classifyYdbDataFailureCode\(error\)/);
+   assert.match(runtime, /classifyMetadataFailureCode\(error: unknown\)/);
+   assert.match(runtime, /METADATA_EXECUTOR_\$\{error\.code\}/);
+   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
+@@ -18,6 +21,7 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
+ test('bootstrap workflow projects only allowlisted phase and metadata failure enums', () => {
+   assert.match(workflow, /applicationPhase:/);
+   assert.match(workflow, /metadataFailureCode:/);
++  assert.match(workflow, /ydbDataFailureCode:/);
+   assert.match(workflow, /FRESH_CLAIM_WRITE/);
+   assert.match(workflow, /METADATA_EXECUTOR_RUN_READBACK_MISMATCH/);
+   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED/);
+@@ -52,6 +56,19 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
+   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+   assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
+   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
++  for (const code of [
++    'YDB_TRANSPORT_SDK_SHAPE_INVALID',
++    'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
++    'YDB_TRANSPORT_PARAMETER_TYPE_UNSUPPORTED',
++    'YDB_TRANSPORT_TIMESTAMP_PRECISION_UNSUPPORTED',
++    'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
++    'YDB_TRANSPORT_CLIENT_CONFIG_INVALID',
++    'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION',
++      'YDB_COMMIT_OUTCOME_UNKNOWN',
++  ]) {
++    assert.match(workflow, new RegExp(code));
++    assert.match(invoker, new RegExp(code));
++  }
+   assert.match(workflow, /runtimeCode:/);
+   assert.match(workflow, /httpStatus:/);
+   assert.match(workflow, /functionError:/);
