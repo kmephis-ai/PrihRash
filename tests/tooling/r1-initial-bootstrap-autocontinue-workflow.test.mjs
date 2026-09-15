@@ -27,7 +27,7 @@ test('R1 autocontinue is stage-specific, CI-gated, exact-main, and has no provid
   assert.doesNotMatch(workflow, /yandex|\byc\b|lockbox|service-account/i);
 });
 
-test('R1 autocontinue dispatches only active #453 exact-main source and never duplicates a SHA', async () => {
+test('R1 autocontinue dispatches only active #453 exact-main source or one proven pre-invoke main-move successor and never duplicates a SHA', async () => {
   const workflow = await workflowText();
 
   assert.match(workflow, /commits\/\$SOURCE_SHA\/pulls/);
@@ -35,6 +35,15 @@ test('R1 autocontinue dispatches only active #453 exact-main source and never du
   assert.match(workflow, /base\.ref == "main"/);
   assert.match(workflow, /head\.repo\.full_name == \$repo/);
   assert.match(workflow, /startswith\("R1 #453:"\)/);
+  assert.match(workflow, /NOT_SINGLE_MERGED_MAIN_PR/);
+  assert.match(workflow, /parents \| length\) == 1/);
+  assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$interrupted_run_id/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_NON_SUCCESS/);
+  assert.match(workflow, /bootstrapInvokeStep == "skipped"/);
+  assert.match(workflow, /postRecoveryVerdict == null/);
+  assert.match(workflow, /Re-verify exact current main before provider deployment/);
+  assert.match(workflow, /Invoke exact initial bootstrap tag once/);
+  assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_RESUME_AFTER_PREINVOKE_MAIN_MOVE/);
   assert.match(workflow, /length == 1/);
   assert.doesNotMatch(workflow, /commit_title=/);
   assert.match(workflow, /issues\/453/);
