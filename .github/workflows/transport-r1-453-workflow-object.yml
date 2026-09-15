@@ -1,0 +1,135 @@
+name: Transport R1 453 workflow object
+
+on:
+  push:
+    branches:
+      - transport/r1-453-workflow-object-20260915
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: fix/r1-453-direct-https-invoke-diagnostics
+  TARGET_HEAD: 57d09d0310db7a780210255aa1dc952fe9c9a317
+  EXPECTED_WORKFLOW_BLOB: 67bc53fac555d249dc0787b16b50ee4a865d3617
+  EXPECTED_TREE: 47f0d93ab268ad5a05c1b86994b15f08f43035a9
+
+jobs:
+  prepare-object:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create verified commit object without moving ref
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_HEAD"
+
+          git apply - <<'PATCH'
+          diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+          index 4af34c6..67bc53f 100644
+          --- a/.github/workflows/r1-initial-shadow-bootstrap.yml
+          +++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+          @@ -416,7 +416,7 @@ jobs:
+                           "INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID",
+                           "INITIAL_BOOTSTRAP_INVOKE_FAILED",
+          -                "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",
+          +                "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",
+                           "INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT",
+                           "INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID",
+                           "INITIAL_BOOTSTRAP_CONFIG_INVALID",
+          @@ -426,21 +426,25 @@ jobs:
+                         )))
+                       )
+                     | select(
+          -                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+          +                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                         or (
+          -                  (.transportClass | type) == "string"
+          -                  and (.transportClass | IN(
+          -                    "EMPTY",
+          -                    "AUTH",
+          -                    "NOT_FOUND",
+          -                    "RATE_LIMIT",
+          -                    "DEADLINE",
+          -                    "UNAVAILABLE",
+          -                    "INVALID_REQUEST",
+          -                    "FAILED_PRECONDITION",
+          -                    "INTERNAL",
+          -                    "OTHER"
+          +                  (.httpStatus | type) == "string"
+          +                  and (.httpStatus | IN(
+          +                    "HTTP_400",
+          +                    "HTTP_403",
+          +                    "HTTP_404",
+          +                    "HTTP_413",
+          +                    "HTTP_429",
+          +                    "HTTP_500",
+          +                    "HTTP_502",
+          +                    "HTTP_503",
+          +                    "HTTP_504",
+          +                    "HTTP_4XX_OTHER",
+          +                    "HTTP_5XX_OTHER",
+          +                    "HTTP_OTHER"
+                           ))
+          +                  and (.functionError | type) == "string"
+          +                  and (.functionError | IN("PRESENT", "ABSENT"))
+                         )
+                       )
+                     | {
+          @@ -540,17 +544,15 @@ jobs:
+                           else null
+                           end
+                         ),
+          -                outputShape: (
+          -                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+          -                     and (.outputShape | type) == "string"
+          -                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
+          -                  then .outputShape
+          +                httpStatus: (
+          +                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+          +                  then .httpStatus
+                           else null
+                           end
+                         ),
+          -                transportClass: (
+          -                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+          -                  then .transportClass
+          +                functionError: (
+          +                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+          +                  then .functionError
+                           else null
+                           end
+                         )
+          PATCH
+
+          test "$(git hash-object .github/workflows/r1-initial-shadow-bootstrap.yml)" = "$EXPECTED_WORKFLOW_BLOB"
+
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+          current_head="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/branches/$TARGET_BRANCH" | jq -er '.commit.sha')"
+          test "$current_head" = "$TARGET_HEAD"
+
+          content="$(base64 -w0 .github/workflows/r1-initial-shadow-bootstrap.yml)"
+          blob_payload="$(jq -nc --arg content "$content" '{content:$content,encoding:"base64"}')"
+          blob_sha="$(curl --fail --silent --show-error --request POST --header "$auth" --header "$accept" --header 'Content-Type: application/json' "$api/git/blobs" --data "$blob_payload" | jq -er '.sha')"
+          test "$blob_sha" = "$EXPECTED_WORKFLOW_BLOB"
+
+          base_tree="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/git/commits/$TARGET_HEAD" | jq -er '.tree.sha')"
+          tree_payload="$(jq -nc --arg base "$base_tree" --arg blob "$blob_sha" '{base_tree:$base,tree:[{path:".github/workflows/r1-initial-shadow-bootstrap.yml",mode:"100644",type:"blob",sha:$blob}]}')"
+          tree_sha="$(curl --fail --silent --show-error --request POST --header "$auth" --header "$accept" --header 'Content-Type: application/json' "$api/git/trees" --data "$tree_payload" | jq -er '.sha')"
+          test "$tree_sha" = "$EXPECTED_TREE"
+
+          commit_payload="$(jq -nc --arg tree "$tree_sha" --arg parent "$TARGET_HEAD" '{message:"R1 #453: expose exact bootstrap HTTP failure class",tree:$tree,parents:[$parent]}')"
+          commit_sha="$(curl --fail --silent --show-error --request POST --header "$auth" --header "$accept" --header 'Content-Type: application/json' "$api/git/commits" --data "$commit_payload" | jq -er '.sha')"
+          echo "TRANSPORT_COMMIT_SHA=$commit_sha"
+          echo "TRANSPORT_TREE_SHA=$tree_sha"
