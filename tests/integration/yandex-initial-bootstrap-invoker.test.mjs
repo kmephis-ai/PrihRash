@@ -125,11 +125,40 @@ test('safe non-success Function results remain exact bounded output and exit non
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
       runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
       applicationPhase: 'FRESH_CLAIM_WRITE',
-      metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW',
+      metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD',
     },
   ];
 
   for (const value of values) {
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, value);
+  }
+});
+
+test('all structural manifest parser diagnostics are accepted only as enum-only metadata failures', async () => {
+  const codes = [
+    'IDENTITY_MANIFEST_MALFORMED_ROW_CARDINALITY',
+    'IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD',
+    'IDENTITY_MANIFEST_MALFORMED_BINDING_ENTRY',
+    'IDENTITY_MANIFEST_MALFORMED_BINDING_SET',
+    'IDENTITY_MANIFEST_MALFORMED_BINDING_COUNT',
+    'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_ROW_COUNT',
+    'IDENTITY_MANIFEST_MALFORMED_RUN_STATE',
+    'IDENTITY_MANIFEST_MALFORMED_MIGRATION_RUN_ID',
+    'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_ID',
+    'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_DIGEST',
+    'IDENTITY_MANIFEST_MALFORMED_RUN_SNAPSHOT_DIGEST',
+    'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_DIGEST'
+  ];
+  for (const metadataFailureCode of codes) {
+    const value = {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+      applicationPhase: 'FRESH_CLAIM_WRITE',
+      metadataFailureCode,
+    };
     const result = await runInvoker({ body: JSON.stringify(value) });
     assert.equal(result.exitCode, 2);
     assertSafeOutput(result, value);

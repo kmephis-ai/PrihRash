@@ -23,7 +23,26 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED/);
   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH/);
   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH/);
-  assert.match(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+  const structuralManifestCodes = [
+    'MALFORMED_ROW_CARDINALITY',
+    'MALFORMED_BINDINGS_PAYLOAD',
+    'MALFORMED_BINDING_ENTRY',
+    'MALFORMED_BINDING_SET',
+    'MALFORMED_BINDING_COUNT',
+    'MALFORMED_SNAPSHOT_ROW_COUNT',
+    'MALFORMED_RUN_STATE',
+    'MALFORMED_MIGRATION_RUN_ID',
+    'MALFORMED_SOURCE_SNAPSHOT_ID',
+    'MALFORMED_SOURCE_SNAPSHOT_DIGEST',
+    'MALFORMED_RUN_SNAPSHOT_DIGEST',
+    'MALFORMED_SNAPSHOT_DIGEST',
+  ];
+  for (const code of structuralManifestCodes) {
+    assert.match(workflow, new RegExp(`IDENTITY_MANIFEST_${code}`));
+    assert.match(invoker, new RegExp(`IDENTITY_MANIFEST_${code}`));
+  }
+  assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+  assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /httpStatus:/);
   assert.match(workflow, /functionError:/);

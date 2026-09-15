@@ -68,7 +68,18 @@ export type InitialBootstrapIdentityManifestErrorCode =
   | 'DUPLICATE_TRANSACTION_ID'
   | 'MISSING_TRANSACTION_ASSIGNMENT'
   | 'UNEXPECTED_TRANSACTION_ASSIGNMENT'
-  | 'MALFORMED_MANIFEST_ROW'
+  | 'MALFORMED_ROW_CARDINALITY'
+  | 'MALFORMED_BINDINGS_PAYLOAD'
+  | 'MALFORMED_BINDING_ENTRY'
+  | 'MALFORMED_BINDING_SET'
+  | 'MALFORMED_BINDING_COUNT'
+  | 'MALFORMED_SNAPSHOT_ROW_COUNT'
+  | 'MALFORMED_RUN_STATE'
+  | 'MALFORMED_MIGRATION_RUN_ID'
+  | 'MALFORMED_SOURCE_SNAPSHOT_ID'
+  | 'MALFORMED_SOURCE_SNAPSHOT_DIGEST'
+  | 'MALFORMED_RUN_SNAPSHOT_DIGEST'
+  | 'MALFORMED_SNAPSHOT_DIGEST'
   | 'MANIFEST_NOT_FOUND'
   | 'MANIFEST_EVIDENCE_MISMATCH'
   | 'INVALID_RESUME_OBSERVATION'
@@ -256,70 +267,78 @@ export function prepareInitialBootstrapIdentityManifestWrite(
   });
 }
 
-function malformed(): never {
-  throw new InitialBootstrapIdentityManifestError('MALFORMED_MANIFEST_ROW');
+function malformed(code: InitialBootstrapIdentityManifestErrorCode): never {
+  throw new InitialBootstrapIdentityManifestError(code);
 }
 
-function safeInteger(value: unknown, minimum: number): number {
+function safeInteger(
+  value: unknown,
+  minimum: number,
+  code: InitialBootstrapIdentityManifestErrorCode,
+): number {
   if (typeof value === 'bigint') {
-    if (value < BigInt(minimum) || value > BigInt(Number.MAX_SAFE_INTEGER)) malformed();
+    if (value < BigInt(minimum) || value > BigInt(Number.MAX_SAFE_INTEGER)) malformed(code);
     return Number(value);
   }
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) malformed();
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) malformed(code);
   return value;
 }
 
-function canonicalString(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
+function canonicalString(value: unknown, code: InitialBootstrapIdentityManifestErrorCode): string {
+  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed(code);
   return value;
 }
 
-function digestString(value: unknown): string {
-  if (typeof value !== 'string' || value.trim().length === 0) malformed();
+function digestString(value: unknown, code: InitialBootstrapIdentityManifestErrorCode): string {
+  if (typeof value !== 'string' || value.trim().length === 0) malformed(code);
   return value;
 }
 
 function parseBinding(value: unknown): Readonly<InitialBootstrapIdentityBinding> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) malformed();
+  const code = 'MALFORMED_BINDING_ENTRY' as const;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) malformed(code);
   const record = value as Readonly<Record<string, unknown>>;
   const keys = Object.keys(record);
   const expected = ['source_ordinal', 'row_hint', 'row_digest', 'source_record_id', 'transaction_id'];
-  if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) malformed();
+  if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) malformed(code);
   const transactionId = record.transaction_id === null
     ? null
-    : normalizedUuid(canonicalString(record.transaction_id), 'MALFORMED_MANIFEST_ROW');
+    : normalizedUuid(canonicalString(record.transaction_id, code), code);
   return Object.freeze({
-    sourceOrdinal: safeInteger(record.source_ordinal, 0),
-    rowHint: safeInteger(record.row_hint, 1),
-    rowDigest: digestString(record.row_digest),
-    sourceRecordId: normalizedUuid(canonicalString(record.source_record_id), 'MALFORMED_MANIFEST_ROW'),
+    sourceOrdinal: safeInteger(record.source_ordinal, 0, code),
+    rowHint: safeInteger(record.row_hint, 1, code),
+    rowDigest: digestString(record.row_digest, code),
+    sourceRecordId: normalizedUuid(canonicalString(record.source_record_id, code), code),
     transactionId,
   });
 }
 
 function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdentityBinding>[] {
+  const payloadCode = 'MALFORMED_BINDINGS_PAYLOAD' as const;
   let payload: unknown = value;
   if (typeof payload === 'string') {
     try {
       payload = JSON.parse(payload) as unknown;
     } catch {
-      malformed();
+      malformed(payloadCode);
     }
   }
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed();
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed(payloadCode);
   const record = payload as Readonly<Record<string, unknown>>;
-  if (record.schema_version !== 1 || !Array.isArray(record.bindings)) malformed();
+  if (record.schema_version !== 1 || !Array.isArray(record.bindings)) malformed(payloadCode);
   const keys = Object.keys(record);
-  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) malformed();
+  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) malformed(payloadCode);
 
   const bindings = record.bindings.map(parseBinding).sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
   const sourceIds = new Set<string>();
   const transactionIds = new Set<string>();
   for (const [index, binding] of bindings.entries()) {
-    if (binding.sourceOrdinal !== index || sourceIds.has(binding.sourceRecordId)) malformed();
+    if (binding.sourceOrdinal !== index || sourceIds.has(binding.sourceRecordId)) {
+      malformed('MALFORMED_BINDING_SET');
+    }
     sourceIds.add(binding.sourceRecordId);
     if (binding.transactionId !== null) {
-      if (transactionIds.has(binding.transactionId)) malformed();
+      if (transactionIds.has(binding.transactionId)) malformed('MALFORMED_BINDING_SET');
       transactionIds.add(binding.transactionId);
     }
   }
@@ -345,24 +364,30 @@ export function parseInitialBootstrapIdentityManifestRows(
   rows: readonly Readonly<IdentityManifestReadRow>[],
 ): Readonly<InitialBootstrapIdentityManifestReadback> {
   if (rows.length === 0) throw new InitialBootstrapIdentityManifestError('MANIFEST_NOT_FOUND');
-  if (rows.length !== 1) malformed();
+  if (rows.length !== 1) malformed('MALFORMED_ROW_CARDINALITY');
   const row = rows[0];
-  if (row === undefined) malformed();
+  if (row === undefined) malformed('MALFORMED_ROW_CARDINALITY');
   const bindings = parseBindings(row.bindings);
-  const bindingCount = safeInteger(row.binding_count, 0);
-  const snapshotRowCount = safeInteger(row.snapshot_row_count, 0);
-  if (bindingCount !== bindings.length) malformed();
-  const runState = canonicalString(row.run_state);
+  const bindingCount = safeInteger(row.binding_count, 0, 'MALFORMED_BINDING_COUNT');
+  const snapshotRowCount = safeInteger(row.snapshot_row_count, 0, 'MALFORMED_SNAPSHOT_ROW_COUNT');
+  if (bindingCount !== bindings.length) malformed('MALFORMED_BINDING_COUNT');
+  const runState = canonicalString(row.run_state, 'MALFORMED_RUN_STATE');
   return Object.freeze({
     manifest: Object.freeze({
-      migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MANIFEST_ROW'),
-      sourceSnapshotId: normalizedUuid(canonicalString(row.source_snapshot_id), 'MALFORMED_MANIFEST_ROW'),
-      sourceSnapshotDigest: digestString(row.source_snapshot_digest),
+      migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MIGRATION_RUN_ID'),
+      sourceSnapshotId: normalizedUuid(
+        canonicalString(row.source_snapshot_id, 'MALFORMED_SOURCE_SNAPSHOT_ID'),
+        'MALFORMED_SOURCE_SNAPSHOT_ID',
+      ),
+      sourceSnapshotDigest: digestString(
+        row.source_snapshot_digest,
+        'MALFORMED_SOURCE_SNAPSHOT_DIGEST',
+      ),
       bindings,
     }),
     runState,
-    runSnapshotDigest: digestString(row.run_snapshot_digest),
-    snapshotDigest: digestString(row.snapshot_digest),
+    runSnapshotDigest: digestString(row.run_snapshot_digest, 'MALFORMED_RUN_SNAPSHOT_DIGEST'),
+    snapshotDigest: digestString(row.snapshot_digest, 'MALFORMED_SNAPSHOT_DIGEST'),
     snapshotRowCount,
   });
 }
