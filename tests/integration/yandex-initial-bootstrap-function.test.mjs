@@ -135,9 +135,26 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
         status: 'FAIL',
         code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
         runtimeCode,
+        applicationPhase: null,
+        metadataFailureCode: null,
       },
     );
   }
+
+  assert.deepEqual(
+    await execute(new InitialBootstrapReferenceAwareRuntimeError(
+      'REFERENCE_APPLICATION_METADATA_FAILED',
+      'FRESH_CLAIM_WRITE',
+      'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+      applicationPhase: 'FRESH_CLAIM_WRITE',
+      metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
+    },
+  );
 
   const untrustedError = Object.assign(new Error('private provider error text'), {
     code: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',

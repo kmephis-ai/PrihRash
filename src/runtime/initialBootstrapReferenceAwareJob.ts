@@ -12,7 +12,10 @@ import {
   YdbAdapterError,
   YdbCommitOutcomeUnknownError,
 } from '../integration/ydb/adapter.js';
-import { YdbParameterError } from '../integration/ydb/parameters.js';
+import {
+  YdbParameterError,
+  type YdbParameterErrorCode,
+} from '../integration/ydb/parameters.js';
 import {
   createYdbJsV6MetadataDataClient,
   YdbJsV6DataTransportError,
@@ -31,9 +34,18 @@ import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
 } from '../migration/initialBootstrapDurableReconciliation.js';
-import { InitialBootstrapIdentityManifestError } from '../migration/initialBootstrapIdentityManifest.js';
-import { InitialBootstrapMetadataExecutorError } from '../migration/initialBootstrapMetadataExecutor.js';
-import { InitialBootstrapPersistenceError } from '../migration/initialBootstrapPersistence.js';
+import {
+  InitialBootstrapIdentityManifestError,
+  type InitialBootstrapIdentityManifestErrorCode,
+} from '../migration/initialBootstrapIdentityManifest.js';
+import {
+  InitialBootstrapMetadataExecutorError,
+  type InitialBootstrapMetadataExecutorErrorCode,
+} from '../migration/initialBootstrapMetadataExecutor.js';
+import {
+  InitialBootstrapPersistenceError,
+  type InitialBootstrapPersistenceErrorCode,
+} from '../migration/initialBootstrapPersistence.js';
 import { InitialRunCounterRefinementError } from '../migration/initialRunCounterRefinement.js';
 import { InitialRunCounterRefinementPersistenceError } from '../migration/initialRunCounterRefinementPersistence.js';
 import { InitialSourceLineageError } from '../migration/initialSourceLineage.js';
@@ -127,14 +139,44 @@ function isUnsafeNoRunRecoverySurface(
     || surface.reason === 'RESIDUAL_MIXED_STATE_WITHOUT_RUN';
 }
 
+export type InitialBootstrapMetadataFailureCode =
+  | `METADATA_EXECUTOR_${InitialBootstrapMetadataExecutorErrorCode}`
+  | `IDENTITY_MANIFEST_${InitialBootstrapIdentityManifestErrorCode}`
+  | `BOOTSTRAP_PERSISTENCE_${InitialBootstrapPersistenceErrorCode}`
+  | `YDB_PARAMETER_${YdbParameterErrorCode}`;
+
 export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
+  readonly applicationPhase: InitialBootstrapApplicationPhase | null;
+  readonly metadataFailureCode: InitialBootstrapMetadataFailureCode | null;
 
-  constructor(code: InitialBootstrapReferenceAwareRuntimeErrorCode) {
+  constructor(
+    code: InitialBootstrapReferenceAwareRuntimeErrorCode,
+    applicationPhase: InitialBootstrapApplicationPhase | null = null,
+    metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
+  ) {
     super(code);
     this.name = 'InitialBootstrapReferenceAwareRuntimeError';
     this.code = code;
+    this.applicationPhase = applicationPhase;
+    this.metadataFailureCode = metadataFailureCode;
   }
+}
+
+function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFailureCode | null {
+  if (error instanceof InitialBootstrapMetadataExecutorError) {
+    return `METADATA_EXECUTOR_${error.code}`;
+  }
+  if (error instanceof InitialBootstrapIdentityManifestError) {
+    return `IDENTITY_MANIFEST_${error.code}`;
+  }
+  if (error instanceof InitialBootstrapPersistenceError) {
+    return `BOOTSTRAP_PERSISTENCE_${error.code}`;
+  }
+  if (error instanceof YdbParameterError) {
+    return `YDB_PARAMETER_${error.code}`;
+  }
+  return null;
 }
 
 function classifyGenericApplicationPhase(
@@ -237,6 +279,8 @@ async function runApplicationSafely(
   } catch (error) {
     throw new InitialBootstrapReferenceAwareRuntimeError(
       classifyApplicationRuntimeError(error, phase),
+      phase,
+      classifyMetadataFailureCode(error),
     );
   }
 }

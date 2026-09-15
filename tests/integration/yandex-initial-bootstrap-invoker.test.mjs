@@ -96,6 +96,15 @@ test('safe non-success Function results remain exact bounded output and exit non
       status: 'FAIL',
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
       runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+      applicationPhase: null,
+      metadataFailureCode: null,
+    },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+      applicationPhase: 'FRESH_CLAIM_WRITE',
+      metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
     },
   ];
 
@@ -123,6 +132,8 @@ test('malformed, extra-field and non-allowlisted successful provider output fail
       status: 'FAIL',
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
       runtimeCode: 'PRIVATE_RUNTIME_CODE',
+      applicationPhase: null,
+      metadataFailureCode: null,
     }),
     JSON.stringify({
       status: 'FAIL',
@@ -156,6 +167,8 @@ test('one exact allowlisted non-pass Function result line inside provider stderr
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
     runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+    applicationPhase: null,
+    metadataFailureCode: null,
   };
   const result = await runInvoker({
     fakeSource: `
