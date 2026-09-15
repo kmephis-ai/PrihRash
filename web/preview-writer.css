@@ -30,3 +30,36 @@
 @media (min-width: 760px) {
   .preview-expense-edit__compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.preview-void__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.preview-void__confirmation,
+.preview-void__pending,
+.preview-void__conflict {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--border, #d7dce2);
+  border-radius: 12px;
+}
+
+.preview-void__confirmation h3,
+.preview-void__conflict h3 {
+  margin: 0 0 8px;
+}
+
+.preview-void__confirmation p,
+.preview-void__pending p,
+.preview-void__conflict p {
+  margin: 0 0 12px;
+}
+
+@media (max-width: 640px) {
+  .preview-void__controls {
+    grid-template-columns: 1fr;
+  }
+}

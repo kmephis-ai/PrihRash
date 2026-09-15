@@ -30,6 +30,7 @@ async function waitForPreview(page) {
   await expect(page.locator('[data-preview-writer="expense"]')).toBeVisible();
   await expect(page.locator('[data-preview-writer="income"]')).toBeVisible();
   await expect(page.locator('[data-preview-writer="transfer"]')).toBeVisible();
+  await expect(page.locator('[data-preview-transaction-void]')).toBeVisible();
 }
 
 async function fillCreateForm(panel, values) {
@@ -222,5 +223,59 @@ test('optimistic edit conflict never silently overwrites and requires explicit r
     await expect(edit.locator('[data-preview-expense-edit-status]')).toContainText('Нажмите «Сохранить изменения» ещё раз');
     await edit.locator('[data-preview-expense-edit-save]').click();
     await expect(edit.locator('[data-preview-expense-edit-status]')).toContainText('Сохранено · версия 3');
+  });
+});
+
+test('VOID confirmation is local-first, survives reload, validates terminal ACK and keeps conflicts pending', async ({ page, context }) => {
+  await guardedBrowser(page, async () => {
+    await page.goto('/');
+    await waitForPreview(page);
+    let voidPanel = page.locator('[data-preview-transaction-void]');
+
+    await voidPanel.locator('[data-preview-void-open]').click();
+    await expect(voidPanel.locator('[data-preview-void-confirmation]')).toBeVisible();
+    await voidPanel.locator('[data-preview-void-cancel]').click();
+    await expect(voidPanel.locator('[data-preview-void-confirmation]')).toBeHidden();
+    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('очередь не изменена');
+    expect(await page.evaluate(async () => {
+      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
+      return (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION').length;
+    })).toBe(0);
+
+    await context.setOffline(true);
+    await voidPanel.locator('[data-preview-void-open]').click();
+    await voidPanel.locator('[data-preview-void-confirm]').click();
+    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('Сохранено локально');
+    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
+    expect(await page.evaluate(async () => {
+      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
+      const pending = (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION');
+      return pending.map((intent) => ({ transactionId: intent.payload.transactionId, expectedVersion: intent.payload.expectedVersion }));
+    })).toEqual([{ transactionId: '40000000-0000-0000-0000-000000000001', expectedVersion: 1 }]);
+
+    await context.setOffline(false);
+    await page.reload();
+    await waitForPreview(page);
+    voidPanel = page.locator('[data-preview-transaction-void]');
+    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('сохранено локально');
+    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
+    await voidPanel.locator('[data-preview-void-deliver]').click();
+    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('Аннулирование подтверждено');
+    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 0');
+
+    await voidPanel.locator('[data-preview-void-operation]').selectOption('40000000-0000-0000-0000-000000000002');
+    await voidPanel.locator('[data-preview-void-open]').click();
+    await voidPanel.locator('[data-preview-void-confirm]').click();
+    await voidPanel.locator('[data-preview-void-deliver]').click();
+    await expect(voidPanel.locator('[data-preview-void-conflict]')).toBeVisible();
+    await expect(voidPanel.locator('[data-preview-void-conflict-version]')).toHaveText('2');
+    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('автоматической повторной отправки нет');
+    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
+    await expect(voidPanel.locator('[data-preview-void-deliver]')).toBeHidden();
+    expect(await page.evaluate(async () => {
+      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
+      const pending = (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION');
+      return pending.map((intent) => ({ transactionId: intent.payload.transactionId, expectedVersion: intent.payload.expectedVersion }));
+    })).toEqual([{ transactionId: '40000000-0000-0000-0000-000000000002', expectedVersion: 1 }]);
   });
 });

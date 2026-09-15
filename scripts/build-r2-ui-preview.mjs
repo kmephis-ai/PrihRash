@@ -18,6 +18,8 @@ const files = [
   'preview-writer-delivery.mjs',
   'preview-income-writer-delivery.mjs',
   'preview-transfer-writer-delivery.mjs',
+  'preview-transaction-void-delivery.mjs',
+  'preview-transaction-void.mjs',
   'preview-writer.mjs',
   'preview-writer-outbox.mjs',
   'preview-writer.css',
