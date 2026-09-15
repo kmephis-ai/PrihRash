@@ -1,4 +1,5 @@
 import { readStatement, type YdbStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { normalizeYdbTimestampReadback } from '../integration/ydb/readbackTimestamp.js';
 import type { MigrationRun, MigrationRunState } from './migrationRunState.js';
 
 export interface ScheduledSyncAdmissionEvidence {
@@ -50,10 +51,11 @@ function counter(value: unknown): number {
 
 function timestamp(value: unknown, nullable: boolean): string | null {
   if (value === null && nullable) return null;
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim() || !Number.isFinite(Date.parse(value))) {
+  const normalized = normalizeYdbTimestampReadback(value);
+  if (normalized === null) {
     throw new ScheduledSyncAdmissionEvidenceError('MALFORMED_RUN_EVIDENCE');
   }
-  return value;
+  return normalized;
 }
 
 function parseRow(row: MigrationRunEvidenceRow): Readonly<MigrationRun> {

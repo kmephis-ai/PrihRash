@@ -1,5 +1,6 @@
 import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
+import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import {
   initialBootstrapIdentityManifestReadStatement,
@@ -105,7 +106,7 @@ function identityManifestMatchesCandidate(
 }
 
 function snapshotMatches(row: SnapshotReadRow, candidate: InitialBootstrapCandidateEnvelope): boolean {
-  return row.captured_at === candidate.snapshot.capturedAt
+  return ydbTimestampReadbackMatches(row.captured_at, candidate.snapshot.capturedAt)
     && row.source_sheet === candidate.snapshot.sourceSheet
     && row.snapshot_digest === candidate.snapshot.snapshotDigest
     && counterMatches(row.row_count, candidate.snapshot.rowCount);
@@ -113,8 +114,8 @@ function snapshotMatches(row: SnapshotReadRow, candidate: InitialBootstrapCandid
 
 function runMatches(row: RunReadRow, candidate: InitialBootstrapCandidateEnvelope): boolean {
   const run = candidate.run;
-  return row.started_at === run.startedAt
-    && row.finished_at === run.finishedAt
+  return ydbTimestampReadbackMatches(row.started_at, run.startedAt)
+    && ydbTimestampReadbackMatches(row.finished_at, run.finishedAt)
     && row.source_snapshot_digest === run.sourceSnapshotDigest
     && row.state === 'STAGING'
     && counterMatches(row.rows_seen, run.rowsSeen)
@@ -131,8 +132,8 @@ function claimedRunMatches(
 ): boolean {
   const run = candidate.run;
   return observed.id === run.id
-    && observed.startedAt === run.startedAt
-    && observed.finishedAt === run.finishedAt
+    && ydbTimestampReadbackMatches(observed.startedAt, run.startedAt)
+    && ydbTimestampReadbackMatches(observed.finishedAt, run.finishedAt)
     && observed.sourceSnapshotDigest === run.sourceSnapshotDigest
     && observed.state === run.state
     && observed.rowsSeen === run.rowsSeen
