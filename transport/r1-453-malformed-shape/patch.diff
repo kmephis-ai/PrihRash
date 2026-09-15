@@ -1,0 +1,376 @@
+diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+index 449a477..4fcb6c8 100644
+--- a/.github/workflows/r1-initial-shadow-bootstrap.yml
++++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+@@ -525,7 +525,18 @@ jobs:
+                        "IDENTITY_MANIFEST_DUPLICATE_TRANSACTION_ID",
+                        "IDENTITY_MANIFEST_MISSING_TRANSACTION_ASSIGNMENT",
+                        "IDENTITY_MANIFEST_UNEXPECTED_TRANSACTION_ASSIGNMENT",
+-                       "IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW",
++                       "IDENTITY_MANIFEST_MALFORMED_ROW_CARDINALITY",
++                       "IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD",
++                       "IDENTITY_MANIFEST_MALFORMED_BINDING_ENTRY",
++                       "IDENTITY_MANIFEST_MALFORMED_BINDING_SET",
++                       "IDENTITY_MANIFEST_MALFORMED_BINDING_COUNT",
++                       "IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_ROW_COUNT",
++                       "IDENTITY_MANIFEST_MALFORMED_RUN_STATE",
++                       "IDENTITY_MANIFEST_MALFORMED_MIGRATION_RUN_ID",
++                       "IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_ID",
++                       "IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_DIGEST",
++                       "IDENTITY_MANIFEST_MALFORMED_RUN_SNAPSHOT_DIGEST",
++                       "IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_DIGEST",
+                        "IDENTITY_MANIFEST_MANIFEST_NOT_FOUND",
+                        "IDENTITY_MANIFEST_MANIFEST_EVIDENCE_MISMATCH",
+                        "IDENTITY_MANIFEST_INVALID_RESUME_OBSERVATION",
+diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
+index 671b65e..2090672 100644
+--- a/scripts/invoke-yandex-initial-bootstrap.mjs
++++ b/scripts/invoke-yandex-initial-bootstrap.mjs
+@@ -127,7 +127,18 @@ const METADATA_FAILURE_CODES = new Set([
+   'IDENTITY_MANIFEST_DUPLICATE_TRANSACTION_ID',
+   'IDENTITY_MANIFEST_MISSING_TRANSACTION_ASSIGNMENT',
+   'IDENTITY_MANIFEST_UNEXPECTED_TRANSACTION_ASSIGNMENT',
+-  'IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW',
++  'IDENTITY_MANIFEST_MALFORMED_ROW_CARDINALITY',
++  'IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD',
++  'IDENTITY_MANIFEST_MALFORMED_BINDING_ENTRY',
++  'IDENTITY_MANIFEST_MALFORMED_BINDING_SET',
++  'IDENTITY_MANIFEST_MALFORMED_BINDING_COUNT',
++  'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_ROW_COUNT',
++  'IDENTITY_MANIFEST_MALFORMED_RUN_STATE',
++  'IDENTITY_MANIFEST_MALFORMED_MIGRATION_RUN_ID',
++  'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_ID',
++  'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_DIGEST',
++  'IDENTITY_MANIFEST_MALFORMED_RUN_SNAPSHOT_DIGEST',
++  'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_DIGEST',
+   'IDENTITY_MANIFEST_MANIFEST_NOT_FOUND',
+   'IDENTITY_MANIFEST_MANIFEST_EVIDENCE_MISMATCH',
+   'IDENTITY_MANIFEST_INVALID_RESUME_OBSERVATION',
+diff --git a/src/migration/initialBootstrapIdentityManifest.ts b/src/migration/initialBootstrapIdentityManifest.ts
+index 7f4eb2b..c8ca7c5 100644
+--- a/src/migration/initialBootstrapIdentityManifest.ts
++++ b/src/migration/initialBootstrapIdentityManifest.ts
+@@ -68,7 +68,18 @@ export type InitialBootstrapIdentityManifestErrorCode =
+   | 'DUPLICATE_TRANSACTION_ID'
+   | 'MISSING_TRANSACTION_ASSIGNMENT'
+   | 'UNEXPECTED_TRANSACTION_ASSIGNMENT'
+-  | 'MALFORMED_MANIFEST_ROW'
++  | 'MALFORMED_ROW_CARDINALITY'
++  | 'MALFORMED_BINDINGS_PAYLOAD'
++  | 'MALFORMED_BINDING_ENTRY'
++  | 'MALFORMED_BINDING_SET'
++  | 'MALFORMED_BINDING_COUNT'
++  | 'MALFORMED_SNAPSHOT_ROW_COUNT'
++  | 'MALFORMED_RUN_STATE'
++  | 'MALFORMED_MIGRATION_RUN_ID'
++  | 'MALFORMED_SOURCE_SNAPSHOT_ID'
++  | 'MALFORMED_SOURCE_SNAPSHOT_DIGEST'
++  | 'MALFORMED_RUN_SNAPSHOT_DIGEST'
++  | 'MALFORMED_SNAPSHOT_DIGEST'
+   | 'MANIFEST_NOT_FOUND'
+   | 'MANIFEST_EVIDENCE_MISMATCH'
+   | 'INVALID_RESUME_OBSERVATION'
+@@ -256,70 +267,78 @@ export function prepareInitialBootstrapIdentityManifestWrite(
+   });
+ }
+ 
+-function malformed(): never {
+-  throw new InitialBootstrapIdentityManifestError('MALFORMED_MANIFEST_ROW');
++function malformed(code: InitialBootstrapIdentityManifestErrorCode): never {
++  throw new InitialBootstrapIdentityManifestError(code);
+ }
+ 
+-function safeInteger(value: unknown, minimum: number): number {
++function safeInteger(
++  value: unknown,
++  minimum: number,
++  code: InitialBootstrapIdentityManifestErrorCode,
++): number {
+   if (typeof value === 'bigint') {
+-    if (value < BigInt(minimum) || value > BigInt(Number.MAX_SAFE_INTEGER)) malformed();
++    if (value < BigInt(minimum) || value > BigInt(Number.MAX_SAFE_INTEGER)) malformed(code);
+     return Number(value);
+   }
+-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) malformed();
++  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum) malformed(code);
+   return value;
+ }
+ 
+-function canonicalString(value: unknown): string {
+-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
++function canonicalString(value: unknown, code: InitialBootstrapIdentityManifestErrorCode): string {
++  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed(code);
+   return value;
+ }
+ 
+-function digestString(value: unknown): string {
+-  if (typeof value !== 'string' || value.trim().length === 0) malformed();
++function digestString(value: unknown, code: InitialBootstrapIdentityManifestErrorCode): string {
++  if (typeof value !== 'string' || value.trim().length === 0) malformed(code);
+   return value;
+ }
+ 
+ function parseBinding(value: unknown): Readonly<InitialBootstrapIdentityBinding> {
+-  if (value === null || typeof value !== 'object' || Array.isArray(value)) malformed();
++  const code = 'MALFORMED_BINDING_ENTRY' as const;
++  if (value === null || typeof value !== 'object' || Array.isArray(value)) malformed(code);
+   const record = value as Readonly<Record<string, unknown>>;
+   const keys = Object.keys(record);
+   const expected = ['source_ordinal', 'row_hint', 'row_digest', 'source_record_id', 'transaction_id'];
+-  if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) malformed();
++  if (keys.length !== expected.length || !expected.every((key) => keys.includes(key))) malformed(code);
+   const transactionId = record.transaction_id === null
+     ? null
+-    : normalizedUuid(canonicalString(record.transaction_id), 'MALFORMED_MANIFEST_ROW');
++    : normalizedUuid(canonicalString(record.transaction_id, code), code);
+   return Object.freeze({
+-    sourceOrdinal: safeInteger(record.source_ordinal, 0),
+-    rowHint: safeInteger(record.row_hint, 1),
+-    rowDigest: digestString(record.row_digest),
+-    sourceRecordId: normalizedUuid(canonicalString(record.source_record_id), 'MALFORMED_MANIFEST_ROW'),
++    sourceOrdinal: safeInteger(record.source_ordinal, 0, code),
++    rowHint: safeInteger(record.row_hint, 1, code),
++    rowDigest: digestString(record.row_digest, code),
++    sourceRecordId: normalizedUuid(canonicalString(record.source_record_id, code), code),
+     transactionId,
+   });
+ }
+ 
+ function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdentityBinding>[] {
++  const payloadCode = 'MALFORMED_BINDINGS_PAYLOAD' as const;
+   let payload: unknown = value;
+   if (typeof payload === 'string') {
+     try {
+       payload = JSON.parse(payload) as unknown;
+     } catch {
+-      malformed();
++      malformed(payloadCode);
+     }
+   }
+-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed();
++  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) malformed(payloadCode);
+   const record = payload as Readonly<Record<string, unknown>>;
+-  if (record.schema_version !== 1 || !Array.isArray(record.bindings)) malformed();
++  if (record.schema_version !== 1 || !Array.isArray(record.bindings)) malformed(payloadCode);
+   const keys = Object.keys(record);
+-  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) malformed();
++  if (keys.length !== 2 || !keys.includes('schema_version') || !keys.includes('bindings')) malformed(payloadCode);
+ 
+   const bindings = record.bindings.map(parseBinding).sort((left, right) => left.sourceOrdinal - right.sourceOrdinal);
+   const sourceIds = new Set<string>();
+   const transactionIds = new Set<string>();
+   for (const [index, binding] of bindings.entries()) {
+-    if (binding.sourceOrdinal !== index || sourceIds.has(binding.sourceRecordId)) malformed();
++    if (binding.sourceOrdinal !== index || sourceIds.has(binding.sourceRecordId)) {
++      malformed('MALFORMED_BINDING_SET');
++    }
+     sourceIds.add(binding.sourceRecordId);
+     if (binding.transactionId !== null) {
+-      if (transactionIds.has(binding.transactionId)) malformed();
++      if (transactionIds.has(binding.transactionId)) malformed('MALFORMED_BINDING_SET');
+       transactionIds.add(binding.transactionId);
+     }
+   }
+@@ -345,24 +364,30 @@ export function parseInitialBootstrapIdentityManifestRows(
+   rows: readonly Readonly<IdentityManifestReadRow>[],
+ ): Readonly<InitialBootstrapIdentityManifestReadback> {
+   if (rows.length === 0) throw new InitialBootstrapIdentityManifestError('MANIFEST_NOT_FOUND');
+-  if (rows.length !== 1) malformed();
++  if (rows.length !== 1) malformed('MALFORMED_ROW_CARDINALITY');
+   const row = rows[0];
+-  if (row === undefined) malformed();
++  if (row === undefined) malformed('MALFORMED_ROW_CARDINALITY');
+   const bindings = parseBindings(row.bindings);
+-  const bindingCount = safeInteger(row.binding_count, 0);
+-  const snapshotRowCount = safeInteger(row.snapshot_row_count, 0);
+-  if (bindingCount !== bindings.length) malformed();
+-  const runState = canonicalString(row.run_state);
++  const bindingCount = safeInteger(row.binding_count, 0, 'MALFORMED_BINDING_COUNT');
++  const snapshotRowCount = safeInteger(row.snapshot_row_count, 0, 'MALFORMED_SNAPSHOT_ROW_COUNT');
++  if (bindingCount !== bindings.length) malformed('MALFORMED_BINDING_COUNT');
++  const runState = canonicalString(row.run_state, 'MALFORMED_RUN_STATE');
+   return Object.freeze({
+     manifest: Object.freeze({
+-      migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MANIFEST_ROW'),
+-      sourceSnapshotId: normalizedUuid(canonicalString(row.source_snapshot_id), 'MALFORMED_MANIFEST_ROW'),
+-      sourceSnapshotDigest: digestString(row.source_snapshot_digest),
++      migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MIGRATION_RUN_ID'),
++      sourceSnapshotId: normalizedUuid(
++        canonicalString(row.source_snapshot_id, 'MALFORMED_SOURCE_SNAPSHOT_ID'),
++        'MALFORMED_SOURCE_SNAPSHOT_ID',
++      ),
++      sourceSnapshotDigest: digestString(
++        row.source_snapshot_digest,
++        'MALFORMED_SOURCE_SNAPSHOT_DIGEST',
++      ),
+       bindings,
+     }),
+     runState,
+-    runSnapshotDigest: digestString(row.run_snapshot_digest),
+-    snapshotDigest: digestString(row.snapshot_digest),
++    runSnapshotDigest: digestString(row.run_snapshot_digest, 'MALFORMED_RUN_SNAPSHOT_DIGEST'),
++    snapshotDigest: digestString(row.snapshot_digest, 'MALFORMED_SNAPSHOT_DIGEST'),
+     snapshotRowCount,
+   });
+ }
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+index 732c6a4..a0401fa 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+@@ -125,7 +125,7 @@ test('safe non-success Function results remain exact bounded output and exit non
+       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+       runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+       applicationPhase: 'FRESH_CLAIM_WRITE',
+-      metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW',
++      metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD',
+     },
+   ];
+ 
+@@ -136,6 +136,35 @@ test('safe non-success Function results remain exact bounded output and exit non
+   }
+ });
+ 
++test('all structural manifest parser diagnostics are accepted only as enum-only metadata failures', async () => {
++  const codes = [
++    'IDENTITY_MANIFEST_MALFORMED_ROW_CARDINALITY',
++    'IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD',
++    'IDENTITY_MANIFEST_MALFORMED_BINDING_ENTRY',
++    'IDENTITY_MANIFEST_MALFORMED_BINDING_SET',
++    'IDENTITY_MANIFEST_MALFORMED_BINDING_COUNT',
++    'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_ROW_COUNT',
++    'IDENTITY_MANIFEST_MALFORMED_RUN_STATE',
++    'IDENTITY_MANIFEST_MALFORMED_MIGRATION_RUN_ID',
++    'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_ID',
++    'IDENTITY_MANIFEST_MALFORMED_SOURCE_SNAPSHOT_DIGEST',
++    'IDENTITY_MANIFEST_MALFORMED_RUN_SNAPSHOT_DIGEST',
++    'IDENTITY_MANIFEST_MALFORMED_SNAPSHOT_DIGEST'
++  ];
++  for (const metadataFailureCode of codes) {
++    const value = {
++      status: 'FAIL',
++      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++      runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
++      applicationPhase: 'FRESH_CLAIM_WRITE',
++      metadataFailureCode,
++    };
++    const result = await runInvoker({ body: JSON.stringify(value) });
++    assert.equal(result.exitCode, 2);
++    assertSafeOutput(result, value);
++  }
++});
++
+ test('malformed, extra-field and non-allowlisted successful response bodies fail closed without echo', async () => {
+   const outputs = [
+     PRIVATE_LOOKING,
+diff --git a/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs b/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
+index 4571056..28ee84a 100644
+--- a/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
+@@ -6,6 +6,7 @@ import {
+   InitialBootstrapIdentityManifestError,
+   buildInitialBootstrapIdentityManifest,
+   prepareInitialBootstrapIdentityManifestWrite,
++  parseInitialBootstrapIdentityManifestRows,
+   recoverInitialBootstrapIdentities,
+ } from '../../dist/migration/initialBootstrapIdentityManifest.js';
+ 
+@@ -188,6 +189,36 @@ test('restart after durable claim recovers exactly the same source and transacti
+   });
+ });
+ 
++test('manifest readback parser exposes structural failure class without row values', async () => {
++  const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
++  const valid = readbackRow(write);
++  const validBindings = valid.bindings;
++  const cases = [
++    ['MALFORMED_ROW_CARDINALITY', [valid, valid]],
++    ['MALFORMED_BINDINGS_PAYLOAD', [{ ...valid, bindings: [] }]],
++    ['MALFORMED_BINDING_ENTRY', [{
++      ...valid,
++      bindings: { ...validBindings, bindings: [{ ...validBindings.bindings[0], source_record_id: null }, validBindings.bindings[1]] },
++    }]],
++    ['MALFORMED_BINDING_SET', [{
++      ...valid,
++      bindings: { ...validBindings, bindings: [validBindings.bindings[0], { ...validBindings.bindings[1], source_record_id: SOURCE_ID_1 }] },
++    }]],
++    ['MALFORMED_BINDING_COUNT', [{ ...valid, binding_count: '2' }]],
++    ['MALFORMED_SNAPSHOT_ROW_COUNT', [{ ...valid, snapshot_row_count: '2' }]],
++    ['MALFORMED_RUN_STATE', [{ ...valid, run_state: null }]],
++    ['MALFORMED_MIGRATION_RUN_ID', [valid], 'not-a-uuid'],
++    ['MALFORMED_SOURCE_SNAPSHOT_ID', [{ ...valid, source_snapshot_id: 7 }]],
++    ['MALFORMED_SOURCE_SNAPSHOT_DIGEST', [{ ...valid, source_snapshot_digest: null }]],
++    ['MALFORMED_RUN_SNAPSHOT_DIGEST', [{ ...valid, run_snapshot_digest: null }]],
++    ['MALFORMED_SNAPSHOT_DIGEST', [{ ...valid, snapshot_digest: null }]],
++  ];
++
++  for (const [code, rows, migrationRunId = RUN_ID] of cases) {
++    await expectManifestError(code, async () => parseInitialBootstrapIdentityManifestRows(migrationRunId, rows));
++  }
++});
++
+ test('resume fails closed when current observation no longer matches the claimed manifest', async () => {
+   const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
+   await expectManifestError(
+@@ -210,7 +241,7 @@ test('contradictory durable bindings are rejected instead of choosing an identit
+   malformedBindings.bindings[1].source_record_id = SOURCE_ID_1;
+ 
+   await expectManifestError(
+-    'MALFORMED_MANIFEST_ROW',
++    'MALFORMED_BINDING_SET',
+     () => recoverInitialBootstrapIdentities(
+       reader([readbackRow(write, { bindings: malformedBindings })]),
+       RUN_ID,
+diff --git a/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs b/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs
+index 4d131af..6102863 100644
+--- a/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs
+@@ -286,7 +286,7 @@ test('missing identity manifest readback preserves the privacy-safe not-found pa
+   assert.equal(fake.events.at(-1), 'rollback');
+ });
+ 
+-test('malformed identity manifest readback preserves the privacy-safe manifest parser code', async () => {
++test('malformed identity manifest binding count preserves the exact privacy-safe parser code', async () => {
+   const input = candidate();
+   const writes = prepareInitialBootstrapMetadataWrites(input);
+   const manifestWrite = identityWrite(input);
+@@ -300,7 +300,7 @@ test('malformed identity manifest readback preserves the privacy-safe manifest p
+   });
+ 
+   await expectManifestError(
+-    'MALFORMED_MANIFEST_ROW',
++    'MALFORMED_BINDING_COUNT',
+     () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+   );
+   assert.equal(fake.events.at(-1), 'rollback');
+diff --git a/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs b/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
+index dd865c8..252a935 100644
+--- a/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
++++ b/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
+@@ -23,7 +23,26 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
+   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED/);
+   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH/);
+   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH/);
+-  assert.match(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
++  const structuralManifestCodes = [
++    'MALFORMED_ROW_CARDINALITY',
++    'MALFORMED_BINDINGS_PAYLOAD',
++    'MALFORMED_BINDING_ENTRY',
++    'MALFORMED_BINDING_SET',
++    'MALFORMED_BINDING_COUNT',
++    'MALFORMED_SNAPSHOT_ROW_COUNT',
++    'MALFORMED_RUN_STATE',
++    'MALFORMED_MIGRATION_RUN_ID',
++    'MALFORMED_SOURCE_SNAPSHOT_ID',
++    'MALFORMED_SOURCE_SNAPSHOT_DIGEST',
++    'MALFORMED_RUN_SNAPSHOT_DIGEST',
++    'MALFORMED_SNAPSHOT_DIGEST',
++  ];
++  for (const code of structuralManifestCodes) {
++    assert.match(workflow, new RegExp(`IDENTITY_MANIFEST_${code}`));
++    assert.match(invoker, new RegExp(`IDENTITY_MANIFEST_${code}`));
++  }
++  assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
++  assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+   assert.match(workflow, /runtimeCode:/);
+   assert.match(workflow, /httpStatus:/);
+   assert.match(workflow, /functionError:/);
