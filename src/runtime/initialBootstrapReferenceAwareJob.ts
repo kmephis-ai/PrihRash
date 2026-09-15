@@ -7,7 +7,11 @@ import {
   type GoogleSheetsFullSnapshotLease,
 } from '../integration/google/googleSheetsFullSnapshotReader.js';
 import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integration/google/googleServiceAccountTokenProvider.js';
-import { YdbAdapter } from '../integration/ydb/adapter.js';
+import {
+  YdbAdapter,
+  YdbAdapterError,
+  YdbCommitOutcomeUnknownError,
+} from '../integration/ydb/adapter.js';
 import { YdbParameterError } from '../integration/ydb/parameters.js';
 import {
   createYdbJsV6MetadataDataClient,
@@ -19,7 +23,9 @@ import {
   runInitialBootstrapApplication,
 } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
+import { AtomicPromotionError } from '../migration/atomicPromotion.js';
 import { ControlledRebuildEvidenceReaderError } from '../migration/initialControlledRebuildEvidenceReader.js';
+import { InitialControlledRebuildReconciliationError } from '../migration/initialControlledRebuildReconciliation.js';
 import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
@@ -27,6 +33,14 @@ import {
 import { InitialBootstrapIdentityManifestError } from '../migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapMetadataExecutorError } from '../migration/initialBootstrapMetadataExecutor.js';
 import { InitialBootstrapPersistenceError } from '../migration/initialBootstrapPersistence.js';
+import { InitialRunCounterRefinementError } from '../migration/initialRunCounterRefinement.js';
+import { InitialRunCounterRefinementPersistenceError } from '../migration/initialRunCounterRefinementPersistence.js';
+import { InitialSourceLineageError } from '../migration/initialSourceLineage.js';
+import { InitialSourceLineagePersistenceError } from '../migration/initialSourceLineagePersistence.js';
+import { InitialRevisionEvidenceError } from '../migration/initialSourceRevisionEvidenceExecutor.js';
+import { InitialSourceRevisionEvidenceRecoveryError } from '../migration/initialSourceRevisionEvidenceRecovery.js';
+import { InitialVerifiedCurrentPlanError } from '../migration/initialVerifiedCurrentPlan.js';
+import { InitialVerifiedCurrentPersistenceError } from '../migration/initialVerifiedCurrentPersistence.js';
 import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
@@ -47,6 +61,8 @@ import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googl
 import {
   InitialSnapshotProjectionStructuralError,
 } from '../migration/initialSnapshotProjection.js';
+import { MigrationRunLifecycleExecutorError } from '../migration/migrationRunLifecycleExecutor.js';
+import { MigrationRunPersistenceError } from '../migration/migrationRunPersistence.js';
 import { MigrationRunStateError } from '../migration/migrationRunState.js';
 import {
   readScheduledSyncAdmissionEvidence,
@@ -135,6 +151,13 @@ function classifyApplicationRuntimeError(
     || error instanceof ControlledRebuildEvidenceReaderError
     || error instanceof InitialSnapshotProjectionStructuralError
     || error instanceof SourceSnapshotSemanticProjectionStructuralError
+    || error instanceof InitialControlledRebuildReconciliationError
+    || error instanceof InitialSourceLineageError
+    || error instanceof InitialSourceRevisionEvidenceRecoveryError
+    || error instanceof InitialRevisionEvidenceError
+    || error instanceof InitialRunCounterRefinementError
+    || error instanceof InitialVerifiedCurrentPlanError
+    || error instanceof AtomicPromotionError
   ) {
     return 'REFERENCE_APPLICATION_SEMANTIC_FAILED';
   }
@@ -142,11 +165,20 @@ function classifyApplicationRuntimeError(
     error instanceof InitialBootstrapMetadataExecutorError
     || error instanceof InitialBootstrapIdentityManifestError
     || error instanceof InitialBootstrapPersistenceError
+    || error instanceof InitialSourceLineagePersistenceError
+    || error instanceof InitialRunCounterRefinementPersistenceError
+    || error instanceof InitialVerifiedCurrentPersistenceError
+    || error instanceof MigrationRunLifecycleExecutorError
+    || error instanceof MigrationRunPersistenceError
     || error instanceof YdbParameterError
   ) {
     return 'REFERENCE_APPLICATION_METADATA_FAILED';
   }
-  if (error instanceof YdbJsV6DataTransportError) {
+  if (
+    error instanceof YdbJsV6DataTransportError
+    || error instanceof YdbAdapterError
+    || error instanceof YdbCommitOutcomeUnknownError
+  ) {
     return 'REFERENCE_APPLICATION_YDB_DATA_FAILED';
   }
   if (error instanceof InitialBootstrapRuntimePrimitiveError) {
