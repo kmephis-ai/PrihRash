@@ -1,31 +1,18 @@
-diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
-index 4af34c6..6a81fc6 100644
---- a/.github/workflows/r1-initial-shadow-bootstrap.yml
-+++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
-@@ -438,6 +438,7 @@ jobs:
-                     "UNAVAILABLE",
-                     "INVALID_REQUEST",
-                     "FAILED_PRECONDITION",
-+                    "BAD_GATEWAY",
-                     "INTERNAL",
-                     "OTHER"
-                   ))
 diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
-index 140ff05..ce14bd4 100644
+index 140ff05..6f3579b 100644
 --- a/scripts/invoke-yandex-initial-bootstrap.mjs
 +++ b/scripts/invoke-yandex-initial-bootstrap.mjs
-@@ -328,7 +328,8 @@ function safeTransportClass(stderr) {
+@@ -328,7 +328,7 @@ function safeTransportClass(stderr) {
      [/(unavailable|service unavailable|connection refused|connection reset|network is unreachable|temporary failure|\b503\b)/, 'UNAVAILABLE'],
      [/(invalid(?:[_ ]?argument)|unknown flag|usage:)/, 'INVALID_REQUEST'],
      [/(failed(?:[_ ]?precondition))/, 'FAILED_PRECONDITION'],
 -    [/(internal error|\binternal\b)/, 'INTERNAL'],
-+    [/(bad gateway|badgateway|proxyintegrationerror|x-function-error|function invocation error|\b502\b)/, 'BAD_GATEWAY'],
-+    [/(internal server error|internal error|\b500\b|\binternal\b)/, 'INTERNAL'],
++    [/(bad gateway|badgateway|proxyintegrationerror|x-function-error|function invocation error|internal server error|internal error|\b500\b|\b502\b|\binternal\b)/, 'INTERNAL'],
    ];
    return rules.find(([pattern]) => pattern.test(normalized))?.[1] ?? 'OTHER';
  }
 diff --git a/tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs
-index 824d6c1..9f25269 100644
+index 824d6c1..25403ea 100644
 --- a/tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs
 +++ b/tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs
 @@ -105,3 +105,13 @@ process.exit(17);
@@ -40,17 +27,5 @@ index 824d6c1..9f25269 100644
 +process.exit(17);
 +`);
 +
-+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'BAD_GATEWAY');
++  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'INTERNAL');
 +});
-diff --git a/tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs b/tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs
-index 95de2f6..dd7ef3e 100644
---- a/tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs
-+++ b/tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs
-@@ -96,6 +96,7 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
-     'UNAVAILABLE',
-     'INVALID_REQUEST',
-     'FAILED_PRECONDITION',
-+    'BAD_GATEWAY',
-     'INTERNAL',
-     'OTHER',
-   ]) {
