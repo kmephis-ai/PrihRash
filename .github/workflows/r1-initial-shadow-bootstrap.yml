@@ -425,6 +425,24 @@ jobs:
                   "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
                 )))
               )
+            | select(
+                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                or (
+                  (.transportClass | type) == "string"
+                  and (.transportClass | IN(
+                    "EMPTY",
+                    "AUTH",
+                    "NOT_FOUND",
+                    "RATE_LIMIT",
+                    "DEADLINE",
+                    "UNAVAILABLE",
+                    "INVALID_REQUEST",
+                    "FAILED_PRECONDITION",
+                    "INTERNAL",
+                    "OTHER"
+                  ))
+                )
+              )
             | {
                 status: $status,
                 code: $code,
@@ -454,6 +472,12 @@ jobs:
                      and (.outputShape | type) == "string"
                      and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
                   then .outputShape
+                  else null
+                  end
+                ),
+                transportClass: (
+                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
+                  then .transportClass
                   else null
                   end
                 )
