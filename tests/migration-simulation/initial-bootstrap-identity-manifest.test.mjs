@@ -6,6 +6,7 @@ import {
   InitialBootstrapIdentityManifestError,
   buildInitialBootstrapIdentityManifest,
   prepareInitialBootstrapIdentityManifestWrite,
+  initialBootstrapIdentityManifestReadStatement,
   parseInitialBootstrapIdentityManifestRows,
   recoverInitialBootstrapIdentities,
 } from '../../dist/migration/initialBootstrapIdentityManifest.js';
@@ -149,6 +150,15 @@ test('prepares only a non-overwriting INSERT manifest write with versioned canon
     ],
   });
   assert.equal(write.estimatedParameterBytes > 0, true);
+});
+
+test('manifest readback query aliases every qualified manifest column to the parser contract key', () => {
+  const statement = initialBootstrapIdentityManifestReadStatement(RUN_ID);
+  assert.match(statement.text, /m\.source_snapshot_id AS source_snapshot_id/);
+  assert.match(statement.text, /m\.binding_count AS binding_count/);
+  assert.match(statement.text, /m\.bindings AS bindings/);
+  assert.doesNotMatch(statement.text, /SELECT m\.source_snapshot_id,/);
+  assert.doesNotMatch(statement.text, /m\.binding_count, m\.bindings,/);
 });
 
 test('financial identity must be explicit while ambiguous/non-financial rows cannot receive invented transaction IDs', () => {
