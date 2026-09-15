@@ -1,0 +1,41 @@
+From d3b9c8cc3556ea8652b872f3d9d1dfc79f76d066 Mon Sep 17 00:00:00 2001
+From: OpenAI PrihRash Agent <noreply@openai.com>
+Date: Tue, 15 Sep 2026 15:37:23 +0000
+Subject: [PATCH] R1 #453: classify manifest claim readback failure
+
+
+diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+index c135e4c..449a477 100644
+--- a/.github/workflows/r1-initial-shadow-bootstrap.yml
++++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+@@ -512,7 +512,9 @@ jobs:
+                        "METADATA_EXECUTOR_COMMITTED_BASELINE_EXISTS",
+                        "METADATA_EXECUTOR_SNAPSHOT_READBACK_MISMATCH",
+                        "METADATA_EXECUTOR_RUN_READBACK_MISMATCH",
+-                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_READBACK_MISMATCH",
++                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED",
++                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH",
++                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH",
+                        "METADATA_EXECUTOR_CLAIM_READBACK_MISMATCH",
+                        "IDENTITY_MANIFEST_RUN_NOT_STAGING",
+                        "IDENTITY_MANIFEST_PROJECTION_LENGTH_MISMATCH",
+diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
+index f9b8b15..671b65e 100644
+--- a/scripts/invoke-yandex-initial-bootstrap.mjs
++++ b/scripts/invoke-yandex-initial-bootstrap.mjs
+@@ -114,7 +114,9 @@ const METADATA_FAILURE_CODES = new Set([
+   'METADATA_EXECUTOR_COMMITTED_BASELINE_EXISTS',
+   'METADATA_EXECUTOR_SNAPSHOT_READBACK_MISMATCH',
+   'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
+-  'METADATA_EXECUTOR_IDENTITY_MANIFEST_READBACK_MISMATCH',
++  'METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED',
++  'METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH',
++  'METADATA_EXECUTOR_IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH',
+   'METADATA_EXECUTOR_CLAIM_READBACK_MISMATCH',
+   'IDENTITY_MANIFEST_RUN_NOT_STAGING',
+   'IDENTITY_MANIFEST_PROJECTION_LENGTH_MISMATCH',
+diff --git a/src/migration/initialBootstrapMetadataExecutor.ts b/src/migration/initialBootstrapMetadataExecutor.ts
+index a439db9..f2a1720 100644
+--- a/src/migration/initialBootstrapMetadataExecutor.ts
++++ b/src/migration/initialBootstrapMetadataExecutor.ts
+@@ -3,9 +3,11 @@ import { uuidParameter } from '../integr
