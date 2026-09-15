@@ -281,7 +281,7 @@ async function createDataClientWithCredentials(
   const transport = createYdbJsV6DataTransport(
     sql,
     createYdbJsV6ParameterMapper(sdk),
-    { readTimeoutMs: config.readTimeoutMs },
+    config.readTimeoutMs === undefined ? {} : { readTimeoutMs: config.readTimeoutMs },
   );
 
   return Object.freeze({
