@@ -1,0 +1,53 @@
+name: Transport R1 453 bindings shape blobs
+
+on:
+  push:
+    branches:
+      - transport/r1-453-bindings-shape-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and publish exact verified blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch='transport/r1-453-bindings-shape/patch.diff'
+          printf '%s  %s\n' '3db089331c075fe5bf63ce3d89de67fc9d321b3f40942363321ac3808f75e852' "$patch" | sha256sum --check --status
+          cp "$patch" "$RUNNER_TEMP/r1-453-bindings-shape.patch"
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = '68b46af0802941eef0424b4a2a11b894af6cd1cc'
+          git checkout --detach 68b46af0802941eef0424b4a2a11b894af6cd1cc
+          git apply --check "$RUNNER_TEMP/r1-453-bindings-shape.patch"
+          git apply --index "$RUNNER_TEMP/r1-453-bindings-shape.patch"
+
+          tree="$(git write-tree)"
+          test "$tree" = 'd0e3f256d7bc60a6036a98706ace86e37d1261e7'
+
+          declare -A expected=(
+            ['.github/workflows/r1-initial-shadow-bootstrap.yml']='4812c79f99ef9a2d0acf0126427eabc846b7d09c'
+            ['scripts/invoke-yandex-initial-bootstrap.mjs']='f56417ad1f857fead40473feeab3b22872276922'
+            ['src/migration/initialBootstrapIdentityManifest.ts']='24ab93b33f4632bcab728be17dde8512f2773874'
+            ['tests/integration/yandex-initial-bootstrap-invoker.test.mjs']='8f28c4c1c27aea473fc68f09ed0f8f828b95684f'
+            ['tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs']='d470860ac8dbbd82c6f5572dffd5b98d739b9826'
+            ['tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs']='3992130250f4330e45a669e168aa470ea8faf630'
+          )
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for path in "${!expected[@]}"; do
+            blob="$(git hash-object "$path")"
+            test "$blob" = "${expected[$path]}"
+            tag="transport-r1-453-bindings-blob-${blob:0:12}-20260915"
+            git tag -a "$tag" "$blob" -m "transport verified R1 bindings-shape blob: $path"
+            git push origin "refs/tags/$tag"
+          done
