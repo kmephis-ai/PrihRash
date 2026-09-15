@@ -1,0 +1,96 @@
+name: R1 YDB data diagnostic transport
+
+on:
+  push:
+    branches:
+      - transport/r1-453-ydb-data-v2-20260915
+    paths:
+      - .github/workflows/r1-ydb-data-diagnostic-transport.yml
+
+permissions:
+  contents: write
+
+jobs:
+  transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact patch and publish product branch
+        shell: bash
+        env:
+          EXPECTED_MAIN: 5bb96dde93bc675e137f700794c09b012355ca09
+          PRODUCT_BRANCH: fix/r1-453-classify-ydb-data-failure
+          TRANSPORT_BRANCH: transport/r1-453-ydb-data-v2-20260915
+          PATCH_SHA256: 01e00244c29381953234a9d3979e105155635adcfa479188be2e2113f77fd2b1
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/$TRANSPORT_BRANCH"
+
+          patch="$RUNNER_TEMP/r1-ydb-data-failure.patch"
+          cat \
+            .transport/r1-ydb-data-v2/part-00.patch \
+            .transport/r1-ydb-data-v2/part-01.patch \
+            .transport/r1-ydb-data-v2/part-02.patch \
+            .transport/r1-ydb-data-v2/part-03.patch \
+            .transport/r1-ydb-data-v2/part-04.patch \
+            > "$patch"
+          printf '%s  %s\n' "$PATCH_SHA256" "$patch" | sha256sum --check -
+
+          git fetch origin main "$PRODUCT_BRANCH"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "origin/$PRODUCT_BRANCH")" = "$EXPECTED_MAIN"
+
+          test "$(git rev-parse "$EXPECTED_MAIN:.github/workflows/r1-initial-shadow-bootstrap.yml")" = 4812c79f99ef9a2d0acf0126427eabc846b7d09c
+          test "$(git rev-parse "$EXPECTED_MAIN:scripts/invoke-yandex-initial-bootstrap.mjs")" = f56417ad1f857fead40473feeab3b22872276922
+          test "$(git rev-parse "$EXPECTED_MAIN:src/runtime/initialBootstrapReferenceAwareJob.ts")" = 1069fa71eac270bcad3ad357b4fa29469e780f8d
+          test "$(git rev-parse "$EXPECTED_MAIN:src/runtime/yandexCloudInitialBootstrapFunction.ts")" = eacdbcb07dc1b2ecaa76d6a11f0c113f3129e6c9
+          test "$(git rev-parse "$EXPECTED_MAIN:tests/integration/yandex-initial-bootstrap-function.test.mjs")" = 93fdb2004c6875bb91f733e4ce110df69985cd48
+          test "$(git rev-parse "$EXPECTED_MAIN:tests/integration/yandex-initial-bootstrap-invoker.test.mjs")" = 8f28c4c1c27aea473fc68f09ed0f8f828b95684f
+          test "$(git rev-parse "$EXPECTED_MAIN:tests/tooling/initial-bootstrap-runtime-stage-taxonomy.test.mjs")" = 3cecbe0f54c15b8d56883bcd8c9736f24bbea10a
+          test "$(git rev-parse "$EXPECTED_MAIN:tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs")" = 3992130250f4330e45a669e168aa470ea8faf630
+
+          git checkout --detach "$EXPECTED_MAIN"
+          git apply --index "$patch"
+          git diff --cached --check
+
+          expected_files="$(printf '%s\n' \
+            .github/workflows/r1-initial-shadow-bootstrap.yml \
+            scripts/invoke-yandex-initial-bootstrap.mjs \
+            src/runtime/initialBootstrapReferenceAwareJob.ts \
+            src/runtime/yandexCloudInitialBootstrapFunction.ts \
+            tests/integration/yandex-initial-bootstrap-function.test.mjs \
+            tests/integration/yandex-initial-bootstrap-invoker.test.mjs \
+            tests/tooling/initial-bootstrap-runtime-stage-taxonomy.test.mjs \
+            tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs | sort)"
+          actual_files="$(git diff --cached --name-only | sort)"
+          test "$actual_files" = "$expected_files"
+
+          test "$(git hash-object .github/workflows/r1-initial-shadow-bootstrap.yml)" = c6dd32a271341d3c07a086e40ec8c4492f64f6da
+          test "$(git hash-object scripts/invoke-yandex-initial-bootstrap.mjs)" = 497e975dbe39ffa9caae18c5a5d016fb0a7f8972
+          test "$(git hash-object src/runtime/initialBootstrapReferenceAwareJob.ts)" = 431b60418204b1b4a00aafe3025e1af6535ff364
+          test "$(git hash-object src/runtime/yandexCloudInitialBootstrapFunction.ts)" = eb893ee14620ad5e0fdd9c1a7416234a7064cea3
+          test "$(git hash-object tests/integration/yandex-initial-bootstrap-function.test.mjs)" = e2a3632229325c3cd6f2e51b84a465f91af39501
+          test "$(git hash-object tests/integration/yandex-initial-bootstrap-invoker.test.mjs)" = 5c582748ef9529e69828b5e342329088b6965847
+          test "$(git hash-object tests/tooling/initial-bootstrap-runtime-stage-taxonomy.test.mjs)" = f972825da822abb8058e1deb24f0b95994b226c9
+          test "$(git hash-object tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs)" = 5d0768680e7f0875853bb3fa3ac4c4c2cb4d2e46
+
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'R1 #453: classify YDB data failures'
+          product_commit="$(git rev-parse HEAD)"
+          product_tree="$(git rev-parse HEAD^{tree})"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_MAIN"
+
+          git fetch origin main "$PRODUCT_BRANCH"
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "origin/$PRODUCT_BRANCH")" = "$EXPECTED_MAIN"
+          git push origin "$product_commit:refs/heads/$PRODUCT_BRANCH"
+
+          echo "PRODUCT_COMMIT=$product_commit"
+          echo "PRODUCT_TREE=$product_tree"
