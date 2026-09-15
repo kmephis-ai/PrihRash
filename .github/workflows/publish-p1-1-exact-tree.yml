@@ -1,0 +1,81 @@
+name: Publish P1.1 exact tree
+
+on:
+  push:
+    branches:
+      - transport/p1-1-publish-e35
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: e35e23c5dbd0834c2d4fd89eab8aa4a45a85b1f8
+  EXPECTED_TREE: ee471b03a1ffe5fb63d913cb2f52e99a16895fba
+  PATCH_SHA256: 57057bcf7093fe0797d94d41b6bb6cf9931e8fc21603cb6bfbec2bdbe24c37ce
+  PRODUCT_BRANCH: process/530-p1-1-exact-source-artifact
+
+jobs:
+  publish:
+    if: github.repository == 'kmephis-ai/PrihRash'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Materialize exact product tree
+        id: product
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .transport/p1-1.patch.gz.b64 "$RUNNER_TEMP/p1-1.patch.gz.b64"
+          base64 --decode "$RUNNER_TEMP/p1-1.patch.gz.b64" > "$RUNNER_TEMP/p1-1.patch.gz"
+          gzip --decompress --stdout "$RUNNER_TEMP/p1-1.patch.gz" > "$RUNNER_TEMP/p1-1.patch"
+          echo "${PATCH_SHA256}  $RUNNER_TEMP/p1-1.patch" | sha256sum --check --status
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git reset --hard "$SOURCE_SHA"
+          git clean -fdx
+          git apply --index "$RUNNER_TEMP/p1-1.patch"
+          git diff --cached --check
+          tree="$(git write-tree)"
+          test "$tree" = "$EXPECTED_TREE"
+          git config user.name 'PrihRash AI'
+          git config user.email 'noreply@openai.com'
+          git commit -m 'R1 #530 P1.1: переиспользовать exact-SHA CI artifact'
+          commit="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/p1-1-publish-evidence"
+          jq -cn --arg sourceSha "$SOURCE_SHA" --arg treeSha "$EXPECTED_TREE" --arg commitSha "$commit" '{sourceSha:$sourceSha,treeSha:$treeSha,commitSha:$commitSha,pushStatus:"PENDING"}' > "$RUNNER_TEMP/p1-1-publish-evidence/evidence.json"
+
+      - name: Publish product branch or preserve pack objects
+        shell: bash
+        env:
+          PRODUCT_COMMIT: ${{ steps.product.outputs.commit }}
+        run: |
+          set -euo pipefail
+          set +e
+          git push origin "${PRODUCT_COMMIT}:refs/heads/${PRODUCT_BRANCH}" >"$RUNNER_TEMP/push.out" 2>"$RUNNER_TEMP/push.err"
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            push_status='PUSHED'
+          elif grep -q 'refusing to allow a GitHub App to create or update workflow' "$RUNNER_TEMP/push.err"; then
+            push_status='PACK_SENT_REF_BLOCKED_WORKFLOW_PERMISSION'
+          else
+            cat "$RUNNER_TEMP/push.err" >&2
+            exit "$status"
+          fi
+          jq --arg pushStatus "$push_status" '.pushStatus=$pushStatus' "$RUNNER_TEMP/p1-1-publish-evidence/evidence.json" > "$RUNNER_TEMP/p1-1-publish-evidence/evidence.next.json"
+          mv "$RUNNER_TEMP/p1-1-publish-evidence/evidence.next.json" "$RUNNER_TEMP/p1-1-publish-evidence/evidence.json"
+          echo "$push_status"
+
+      - name: Upload publication evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: p1-1-publish-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/p1-1-publish-evidence/evidence.json
+          if-no-files-found: error
+          retention-days: 1
