@@ -241,6 +241,24 @@ Preview-only `preview-expense-edit.mjs` доказывает browser conflict UX
 
 Malformed/mismatched current-read или ACK оставляет локальные значения нетронутыми и переводит UI в degraded state без rebase/overwrite. Production Reader/PWA/Service Worker этот module не импортируют.
 
+## VOID confirmation/conflict preview
+
+Preview-only `preview-transaction-void.mjs` добавляет browser-facing confirmation поверх уже доказанных `VOID_TRANSACTION / PENDING` и `preview-transaction-void-delivery.mjs`. Он монтируется только из synthetic `preview-bootstrap.mjs`; production Reader/PWA/Service Worker его не импортируют.
+
+Активное действие доступно только exact synthetic ordinary `EXPENSE | INCOME | TRANSFER` с `recordGranularity=TRANSACTION`, `datePrecision=DAY`, `status=POSTED`, canonical transaction id и positive version. Уже `VOIDED`, historical coarse/unknown или malformed evidence не получает active VOID action.
+
+Пользовательский flow fail-closed и local-first:
+
+- `Аннулировать` сначала открывает explicit confirmation; `Отмена` не создаёт intent и не вызывает sender;
+- `Подтвердить аннулирование` сначала проверяет существующий durable evidence и затем сохраняет exact `{transactionId, expectedVersion}` в IndexedDB; sender на этом шаге не вызывается;
+- reload восстанавливает exact pending VOID intent и показывает его как локально сохранённый, но ещё не подтверждённый;
+- отправка выполняется только отдельным явным действием через injected `sendTransactionVoid(request)` boundary; real HTTP/auth/provider binding отсутствует;
+- validated `VOIDED` / `ALREADY_VOIDED` очищает только exact intent и даёт явный confirmed UI state;
+- `VERSION_CONFLICT` сохраняет intent, показывает только безопасный `currentVersion` и блокирует automatic retry/overwrite; current-record read/rebase здесь не выполняется;
+- sender, malformed ACK или local ACK failure переводят UI в degraded state, сохраняя pending evidence для отдельного явного retry.
+
+Browser Quality отдельно доказывает cancel/no-write, offline local commit, reload restore, terminal ACK cleanup и conflict-without-auto-retry в Chromium. Это не меняет production authority: Google остаётся authoritative, `YDB_WRITE_ENABLED=false`.
+
 ## Не входит
 
 - production Writer UI;
@@ -252,6 +270,6 @@ Malformed/mismatched current-read или ACK оставляет локальны
 - automatic retry/sync scheduler;
 - real production browser edit/current-record transport;
 - INCOME/TRANSFER edit;
-- browser VOID confirmation и user-facing conflict resolution/current-read reconciliation;
+- production browser VOID transport и user-facing conflict resolution/current-read reconciliation;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.

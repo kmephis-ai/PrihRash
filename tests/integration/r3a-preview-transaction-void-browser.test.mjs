@@ -1,0 +1,216 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import {
+  createPreviewTransactionVoidController,
+  createSyntheticPreviewTransactionVoidSender,
+  listPreviewTransactionVoidCandidates,
+  previewTransactionVoidContract,
+} from '../../web/preview-transaction-void.mjs';
+import { syntheticPreviewEvidence } from '../../web/preview-transport.mjs';
+
+const TX_EXPENSE = '40000000-0000-0000-0000-000000000001';
+const TX_INCOME = '40000000-0000-0000-0000-000000000002';
+const INTENT_1 = '70000000-0000-0000-0000-000000000001';
+
+function memoryOutbox(seed = []) {
+  const rows = new Map(seed.map((row) => [row.intentId, row]));
+  const calls = { enqueue: [], acknowledge: [] };
+  return {
+    calls,
+    async enqueue(intent) {
+      calls.enqueue.push(intent);
+      if (rows.has(intent.intentId)) throw new Error('duplicate');
+      rows.set(intent.intentId, intent);
+      return intent;
+    },
+    async listPending() {
+      return [...rows.values()];
+    },
+    async acknowledge(intentId) {
+      calls.acknowledge.push(intentId);
+      rows.delete(intentId);
+    },
+  };
+}
+
+function makeController({ outbox = memoryOutbox(), sender, randomUuid = () => INTENT_1 } = {}) {
+  return {
+    outbox,
+    controller: createPreviewTransactionVoidController({
+      candidates: listPreviewTransactionVoidCandidates(),
+      outbox,
+      sender: sender ?? createSyntheticPreviewTransactionVoidSender(),
+      randomUuid,
+      now: () => '2026-09-15T17:30:00.000Z',
+    }),
+  };
+}
+
+test('R3A VOID browser candidates expose only ordinary POSTED TRANSACTION/DAY synthetic records', () => {
+  const candidates = listPreviewTransactionVoidCandidates();
+  assert.equal(candidates.length, 8);
+  assert.ok(candidates.some((candidate) => candidate.transactionId === TX_EXPENSE));
+  assert.equal(candidates.some((candidate) => candidate.transactionId === '40000000-0000-0000-0000-000000000006'), false);
+  assert.equal(candidates.some((candidate) => candidate.transactionId === '40000000-0000-0000-0000-000000000010'), false);
+  assert.deepEqual(previewTransactionVoidContract, {
+    allowedTypes: ['EXPENSE', 'INCOME', 'TRANSFER'],
+    requiresGranularity: 'TRANSACTION',
+    requiresDatePrecision: 'DAY',
+    requiresStatus: 'POSTED',
+  });
+});
+
+test('malformed, already VOIDED and coarse evidence never receives an active VOID candidate', () => {
+  const base = syntheticPreviewEvidence.operations[0];
+  const malformed = [
+    { ...base, id: 'NOT-UUID' },
+    { ...base, version: 0 },
+    { ...base, status: 'VOIDED' },
+    { ...base, recordGranularity: 'PERIOD_AGGREGATE', datePrecision: 'MONTH' },
+    { ...base, type: 'UNKNOWN' },
+  ];
+  assert.deepEqual(listPreviewTransactionVoidCandidates(malformed), []);
+  assert.deepEqual(listPreviewTransactionVoidCandidates([{ ...base }, { ...base }]), []);
+  assert.deepEqual(listPreviewTransactionVoidCandidates([{ ...base, description: null }]), []);
+});
+
+test('cancelled confirmation performs no outbox mutation and no sender call', async () => {
+  let sends = 0;
+  const { controller, outbox } = makeController({ sender: { sendTransactionVoid: async () => { sends += 1; } } });
+  await controller.restore();
+  controller.openConfirmation();
+  const state = controller.cancelConfirmation();
+  assert.equal(state.status, 'READY');
+  assert.equal(outbox.calls.enqueue.length, 0);
+  assert.equal(outbox.calls.acknowledge.length, 0);
+  assert.equal(sends, 0);
+});
+
+test('confirm durably enqueues exact VOID intent without calling sender and restore reuses same local evidence', async () => {
+  let sends = 0;
+  const outbox = memoryOutbox();
+  const { controller } = makeController({ outbox, sender: { sendTransactionVoid: async () => { sends += 1; } } });
+  await controller.restore();
+  controller.openConfirmation();
+  const pending = await controller.confirm();
+  assert.equal(pending.status, 'PENDING');
+  assert.equal(pending.pendingCount, 1);
+  assert.equal(sends, 0);
+  assert.equal(outbox.calls.enqueue.length, 1);
+  assert.deepEqual(outbox.calls.enqueue[0].payload, { transactionId: TX_EXPENSE, expectedVersion: 1 });
+  assert.equal(outbox.calls.enqueue[0].intentId, INTENT_1);
+
+  const restored = makeController({ outbox, sender: { sendTransactionVoid: async () => { sends += 1; } }, randomUuid: () => '70000000-0000-0000-0000-000000000002' });
+  const restoreState = await restored.controller.restore();
+  assert.equal(restoreState.status, 'PENDING');
+  assert.equal(restoreState.pendingIntent.intentId, INTENT_1);
+  assert.equal(outbox.calls.enqueue.length, 1);
+  assert.equal(sends, 0);
+});
+
+test('validated terminal ACK clears only exact local intent after explicit delivery', async () => {
+  const { controller, outbox } = makeController();
+  await controller.restore();
+  controller.openConfirmation();
+  await controller.confirm();
+  const state = await controller.deliver();
+  assert.equal(state.status, 'CONFIRMED');
+  assert.equal(state.pendingIntent, null);
+  assert.equal(state.pendingCount, 0);
+  assert.deepEqual(outbox.calls.acknowledge, [INTENT_1]);
+  assert.equal((await outbox.listPending()).length, 0);
+});
+
+test('VERSION_CONFLICT stays pending, exposes only safe current version and never auto-retries', async () => {
+  let sends = 0;
+  const { controller, outbox } = makeController({
+    sender: {
+      sendTransactionVoid: async (request) => {
+        sends += 1;
+        return { apiVersion: 1, outcome: 'VERSION_CONFLICT', transactionId: request.transactionId, currentVersion: 2 };
+      },
+    },
+  });
+  await controller.restore();
+  controller.openConfirmation();
+  await controller.confirm();
+  const state = await controller.deliver();
+  assert.equal(state.status, 'CONFLICT');
+  assert.equal(state.conflictVersion, 2);
+  assert.equal(state.pendingIntent.intentId, INTENT_1);
+  assert.equal(sends, 1);
+  assert.equal(outbox.calls.acknowledge.length, 0);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(sends, 1);
+});
+
+test('sender or ACK failure preserves exact pending intent for explicit retry', async () => {
+  let sends = 0;
+  const { controller, outbox } = makeController({
+    sender: {
+      sendTransactionVoid: async () => {
+        sends += 1;
+        if (sends === 1) throw new Error('private provider detail');
+        return { apiVersion: 1, outcome: 'VOIDED', transactionId: TX_EXPENSE, version: 2 };
+      },
+    },
+  });
+  await controller.restore();
+  controller.openConfirmation();
+  await controller.confirm();
+  const degraded = await controller.deliver();
+  assert.equal(degraded.status, 'DEGRADED');
+  assert.equal(degraded.pendingIntent.intentId, INTENT_1);
+  assert.match(degraded.message, /сохранён локально/u);
+  assert.equal(outbox.calls.acknowledge.length, 0);
+  const recovered = await controller.deliver();
+  assert.equal(recovered.status, 'CONFIRMED');
+  assert.equal(sends, 2);
+});
+
+test('malformed ACK degrades safely and preserves the exact pending intent', async () => {
+  const { controller, outbox } = makeController({
+    sender: {
+      sendTransactionVoid: async (request) => ({
+        apiVersion: 1,
+        outcome: 'VOIDED',
+        transactionId: request.transactionId,
+        version: 99,
+      }),
+    },
+  });
+  await controller.restore();
+  controller.openConfirmation();
+  await controller.confirm();
+  const state = await controller.deliver();
+  assert.equal(state.status, 'DEGRADED');
+  assert.equal(state.pendingIntent.intentId, INTENT_1);
+  assert.match(state.message, /не прошёл проверку/u);
+  assert.equal(outbox.calls.acknowledge.length, 0);
+  assert.equal((await outbox.listPending()).length, 1);
+});
+
+test('synthetic sender deterministically reserves INCOME demo transaction for VERSION_CONFLICT', async () => {
+  const sender = createSyntheticPreviewTransactionVoidSender();
+  assert.deepEqual(await sender.sendTransactionVoid({ transactionId: TX_INCOME, expectedVersion: 1 }), {
+    apiVersion: 1,
+    outcome: 'VERSION_CONFLICT',
+    transactionId: TX_INCOME,
+    currentVersion: 2,
+  });
+});
+
+test('VOID browser module is preview-only and contains no real network/provider binding', async () => {
+  const [source, bootstrap, productionApp, serviceWorker] = await Promise.all([
+    readFile(new URL('../../web/preview-transaction-void.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../web/preview-bootstrap.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../web/app.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../web/sw.js', import.meta.url), 'utf8'),
+  ]);
+  assert.doesNotMatch(source, /\bfetch\s*\(/u);
+  assert.doesNotMatch(source, /YDB|API Gateway|Authorization|Bearer/u);
+  assert.match(bootstrap, /preview-transaction-void\.mjs/u);
+  assert.doesNotMatch(productionApp, /preview-transaction-void/u);
+  assert.doesNotMatch(serviceWorker, /preview-transaction-void/u);
+});

@@ -164,6 +164,8 @@ test('preview build emits static root without service worker or manifest deploym
   assert.match(bootstrap, /preview-writer\.mjs/u);
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer-outbox.mjs', import.meta.url));
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void-delivery.mjs', import.meta.url));
+  await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void.mjs', import.meta.url));
   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.css', import.meta.url));
   assert.doesNotMatch(shell, /Новый расход|data-preview-writer|Сохранить локально/u);
   assert.doesNotMatch(index, /manifest\.webmanifest/u);
