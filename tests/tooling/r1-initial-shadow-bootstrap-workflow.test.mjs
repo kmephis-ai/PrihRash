@@ -86,6 +86,26 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /\$code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"/);
   assert.match(workflow, /\^STDOUT_\(EMPTY\|TEXT\|JSON_OBJECT\|JSON_ARRAY\|JSON_STRING\|JSON_NUMBER\|JSON_BOOLEAN\|JSON_NULL\)__STDERR_/);
   assert.match(workflow, /then \.outputShape/);
+  assert.match(workflow, /transportClass:/);
+  for (const transportClass of [
+    'EMPTY',
+    'AUTH',
+    'NOT_FOUND',
+    'RATE_LIMIT',
+    'DEADLINE',
+    'UNAVAILABLE',
+    'INVALID_REQUEST',
+    'FAILED_PRECONDITION',
+    'INTERNAL',
+    'OTHER',
+  ]) {
+    assert.match(workflow, new RegExp(`"${transportClass}"`));
+  }
+  assert.match(
+    workflow,
+    /\$code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"[\s\S]*?\(\.transportClass \| type\) == "string"[\s\S]*?\(\.transportClass \| IN\(/,
+  );
+  assert.match(workflow, /then \.transportClass/);
   assert.match(workflow, /Publish enum-only bootstrap evidence/);
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-evidence-\$\{\{ github\.run_id \}\}/);
@@ -99,6 +119,7 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(projection, /code: \$code/);
   assert.match(projection, /runtimeCode:/);
   assert.match(projection, /outputShape:/);
+  assert.match(projection, /transportClass:/);
   assert.doesNotMatch(projection, /\.(?:stdout|stderr|message|payload|details)\b/i);
 });
 
