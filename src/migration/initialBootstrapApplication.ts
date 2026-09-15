@@ -106,12 +106,42 @@ export interface InitialBootstrapApplicationClock {
   now(): string;
 }
 
+export type InitialBootstrapApplicationPhase =
+  | 'ADMISSION_READ'
+  | 'CURRENT_STATE_PREFLIGHT'
+  | 'FRESH_CONTEXT_PREPARATION'
+  | 'FRESH_METADATA_PREPARATION'
+  | 'FRESH_CLAIM_WRITE'
+  | 'RESUME_CONTEXT_READ'
+  | 'RESUME_CONTEXT_PREPARATION'
+  | 'REVISION_EVIDENCE_PREPARATION'
+  | 'REVISION_EVIDENCE_WRITE'
+  | 'LINEAGE_PREPARATION'
+  | 'COUNTER_REFINEMENT_PREPARATION'
+  | 'COUNTER_REFINEMENT_WRITE'
+  | 'RECONCILIATION_READ'
+  | 'VALIDATION_EVALUATION'
+  | 'CURRENT_PLAN_PREPARATION'
+  | 'CURRENT_WRITE_PREPARATION'
+  | 'PRE_PROMOTION_PREFLIGHT'
+  | 'VALIDATION_WRITE_PREPARATION'
+  | 'VALIDATION_TRANSITION_WRITE'
+  | 'PROMOTION_WRITE';
+
 export interface InitialBootstrapApplicationDependencies {
   readonly adapter: YdbAdapter;
   readonly identityAllocator: InitialBootstrapIdentityAllocator;
   readonly projectionContext: Readonly<InitialSnapshotProjectionContext>;
   readonly reconciliation: InitialBootstrapReconciliationPort;
   readonly clock: InitialBootstrapApplicationClock;
+  readonly observePhase?: (phase: InitialBootstrapApplicationPhase) => void;
+}
+
+function markApplicationPhase(
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+  phase: InitialBootstrapApplicationPhase,
+): void {
+  dependencies.observePhase?.(phase);
 }
 
 export type InitialBootstrapRecoveryReason =
@@ -358,6 +388,7 @@ async function prepareFreshContext(
   observation: Readonly<InitialBootstrapObservation>,
   dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<Readonly<PreparedBootstrapContext> | InitialBootstrapApplicationResult> {
+  markApplicationPhase(dependencies, 'FRESH_CONTEXT_PREPARATION');
   const sourceRows = allocateFreshSourceRows(observation, dependencies.identityAllocator);
   const candidate = buildInitialBootstrapCandidate({
     snapshotId: dependencies.identityAllocator.allocateSnapshotId(),
@@ -373,8 +404,10 @@ async function prepareFreshContext(
   );
   const assignments = allocateTransactionAssignments(projection, dependencies.identityAllocator);
   const manifest = buildInitialBootstrapIdentityManifest(candidate, projection, assignments);
+  markApplicationPhase(dependencies, 'FRESH_METADATA_PREPARATION');
   const metadataWrites = prepareInitialBootstrapMetadataWrites(candidate);
   const manifestWrite = prepareInitialBootstrapIdentityManifestWrite(manifest);
+  markApplicationPhase(dependencies, 'FRESH_CLAIM_WRITE');
   try {
     await executeInitialBootstrapMetadataWrites(
       dependencies.adapter,
@@ -399,6 +432,7 @@ async function prepareResumeContext(
   if (run.sourceSnapshotDigest !== observation.snapshotDigest) {
     throw new InitialBootstrapApplicationError('RESUME_SNAPSHOT_DIGEST_MISMATCH');
   }
+  markApplicationPhase(dependencies, 'RESUME_CONTEXT_READ');
   const recovered = await recoverInitialBootstrapIdentities(
     dependencies.adapter,
     run.id,
@@ -411,6 +445,7 @@ async function prepareResumeContext(
     observation.snapshotDigest,
     observation.rows.length,
   );
+  markApplicationPhase(dependencies, 'RESUME_CONTEXT_PREPARATION');
   const baseCandidate = buildInitialBootstrapCandidate({
     snapshotId: recovered.sourceSnapshotId,
     migrationRunId: run.id,
@@ -437,8 +472,10 @@ async function prepareResumeContext(
 async function persistRevisionEvidence(
   context: Readonly<PreparedBootstrapContext>,
   observation: Readonly<InitialBootstrapObservation>,
-  adapter: YdbAdapter,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<InitialBootstrapApplicationResult | null> {
+  markApplicationPhase(dependencies, 'REVISION_EVIDENCE_PREPARATION');
+  const adapter = dependencies.adapter;
   const lineage = buildInitialSourceLineageProjection(
     context.candidate,
     lineageObservations(context.candidate, observation),
@@ -446,6 +483,7 @@ async function persistRevisionEvidence(
   const resume = await planInitialSourceRevisionEvidenceResume(adapter, lineage.revisions);
   const missingWrites = prepareInitialSourceRevisionWrites(resume.missingRevisions);
   const batches = planInitialRevisionEvidenceBatches(missingWrites);
+  markApplicationPhase(dependencies, 'REVISION_EVIDENCE_WRITE');
   try {
     await executeInitialRevisionEvidenceBatches(adapter, batches);
   } catch (error) {
@@ -460,8 +498,10 @@ async function persistRevisionEvidence(
 async function refineDurableRun(
   run: Readonly<MigrationRun>,
   projection: Readonly<InitialSnapshotProjection>,
-  adapter: YdbAdapter,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<Readonly<MigrationRun> | InitialBootstrapApplicationResult> {
+  markApplicationPhase(dependencies, 'COUNTER_REFINEMENT_PREPARATION');
+  const adapter = dependencies.adapter;
   const expectedAmbiguous = projection.counters.ambiguous;
   if (run.rowsAmbiguous === expectedAmbiguous) return run;
   if (run.rowsAmbiguous !== 0) {
@@ -469,6 +509,7 @@ async function refineDurableRun(
   }
   const refined = refineInitialRunCounters(run, projection);
   const prepared = prepareInitialRunCounterRefinementWrite(run, refined);
+  markApplicationPhase(dependencies, 'COUNTER_REFINEMENT_WRITE');
   try {
     return await executeInitialRunCounterRefinementWrite(adapter, prepared, refined);
   } catch (error) {
@@ -489,6 +530,7 @@ export async function runInitialBootstrapApplication(
   observation: Readonly<InitialBootstrapObservation>,
   dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<InitialBootstrapApplicationResult> {
+  markApplicationPhase(dependencies, 'ADMISSION_READ');
   const admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
   if (admission.committedBaselineRun !== null) {
     return Object.freeze({
@@ -505,6 +547,7 @@ export async function runInitialBootstrapApplication(
     return recoveryRequired('VALIDATED_RUN_REQUIRES_RECOVERY', incomplete);
   }
 
+  markApplicationPhase(dependencies, 'CURRENT_STATE_PREFLIGHT');
   await assertCurrentStateEmpty(dependencies.adapter);
 
   const prepared = incomplete === null
@@ -512,9 +555,10 @@ export async function runInitialBootstrapApplication(
     : await prepareResumeContext(observation, incomplete, dependencies);
   if ('status' in prepared) return prepared;
 
-  const evidenceRecovery = await persistRevisionEvidence(prepared, observation, dependencies.adapter);
+  const evidenceRecovery = await persistRevisionEvidence(prepared, observation, dependencies);
   if (evidenceRecovery !== null) return evidenceRecovery;
 
+  markApplicationPhase(dependencies, 'LINEAGE_PREPARATION');
   const lineage = buildInitialSourceLineageProjection(
     prepared.candidate,
     lineageObservations(prepared.candidate, observation),
@@ -522,16 +566,18 @@ export async function runInitialBootstrapApplication(
   const refined = await refineDurableRun(
     prepared.candidate.run,
     prepared.projection,
-    dependencies.adapter,
+    dependencies,
   );
   if (isApplicationResult(refined)) return refined;
   const durableCandidate = envelopeWithRun(prepared.candidate, refined);
 
+  markApplicationPhase(dependencies, 'RECONCILIATION_READ');
   const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
     run: refined,
     projection: prepared.projection,
     lineage,
   }));
+  markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
   const validation = evaluateInitialValidation(refined, prepared.projection, reconciliation);
   if (!validation.ok) {
     return Object.freeze({
@@ -541,6 +587,7 @@ export async function runInitialBootstrapApplication(
     });
   }
 
+  markApplicationPhase(dependencies, 'CURRENT_PLAN_PREPARATION');
   const verifiedPlan: Readonly<InitialVerifiedCurrentPlan> = buildInitialVerifiedCurrentPlan(
     validation.validatedRun,
     lineage,
@@ -548,6 +595,7 @@ export async function runInitialBootstrapApplication(
     prepared.assignments,
   );
   const promotedAt = dependencies.clock.now();
+  markApplicationPhase(dependencies, 'CURRENT_WRITE_PREPARATION');
   const currentWrites = prepareInitialVerifiedCurrentWrites(
     validation.validatedRun,
     verifiedPlan,
@@ -564,10 +612,13 @@ export async function runInitialBootstrapApplication(
 
   // Re-prove the known-empty initial current state as close as possible to the ordinary atomic promotion.
   // No other production writer is authorized before cutover; any observed row therefore fails closed.
+  markApplicationPhase(dependencies, 'PRE_PROMOTION_PREFLIGHT');
   await assertCurrentStateEmpty(dependencies.adapter);
 
+  markApplicationPhase(dependencies, 'VALIDATION_WRITE_PREPARATION');
   const validatedWrite = prepareMigrationRunValidatedWrite(refined, validation.validatedRun);
   let validatedRun: Readonly<MigrationRun>;
+  markApplicationPhase(dependencies, 'VALIDATION_TRANSITION_WRITE');
   try {
     validatedRun = await executeMigrationRunLifecycleWrite(
       dependencies.adapter,
@@ -582,6 +633,7 @@ export async function runInitialBootstrapApplication(
   }
 
   const finishedAt = dependencies.clock.now();
+  markApplicationPhase(dependencies, 'PROMOTION_WRITE');
   try {
     const promotion = await promoteAtomicDelta(
       dependencies.adapter,

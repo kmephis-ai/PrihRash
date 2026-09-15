@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+const application = await readFile('src/migration/initialBootstrapApplication.ts', 'utf8');
 const runtime = await readFile('src/runtime/initialBootstrapReferenceAwareJob.ts', 'utf8');
 const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap.mjs', 'utf8');
 
@@ -16,6 +17,29 @@ const STAGE_CODES = Object.freeze([
   'REFERENCE_APPLICATION_YDB_DATA_FAILED',
   'REFERENCE_APPLICATION_RUNTIME_FAILED',
 ]);
+const APPLICATION_PHASES = Object.freeze([
+  'ADMISSION_READ',
+  'CURRENT_STATE_PREFLIGHT',
+  'FRESH_CONTEXT_PREPARATION',
+  'FRESH_METADATA_PREPARATION',
+  'FRESH_CLAIM_WRITE',
+  'RESUME_CONTEXT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'REVISION_EVIDENCE_PREPARATION',
+  'REVISION_EVIDENCE_WRITE',
+  'LINEAGE_PREPARATION',
+  'COUNTER_REFINEMENT_PREPARATION',
+  'COUNTER_REFINEMENT_WRITE',
+  'RECONCILIATION_READ',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+  'PRE_PROMOTION_PREFLIGHT',
+  'VALIDATION_WRITE_PREPARATION',
+  'VALIDATION_TRANSITION_WRITE',
+  'PROMOTION_WRITE',
+]);
+
 
 test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics', () => {
   for (const code of STAGE_CODES) {
@@ -68,8 +92,8 @@ test('application taxonomy covers known pre-write structural and metadata errors
 });
 
 test('application taxonomy stays category-only and keeps generic fallback', () => {
-  assert.match(runtime, /classifyApplicationRuntimeError\(\s*error: unknown/);
-  assert.match(runtime, /catch \(error\)[\s\S]*classifyApplicationRuntimeError\(error\)/);
+  assert.match(runtime, /classifyApplicationRuntimeError\(\s*error: unknown[\s\S]*phase: InitialBootstrapApplicationPhase \| null/);
+  assert.match(runtime, /catch \(error\)[\s\S]*classifyApplicationRuntimeError\(error, phase\)/);
   assert.doesNotMatch(runtime, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
 });
 
@@ -77,4 +101,23 @@ test('stage taxonomy does not expose exception text or provider payload through 
   assert.match(invoker, /exactKeys\(result, \['status', 'code', 'runtimeCode'\]\)/);
   assert.match(invoker, /REFERENCE_AWARE_RUNTIME_CODES\.has\(result\.runtimeCode\)/);
   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
+});
+
+test('generic application fallback is projected from an allowlisted in-memory phase only', () => {
+  for (const phase of APPLICATION_PHASES) {
+    assert.match(application, new RegExp(`'${phase}'`));
+    assert.match(runtime, new RegExp(`'${phase}'`));
+  }
+
+  assert.match(application, /observePhase\?: \(phase: InitialBootstrapApplicationPhase\) => void/);
+  assert.match(application, /markApplicationPhase\(dependencies, 'FRESH_CONTEXT_PREPARATION'\)/);
+  assert.match(application, /markApplicationPhase\(dependencies, 'FRESH_CLAIM_WRITE'\)/);
+  assert.match(application, /markApplicationPhase\(dependencies, 'RECONCILIATION_READ'\)/);
+  assert.match(application, /markApplicationPhase\(dependencies, 'PROMOTION_WRITE'\)/);
+  assert.match(runtime, /classifyGenericApplicationPhase\([\s\S]*REFERENCE_APPLICATION_SEMANTIC_FAILED/);
+  assert.match(runtime, /classifyGenericApplicationPhase\([\s\S]*REFERENCE_APPLICATION_METADATA_FAILED/);
+  assert.match(runtime, /classifyGenericApplicationPhase\([\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(runtime, /default:[\s\S]*REFERENCE_APPLICATION_RUNTIME_FAILED/);
+  assert.doesNotMatch(application, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
+  assert.doesNotMatch(runtime, /error\.message|error\.stack|String\(error\)|JSON\.stringify\(error\)/);
 });

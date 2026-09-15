@@ -21,6 +21,7 @@ import {
 import {
   InitialBootstrapApplicationError,
   runInitialBootstrapApplication,
+  type InitialBootstrapApplicationPhase,
 } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
 import { AtomicPromotionError } from '../migration/atomicPromotion.js';
@@ -136,8 +137,41 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   }
 }
 
+function classifyGenericApplicationPhase(
+  phase: InitialBootstrapApplicationPhase | null,
+): InitialBootstrapReferenceAwareRuntimeErrorCode {
+  switch (phase) {
+    case 'FRESH_CONTEXT_PREPARATION':
+    case 'RESUME_CONTEXT_PREPARATION':
+    case 'REVISION_EVIDENCE_PREPARATION':
+    case 'LINEAGE_PREPARATION':
+    case 'COUNTER_REFINEMENT_PREPARATION':
+    case 'VALIDATION_EVALUATION':
+    case 'CURRENT_PLAN_PREPARATION':
+      return 'REFERENCE_APPLICATION_SEMANTIC_FAILED';
+    case 'FRESH_METADATA_PREPARATION':
+    case 'CURRENT_WRITE_PREPARATION':
+    case 'VALIDATION_WRITE_PREPARATION':
+      return 'REFERENCE_APPLICATION_METADATA_FAILED';
+    case 'ADMISSION_READ':
+    case 'CURRENT_STATE_PREFLIGHT':
+    case 'FRESH_CLAIM_WRITE':
+    case 'RESUME_CONTEXT_READ':
+    case 'REVISION_EVIDENCE_WRITE':
+    case 'COUNTER_REFINEMENT_WRITE':
+    case 'RECONCILIATION_READ':
+    case 'PRE_PROMOTION_PREFLIGHT':
+    case 'VALIDATION_TRANSITION_WRITE':
+    case 'PROMOTION_WRITE':
+      return 'REFERENCE_APPLICATION_YDB_DATA_FAILED';
+    default:
+      return 'REFERENCE_APPLICATION_RUNTIME_FAILED';
+  }
+}
+
 function classifyApplicationRuntimeError(
   error: unknown,
+  phase: InitialBootstrapApplicationPhase | null,
 ): InitialBootstrapReferenceAwareRuntimeErrorCode {
   if (error instanceof ScheduledSyncAdmissionEvidenceError) {
     return 'REFERENCE_APPLICATION_ADMISSION_EVIDENCE_FAILED';
@@ -184,17 +218,26 @@ function classifyApplicationRuntimeError(
   if (error instanceof InitialBootstrapRuntimePrimitiveError) {
     return 'REFERENCE_RUNTIME_STATE_INVALID';
   }
-  return 'REFERENCE_APPLICATION_RUNTIME_FAILED';
+  return classifyGenericApplicationPhase(phase);
 }
 
 async function runApplicationSafely(
   observation: Parameters<typeof runInitialBootstrapApplication>[0],
   dependencies: Parameters<typeof runInitialBootstrapApplication>[1],
 ) {
+  let phase: InitialBootstrapApplicationPhase | null = null;
+  const observedDependencies = Object.freeze({
+    ...dependencies,
+    observePhase(nextPhase: InitialBootstrapApplicationPhase) {
+      phase = nextPhase;
+    },
+  });
   try {
-    return await runInitialBootstrapApplication(observation, dependencies);
+    return await runInitialBootstrapApplication(observation, observedDependencies);
   } catch (error) {
-    throw new InitialBootstrapReferenceAwareRuntimeError(classifyApplicationRuntimeError(error));
+    throw new InitialBootstrapReferenceAwareRuntimeError(
+      classifyApplicationRuntimeError(error, phase),
+    );
   }
 }
 
