@@ -5,6 +5,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
@@ -50,12 +51,17 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Verify and package exact source
+      - name: Install exact-source invoke dependencies
         shell: bash
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          npm run check
+
+      - name: Restore verified exact-source artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
 
       - name: Install Yandex Cloud CLI
         shell: bash

@@ -102,12 +102,17 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Package exact read-only recovery source
+      - name: Install exact-source invoke dependencies
         shell: bash
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          npm run package:initial-bootstrap-recovery
+
+      - name: Restore verified exact-source artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
 
       - name: Install Yandex Cloud CLI
         shell: bash
