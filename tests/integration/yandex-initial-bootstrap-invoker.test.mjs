@@ -1,34 +1,36 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, '../..');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-initial-bootstrap.mjs');
+const FETCH_MOCK = resolve(ROOT, 'tests/fixtures/mock-yandex-function-fetch.mjs');
 const FUNCTION_ID = 'synthetic-bootstrap-function-id';
 const PRIVATE_LOOKING = 'private-sheet-id grpcs://private-ydb private-token-value 12345';
 
-async function fakeYc(source) {
-  const directory = await mkdtemp(join(tmpdir(), 'prihrash-fake-bootstrap-yc-'));
-  const path = join(directory, 'yc');
-  await writeFile(path, `#!/usr/bin/env node\n${source}\n`, 'utf8');
-  await chmod(path, 0o755);
-  return { directory, path };
-}
-
-async function runInvoker({ fakeSource, includeFunctionId = true, ycPath = null }) {
-  const fake = fakeSource === null ? null : await fakeYc(fakeSource);
+async function runInvoker({
+  body = '',
+  status = 200,
+  functionError = false,
+  mode = 'response',
+  includeFunctionId = true,
+  includeIamToken = true,
+} = {}) {
   const environment = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
-    PRIHRASH_YC_BIN: ycPath ?? fake?.path,
-    SYNTHETIC_PRIVATE_VALUE: PRIVATE_LOOKING,
-    YC_IAM_TOKEN: 'synthetic-short-lived-iam-token',
+    NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
+    PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
+    PRIHRASH_TEST_FETCH_BODY: body,
+    PRIHRASH_TEST_FETCH_STATUS: String(status),
+    PRIHRASH_TEST_FETCH_MODE: mode,
+    PRIHRASH_TEST_FUNCTION_ERROR: functionError ? 'true' : 'false',
     ...(includeFunctionId ? { PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: FUNCTION_ID } : {}),
+    ...(includeIamToken ? { YC_IAM_TOKEN: 'synthetic-short-lived-iam-token' } : {}),
   };
   try {
     const result = await execFileAsync(process.execPath, [INVOKER], {
@@ -43,8 +45,6 @@ async function runInvoker({ fakeSource, includeFunctionId = true, ycPath = null 
       stdout: typeof error.stdout === 'string' ? error.stdout : '',
       stderr: typeof error.stderr === 'string' ? error.stderr : '',
     });
-  } finally {
-    if (fake !== null) await rm(fake.directory, { recursive: true, force: true });
   }
 }
 
@@ -55,16 +55,9 @@ function assertSafeOutput(result, expected) {
   assert.equal(result.stderr.includes(PRIVATE_LOOKING), false);
 }
 
-test('safe bootstrap invoker calls only the pinned one-shot tag and accepts exact COMMITTED result', async () => {
+test('safe bootstrap invoker uses private HTTPS raw integration and accepts exact COMMITTED result', async () => {
   const result = await runInvoker({
-    fakeSource: `
-const expected = ['serverless','function','invoke','--id','${FUNCTION_ID}','--tag','r1-initial-bootstrap','--retry','0','--no-user-output'];
-if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(91);
-if (process.env.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID !== undefined) process.exit(92);
-if (process.env.SYNTHETIC_PRIVATE_VALUE !== undefined) process.exit(93);
-if (process.env.YC_IAM_TOKEN !== 'synthetic-short-lived-iam-token') process.exit(94);
-process.stdout.write(JSON.stringify({status:'PASS',code:'INITIAL_BOOTSTRAP_COMMITTED'}));
-`,
+    body: JSON.stringify({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED' }),
   });
 
   assert.equal(result.exitCode, 0);
@@ -109,15 +102,13 @@ test('safe non-success Function results remain exact bounded output and exit non
   ];
 
   for (const value of values) {
-    const result = await runInvoker({
-      fakeSource: `process.stdout.write(${JSON.stringify(JSON.stringify(value))});`,
-    });
+    const result = await runInvoker({ body: JSON.stringify(value) });
     assert.equal(result.exitCode, 2);
     assertSafeOutput(result, value);
   }
 });
 
-test('malformed, extra-field and non-allowlisted successful provider output fails closed without echo', async () => {
+test('malformed, extra-field and non-allowlisted successful response bodies fail closed without echo', async () => {
   const outputs = [
     PRIVATE_LOOKING,
     JSON.stringify({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED', private: PRIVATE_LOOKING }),
@@ -135,119 +126,31 @@ test('malformed, extra-field and non-allowlisted successful provider output fail
       applicationPhase: null,
       metadataFailureCode: null,
     }),
-    JSON.stringify({
-      status: 'FAIL',
-      code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID',
-      runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
-    }),
   ];
 
-  for (const output of outputs) {
-    const result = await runInvoker({ fakeSource: `process.stdout.write(${JSON.stringify(output)});` });
+  for (const body of outputs) {
+    const result = await runInvoker({ body });
     assert.equal(result.exitCode, 2);
     assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID' });
   }
 });
 
-test('non-zero provider failure is classified without echoing captured stdout or stderr', async () => {
-  const result = await runInvoker({
-    fakeSource: `
-process.stdout.write('${PRIVATE_LOOKING}');
-process.stderr.write('${PRIVATE_LOOKING}');
-process.exit(17);
-`,
-  });
+test('transport timeout and generic transport failure remain bounded and private', async () => {
+  const timeout = await runInvoker({ mode: 'timeout', body: PRIVATE_LOOKING });
+  assert.equal(timeout.exitCode, 2);
+  assertSafeOutput(timeout, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT' });
 
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
+  const failure = await runInvoker({ mode: 'failure', body: PRIVATE_LOOKING });
+  assert.equal(failure.exitCode, 2);
+  assertSafeOutput(failure, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FAILED' });
 });
 
-test('one exact allowlisted non-pass Function result line inside provider stderr is recovered without echoing wrapper text', async () => {
-  const exact = {
-    status: 'FAIL',
-    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
-    runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
-    applicationPhase: null,
-    metadataFailureCode: null,
-  };
-  const result = await runInvoker({
-    fakeSource: `
-process.stderr.write(${JSON.stringify(`provider wrapper\n${JSON.stringify(exact)}\n${PRIVATE_LOOKING}`)});
-process.exit(17);
-`,
-  });
+test('missing function id or IAM token fails before any invocation', async () => {
+  const missingFunction = await runInvoker({ includeFunctionId: false, body: PRIVATE_LOOKING });
+  assert.equal(missingFunction.exitCode, 2);
+  assertSafeOutput(missingFunction, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID' });
 
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, exact);
-});
-
-test('multiple exact non-pass Function result lines in stderr remain fail-closed and unclassified', async () => {
-  const first = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID' });
-  const second = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RESULT_INVALID' });
-  const result = await runInvoker({
-    fakeSource: `
-process.stderr.write(${JSON.stringify(`${first}\n${second}\n${PRIVATE_LOOKING}`)});
-process.exit(17);
-`,
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
-});
-
-test('PASS result line on a non-zero stderr path is ignored and remains fail-closed', async () => {
-  const pass = JSON.stringify({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED' });
-  const result = await runInvoker({
-    fakeSource: `
-process.stderr.write(${JSON.stringify(`${pass}\n${PRIVATE_LOOKING}`)});
-process.exit(17);
-`,
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
-});
-
-test('known Yandex Function execution timeout is classified without echoing provider detail', async () => {
-  const result = await runInvoker({
-    fakeSource: `
-process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (504)\n${PRIVATE_LOOKING}`)});
-process.exit(1);
-`,
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT' });
-});
-
-test('near-miss Function timeout remains fail-closed and unclassified', async () => {
-  const result = await runInvoker({
-    fakeSource: `
-process.stderr.write(${JSON.stringify(`ERROR: rpc error: code = Unavailable desc = Function execution timeout (503)\n${PRIVATE_LOOKING}`)});
-process.exit(1);
-`,
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
-});
-
-test('missing function id fails before yc executes', async () => {
-  const result = await runInvoker({
-    includeFunctionId: false,
-    fakeSource: `process.stdout.write('${PRIVATE_LOOKING}'); process.exit(99);`,
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID' });
-});
-
-test('missing yc CLI fails closed with generic invoke failure', async () => {
-  const result = await runInvoker({
-    fakeSource: null,
-    ycPath: resolve(tmpdir(), 'prihrash-definitely-missing-bootstrap-yc'),
-  });
-
-  assert.equal(result.exitCode, 2);
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_FAILED' });
+  const missingToken = await runInvoker({ includeIamToken: false, body: PRIVATE_LOOKING });
+  assert.equal(missingToken.exitCode, 2);
+  assertSafeOutput(missingToken, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID' });
 });

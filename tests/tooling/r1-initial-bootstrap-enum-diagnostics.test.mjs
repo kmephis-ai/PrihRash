@@ -21,7 +21,8 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.match(workflow, /FRESH_CLAIM_WRITE/);
   assert.match(workflow, /METADATA_EXECUTOR_RUN_READBACK_MISMATCH/);
   assert.match(workflow, /runtimeCode:/);
-  assert.match(workflow, /outputShape:/);
-  assert.match(workflow, /transportClass:/);
+  assert.match(workflow, /httpStatus:/);
+  assert.match(workflow, /functionError:/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED/);
   assert.doesNotMatch(workflow, /classification\.json[^\n]*(?:stdout|stderr|message|payload|details)/i);
 });
