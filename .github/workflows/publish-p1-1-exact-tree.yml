@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - transport/p1-1-publish-e35
+    paths:
+      - .transport/p1-1.ready
 
 permissions:
   contents: write
@@ -29,8 +31,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp .transport/p1-1.patch.gz.b64 "$RUNNER_TEMP/p1-1.patch.gz.b64"
+          mkdir -p "$RUNNER_TEMP/p1-1-publish-evidence"
+          cat .transport/p1-1.part00 .transport/p1-1.part01 .transport/p1-1.part02 > "$RUNNER_TEMP/p1-1.patch.gz.b64"
+          test "$(sha256sum "$RUNNER_TEMP/p1-1.patch.gz.b64" | awk '{print $1}')" = '8ad0e06817cda4fe16fb189b1835474bb9507c503427406feabf6b1bc0e76561'
           base64 --decode "$RUNNER_TEMP/p1-1.patch.gz.b64" > "$RUNNER_TEMP/p1-1.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/p1-1.patch.gz" | awk '{print $1}')" = '9a5d39fe33a046bd2d0df00e5e668eb96909e387617a025fab864bc67d8fb664'
           gzip --decompress --stdout "$RUNNER_TEMP/p1-1.patch.gz" > "$RUNNER_TEMP/p1-1.patch"
           echo "${PATCH_SHA256}  $RUNNER_TEMP/p1-1.patch" | sha256sum --check --status
           git cat-file -e "${SOURCE_SHA}^{commit}"
@@ -46,7 +51,6 @@ jobs:
           commit="$(git rev-parse HEAD)"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
-          mkdir -p "$RUNNER_TEMP/p1-1-publish-evidence"
           jq -cn --arg sourceSha "$SOURCE_SHA" --arg treeSha "$EXPECTED_TREE" --arg commitSha "$commit" '{sourceSha:$sourceSha,treeSha:$treeSha,commitSha:$commitSha,pushStatus:"PENDING"}' > "$RUNNER_TEMP/p1-1-publish-evidence/evidence.json"
 
       - name: Publish product branch or preserve pack objects
