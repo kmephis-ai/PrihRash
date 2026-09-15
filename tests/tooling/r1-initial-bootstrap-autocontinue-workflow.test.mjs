@@ -21,6 +21,7 @@ test('R1 autocontinue is stage-specific, CI-gated, exact-main, and has no provid
   assert.match(workflow, /actions:\s*write/);
   assert.match(workflow, /contents:\s*read/);
   assert.match(workflow, /issues:\s*read/);
+  assert.match(workflow, /pull-requests:\s*read/);
   assert.doesNotMatch(workflow, /id-token:\s*write/);
   assert.doesNotMatch(workflow, /secrets\./);
   assert.doesNotMatch(workflow, /yandex|\byc\b|lockbox|service-account/i);
@@ -29,7 +30,13 @@ test('R1 autocontinue is stage-specific, CI-gated, exact-main, and has no provid
 test('R1 autocontinue dispatches only active #453 exact-main source and never duplicates a SHA', async () => {
   const workflow = await workflowText();
 
-  assert.match(workflow, /R1 #453:/);
+  assert.match(workflow, /commits\/\$SOURCE_SHA\/pulls/);
+  assert.match(workflow, /merge_commit_sha == \$sha/);
+  assert.match(workflow, /base\.ref == "main"/);
+  assert.match(workflow, /head\.repo\.full_name == \$repo/);
+  assert.match(workflow, /startswith\("R1 #453:"\)/);
+  assert.match(workflow, /length == 1/);
+  assert.doesNotMatch(workflow, /commit_title=/);
   assert.match(workflow, /issues\/453/);
   assert.match(workflow, /issue_state.*open/s);
   assert.match(workflow, /branches\/main/g);

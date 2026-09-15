@@ -11,6 +11,7 @@ permissions:
   contents: read
   actions: write
   issues: read
+  pull-requests: read
 
 concurrency:
   group: r1-initial-bootstrap-autocontinue
@@ -46,17 +47,24 @@ jobs:
             exit 0
           fi
 
-          commit_title="$(curl --fail --silent --show-error \
+          associated_prs="$(curl --fail --silent --show-error \
             --header "$auth_header" \
             --header "$accept_header" \
-            "$api/commits/$SOURCE_SHA" | jq -er '.commit.message | split("\n")[0]')"
-          case "$commit_title" in
-            'R1 #453:'*) ;;
-            *)
-              echo 'R1_BOOTSTRAP_AUTOCONTINUE_NOT_R1_453_SOURCE'
-              exit 0
-              ;;
-          esac
+            "$api/commits/$SOURCE_SHA/pulls")"
+          if ! jq -e \
+            --arg sha "$SOURCE_SHA" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '[.[] | select(
+              .merged_at != null
+              and .merge_commit_sha == $sha
+              and .base.ref == "main"
+              and .head.repo.full_name == $repo
+              and (.title | startswith("R1 #453:"))
+            )] | length == 1' \
+            <<<"$associated_prs" >/dev/null; then
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_NOT_R1_453_SOURCE'
+            exit 0
+          fi
 
           issue_state="$(curl --fail --silent --show-error \
             --header "$auth_header" \
