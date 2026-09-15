@@ -1,0 +1,80 @@
+ import {
+   InitialBootstrapJobError,
+@@ -73,6 +74,7 @@ export type YandexInitialBootstrapFunctionResult =
+       runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode;
+       applicationPhase?: InitialBootstrapApplicationPhase | null;
+       metadataFailureCode?: InitialBootstrapMetadataFailureCode | null;
++      ydbDataFailureCode?: InitialBootstrapYdbDataFailureCode | null;
+     }>;
+ 
+ export interface YandexInitialBootstrapJob {
+@@ -125,15 +127,19 @@ function runtimeFailure(
+   runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode,
+   applicationPhase: InitialBootstrapApplicationPhase | null = null,
+   metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
++  ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
+ ): Readonly<YandexInitialBootstrapFunctionResult> {
+   if (runtimeCode === undefined) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
+-  return Object.freeze({
++  const result = {
+     status: 'FAIL' as const,
+     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' as const,
+     runtimeCode,
+     applicationPhase,
+     metadataFailureCode,
+-  });
++  };
++  return ydbDataFailureCode === null
++    ? Object.freeze(result)
++    : Object.freeze({ ...result, ydbDataFailureCode });
+ }
+ 
+ function validationBlocker(value: unknown): Readonly<YandexInitialBootstrapValidationBlocker> | null {
+@@ -238,7 +244,12 @@ export async function executeYandexInitialBootstrapFunction(
+       return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
+     }
+     if (error instanceof InitialBootstrapReferenceAwareRuntimeError) {
+-      return runtimeFailure(error.code, error.applicationPhase, error.metadataFailureCode);
++      return runtimeFailure(
++        error.code,
++        error.applicationPhase,
++        error.metadataFailureCode,
++        error.ydbDataFailureCode,
++      );
+     }
+     if (error instanceof InitialBootstrapJobError) {
+       if (isConfigError(error.code)) return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
+diff --git a/tests/integration/yandex-initial-bootstrap-function.test.mjs b/tests/integration/yandex-initial-bootstrap-function.test.mjs
+index 93fdb20..e2a3632 100644
+--- a/tests/integration/yandex-initial-bootstrap-function.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-function.test.mjs
+@@ -156,6 +156,23 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
+     },
+   );
+ 
++  assert.deepEqual(
++    await execute(new InitialBootstrapReferenceAwareRuntimeError(
++      'REFERENCE_APPLICATION_YDB_DATA_FAILED',
++      'REVISION_EVIDENCE_WRITE',
++      null,
++      'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
++    )),
++    {
++      status: 'FAIL',
++      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
++      applicationPhase: 'REVISION_EVIDENCE_WRITE',
++      metadataFailureCode: null,
++      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
++    },
++  );
++
+   const untrustedError = Object.assign(new Error('private provider error text'), {
+     code: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+   });
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+index 8f28c4c..5c58274 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+@@ -127,6 +127,14 @@ test('safe non-success Function results remain exact bounded output and exit non
+       applicationPhase: 'FRESH_CLAIM_WRITE',
