@@ -1,0 +1,96 @@
+name: R3A 529 Guarded Publish
+
+on:
+  push:
+    branches:
+      - transport/r3a-529-publish-20260915
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: c895dbac48b7cc00316474d3a89dc7a04f713001
+  PATCH_SHA256: 00aa24028e68f8a8dc22b5c1fa9416a1eae84e941c0d32318cba3d0b915c2709
+  FEATURE_BRANCH: r3a/uat-entry-ux
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct exact patch and guard base
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .github/r3a-529/patch.gz.b64 | gzip -dc > /tmp/r3a529.patch
+          printf '%s  %s\n' "$PATCH_SHA256" /tmp/r3a529.patch | sha256sum -c -
+          git fetch --no-tags origin main
+          actual_main="$(git rev-parse origin/main)"
+          test "$actual_main" = "$SOURCE_SHA"
+          git checkout --detach "$SOURCE_SHA"
+
+      - name: Apply exact bounded patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --index /tmp/r3a529.patch
+          cat > /tmp/expected-files <<'EOF'
+          docs/R3A_PREVIEW_WRITER.md
+          scripts/build-r2-ui-preview.mjs
+          tests/browser/critical-flows.spec.mjs
+          tests/integration/r2-safe-ui-preview.test.mjs
+          web/preview-bootstrap.mjs
+          web/preview-writer-outbox.mjs
+          web/preview-writer-queue.mjs
+          web/preview-writer.css
+          web/preview-writer.mjs
+          EOF
+          git diff --cached --name-only | sort > /tmp/actual-files
+          sort /tmp/expected-files > /tmp/expected-files.sorted
+          diff -u /tmp/expected-files.sorted /tmp/actual-files
+          git diff --cached --check
+          cat > /tmp/expected-hashes <<'EOF'
+          abb8357bf0806a93af4a010cb5ce1a983e6fb843 docs/R3A_PREVIEW_WRITER.md
+          a978537fa9f790a098b783f3d48dd9db4110f9dd scripts/build-r2-ui-preview.mjs
+          3d3c48c06dee4a13f539fab3ce7a1c99db00cce1 tests/browser/critical-flows.spec.mjs
+          d4692bea26e07d132c3f48d8ef0908db9422c0ec tests/integration/r2-safe-ui-preview.test.mjs
+          556a52df11175a0a67c937b7a45cd949a3d41b7a web/preview-bootstrap.mjs
+          a45dbf035e56a66c4aad473414e34e1d6b42a162 web/preview-writer-outbox.mjs
+          eb4f9e9c0f21e436db785f78ba04788cc96756fd web/preview-writer-queue.mjs
+          f97a772129de1df68f9b311149cea3ff672f7763 web/preview-writer.css
+          a71a0e456dfa8ae6dd54de6ccb004a5b830b27f2 web/preview-writer.mjs
+          EOF
+          while read -r expected path; do
+            actual="$(git hash-object "$path")"
+            test "$actual" = "$expected"
+          done < /tmp/expected-hashes
+
+      - name: Canonical verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test \
+            tests/integration/r2-safe-ui-preview.test.mjs \
+            tests/integration/r3a-preview-expense-edit-conflict.test.mjs \
+            tests/integration/r3a-preview-transaction-void-browser.test.mjs
+          npm run check
+
+      - name: Publish verified feature branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          actual_main="$(git rev-parse origin/main)"
+          test "$actual_main" = "$SOURCE_SHA"
+          remote_feature="$(git ls-remote --heads origin "refs/heads/$FEATURE_BRANCH" | awk '{print $1}')"
+          test "$remote_feature" = "$SOURCE_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R3A #529: compact Writer entry and local queue UX'
+          test "$(git rev-parse HEAD^)" = "$SOURCE_SHA"
+          git push origin "HEAD:refs/heads/$FEATURE_BRANCH"
