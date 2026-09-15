@@ -1,0 +1,105 @@
+;
++  const pendingPanel = panel.querySelector('[data-preview-void-pending]');
++  const deliverButton = panel.querySelector('[data-preview-void-deliver]');
++  const conflictPanel = panel.querySelector('[data-preview-void-conflict]');
++  const conflictVersion = panel.querySelector('[data-preview-void-conflict-version]');
++  if (!operationSelect || !openButton || !status || !pendingCount || !confirmation || !confirmationCopy || !confirmButton || !cancelButton || !pendingPanel || !deliverButton || !conflictPanel || !conflictVersion) {
++    fail('PREVIEW_VOID_MARKUP_INVALID');
++  }
++
++  const render = () => {
++    const state = controller.getState();
++    status.textContent = state.message;
++    pendingCount.textContent = `Локально ожидают: ${state.pendingCount}`;
++    if (state.candidate !== null) operationSelect.value = state.candidate.transactionId;
++    confirmation.hidden = state.status !== 'CONFIRMING';
++    pendingPanel.hidden = !['PENDING', 'DEGRADED', 'DELIVERING'].includes(state.status) || state.pendingIntent === null;
++    conflictPanel.hidden = state.status !== 'CONFLICT';
++    if (state.conflictVersion !== null) conflictVersion.textContent = String(state.conflictVersion);
++    if (state.candidate !== null) confirmationCopy.textContent = `${typeLabel(state.candidate.type)} · ${state.candidate.label} · версия ${state.candidate.version}`;
++    const locked = ['CONFIRMING', 'PENDING', 'DELIVERING', 'CONFLICT'].includes(state.status) || (state.status === 'DEGRADED' && state.pendingIntent !== null);
++    operationSelect.disabled = locked;
++    openButton.disabled = state.status !== 'READY';
++    confirmButton.disabled = state.status !== 'CONFIRMING';
++    cancelButton.disabled = state.status !== 'CONFIRMING';
++    deliverButton.disabled = state.status === 'DELIVERING' || state.status === 'CONFLICT' || state.pendingIntent === null;
++    deliverButton.textContent = state.status === 'DEGRADED' ? 'Повторить демо-отправку' : 'Отправить демо-запрос';
++  };
++
++  operationSelect.addEventListener('change', () => {
++    try {
++      controller.selectTransaction(operationSelect.value);
++    } catch {
++      status.textContent = 'Нельзя выбрать операцию, пока текущий локальный запрос не завершён.';
++    }
++    render();
++  });
++  openButton.addEventListener('click', () => {
++    controller.openConfirmation();
++    render();
++  });
++  cancelButton.addEventListener('click', () => {
++    controller.cancelConfirmation();
++    render();
++  });
++  confirmButton.addEventListener('click', async () => {
++    await controller.confirm();
++    render();
++  });
++  deliverButton.addEventListener('click', async () => {
++    await controller.deliver();
++    render();
++  });
++
++  await controller.restore();
++  render();
++  return controller;
++}
++
++export const previewTransactionVoidContract = Object.freeze({
++  allowedTypes: ORDINARY_TYPES,
++  requiresGranularity: 'TRANSACTION',
++  requiresDatePrecision: 'DAY',
++  requiresStatus: 'POSTED',
++});
+diff --git a/web/preview-writer.css b/web/preview-writer.css
+index 36e6ef9..31de146 100644
+--- a/web/preview-writer.css
++++ b/web/preview-writer.css
+@@ -30,3 +30,36 @@
+ @media (min-width: 760px) {
+   .preview-expense-edit__compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+ }
++
++.preview-void__controls {
++  display: grid;
++  grid-template-columns: minmax(0, 1fr) auto;
++  gap: 12px;
++  align-items: end;
++}
++
++.preview-void__confirmation,
++.preview-void__pending,
++.preview-void__conflict {
++  margin-top: 14px;
++  padding: 14px;
++  border: 1px solid var(--border, #d7dce2);
++  border-radius: 12px;
++}
++
++.preview-void__confirmation h3,
++.preview-void__conflict h3 {
++  margin: 0 0 8px;
++}
++
++.preview-void__confirmation p,
++.preview-void__pending p,
++.preview-void__conflict p {
++  margin: 0 0 12px;
++}
++
++@media (max-width: 640px) {
++  .preview-void__controls {
++    grid-template-columns: 1fr;
++  }
++}

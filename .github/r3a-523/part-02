@@ -1,0 +1,238 @@
+id.mjs');
++  await mountSyntheticPreviewTransactionVoid();
+ } catch {
+   document.body.innerHTML = '<main style="max-width:720px;margin:48px auto;padding:24px;font-family:system-ui,sans-serif"><h1>PrihRash</h1><p>Не удалось запустить безопасный demo preview.</p></main>';
+ }
+diff --git a/web/preview-transaction-void.mjs b/web/preview-transaction-void.mjs
+new file mode 100644
+index 0000000..2c5f978
+--- /dev/null
++++ b/web/preview-transaction-void.mjs
+@@ -0,0 +1,489 @@
++import { syntheticPreviewEvidence } from './preview-transport.mjs';
++import {
++  createIndexedDbPreviewOutbox,
++  createPreviewVoidIntent,
++  parsePreviewVoidIntent,
++} from './preview-writer-outbox.mjs';
++import { deliverPreviewTransactionVoidIntent } from './preview-transaction-void-delivery.mjs';
++
++const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
++const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
++const ORDINARY_TYPES = Object.freeze(['EXPENSE', 'INCOME', 'TRANSFER']);
++
++function fail(code) {
++  throw new Error(code);
++}
++
++function canonicalUuid(value, code = 'PREVIEW_VOID_EVIDENCE_INVALID') {
++  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) fail(code);
++  return value;
++}
++
++function canonicalDate(value, code = 'PREVIEW_VOID_EVIDENCE_INVALID') {
++  if (typeof value !== 'string' || !DATE_PATTERN.test(value)) fail(code);
++  const [year, month, day] = value.split('-').map(Number);
++  const parsed = new Date(Date.UTC(year, month - 1, day));
++  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) fail(code);
++  return value;
++}
++
++function positiveVersion(value, code = 'PREVIEW_VOID_EVIDENCE_INVALID') {
++  if (!Number.isSafeInteger(value) || value <= 0) fail(code);
++  return value;
++}
++
++function canonicalLabel(value, code = 'PREVIEW_VOID_EVIDENCE_INVALID') {
++  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) fail(code);
++  return value;
++}
++
++function candidateFromOperation(operation) {
++  if (!operation || typeof operation !== 'object' || Array.isArray(operation)) fail('PREVIEW_VOID_EVIDENCE_INVALID');
++  if (!ORDINARY_TYPES.includes(operation.type)) fail('PREVIEW_VOID_EVIDENCE_INVALID');
++  if (operation.recordGranularity !== 'TRANSACTION' || operation.datePrecision !== 'DAY' || operation.status !== 'POSTED') {
++    fail('PREVIEW_VOID_EVIDENCE_INVALID');
++  }
++  return Object.freeze({
++    transactionId: canonicalUuid(operation.id),
++    type: operation.type,
++    occurredOn: canonicalDate(operation.occurredOn),
++    version: positiveVersion(operation.version),
++    label: canonicalLabel(operation.description),
++  });
++}
++
++export function listPreviewTransactionVoidCandidates(operations = syntheticPreviewEvidence.operations) {
++  if (!Array.isArray(operations)) return Object.freeze([]);
++  const byId = new Map();
++  const duplicateIds = new Set();
++  for (const operation of operations) {
++    try {
++      const candidate = candidateFromOperation(operation);
++      if (byId.has(candidate.transactionId)) duplicateIds.add(candidate.transactionId);
++      else byId.set(candidate.transactionId, candidate);
++    } catch {
++      // Unsafe, coarse, already-VOIDED or malformed evidence never gets an active VOID action.
++    }
++  }
++  return Object.freeze([...byId.values()].filter((candidate) => !duplicateIds.has(candidate.transactionId)));
++}
++
++function stateSnapshot(state) {
++  return Object.freeze({
++    ...state,
++    candidate: state.candidate === null ? null : Object.freeze({ ...state.candidate }),
++    pendingIntent: state.pendingIntent === null ? null : parsePreviewVoidIntent(state.pendingIntent),
++  });
++}
++
++function requirePorts(outbox, sender) {
++  if (
++    !outbox
++    || typeof outbox.enqueue !== 'function'
++    || typeof outbox.listPending !== 'function'
++    || typeof outbox.acknowledge !== 'function'
++    || !sender
++    || typeof sender.sendTransactionVoid !== 'function'
++  ) fail('PREVIEW_VOID_UI_PORT_REQUIRED');
++}
++
++function candidateById(candidates, transactionId) {
++  const matches = candidates.filter((candidate) => candidate.transactionId === transactionId);
++  if (matches.length !== 1) fail('PREVIEW_VOID_EVIDENCE_INVALID');
++  return matches[0];
++}
++
++function voidIntents(intents) {
++  if (!Array.isArray(intents)) fail('PREVIEW_VOID_OUTBOX_INVALID');
++  const valid = [];
++  for (const intent of intents) {
++    if (intent?.kind !== 'VOID_TRANSACTION') continue;
++    try {
++      valid.push(parsePreviewVoidIntent(intent));
++    } catch {
++      fail('PREVIEW_VOID_OUTBOX_INVALID');
++    }
++  }
++  return valid;
++}
++
++function pendingForCandidate(intents, candidate) {
++  return intents.filter((intent) => intent.payload.transactionId === candidate.transactionId);
++}
++
++function errorMessage(error) {
++  if (error?.message === 'PREVIEW_VOID_SEND_FAILED') {
++    return 'Не удалось отправить демо-запрос. Он сохранён локально; повтор возможен только явным действием.';
++  }
++  if (error?.message === 'INVALID_PREVIEW_VOID_ACK') {
++    return 'Ответ не прошёл проверку. Локальный запрос сохранён и не считается подтверждённым.';
++  }
++  if (error?.message === 'PREVIEW_VOID_LOCAL_ACK_FAILED') {
++    return 'Подтверждение получено, но локальную очередь очистить не удалось. Запрос сохранён; автоматического повтора нет.';
++  }
++  return 'Не удалось завершить демо-аннулирование. Локальный запрос сохранён.';
++}
++
++export function createPreviewTransactionVoidController({
++  candidates = listPreviewTransactionVoidCandidates(),
++  outbox,
++  sender,
++  randomUuid = () => globalThis.crypto?.randomUUID?.(),
++  now = () => new Date().toISOString(),
++} = {}) {
++  requirePorts(outbox, sender);
++  if (!Array.isArray(candidates) || candidates.length === 0) fail('PREVIEW_VOID_EVIDENCE_INVALID');
++  const safeCandidates = Object.freeze(candidates.map((candidate) => candidateFromOperation({
++    id: candidate.transactionId,
++    type: candidate.type,
++    occurredOn: candidate.occurredOn,
++    version: candidate.version,
++    description: candidate.label,
++    recordGranularity: 'TRANSACTION',
++    datePrecision: 'DAY',
++    status: 'POSTED',
++  })));
++  const confirmedIds = new Set();
++  let state = stateSnapshot({
++    status: 'READY',
++    candidate: safeCandidates[0],
++    pendingIntent: null,
++    pendingCount: 0,
++    conflictVersion: null,
++    message: 'Выберите демо-операцию. Аннулирование сначала сохраняется локально.',
++  });
++
++  function getState() {
++    return state;
++  }
++
++  async function restore() {
++    let pending;
++    try {
++      pending = voidIntents(await outbox.listPending());
++    } catch {
++      state = stateSnapshot({ ...state, status: 'DEGRADED', pendingCount: 0, message: 'Локальную очередь аннулирований прочитать не удалось.' });
++      return state;
++    }
++    if (pending.length === 0) {
++      state = stateSnapshot({ ...state, status: 'READY', pendingIntent: null, pendingCount: 0, conflictVersion: null });
++      return state;
++    }
++
++    const exact = [];
++    for (const intent of pending) {
++      const matches = safeCandidates.filter((candidate) => candidate.transactionId === intent.payload.transactionId);
++      if (matches.length !== 1 || matches[0].version !== intent.payload.expectedVersion) continue;
++      exact.push({ intent, candidate: matches[0] });
++    }
++    if (exact.length === 0) {
++      state = stateSnapshot({
++        ...state,
++        status: 'DEGRADED',
++        pendingIntent: null,
++        pendingCount: pending.length,
++        conflictVersion: null,
++        message: 'Есть локальный запрос аннулирования, который нельзя безопасно связать с текущей демо-операцией.',
++      });
++      return state;
++    }
++    const selected = exact[0];
++    const sameTarget = pendingForCandidate(pending, selected.candidate);
++    if (sameTarget.length !== 1) {
++      state = stateSnapshot({
++        ...state,
++        status: 'DEGRADED',
++        candidate: selected.candidate,
++        pendingIntent: null,
++        pendingCount: pending.length,
++        conflictVersion: null,
++        message: 'Для одной операции найдено несколько локальных запросов. Автоматические действия заблокированы.',
++      });
++      return state;
++    }
++    state = stateSnapshot({
++      ...state,
++      status: 'PENDING',
++      candidate: selected.candidate,
++      pendingIntent: selected.intent,
++      pendingCount: pending.length,
++      conflictVersion: null,
++      message: 'Аннулирование сохранено локально · демо · ещё не подтверждено.',
++    });
++    return state;
++  }
++
++  function selectTransaction(transactionId) {
++    if (!['READY', 'CONFIRMED'].includes(state.status)) fail('PREVIEW_VOID_UI_ACTION_BLOCKED');
++    const candidate = candidateById(safeCandidates, canonicalUuid(transactionId, 'PREVIEW_VOID_EVIDENCE_INVALID'));
++    state = stateSnapshot({
++      ...state,
++      status: confirmedIds.has(candidate.transactionId) ? 'CONFIRMED' : 'READY',
++      candidate,
++      pendingIntent: null,
++      conflictVersion: null,
++      message: confirmedIds.has(candidate.transactionId)
++        ? 'Эта демо-операция уже подтверждённо аннулирована в текущей сессии.'
++        : 'Готово к подтверждению. До подтверждения локальная очередь не меняет�

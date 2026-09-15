@@ -1,0 +1,132 @@
+diff --git a/docs/R3A_PREVIEW_WRITER.md b/docs/R3A_PREVIEW_WRITER.md
+index f690fe8..db06a77 100644
+--- a/docs/R3A_PREVIEW_WRITER.md
++++ b/docs/R3A_PREVIEW_WRITER.md
+@@ -241,6 +241,24 @@ Preview-only `preview-expense-edit.mjs` доказывает browser conflict UX
+ 
+ Malformed/mismatched current-read или ACK оставляет локальные значения нетронутыми и переводит UI в degraded state без rebase/overwrite. Production Reader/PWA/Service Worker этот module не импортируют.
+ 
++## VOID confirmation/conflict preview
++
++Preview-only `preview-transaction-void.mjs` добавляет browser-facing confirmation поверх уже доказанных `VOID_TRANSACTION / PENDING` и `preview-transaction-void-delivery.mjs`. Он монтируется только из synthetic `preview-bootstrap.mjs`; production Reader/PWA/Service Worker его не импортируют.
++
++Активное действие доступно только exact synthetic ordinary `EXPENSE | INCOME | TRANSFER` с `recordGranularity=TRANSACTION`, `datePrecision=DAY`, `status=POSTED`, canonical transaction id и positive version. Уже `VOIDED`, historical coarse/unknown или malformed evidence не получает active VOID action.
++
++Пользовательский flow fail-closed и local-first:
++
++- `Аннулировать` сначала открывает explicit confirmation; `Отмена` не создаёт intent и не вызывает sender;
++- `Подтвердить аннулирование` сначала проверяет существующий durable evidence и затем сохраняет exact `{transactionId, expectedVersion}` в IndexedDB; sender на этом шаге не вызывается;
++- reload восстанавливает exact pending VOID intent и показывает его как локально сохранённый, но ещё не подтверждённый;
++- отправка выполняется только отдельным явным действием через injected `sendTransactionVoid(request)` boundary; real HTTP/auth/provider binding отсутствует;
++- validated `VOIDED` / `ALREADY_VOIDED` очищает только exact intent и даёт явный confirmed UI state;
++- `VERSION_CONFLICT` сохраняет intent, показывает только безопасный `currentVersion` и блокирует automatic retry/overwrite; current-record read/rebase здесь не выполняется;
++- sender, malformed ACK или local ACK failure переводят UI в degraded state, сохраняя pending evidence для отдельного явного retry.
++
++Browser Quality отдельно доказывает cancel/no-write, offline local commit, reload restore, terminal ACK cleanup и conflict-without-auto-retry в Chromium. Это не меняет production authority: Google остаётся authoritative, `YDB_WRITE_ENABLED=false`.
++
+ ## Не входит
+ 
+ - production Writer UI;
+@@ -252,6 +270,6 @@ Malformed/mismatched current-read или ACK оставляет локальны
+ - automatic retry/sync scheduler;
+ - real production browser edit/current-record transport;
+ - INCOME/TRANSFER edit;
+-- browser VOID confirmation и user-facing conflict resolution/current-read reconciliation;
++- production browser VOID transport и user-facing conflict resolution/current-read reconciliation;
+ - FinancialPeriod membership;
+ - provider deployment или authority cutover.
+diff --git a/scripts/build-r2-ui-preview.mjs b/scripts/build-r2-ui-preview.mjs
+index b24e3d2..1e9f109 100644
+--- a/scripts/build-r2-ui-preview.mjs
++++ b/scripts/build-r2-ui-preview.mjs
+@@ -18,6 +18,8 @@ const files = [
+   'preview-writer-delivery.mjs',
+   'preview-income-writer-delivery.mjs',
+   'preview-transfer-writer-delivery.mjs',
++  'preview-transaction-void-delivery.mjs',
++  'preview-transaction-void.mjs',
+   'preview-writer.mjs',
+   'preview-writer-outbox.mjs',
+   'preview-writer.css',
+diff --git a/tests/browser/critical-flows.spec.mjs b/tests/browser/critical-flows.spec.mjs
+index be0d753..eae5dfe 100644
+--- a/tests/browser/critical-flows.spec.mjs
++++ b/tests/browser/critical-flows.spec.mjs
+@@ -30,6 +30,7 @@ async function waitForPreview(page) {
+   await expect(page.locator('[data-preview-writer="expense"]')).toBeVisible();
+   await expect(page.locator('[data-preview-writer="income"]')).toBeVisible();
+   await expect(page.locator('[data-preview-writer="transfer"]')).toBeVisible();
++  await expect(page.locator('[data-preview-transaction-void]')).toBeVisible();
+ }
+ 
+ async function fillCreateForm(panel, values) {
+@@ -224,3 +225,57 @@ test('optimistic edit conflict never silently overwrites and requires explicit r
+     await expect(edit.locator('[data-preview-expense-edit-status]')).toContainText('Сохранено · версия 3');
+   });
+ });
++
++test('VOID confirmation is local-first, survives reload, validates terminal ACK and keeps conflicts pending', async ({ page, context }) => {
++  await guardedBrowser(page, async () => {
++    await page.goto('/');
++    await waitForPreview(page);
++    let voidPanel = page.locator('[data-preview-transaction-void]');
++
++    await voidPanel.locator('[data-preview-void-open]').click();
++    await expect(voidPanel.locator('[data-preview-void-confirmation]')).toBeVisible();
++    await voidPanel.locator('[data-preview-void-cancel]').click();
++    await expect(voidPanel.locator('[data-preview-void-confirmation]')).toBeHidden();
++    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('очередь не изменена');
++    expect(await page.evaluate(async () => {
++      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
++      return (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION').length;
++    })).toBe(0);
++
++    await context.setOffline(true);
++    await voidPanel.locator('[data-preview-void-open]').click();
++    await voidPanel.locator('[data-preview-void-confirm]').click();
++    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('Сохранено локально');
++    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
++    expect(await page.evaluate(async () => {
++      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
++      const pending = (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION');
++      return pending.map((intent) => ({ transactionId: intent.payload.transactionId, expectedVersion: intent.payload.expectedVersion }));
++    })).toEqual([{ transactionId: '40000000-0000-0000-0000-000000000001', expectedVersion: 1 }]);
++
++    await context.setOffline(false);
++    await page.reload();
++    await waitForPreview(page);
++    voidPanel = page.locator('[data-preview-transaction-void]');
++    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('сохранено локально');
++    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
++    await voidPanel.locator('[data-preview-void-deliver]').click();
++    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('Аннулирование подтверждено');
++    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 0');
++
++    await voidPanel.locator('[data-preview-void-operation]').selectOption('40000000-0000-0000-0000-000000000002');
++    await voidPanel.locator('[data-preview-void-open]').click();
++    await voidPanel.locator('[data-preview-void-confirm]').click();
++    await voidPanel.locator('[data-preview-void-deliver]').click();
++    await expect(voidPanel.locator('[data-preview-void-conflict]')).toBeVisible();
++    await expect(voidPanel.locator('[data-preview-void-conflict-version]')).toHaveText('2');
++    await expect(voidPanel.locator('[data-preview-void-status]')).toContainText('автоматической повторной отправки нет');
++    await expect(voidPanel.locator('[data-preview-void-pending-count]')).toHaveText('Локально ожидают: 1');
++    await expect(voidPanel.locator('[data-preview-void-deliver]')).toBeHidden();
++    expect(await page.evaluate(async () => {
++      const { createIndexedDbPreviewOutbox } = await import('/preview-writer-outbox.mjs');
++      const pending = (await createIndexedDbPreviewOutbox(indexedDB).listPending()).filter((intent) => intent.kind === 'VOID_TRANSACTION');
++      return pending.map((intent) => ({ transactionId: intent.payload.transactionId, expectedVersion: intent.payload.expectedVersion }));
++    })).toEqual([{ transactionId: '40000000-0000-0000-0000-000000000002', expectedVersion: 1 }]);
++  });
++});
+diff --git a/tests/integration/r2-safe-ui-preview.test.mjs b/tests/integration/r2-safe-ui-preview.test.mjs
+index 601e3ef..5c743aa 100644
+--- a/tests/integration/r2-safe-ui-preview.test.mjs
++++ b/tests/integration/r2-safe-ui-preview.test.mjs
+@@ -164,6 +164,8 @@ test('preview build emits static root without service worker or manifest deploym
+   assert.match(bootstrap, /preview-writer\.mjs/u);
+   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.mjs', import.meta.url));
+   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer-outbox.mjs', import.meta.url));
++  await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void-delivery.mjs', import.meta.url));
++  await access(new URL('../../.artifacts/r2-ui-preview/preview-transaction-void.mjs', import.meta.url));
+   await access(new URL('../../.artifacts/r2-ui-preview/preview-writer.css', import.meta.url));
+   assert

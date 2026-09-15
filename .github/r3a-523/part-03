@@ -1,0 +1,200 @@
+�я.',
++    });
++    return state;
++  }
++
++  function openConfirmation() {
++    if (state.status !== 'READY' || state.candidate === null) fail('PREVIEW_VOID_UI_ACTION_BLOCKED');
++    state = stateSnapshot({ ...state, status: 'CONFIRMING', message: 'Подтвердите аннулирование. Это demo-only локальный сценарий.' });
++    return state;
++  }
++
++  function cancelConfirmation() {
++    if (state.status !== 'CONFIRMING') fail('PREVIEW_VOID_UI_ACTION_BLOCKED');
++    state = stateSnapshot({ ...state, status: 'READY', message: 'Аннулирование отменено. Локальная очередь не изменена.' });
++    return state;
++  }
++
++  async function confirm() {
++    if (state.status !== 'CONFIRMING' || state.candidate === null) fail('PREVIEW_VOID_UI_ACTION_BLOCKED');
++    const candidate = state.candidate;
++    let pending;
++    try {
++      pending = voidIntents(await outbox.listPending());
++    } catch {
++      state = stateSnapshot({ ...state, status: 'DEGRADED', message: 'Локальную очередь проверить не удалось. Новый запрос не создан.' });
++      return state;
++    }
++    const sameTarget = pendingForCandidate(pending, candidate);
++    if (sameTarget.length > 1 || (sameTarget.length === 1 && sameTarget[0].payload.expectedVersion !== candidate.version)) {
++      state = stateSnapshot({
++        ...state,
++        status: 'DEGRADED',
++        pendingIntent: sameTarget.length === 1 ? sameTarget[0] : null,
++        pendingCount: pending.length,
++        message: 'Существующий локальный запрос не совпадает с текущей версией. Новый запрос не создан.',
++      });
++      return state;
++    }
++    if (sameTarget.length === 1) {
++      state = stateSnapshot({
++        ...state,
++        status: 'PENDING',
++        pendingIntent: sameTarget[0],
++        pendingCount: pending.length,
++        conflictVersion: null,
++        message: 'Аннулирование уже сохранено локально · демо · ещё не подтверждено.',
++      });
++      return state;
++    }
++
++    let intent;
++    try {
++      intent = createPreviewVoidIntent({ transactionId: candidate.transactionId, expectedVersion: candidate.version }, { randomUuid, now });
++      await outbox.enqueue(intent);
++    } catch {
++      state = stateSnapshot({ ...state, status: 'DEGRADED', pendingIntent: null, pendingCount: pending.length, message: 'Не удалось сохранить аннулирование локально. Отправка не выполнялась.' });
++      return state;
++    }
++    state = stateSnapshot({
++      ...state,
++      status: 'PENDING',
++      pendingIntent: intent,
++      pendingCount: pending.length + 1,
++      conflictVersion: null,
++      message: 'Сохранено локально · демо · отправка выполняется только отдельным действием.',
++    });
++    return state;
++  }
++
++  async function deliver() {
++    if (!['PENDING', 'DEGRADED'].includes(state.status) || state.pendingIntent === null) fail('PREVIEW_VOID_UI_ACTION_BLOCKED');
++    const intent = state.pendingIntent;
++    state = stateSnapshot({ ...state, status: 'DELIVERING', message: 'Проверяем демо-подтверждение…' });
++    try {
++      const ack = await deliverPreviewTransactionVoidIntent({ outbox, sender, intent });
++      if (ack.outcome === 'VERSION_CONFLICT') {
++        state = stateSnapshot({
++          ...state,
++          status: 'CONFLICT',
++          pendingIntent: intent,
++          conflictVersion: ack.currentVersion,
++          message: `Есть более новая версия ${ack.currentVersion}. Локальный запрос сохранён; автоматической повторной отправки нет.`,
++        });
++        return state;
++      }
++      confirmedIds.add(intent.payload.transactionId);
++      state = stateSnapshot({
++        ...state,
++        status: 'CONFIRMED',
++        pendingIntent: null,
++        pendingCount: Math.max(0, state.pendingCount - 1),
++        conflictVersion: null,
++        message: `Аннулирование подтверждено · ${ack.outcome === 'VOIDED' ? 'операция аннулирована' : 'операция уже была аннулирована'} · демо.`,
++      });
++      return state;
++    } catch (error) {
++      state = stateSnapshot({ ...state, status: 'DEGRADED', pendingIntent: intent, conflictVersion: null, message: errorMessage(error) });
++      return state;
++    }
++  }
++
++  return Object.freeze({
++    getState,
++    restore,
++    selectTransaction,
++    openConfirmation,
++    cancelConfirmation,
++    confirm,
++    deliver,
++  });
++}
++
++export function createSyntheticPreviewTransactionVoidSender() {
++  return Object.freeze({
++    async sendTransactionVoid(request) {
++      if (request.transactionId === '40000000-0000-0000-0000-000000000002') {
++        return Object.freeze({
++          apiVersion: 1,
++          outcome: 'VERSION_CONFLICT',
++          transactionId: request.transactionId,
++          currentVersion: request.expectedVersion + 1,
++        });
++      }
++      return Object.freeze({
++        apiVersion: 1,
++        outcome: 'VOIDED',
++        transactionId: request.transactionId,
++        version: request.expectedVersion + 1,
++      });
++    },
++  });
++}
++
++function typeLabel(type) {
++  if (type === 'EXPENSE') return 'Расход';
++  if (type === 'INCOME') return 'Доход';
++  return 'Перевод';
++}
++
++function panelMarkup(candidates) {
++  const options = candidates.map((candidate) => (
++    `<option value="${candidate.transactionId}">${typeLabel(candidate.type)} · ${candidate.label} · версия ${candidate.version}</option>`
++  )).join('');
++  return `<section class="preview-writer preview-void" data-preview-transaction-void aria-labelledby="preview-void-title">
++    <div class="preview-writer__head">
++      <div><span class="eyebrow">R3A · VOID · демо</span><h2 id="preview-void-title">Аннулирование операции</h2></div>
++      <span class="preview-writer__pending" data-preview-void-pending-count>Локально ожидают: 0</span>
++    </div>
++    <p class="preview-writer__hint">Только synthetic preview. «Удалить» означает VOIDED; production write path не подключён.</p>
++    <div class="preview-void__controls">
++      <label class="preview-writer__field preview-writer__field--wide"><span>Операция</span><select data-preview-void-operation>${options}</select></label>
++      <button type="button" data-preview-void-open>Аннулировать</button>
++    </div>
++    <p class="preview-writer__status" data-preview-void-status role="status" aria-live="polite" aria-atomic="true"></p>
++    <section class="preview-void__confirmation" data-preview-void-confirmation role="dialog" aria-modal="false" aria-labelledby="preview-void-confirm-title" hidden>
++      <h3 id="preview-void-confirm-title">Подтвердить аннулирование?</h3>
++      <p data-preview-void-confirm-copy></p>
++      <div class="preview-writer__actions">
++        <button type="button" data-preview-void-confirm>Подтвердить аннулирование</button>
++        <button type="button" data-preview-void-cancel>Отмена</button>
++      </div>
++    </section>
++    <section class="preview-void__pending" data-preview-void-pending hidden>
++      <p>Запрос уже сохранён в IndexedDB и не зависит от доступности сети.</p>
++      <button type="button" data-preview-void-deliver>Отправить демо-запрос</button>
++    </section>
++    <section class="preview-void__conflict" data-preview-void-conflict hidden>
++      <h3>Ничего не перезаписано</h3>
++      <p>На серверной стороне есть более новая версия <strong data-preview-void-conflict-version></strong>. Локальный запрос остаётся pending. Разрешение конфликта — отдельное явное действие будущего flow.</p>
++    </section>
++  </section>`;
++}
++
++export async function mountSyntheticPreviewTransactionVoid({
++  document = globalThis.document,
++  indexedDb = globalThis.indexedDB,
++  sender = createSyntheticPreviewTransactionVoidSender(),
++  candidates = listPreviewTransactionVoidCandidates(),
++  randomUuid = () => globalThis.crypto?.randomUUID?.(),
++  now = () => new Date().toISOString(),
++} = {}) {
++  if (!document?.querySelector) fail('PREVIEW_VOID_DOCUMENT_REQUIRED');
++  if (document.querySelector('[data-preview-transaction-void]')) return;
++  const main = document.querySelector('main');
++  if (!main) fail('PREVIEW_VOID_MAIN_REQUIRED');
++  if (!Array.isArray(candidates) || candidates.length === 0) fail('PREVIEW_VOID_EVIDENCE_INVALID');
++
++  const outbox = createIndexedDbPreviewOutbox(indexedDb);
++  const controller = createPreviewTransactionVoidController({ candidates, outbox, sender, randomUuid, now });
++  main.insertAdjacentHTML('beforeend', panelMarkup(candidates));
++
++  const panel = document.querySelector('[data-preview-transaction-void]');
++  const operationSelect = panel.querySelector('[data-preview-void-operation]');
++  const openButton = panel.querySelector('[data-preview-void-open]');
++  const status = panel.querySelector('[data-preview-void-status]');
++  const pendingCount = panel.querySelector('[data-preview-void-pending-count]');
++  const confirmation = panel.querySelector('[data-preview-void-confirmation]');
++  const confirmationCopy = panel.querySelector('[data-preview-void-confirm-copy]');
++  const confirmButton = panel.querySelector('[data-preview-void-confirm]');
++  const cancelButton = panel.querySelector('[data-preview-void-cancel]')
