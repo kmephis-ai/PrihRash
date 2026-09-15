@@ -1,0 +1,49 @@
+ation/ydb/parameters.js';
+ import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
+ import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
+ import {
++  InitialBootstrapIdentityManifestError,
+   initialBootstrapIdentityManifestReadStatement,
+   initialBootstrapIdentityManifestsEqual,
+   parseInitialBootstrapIdentityManifestRows,
++  type InitialBootstrapIdentityManifestReadback,
+   type PreparedInitialBootstrapIdentityManifestWrite,
+ } from './initialBootstrapIdentityManifest.js';
+ import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
+@@ -54,7 +56,9 @@ export type InitialBootstrapMetadataExecutorErrorCode =
+   | 'COMMITTED_BASELINE_EXISTS'
+   | 'SNAPSHOT_READBACK_MISMATCH'
+   | 'RUN_READBACK_MISMATCH'
+-  | 'IDENTITY_MANIFEST_READBACK_MISMATCH'
++  | 'IDENTITY_MANIFEST_READ_FAILED'
++  | 'IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH'
++  | 'IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH'
+   | 'CLAIM_READBACK_MISMATCH';
+ 
+ export class InitialBootstrapMetadataExecutorError extends Error {
+@@ -205,23 +209,29 @@ export async function executeInitialBootstrapMetadataWrites(
+       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
+     }
+ 
++    let identityRows: readonly Readonly<IdentityManifestReadRow>[];
+     try {
+-      const identityReadback = parseInitialBootstrapIdentityManifestRows(
+-        candidate.run.id,
+-        (await transaction.execute<IdentityManifestReadRow>(identityManifestRead)).rows,
+-      );
+-      if (
+-        identityReadback.runState !== 'STAGING'
+-        || identityReadback.runSnapshotDigest !== candidate.run.sourceSnapshotDigest
+-        || identityReadback.snapshotDigest !== candidate.snapshot.snapshotDigest
+-        || identityReadback.snapshotRowCount !== candidate.snapshot.rowCount
+-        || !initialBootstrapIdentityManifestsEqual(identityReadback.manifest, identityManifestWrite.manifest)
+-      ) {
+-        throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READBACK_MISMATCH');
+-      }
++      identityRows = (await transaction.execute<IdentityManifestReadRow>(identityManifestRead)).rows;
++    } catch {
++      throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READ_FAILED');
++    }
++    let identityReadback: Readonly<InitialBootstrapIdentityManifestReadback>;
++    try {
++      identit
