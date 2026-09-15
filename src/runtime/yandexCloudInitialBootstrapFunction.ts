@@ -1,4 +1,5 @@
 import type {
+  InitialBootstrapApplicationPhase,
   InitialBootstrapRecoveryReason,
 } from '../migration/initialBootstrapApplication.js';
 import {
@@ -12,6 +13,7 @@ import {
 import {
   InitialBootstrapReferenceAwareRuntimeError,
   runInitialBootstrapReferenceAwareJobFromEnvironment,
+  type InitialBootstrapMetadataFailureCode,
   type InitialBootstrapReferenceAwareRuntimeErrorCode,
 } from './initialBootstrapReferenceAwareJob.js';
 import {
@@ -69,6 +71,8 @@ export type YandexInitialBootstrapFunctionResult =
       status: 'FAIL';
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED';
       runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode;
+      applicationPhase?: InitialBootstrapApplicationPhase | null;
+      metadataFailureCode?: InitialBootstrapMetadataFailureCode | null;
     }>;
 
 export interface YandexInitialBootstrapJob {
@@ -119,12 +123,16 @@ function failure(
 
 function runtimeFailure(
   runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode,
+  applicationPhase: InitialBootstrapApplicationPhase | null = null,
+  metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
 ): Readonly<YandexInitialBootstrapFunctionResult> {
   if (runtimeCode === undefined) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
   return Object.freeze({
     status: 'FAIL' as const,
     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' as const,
     runtimeCode,
+    applicationPhase,
+    metadataFailureCode,
   });
 }
 
@@ -230,7 +238,7 @@ export async function executeYandexInitialBootstrapFunction(
       return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
     }
     if (error instanceof InitialBootstrapReferenceAwareRuntimeError) {
-      return runtimeFailure(error.code);
+      return runtimeFailure(error.code, error.applicationPhase, error.metadataFailureCode);
     }
     if (error instanceof InitialBootstrapJobError) {
       if (isConfigError(error.code)) return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');

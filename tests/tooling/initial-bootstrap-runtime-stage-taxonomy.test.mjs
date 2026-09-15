@@ -98,7 +98,7 @@ test('application taxonomy stays category-only and keeps generic fallback', () =
 });
 
 test('stage taxonomy does not expose exception text or provider payload through the invoker', () => {
-  assert.match(invoker, /exactKeys\(result, \['status', 'code', 'runtimeCode'\]\)/);
+  assert.match(invoker, /exactKeys\(result, \['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'\]\)/);
   assert.match(invoker, /REFERENCE_AWARE_RUNTIME_CODES\.has\(result\.runtimeCode\)/);
   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
 });

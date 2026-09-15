@@ -467,6 +467,79 @@ jobs:
                   else null
                   end
                 ),
+                applicationPhase: (
+                  if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
+                     and (.applicationPhase | type) == "string"
+                     and (.applicationPhase | IN(
+                       "ADMISSION_READ",
+                       "CURRENT_STATE_PREFLIGHT",
+                       "FRESH_CONTEXT_PREPARATION",
+                       "FRESH_METADATA_PREPARATION",
+                       "FRESH_CLAIM_WRITE",
+                       "RESUME_CONTEXT_READ",
+                       "RESUME_CONTEXT_PREPARATION",
+                       "REVISION_EVIDENCE_PREPARATION",
+                       "REVISION_EVIDENCE_WRITE",
+                       "LINEAGE_PREPARATION",
+                       "COUNTER_REFINEMENT_PREPARATION",
+                       "COUNTER_REFINEMENT_WRITE",
+                       "RECONCILIATION_READ",
+                       "VALIDATION_EVALUATION",
+                       "CURRENT_PLAN_PREPARATION",
+                       "CURRENT_WRITE_PREPARATION",
+                       "PRE_PROMOTION_PREFLIGHT",
+                       "VALIDATION_WRITE_PREPARATION",
+                       "VALIDATION_TRANSITION_WRITE",
+                       "PROMOTION_WRITE"
+                     ))
+                  then .applicationPhase
+                  else null
+                  end
+                ),
+                metadataFailureCode: (
+                  if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
+                     and (.metadataFailureCode | type) == "string"
+                     and (.metadataFailureCode | IN(
+                       "METADATA_EXECUTOR_METADATA_WRITE_SET_INVALID",
+                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_WRITE_INVALID",
+                       "METADATA_EXECUTOR_IN_FLIGHT_RUN_EXISTS",
+                       "METADATA_EXECUTOR_COMMITTED_BASELINE_EXISTS",
+                       "METADATA_EXECUTOR_SNAPSHOT_READBACK_MISMATCH",
+                       "METADATA_EXECUTOR_RUN_READBACK_MISMATCH",
+                       "METADATA_EXECUTOR_IDENTITY_MANIFEST_READBACK_MISMATCH",
+                       "METADATA_EXECUTOR_CLAIM_READBACK_MISMATCH",
+                       "IDENTITY_MANIFEST_RUN_NOT_STAGING",
+                       "IDENTITY_MANIFEST_PROJECTION_LENGTH_MISMATCH",
+                       "IDENTITY_MANIFEST_PROJECTION_IDENTITY_MISMATCH",
+                       "IDENTITY_MANIFEST_INVALID_PROJECTION_OUTCOME",
+                       "IDENTITY_MANIFEST_INVALID_TRANSACTION_ASSIGNMENT_UUID",
+                       "IDENTITY_MANIFEST_DUPLICATE_TRANSACTION_ASSIGNMENT_SOURCE_ID",
+                       "IDENTITY_MANIFEST_DUPLICATE_TRANSACTION_ID",
+                       "IDENTITY_MANIFEST_MISSING_TRANSACTION_ASSIGNMENT",
+                       "IDENTITY_MANIFEST_UNEXPECTED_TRANSACTION_ASSIGNMENT",
+                       "IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW",
+                       "IDENTITY_MANIFEST_MANIFEST_NOT_FOUND",
+                       "IDENTITY_MANIFEST_MANIFEST_EVIDENCE_MISMATCH",
+                       "IDENTITY_MANIFEST_INVALID_RESUME_OBSERVATION",
+                       "IDENTITY_MANIFEST_DUPLICATE_RESUME_ORDINAL",
+                       "IDENTITY_MANIFEST_RUN_NOT_RESUMABLE",
+                       "BOOTSTRAP_PERSISTENCE_RUN_NOT_STAGING",
+                       "BOOTSTRAP_PERSISTENCE_SNAPSHOT_RUN_DIGEST_MISMATCH",
+                       "BOOTSTRAP_PERSISTENCE_SNAPSHOT_ROW_COUNT_MISMATCH",
+                       "BOOTSTRAP_PERSISTENCE_RUN_COUNTERS_MISMATCH",
+                       "YDB_PARAMETER_INVALID_UUID",
+                       "YDB_PARAMETER_INVALID_DATE",
+                       "YDB_PARAMETER_INVALID_TIMESTAMP",
+                       "YDB_PARAMETER_UNSAFE_INTEGER",
+                       "YDB_PARAMETER_INT64_OUT_OF_RANGE",
+                       "YDB_PARAMETER_UINT64_OUT_OF_RANGE",
+                       "YDB_PARAMETER_UINT32_OUT_OF_RANGE",
+                       "YDB_PARAMETER_INVALID_JSON_DOCUMENT"
+                     ))
+                  then .metadataFailureCode
+                  else null
+                  end
+                ),
                 outputShape: (
                   if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
                      and (.outputShape | type) == "string"

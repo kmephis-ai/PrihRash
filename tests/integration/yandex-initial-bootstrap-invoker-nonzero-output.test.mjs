@@ -59,6 +59,8 @@ test('non-zero yc exit preserves an exact allowlisted runtime failure without pr
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
     runtimeCode: 'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+    applicationPhase: 'FRESH_CONTEXT_PREPARATION',
+    metadataFailureCode: null,
   };
   const result = await runInvoker(`
 process.stdout.write(${JSON.stringify(JSON.stringify(expected))});
