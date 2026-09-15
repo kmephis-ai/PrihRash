@@ -78,6 +78,12 @@ test('canonical CI publishes one exact-SHA provider artifact after the full chec
   assert.ok(checkIndex >= 0 && manifestIndex > checkIndex && uploadIndex > manifestIndex);
   assert.match(ci, /name: r1-exact-source-\$\{\{ github\.sha \}\}/);
   assert.match(ci, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.match(ci, /include-hidden-files: true/);
+  assert.doesNotMatch(ci, /path: \.artifacts\/\s*$/m);
+  assert.match(ci, /\.artifacts\/exact-source-manifest\.json/);
+  for (const directory of EXACT_SOURCE_PACKAGE_DIRECTORIES) {
+    assert.match(ci, new RegExp(`\\.artifacts/${directory.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`));
+  }
   assert.match(ci, /retention-days: 7/);
 });
 
