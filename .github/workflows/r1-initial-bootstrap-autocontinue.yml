@@ -163,10 +163,10 @@ jobs:
               exit 0
             fi
 
-            interrupted_run_id="$(jq -er --arg sha "$parent_sha" \
-              '[.workflow_runs[] | select(.head_sha == $sha)] \
+            interrupted_run_id="$(jq -r --arg sha "$parent_sha" \
+              '[.workflow_runs[] | select(.head_sha == $sha)]
               | sort_by(.created_at) | reverse | .[0].id // empty' \
-              <<<"$existing" || true)"
+              <<<"$existing")"
             if [ -z "$interrupted_run_id" ]; then
               echo 'R1_BOOTSTRAP_AUTOCONTINUE_NOT_R1_453_SOURCE'
               exit 0
@@ -176,10 +176,10 @@ jobs:
               --header "$auth_header" \
               --header "$accept_header" \
               "$api/actions/runs/$interrupted_run_id/artifacts?per_page=100")"
-            artifact_id="$(jq -er --arg name "r1-initial-bootstrap-orchestrator-evidence-$interrupted_run_id" \
-              '[.artifacts[] | select(.name == $name and .expired == false)] \
+            artifact_id="$(jq -r --arg name "r1-initial-bootstrap-orchestrator-evidence-$interrupted_run_id" \
+              '[.artifacts[] | select(.name == $name and .expired == false)]
               | if length == 1 then .[0].id else empty end' \
-              <<<"$artifacts" || true)"
+              <<<"$artifacts")"
             if [ -z "$artifact_id" ]; then
               echo 'R1_BOOTSTRAP_AUTOCONTINUE_INTERRUPTED_EVIDENCE_MISSING'
               exit 0
