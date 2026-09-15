@@ -104,6 +104,11 @@ function optionalLiteralText(value, fail = invalidRecord) {
   return value;
 }
 
+function requiredLiteralText(value, fail) {
+  if (typeof value !== 'string' || value.length === 0 || value.trim().length === 0) fail();
+  return value;
+}
+
 function literalDraftField(value, fail) {
   if (typeof value !== 'string') fail();
   return value;
@@ -195,7 +200,7 @@ export function createPreviewExpenseIntent(input, {
   const fromAccount = resolveUniqueRef(input.accountId, accounts, invalidExpenseInput);
   const category = resolveUniqueCategory(input.categoryId, categories, 'EXPENSE', invalidExpenseInput);
   const paidByMember = resolveOptionalUniqueRef(input.paidByMemberId, members, invalidExpenseInput);
-  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidExpenseInput);
+  const description = requiredLiteralText(input.description, invalidExpenseInput);
   const note = input.note === '' ? null : optionalLiteralText(input.note, invalidExpenseInput);
 
   return parsePreviewExpenseIntent({
@@ -227,7 +232,7 @@ export function createPreviewIncomeIntent(input, {
   const { intentId, createdAt } = createIntentBase(input, { randomUuid, now, fail: invalidIncomeInput });
   const toAccount = resolveUniqueRef(input.accountId, accounts, invalidIncomeInput);
   const category = resolveUniqueCategory(input.categoryId, categories, 'INCOME', invalidIncomeInput);
-  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidIncomeInput);
+  const description = requiredLiteralText(input.description, invalidIncomeInput);
   const note = input.note === '' ? null : optionalLiteralText(input.note, invalidIncomeInput);
 
   return parsePreviewIncomeIntent({
@@ -258,7 +263,7 @@ export function createPreviewTransferIntent(input, {
   const fromAccount = resolveUniqueRef(input.fromAccountId, accounts, invalidTransferInput);
   const toAccount = resolveUniqueRef(input.toAccountId, accounts, invalidTransferInput);
   if (fromAccount.id === toAccount.id) invalidTransferInput();
-  const description = input.description === '' ? null : optionalLiteralText(input.description, invalidTransferInput);
+  const description = requiredLiteralText(input.description, invalidTransferInput);
   const note = input.note === '' ? null : optionalLiteralText(input.note, invalidTransferInput);
 
   return parsePreviewTransferIntent({
@@ -672,6 +677,37 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
       }
       if (row === undefined) return null;
       return parsePreviewIntent(row);
+    },
+    async replace(intent) {
+      const safe = parsePreviewIntent(intent);
+      try {
+        await withStore(OUTBOX_STORE_NAME, 'readwrite', (store) => new Promise((resolve, reject) => {
+          const getRequest = store.get(safe.intentId);
+          getRequest.onerror = () => reject(new Error('PREVIEW_OUTBOX_REPLACE_FAILED'));
+          getRequest.onsuccess = () => {
+            if (getRequest.result === undefined) {
+              reject(new Error('PREVIEW_OUTBOX_REPLACE_MISSING'));
+              return;
+            }
+            let existing;
+            try { existing = parsePreviewIntent(getRequest.result); } catch {
+              reject(new Error('PREVIEW_OUTBOX_REPLACE_FAILED'));
+              return;
+            }
+            if (existing.kind !== safe.kind) {
+              reject(new Error('PREVIEW_OUTBOX_REPLACE_KIND_MISMATCH'));
+              return;
+            }
+            const putRequest = store.put(safe);
+            putRequest.onerror = () => reject(new Error('PREVIEW_OUTBOX_REPLACE_FAILED'));
+            putRequest.onsuccess = () => resolve(safe);
+          };
+        }));
+      } catch (error) {
+        if (error?.message === 'PREVIEW_OUTBOX_REPLACE_MISSING' || error?.message === 'PREVIEW_OUTBOX_REPLACE_KIND_MISMATCH') throw error;
+        throw new Error('PREVIEW_OUTBOX_REPLACE_FAILED');
+      }
+      return safe;
     },
     listPending,
     async countPending() {

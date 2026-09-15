@@ -29,6 +29,8 @@ try {
   await mountSyntheticPreviewExpenseWriter();
   await mountSyntheticPreviewIncomeWriter();
   await mountSyntheticPreviewTransferWriter();
+  const { mountSyntheticPreviewWriterQueue } = await import('./preview-writer-queue.mjs');
+  await mountSyntheticPreviewWriterQueue();
   const { mountSyntheticPreviewExpenseEdit } = await import('./preview-expense-edit.mjs');
   await mountSyntheticPreviewExpenseEdit();
   const { mountSyntheticPreviewTransactionVoid } = await import('./preview-transaction-void.mjs');

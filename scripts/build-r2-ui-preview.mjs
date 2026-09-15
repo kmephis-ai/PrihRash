@@ -22,6 +22,7 @@ const files = [
   'preview-transaction-void.mjs',
   'preview-writer.mjs',
   'preview-writer-outbox.mjs',
+  'preview-writer-queue.mjs',
   'preview-writer.css',
   'reader-cache.mjs',
   'reader-filter-options-view.mjs',
