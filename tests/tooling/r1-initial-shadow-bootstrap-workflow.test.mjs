@@ -81,31 +81,30 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /exit "\$invoke_status"/);
   assert.match(workflow, /runtimeCode:/);
   assert.match(workflow, /REFERENCE_APPLICATION_YDB_DATA_FAILED/);
-  assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED/);
-  assert.match(workflow, /outputShape:/);
-  assert.match(workflow, /\$code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"/);
-  assert.match(workflow, /\^STDOUT_\(EMPTY\|TEXT\|JSON_OBJECT\|JSON_ARRAY\|JSON_STRING\|JSON_NUMBER\|JSON_BOOLEAN\|JSON_NULL\)__STDERR_/);
-  assert.match(workflow, /then \.outputShape/);
-  assert.match(workflow, /transportClass:/);
-  for (const transportClass of [
-    'EMPTY',
-    'AUTH',
-    'NOT_FOUND',
-    'RATE_LIMIT',
-    'DEADLINE',
-    'UNAVAILABLE',
-    'INVALID_REQUEST',
-    'FAILED_PRECONDITION',
-    'INTERNAL',
-    'OTHER',
+  assert.match(workflow, /INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED/);
+  assert.match(workflow, /httpStatus:/);
+  assert.match(workflow, /functionError:/);
+  for (const httpStatus of [
+    'HTTP_400',
+    'HTTP_403',
+    'HTTP_404',
+    'HTTP_413',
+    'HTTP_429',
+    'HTTP_500',
+    'HTTP_502',
+    'HTTP_503',
+    'HTTP_504',
+    'HTTP_4XX_OTHER',
+    'HTTP_5XX_OTHER',
+    'HTTP_OTHER',
   ]) {
-    assert.match(workflow, new RegExp(`"${transportClass}"`));
+    assert.match(workflow, new RegExp(`"${httpStatus}"`));
   }
+  assert.match(workflow, /\.functionError \| IN\("PRESENT", "ABSENT"\)/);
   assert.match(
     workflow,
-    /\$code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"[\s\S]*?\(\.transportClass \| type\) == "string"[\s\S]*?\(\.transportClass \| IN\(/,
+    /\$code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"[\s\S]*?\(\.httpStatus \| type\) == "string"[\s\S]*?\(\.functionError \| type\) == "string"/,
   );
-  assert.match(workflow, /then \.transportClass/);
   assert.match(workflow, /Publish enum-only bootstrap evidence/);
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-evidence-\$\{\{ github\.run_id \}\}/);
@@ -118,8 +117,8 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(projection, /status: \$status/);
   assert.match(projection, /code: \$code/);
   assert.match(projection, /runtimeCode:/);
-  assert.match(projection, /outputShape:/);
-  assert.match(projection, /transportClass:/);
+  assert.match(projection, /httpStatus:/);
+  assert.match(projection, /functionError:/);
   assert.doesNotMatch(projection, /\.(?:stdout|stderr|message|payload|details)\b/i);
 });
 
@@ -139,17 +138,23 @@ test('bootstrap package exports only the dedicated handler and removes scheduled
   assert.match(verifier, /ydbJsV6SchemaBootstrapClient\.js/);
 });
 
-test('bootstrap invoker is retry-zero, exact-tag and exposes only bounded privacy-safe invoke failure taxonomy', async () => {
+test('bootstrap invoker uses one private HTTPS raw invocation and exposes only bounded privacy-safe HTTP failure taxonomy', async () => {
   const invoker = await text(INVOKER);
 
   assert.match(invoker, /BOOTSTRAP_TAG = 'r1-initial-bootstrap'/);
-  assert.match(invoker, /'--retry', '0'/);
-  assert.match(invoker, /'--no-user-output'/);
+  assert.match(invoker, /FUNCTIONS_ORIGIN = 'https:\/\/functions\.yandexcloud\.net'/);
+  assert.match(invoker, /url\.searchParams\.set\('tag', BOOTSTRAP_TAG\)/);
+  assert.match(invoker, /url\.searchParams\.set\('integration', 'raw'\)/);
+  assert.match(invoker, /method: 'POST'/);
+  assert.match(invoker, /Authorization: `Bearer \${iamToken}`/);
+  assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED/);
+  assert.match(invoker, /HTTP_502/);
+  assert.match(invoker, /x-function-error/);
+  assert.match(invoker, /if \(response\.status !== 200\)/);
+  assert.match(invoker, /response\.body\.cancel/);
   assert.match(invoker, /if \(result\.status !== 'PASS'\) process\.exitCode = 2/);
-  assert.match(invoker, /YANDEX_FUNCTION_TIMEOUT_MARKER = 'Function execution timeout \(504\)'/);
-  assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT/);
-  assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED/);
-  assert.doesNotMatch(invoker, /SAFE_FAILURE_CODE_BY_MARKER|new Map\s*\(/);
+  assert.doesNotMatch(invoker, /serverless['"],\s*['"]function['"],\s*['"]invoke/);
+  assert.doesNotMatch(invoker, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED|transportClass|outputShape/);
 });
 
 test('runbook keeps Google authoritative, forbids blind retry/timer and requires retirement after committed reconciliation', async () => {
