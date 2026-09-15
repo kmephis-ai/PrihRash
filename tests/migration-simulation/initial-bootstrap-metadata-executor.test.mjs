@@ -99,7 +99,15 @@ function expectedRows(input, manifestWrite) {
   };
 }
 
-function fakeTransport({ admissionBefore = [], snapshot = [], run = [], manifest = [], admissionAfter = [] }) {
+function fakeTransport({
+  admissionBefore = [],
+  snapshot = [],
+  run = [],
+  manifest = [],
+  admissionAfter = [],
+  failRunRead = false,
+  failPostAdmissionRead = false,
+}) {
   const events = [];
   let admissionReads = 0;
   return {
@@ -116,6 +124,9 @@ function fakeTransport({ admissionBefore = [], snapshot = [], run = [], manifest
             }
             if (statement.text.includes("FROM migration_runs WHERE state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
               events.push('admission');
+              if (admissionReads > 0 && failPostAdmissionRead) {
+                throw new Error('synthetic post-admission read failure');
+              }
               const rows = admissionReads === 0 ? admissionBefore : admissionAfter;
               admissionReads += 1;
               return { rows };
@@ -123,6 +134,7 @@ function fakeTransport({ admissionBefore = [], snapshot = [], run = [], manifest
             events.push('readback');
             if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: snapshot };
             if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: manifest };
+            if (failRunRead) throw new Error('synthetic run read failure');
             return { rows: run };
           },
         };
@@ -297,6 +309,49 @@ test('run read-back mismatch rolls back instead of accepting non-STAGING metadat
 
   await expectExecutorError(
     'RUN_READBACK_MISMATCH',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+
+test('run read transport failure fails closed at the run readback seam', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [expected.manifest],
+    admissionAfter: [expected.admission],
+    failRunRead: true,
+  });
+
+  await expectExecutorError(
+    'RUN_READBACK_MISMATCH',
+    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
+  );
+  assert.equal(fake.events.at(-1), 'rollback');
+});
+
+test('post-admission transport failure fails closed at the claim readback seam', async () => {
+  const input = candidate();
+  const writes = prepareInitialBootstrapMetadataWrites(input);
+  const manifestWrite = identityWrite(input);
+  const expected = expectedRows(input, manifestWrite);
+  const fake = fakeTransport({
+    admissionBefore: [],
+    snapshot: [expected.snapshot],
+    run: [expected.run],
+    manifest: [expected.manifest],
+    admissionAfter: [expected.admission],
+    failPostAdmissionRead: true,
+  });
+
+  await expectExecutorError(
+    'CLAIM_READBACK_MISMATCH',
     () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');

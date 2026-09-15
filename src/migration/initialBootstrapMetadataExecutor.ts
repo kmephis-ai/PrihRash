@@ -194,7 +194,13 @@ export async function executeInitialBootstrapMetadataWrites(
       throw new InitialBootstrapMetadataExecutorError('SNAPSHOT_READBACK_MISMATCH');
     }
 
-    const runResult = await transaction.execute<RunReadRow>(runRead);
+    let runResult;
+    try {
+      runResult = await transaction.execute<RunReadRow>(runRead);
+    } catch {
+      // A transport rejection leaves no trustworthy run readback; fail closed at the same seam.
+      throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
+    }
     if (runResult.rows.length !== 1 || !runMatches(runResult.rows[0] ?? {}, candidate)) {
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
     }
@@ -218,9 +224,14 @@ export async function executeInitialBootstrapMetadataWrites(
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READBACK_MISMATCH');
     }
 
-    const postAdmission = parseScheduledSyncAdmissionEvidence(
-      (await transaction.execute<MigrationRunEvidenceRow>(admissionRead)).rows,
-    );
+    let postAdmissionRows;
+    try {
+      postAdmissionRows = (await transaction.execute<MigrationRunEvidenceRow>(admissionRead)).rows;
+    } catch {
+      // A transport rejection leaves no trustworthy claim readback; fail closed at the same seam.
+      throw new InitialBootstrapMetadataExecutorError('CLAIM_READBACK_MISMATCH');
+    }
+    const postAdmission = parseScheduledSyncAdmissionEvidence(postAdmissionRows);
     const claimedRun = postAdmission.incompleteRuns[0];
     if (
       postAdmission.committedBaselineRun !== null
