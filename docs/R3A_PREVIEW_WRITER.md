@@ -69,6 +69,7 @@ Outbox принимает только strict known union:
 CREATE_EXPENSE / PENDING
 CREATE_INCOME / PENDING
 CREATE_TRANSFER / PENDING
+VOID_TRANSACTION / PENDING
 ```
 
 Unknown kind/schema/state и malformed durable rows fail-closed и не считаются валидными pending intents. Browser ничего не normalizes/fixes при чтении повреждённого evidence.
@@ -145,6 +146,24 @@ TRANSFER durable intent:
 
 `category` в TRANSFER payload отсутствует. Non-null `flowKind`, одинаковые source/destination accounts или лишние поля считаются malformed durable evidence и fail-closed.
 
+VOID durable intent использует тот же IndexedDB outbox, но не является create idempotency envelope:
+
+```text
+{
+  schemaVersion: 1,
+  intentId: canonical lowercase UUID,
+  kind: VOID_TRANSACTION,
+  state: PENDING,
+  createdAt: timestamp,
+  payload: {
+    transactionId: canonical lowercase UUID,
+    expectedVersion: positive safe integer
+  }
+}
+```
+
+`intentId` — только локальная identity outbox row. Она не передаётся в public VOID API и не превращается в придуманный server idempotency key. Durable read сохраняет exact `transactionId`/`expectedVersion`; malformed UUID/version/envelope fail-closed. Shared outbox поддерживает exact-key `enqueue/read/list/acknowledge` без повышения IndexedDB version.
+
 ## Local drafts
 
 Незавершённая форма хранится отдельно от `PENDING` intent. EXPENSE, INCOME и TRANSFER используют разные keys в одном `drafts` store:
@@ -170,7 +189,8 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
 - EXPENSE имеет отдельные application/API/idempotency и injected ACK-delivery proofs;
 - INCOME также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
 - TRANSFER также имеет отдельные application/idempotency, minimal public API envelope и injected ACK-delivery proofs;
-- реальный browser HTTP sender для EXPENSE/INCOME/TRANSFER всё ещё не подключён;
+- VOID имеет application/public API proof и отдельный local durable intent + injected delivery proof; local `intentId` не является server idempotency key;
+- реальный browser HTTP sender для EXPENSE/INCOME/TRANSFER/VOID всё ещё не подключён;
 - «сохранено локально» не означает «записано в YDB» или «синхронизировано»;
 - production `YDB_WRITE_ENABLED=true` остаётся запрещён до CUTOVER GATE;
 - R1 #302 и production R2 auth/YDB wiring не обходятся.
@@ -191,6 +211,20 @@ EXPENSE/INCOME/TRANSFER local save path не содержит `fetch`, Reader AP
 INCOME использует отдельный type-specific preview delivery module с теми же crash/retry invariants, но с `toAccountId` и injected `sendIncomeCreate(request)`. Он не рефакторит доказанный EXPENSE path: malformed/mismatched ACK не удаляет local intent, valid `CREATED|REPLAY` ACK предшествует `acknowledge()`, а local delete failure оставляет тот же idempotency key для безопасного `REPLAY` при следующем явном вызове. Automatic retry cadence/backoff здесь не определяются.
 
 TRANSFER использует отдельный type-specific preview delivery module с injected `sendTransferCreate(request)`. Request содержит только `idempotencyKey`, `occurredOn`, `amountMinor`, `currency=RUB`, exact `fromAccountId`, exact `toAccountId`, `description`, `note`: local labels/metadata и `flowKind=null` в transport envelope не передаются. Valid `CREATED|REPLAY` ACK проверяется до exact-key `acknowledge()`, sender/local-ACK failures санитизируются, а crash после server commit безопасно завершается повтором того же key и `REPLAY`. Automatic retry cadence/backoff здесь не определяются.
+
+## VOID outbox delivery / ACK boundary
+
+Preview-only `preview-transaction-void-delivery.mjs` связывает `VOID_TRANSACTION / PENDING` с уже доказанным public VOID API v1 без HTTP/provider binding.
+
+- outbound request содержит ровно `{transactionId, expectedVersion}`; local `intentId` наружу не передаётся;
+- sender является injected `sendTransactionVoid(request)` port;
+- `VOIDED` terminal только при exact transaction id и `version = expectedVersion + 1`;
+- `ALREADY_VOIDED` terminal только при exact transaction id и `version = expectedVersion`;
+- только эти два validated satisfied outcome разрешают `acknowledge(intentId)` и удаление exact local row;
+- `VERSION_CONFLICT` с exact transaction id и positive `currentVersion != expectedVersion` является normal **non-terminal** result: intent остаётся `PENDING` для будущего explicit conflict UX;
+- malformed/mismatched ACK, sender failure и local acknowledge failure сохраняют intent; diagnostics санитизируются;
+- если server commit мог произойти, но local ACK не удался, последующий `VERSION_CONFLICT` **не** считается доказательством предыдущего commit и не очищает outbox;
+- automatic conflict resolution, current-read reconciliation, retry cadence/backoff и browser confirmation здесь не определяются.
 
 ## EXPENSE optimistic edit/conflict preview
 
@@ -218,6 +252,6 @@ Malformed/mismatched current-read или ACK оставляет локальны
 - automatic retry/sync scheduler;
 - real production browser edit/current-record transport;
 - INCOME/TRANSFER edit;
-- browser/local VOID confirmation, outbox и delivery;
+- browser VOID confirmation и user-facing conflict resolution/current-read reconciliation;
 - FinancialPeriod membership;
 - provider deployment или authority cutover.

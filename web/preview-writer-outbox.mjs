@@ -25,6 +25,10 @@ function invalidTransferInput() {
   throw new Error('INVALID_PREVIEW_TRANSFER_INPUT');
 }
 
+function invalidVoidInput() {
+  throw new Error('INVALID_PREVIEW_VOID_INPUT');
+}
+
 function invalidRecord() {
   throw new Error('INVALID_PREVIEW_OUTBOX_RECORD');
 }
@@ -55,6 +59,11 @@ function canonicalDate(value, fail = invalidExpenseInput) {
     || parsed.getUTCMonth() !== month - 1
     || parsed.getUTCDate() !== day
   ) fail();
+  return value;
+}
+
+function positiveSafeVersion(value, fail = invalidRecord) {
+  if (!Number.isSafeInteger(value) || value <= 0) fail();
   return value;
 }
 
@@ -272,6 +281,43 @@ export function createPreviewTransferIntent(input, {
   });
 }
 
+export function createPreviewVoidIntent(input, {
+  randomUuid = () => globalThis.crypto?.randomUUID?.(),
+  now = () => new Date().toISOString(),
+} = {}) {
+  if (!exactKeys(input, ['transactionId', 'expectedVersion'])) invalidVoidInput();
+  const { intentId, createdAt } = createIntentBase(input, { randomUuid, now, fail: invalidVoidInput });
+  return parsePreviewVoidIntent({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'VOID_TRANSACTION',
+    state: 'PENDING',
+    createdAt,
+    payload: {
+      transactionId: canonicalUuid(input.transactionId, invalidVoidInput),
+      expectedVersion: positiveSafeVersion(input.expectedVersion, invalidVoidInput),
+    },
+  });
+}
+
+export function parsePreviewVoidIntent(value) {
+  if (!exactKeys(value, ['schemaVersion', 'intentId', 'kind', 'state', 'createdAt', 'payload'])) invalidRecord();
+  if (value.schemaVersion !== RECORD_SCHEMA_VERSION || value.kind !== 'VOID_TRANSACTION' || value.state !== 'PENDING') invalidRecord();
+  const intentId = canonicalUuid(value.intentId, invalidRecord);
+  const createdAt = canonicalTimestamp(value.createdAt, invalidRecord);
+  if (!exactKeys(value.payload, ['transactionId', 'expectedVersion'])) invalidRecord();
+  const transactionId = canonicalUuid(value.payload.transactionId, invalidRecord);
+  const expectedVersion = positiveSafeVersion(value.payload.expectedVersion, invalidRecord);
+  return Object.freeze({
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    intentId,
+    kind: 'VOID_TRANSACTION',
+    state: 'PENDING',
+    createdAt,
+    payload: Object.freeze({ transactionId, expectedVersion }),
+  });
+}
+
 export function parsePreviewExpenseIntent(value) {
   if (!exactKeys(value, ['schemaVersion', 'intentId', 'kind', 'state', 'createdAt', 'payload'])) invalidRecord();
   if ((value.schemaVersion !== RECORD_SCHEMA_VERSION && value.schemaVersion !== EXPENSE_RECORD_SCHEMA_VERSION)
@@ -377,6 +423,7 @@ export function parsePreviewIntent(value) {
   if (value?.kind === 'CREATE_EXPENSE') return parsePreviewExpenseIntent(value);
   if (value?.kind === 'CREATE_INCOME') return parsePreviewIncomeIntent(value);
   if (value?.kind === 'CREATE_TRANSFER') return parsePreviewTransferIntent(value);
+  if (value?.kind === 'VOID_TRANSACTION') return parsePreviewVoidIntent(value);
   invalidRecord();
 }
 
@@ -614,6 +661,17 @@ export function createIndexedDbPreviewOutbox(indexedDb = globalThis.indexedDB) {
         throw new Error('PREVIEW_OUTBOX_WRITE_FAILED');
       }
       return safe;
+    },
+    async read(intentId) {
+      const safeIntentId = canonicalUuid(intentId, invalidRecord);
+      let row;
+      try {
+        row = await withStore(OUTBOX_STORE_NAME, 'readonly', (store) => requestResult(store.get(safeIntentId)));
+      } catch {
+        throw new Error('PREVIEW_OUTBOX_READ_FAILED');
+      }
+      if (row === undefined) return null;
+      return parsePreviewIntent(row);
     },
     listPending,
     async countPending() {
