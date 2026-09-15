@@ -48,6 +48,12 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /NOT_SINGLE_MERGED_MAIN_PR/);
   assert.match(workflow, /parents \| length\) == 1/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$interrupted_run_id/);
+  assert.match(workflow, /interrupted_run_id="\$\(jq -r --arg sha/);
+  assert.match(workflow, /artifact_id="\$\(jq -r --arg name/);
+  assert.doesNotMatch(workflow, /\] \\\n\s*\| sort_by/);
+  assert.doesNotMatch(workflow, /\] \\\n\s*\| if length/);
+  assert.doesNotMatch(workflow, /<<<"\$existing" \|\| true/);
+  assert.doesNotMatch(workflow, /<<<"\$artifacts" \|\| true/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_NON_SUCCESS/);
   assert.match(workflow, /bootstrapInvokeStep == "skipped"/);
   assert.match(workflow, /postRecoveryVerdict == null/);
