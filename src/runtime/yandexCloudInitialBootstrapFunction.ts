@@ -15,6 +15,7 @@ import {
   runInitialBootstrapReferenceAwareJobFromEnvironment,
   type InitialBootstrapMetadataFailureCode,
   type InitialBootstrapReferenceAwareRuntimeErrorCode,
+  type InitialBootstrapYdbDataFailureCode,
 } from './initialBootstrapReferenceAwareJob.js';
 import {
   InitialBootstrapJobError,
@@ -73,6 +74,7 @@ export type YandexInitialBootstrapFunctionResult =
       runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode;
       applicationPhase?: InitialBootstrapApplicationPhase | null;
       metadataFailureCode?: InitialBootstrapMetadataFailureCode | null;
+      ydbDataFailureCode?: InitialBootstrapYdbDataFailureCode | null;
     }>;
 
 export interface YandexInitialBootstrapJob {
@@ -125,15 +127,19 @@ function runtimeFailure(
   runtimeCode?: InitialBootstrapReferenceAwareRuntimeErrorCode,
   applicationPhase: InitialBootstrapApplicationPhase | null = null,
   metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
+  ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
 ): Readonly<YandexInitialBootstrapFunctionResult> {
   if (runtimeCode === undefined) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
-  return Object.freeze({
+  const result = {
     status: 'FAIL' as const,
     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED' as const,
     runtimeCode,
     applicationPhase,
     metadataFailureCode,
-  });
+  };
+  return ydbDataFailureCode === null
+    ? Object.freeze(result)
+    : Object.freeze({ ...result, ydbDataFailureCode });
 }
 
 function validationBlocker(value: unknown): Readonly<YandexInitialBootstrapValidationBlocker> | null {
@@ -238,7 +244,12 @@ export async function executeYandexInitialBootstrapFunction(
       return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
     }
     if (error instanceof InitialBootstrapReferenceAwareRuntimeError) {
-      return runtimeFailure(error.code, error.applicationPhase, error.metadataFailureCode);
+      return runtimeFailure(
+        error.code,
+        error.applicationPhase,
+        error.metadataFailureCode,
+        error.ydbDataFailureCode,
+      );
     }
     if (error instanceof InitialBootstrapJobError) {
       if (isConfigError(error.code)) return failure('INITIAL_BOOTSTRAP_CONFIG_INVALID');
