@@ -16,7 +16,7 @@ jobs:
       - name: Checkout transport branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Build and publish exact verified tree
+      - name: Build and publish exact verified blobs
         shell: bash
         run: |
           set -euo pipefail
@@ -32,8 +32,22 @@ jobs:
           tree="$(git write-tree)"
           test "$tree" = '94f7c148c762c17050c8bd22a60a2d85ac5b8c10'
 
-          tag='transport-r1-453-tree-94f7-20260915'
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git tag -a "$tag" "$tree" -m 'transport verified R1 manifest readback diagnostic tree'
-          git push origin "refs/tags/$tag"
+
+          publish_blob() {
+            path="$1"
+            expected="$2"
+            tag="$3"
+            blob="$(git rev-parse ":$path")"
+            test "$blob" = "$expected"
+            git tag -a "$tag" "$blob" -m "transport verified R1 blob: $path"
+            git push origin "refs/tags/$tag"
+          }
+
+          publish_blob '.github/workflows/r1-initial-shadow-bootstrap.yml' '449a4773a1bbe82e9035f02c3209a07447530e42' 'transport-r1-453-blob-workflow-449a477-20260915'
+          publish_blob 'scripts/invoke-yandex-initial-bootstrap.mjs' '671b65e8d07f9a1d6d8d4819c92329935612d50c' 'transport-r1-453-blob-invoker-671b65e-20260915'
+          publish_blob 'src/migration/initialBootstrapMetadataExecutor.ts' 'f2a1720ed6a6da434e3d5041e61eef50df0e2786' 'transport-r1-453-blob-executor-f2a1720-20260915'
+          publish_blob 'tests/integration/yandex-initial-bootstrap-invoker.test.mjs' '732c6a4f82ab8700ee541148d517e39af8543f31' 'transport-r1-453-blob-invoker-test-732c6a4-20260915'
+          publish_blob 'tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs' '4d131af79f7ed6babf269a8cd8e8584bd23b7bd1' 'transport-r1-453-blob-metadata-test-4d131af-20260915'
+          publish_blob 'tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs' 'dd865c8c0c66173488dd0ed120ea87f3f69c7d22' 'transport-r1-453-blob-tooling-test-dd865c8-20260915'
