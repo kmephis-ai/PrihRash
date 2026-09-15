@@ -1,0 +1,39 @@
+name: Transport R1 453 manifest readback tree
+
+on:
+  push:
+    branches:
+      - transport/r1-453-manifest-readback-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-tree:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and publish exact verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$RUNNER_TEMP/r1-453-manifest-readback.patch"
+          cat transport/r1-453-manifest-readback/chunk.* > "$patch"
+          printf '%s  %s\n' '18a8869ba900101cdff0dafeb5cb4ea9bde5fcc2bd14535cf3d4ab2a62e722cb' "$patch" | sha256sum --check --status
+
+          git fetch --no-tags origin main
+          git checkout --detach 668bdfa32306bffc7e0a7b2ebb4c4c840df45113
+          git apply --check "$patch"
+          git apply --index "$patch"
+
+          tree="$(git write-tree)"
+          test "$tree" = '94f7c148c762c17050c8bd22a60a2d85ac5b8c10'
+
+          tag='transport-r1-453-tree-94f7-20260915'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$tag" "$tree" -m 'transport verified R1 manifest readback diagnostic tree'
+          git push origin "refs/tags/$tag"
