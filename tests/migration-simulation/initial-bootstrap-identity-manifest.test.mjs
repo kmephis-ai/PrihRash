@@ -6,6 +6,7 @@ import {
   InitialBootstrapIdentityManifestError,
   buildInitialBootstrapIdentityManifest,
   prepareInitialBootstrapIdentityManifestWrite,
+  parseInitialBootstrapIdentityManifestRows,
   recoverInitialBootstrapIdentities,
 } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 
@@ -188,6 +189,36 @@ test('restart after durable claim recovers exactly the same source and transacti
   });
 });
 
+test('manifest readback parser exposes structural failure class without row values', async () => {
+  const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
+  const valid = readbackRow(write);
+  const validBindings = valid.bindings;
+  const cases = [
+    ['MALFORMED_ROW_CARDINALITY', [valid, valid]],
+    ['MALFORMED_BINDINGS_PAYLOAD', [{ ...valid, bindings: [] }]],
+    ['MALFORMED_BINDING_ENTRY', [{
+      ...valid,
+      bindings: { ...validBindings, bindings: [{ ...validBindings.bindings[0], source_record_id: null }, validBindings.bindings[1]] },
+    }]],
+    ['MALFORMED_BINDING_SET', [{
+      ...valid,
+      bindings: { ...validBindings, bindings: [validBindings.bindings[0], { ...validBindings.bindings[1], source_record_id: SOURCE_ID_1 }] },
+    }]],
+    ['MALFORMED_BINDING_COUNT', [{ ...valid, binding_count: '2' }]],
+    ['MALFORMED_SNAPSHOT_ROW_COUNT', [{ ...valid, snapshot_row_count: '2' }]],
+    ['MALFORMED_RUN_STATE', [{ ...valid, run_state: null }]],
+    ['MALFORMED_MIGRATION_RUN_ID', [valid], 'not-a-uuid'],
+    ['MALFORMED_SOURCE_SNAPSHOT_ID', [{ ...valid, source_snapshot_id: 7 }]],
+    ['MALFORMED_SOURCE_SNAPSHOT_DIGEST', [{ ...valid, source_snapshot_digest: null }]],
+    ['MALFORMED_RUN_SNAPSHOT_DIGEST', [{ ...valid, run_snapshot_digest: null }]],
+    ['MALFORMED_SNAPSHOT_DIGEST', [{ ...valid, snapshot_digest: null }]],
+  ];
+
+  for (const [code, rows, migrationRunId = RUN_ID] of cases) {
+    await expectManifestError(code, async () => parseInitialBootstrapIdentityManifestRows(migrationRunId, rows));
+  }
+});
+
 test('resume fails closed when current observation no longer matches the claimed manifest', async () => {
   const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
   await expectManifestError(
@@ -210,7 +241,7 @@ test('contradictory durable bindings are rejected instead of choosing an identit
   malformedBindings.bindings[1].source_record_id = SOURCE_ID_1;
 
   await expectManifestError(
-    'MALFORMED_MANIFEST_ROW',
+    'MALFORMED_BINDING_SET',
     () => recoverInitialBootstrapIdentities(
       reader([readbackRow(write, { bindings: malformedBindings })]),
       RUN_ID,

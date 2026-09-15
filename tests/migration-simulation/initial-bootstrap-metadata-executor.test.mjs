@@ -286,7 +286,7 @@ test('missing identity manifest readback preserves the privacy-safe not-found pa
   assert.equal(fake.events.at(-1), 'rollback');
 });
 
-test('malformed identity manifest readback preserves the privacy-safe manifest parser code', async () => {
+test('malformed identity manifest binding count preserves the exact privacy-safe parser code', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
   const manifestWrite = identityWrite(input);
@@ -300,7 +300,7 @@ test('malformed identity manifest readback preserves the privacy-safe manifest p
   });
 
   await expectManifestError(
-    'MALFORMED_MANIFEST_ROW',
+    'MALFORMED_BINDING_COUNT',
     () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
   );
   assert.equal(fake.events.at(-1), 'rollback');
