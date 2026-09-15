@@ -47,6 +47,7 @@ type SdkSurface = Readonly<Record<string, unknown>>;
 
 interface YdbSqlQueryBuilder extends PromiseLike<unknown> {
   parameter(name: string, value: unknown): YdbSqlQueryBuilder;
+  timeout(timeoutMs: number): YdbSqlQueryBuilder;
 }
 
 export interface YdbSqlExecutor {
@@ -63,6 +64,7 @@ export interface YdbSqlClient extends YdbSqlExecutor {
 interface YdbJsCommonDataClientConfig {
   readonly connectionString: string;
   readonly poolMaxSize?: number;
+  readonly readTimeoutMs?: number;
 }
 
 export interface YdbJsDataClientConfig extends YdbJsCommonDataClientConfig {
@@ -163,6 +165,7 @@ async function executeStatement<Row>(
   executor: YdbSqlExecutor,
   statement: Readonly<YdbStatement>,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
+  timeoutMs?: number,
 ): Promise<YdbQueryResult<Row>> {
   try {
     let query = executor(statement.text);
@@ -171,6 +174,10 @@ async function executeStatement<Row>(
     }
     for (const [name, parameter] of Object.entries(statement.parameters)) {
       query = query.parameter(name, mapParameter(parameter));
+    }
+    if (timeoutMs !== undefined) {
+      if (typeof query.timeout !== 'function') fail('SDK_SHAPE_INVALID');
+      query = query.timeout(timeoutMs);
     }
     const resultSets = await query;
     const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
@@ -186,12 +193,19 @@ async function executeStatement<Row>(
 export function createYdbJsV6DataTransport(
   sql: YdbSqlClient,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
+  options: Readonly<{ readTimeoutMs?: number }> = {},
 ): YdbTransport {
   if (typeof sql !== 'function' || typeof sql.begin !== 'function') fail('SDK_SHAPE_INVALID');
+  if (
+    options.readTimeoutMs !== undefined
+    && (!Number.isSafeInteger(options.readTimeoutMs) || options.readTimeoutMs <= 0)
+  ) {
+    fail('CLIENT_CONFIG_INVALID');
+  }
 
   return Object.freeze({
     executeRead<Row>(statement: Readonly<YdbStatement>) {
-      return executeStatement<Row>(sql, statement, mapParameter);
+      return executeStatement<Row>(sql, statement, mapParameter, options.readTimeoutMs);
     },
     async serializableReadWrite<T>(work: (transaction: { execute<Row>(statement: YdbStatement): Promise<YdbQueryResult<Row>> }) => Promise<T>) {
       let bodyCompleted = false;
@@ -231,6 +245,7 @@ function validateCommonClientConfig(config: Readonly<YdbJsCommonDataClientConfig
     || config.connectionString.length === 0
     || config.connectionString !== config.connectionString.trim()
     || (config.poolMaxSize !== undefined && (!Number.isSafeInteger(config.poolMaxSize) || config.poolMaxSize <= 0))
+    || (config.readTimeoutMs !== undefined && (!Number.isSafeInteger(config.readTimeoutMs) || config.readTimeoutMs <= 0))
   ) {
     fail('CLIENT_CONFIG_INVALID');
   }
@@ -263,7 +278,11 @@ async function createDataClientWithCredentials(
   const rawSql = queryModule.query(driver, { poolOptions: { maxSize: config.poolMaxSize ?? 4 } });
   const sql = rawSql as unknown as YdbSqlClient;
   const sdk: SdkSurface = Object.freeze({ ...primitive, Optional: optional.Optional });
-  const transport = createYdbJsV6DataTransport(sql, createYdbJsV6ParameterMapper(sdk));
+  const transport = createYdbJsV6DataTransport(
+    sql,
+    createYdbJsV6ParameterMapper(sdk),
+    { readTimeoutMs: config.readTimeoutMs },
+  );
 
   return Object.freeze({
     transport,
