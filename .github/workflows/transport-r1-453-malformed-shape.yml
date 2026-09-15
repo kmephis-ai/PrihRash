@@ -1,0 +1,55 @@
+name: Transport R1 453 malformed shape blobs
+
+on:
+  push:
+    branches:
+      - transport/r1-453-malformed-shape-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-blobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build and publish exact verified blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch='transport/r1-453-malformed-shape/patch.diff'
+          printf '%s  %s\n' '3b7701e544467d7f444cfa85d7bb51f43d19a3f691a0b23eca1ada7077b17ea0' "$patch" | sha256sum --check --status
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = '08cb2d7a06cf929b5ae885d03c875d5baba8ad44'
+          git checkout --detach 08cb2d7a06cf929b5ae885d03c875d5baba8ad44
+          git apply --check "$GITHUB_WORKSPACE/$patch"
+          git apply --index "$GITHUB_WORKSPACE/$patch"
+
+          tree="$(git write-tree)"
+          test "$tree" = 'f60a0e1dc7c5825e28cc339ce913d42167d18ca9'
+
+          declare -A expected=(
+            ['.github/workflows/r1-initial-shadow-bootstrap.yml']='4fcb6c8564dafef112ba921f33c368dc17a52c7b'
+            ['scripts/invoke-yandex-initial-bootstrap.mjs']='20906721d69f80ac6de1a8d1bc0b34362be14322'
+            ['src/migration/initialBootstrapIdentityManifest.ts']='c8ca7c50f38af933ef62b48ec4c9837d23da1b5b'
+            ['tests/integration/yandex-initial-bootstrap-invoker.test.mjs']='a0401fa72f195cea02008e752b751eb953e440fa'
+            ['tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs']='28ee84a5e68b268e1109f672135634d46bfe063f'
+            ['tests/migration-simulation/initial-bootstrap-metadata-executor.test.mjs']='6102863e00c4f423a21bb5270f87f24b5830cf70'
+            ['tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs']='252a935925917fac71632c14a4703b51eebf12ae'
+          )
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          n=0
+          for path in "${!expected[@]}"; do
+            blob="$(git hash-object "$path")"
+            test "$blob" = "${expected[$path]}"
+            n=$((n + 1))
+            tag="transport-r1-453-shape-blob-${n}-${blob:0:7}-20260915"
+            git tag -a "$tag" "$blob" -m "transport verified R1 malformed-shape blob: $path"
+            git push origin "refs/tags/$tag"
+          done
