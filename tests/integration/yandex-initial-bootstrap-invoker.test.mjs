@@ -127,6 +127,14 @@ test('safe non-success Function results remain exact bounded output and exit non
       applicationPhase: 'FRESH_CLAIM_WRITE',
       metadataFailureCode: 'IDENTITY_MANIFEST_MALFORMED_BINDINGS_VALUE_MISSING',
     },
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+      applicationPhase: 'REVISION_EVIDENCE_WRITE',
+      metadataFailureCode: null,
+      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    },
   ];
 
   for (const value of values) {
@@ -165,6 +173,32 @@ test('all structural manifest parser diagnostics are accepted only as enum-only 
       runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
       applicationPhase: 'FRESH_CLAIM_WRITE',
       metadataFailureCode,
+    };
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, value);
+  }
+});
+
+test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
+  const codes = [
+    'YDB_TRANSPORT_SDK_SHAPE_INVALID',
+    'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
+    'YDB_TRANSPORT_PARAMETER_TYPE_UNSUPPORTED',
+    'YDB_TRANSPORT_TIMESTAMP_PRECISION_UNSUPPORTED',
+    'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    'YDB_TRANSPORT_CLIENT_CONFIG_INVALID',
+    'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION',
+    'YDB_COMMIT_OUTCOME_UNKNOWN',
+  ];
+  for (const ydbDataFailureCode of codes) {
+    const value = {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+      applicationPhase: 'REVISION_EVIDENCE_WRITE',
+      metadataFailureCode: null,
+      ydbDataFailureCode,
     };
     const result = await runInvoker({ body: JSON.stringify(value) });
     assert.equal(result.exitCode, 2);

@@ -20,6 +20,7 @@ import {
   createYdbJsV6MetadataDataClient,
   YdbJsV6DataTransportError,
   type YdbJsDataClient,
+  type YdbJsV6DataTransportErrorCode,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
   InitialBootstrapApplicationError,
@@ -147,21 +148,29 @@ export type InitialBootstrapMetadataFailureCode =
   | `BOOTSTRAP_PERSISTENCE_${InitialBootstrapPersistenceErrorCode}`
   | `YDB_PARAMETER_${YdbParameterErrorCode}`;
 
+export type InitialBootstrapYdbDataFailureCode =
+  | `YDB_TRANSPORT_${YdbJsV6DataTransportErrorCode}`
+  | 'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION'
+  | 'YDB_COMMIT_OUTCOME_UNKNOWN';
+
 export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
   readonly applicationPhase: InitialBootstrapApplicationPhase | null;
   readonly metadataFailureCode: InitialBootstrapMetadataFailureCode | null;
+  readonly ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null;
 
   constructor(
     code: InitialBootstrapReferenceAwareRuntimeErrorCode,
     applicationPhase: InitialBootstrapApplicationPhase | null = null,
     metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
+    ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
   ) {
     super(code);
     this.name = 'InitialBootstrapReferenceAwareRuntimeError';
     this.code = code;
     this.applicationPhase = applicationPhase;
     this.metadataFailureCode = metadataFailureCode;
+    this.ydbDataFailureCode = ydbDataFailureCode;
   }
 }
 
@@ -177,6 +186,21 @@ function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFa
   }
   if (error instanceof YdbParameterError) {
     return `YDB_PARAMETER_${error.code}`;
+  }
+  return null;
+}
+
+function classifyYdbDataFailureCode(error: unknown): InitialBootstrapYdbDataFailureCode | null {
+  if (error instanceof YdbJsV6DataTransportError) {
+    return `YDB_TRANSPORT_${error.code}`;
+  }
+  if (error instanceof YdbAdapterError) {
+    return error.code === 'WRITE_REQUIRES_TRANSACTION'
+      ? 'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION'
+      : 'YDB_COMMIT_OUTCOME_UNKNOWN';
+  }
+  if (error instanceof YdbCommitOutcomeUnknownError) {
+    return 'YDB_COMMIT_OUTCOME_UNKNOWN';
   }
   return null;
 }
@@ -283,6 +307,7 @@ async function runApplicationSafely(
       classifyApplicationRuntimeError(error, phase),
       phase,
       classifyMetadataFailureCode(error),
+      classifyYdbDataFailureCode(error),
     );
   }
 }

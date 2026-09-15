@@ -165,6 +165,17 @@ const METADATA_FAILURE_CODES = new Set([
   'YDB_PARAMETER_INVALID_JSON_DOCUMENT',
 ]);
 
+const YDB_DATA_FAILURE_CODES = new Set([
+  'YDB_TRANSPORT_SDK_SHAPE_INVALID',
+  'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
+  'YDB_TRANSPORT_PARAMETER_TYPE_UNSUPPORTED',
+  'YDB_TRANSPORT_TIMESTAMP_PRECISION_UNSUPPORTED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+  'YDB_TRANSPORT_CLIENT_CONFIG_INVALID',
+  'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION',
+  'YDB_COMMIT_OUTCOME_UNKNOWN',
+]);
+
 function nonBlank(value) {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
 }
@@ -270,13 +281,18 @@ function parseExactFunctionResult(stdout) {
   if (
     result.status === 'FAIL'
     && result.code === 'INITIAL_BOOTSTRAP_RUNTIME_FAILED'
-    && exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'])
+    && (
+      exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'])
+      || exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'ydbDataFailureCode'])
+    )
     && typeof result.runtimeCode === 'string'
     && REFERENCE_AWARE_RUNTIME_CODES.has(result.runtimeCode)
     && (result.applicationPhase === null
       || (typeof result.applicationPhase === 'string' && APPLICATION_PHASES.has(result.applicationPhase)))
     && (result.metadataFailureCode === null
       || (typeof result.metadataFailureCode === 'string' && METADATA_FAILURE_CODES.has(result.metadataFailureCode)))
+    && (result.ydbDataFailureCode === undefined
+      || (typeof result.ydbDataFailureCode === 'string' && YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)))
   ) {
     return Object.freeze({
       status: 'FAIL',
@@ -284,6 +300,7 @@ function parseExactFunctionResult(stdout) {
       runtimeCode: result.runtimeCode,
       applicationPhase: result.applicationPhase,
       metadataFailureCode: result.metadataFailureCode,
+      ...(result.ydbDataFailureCode === undefined ? {} : { ydbDataFailureCode: result.ydbDataFailureCode }),
     });
   }
   if (

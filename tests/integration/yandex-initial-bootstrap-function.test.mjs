@@ -156,6 +156,23 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
     },
   );
 
+  assert.deepEqual(
+    await execute(new InitialBootstrapReferenceAwareRuntimeError(
+      'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+      'REVISION_EVIDENCE_WRITE',
+      null,
+      'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+      applicationPhase: 'REVISION_EVIDENCE_WRITE',
+      metadataFailureCode: null,
+      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    },
+  );
+
   const untrustedError = Object.assign(new Error('private provider error text'), {
     code: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
   });

@@ -79,6 +79,9 @@ test('initial bootstrap exposes only allowlisted stage-level runtime diagnostics
   assert.match(runtime, /YdbJsV6DataTransportError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
   assert.match(runtime, /YdbAdapterError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
   assert.match(runtime, /YdbCommitOutcomeUnknownError[\s\S]*REFERENCE_APPLICATION_YDB_DATA_FAILED/);
+  assert.match(runtime, /YdbJsV6DataTransportError[\s\S]*YDB_TRANSPORT_\$\{error\.code\}/);
+  assert.match(runtime, /YdbAdapterError[\s\S]*YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION/);
+  assert.match(runtime, /YdbCommitOutcomeUnknownError[\s\S]*YDB_COMMIT_OUTCOME_UNKNOWN/);
   assert.match(runtime, /InitialBootstrapRuntimePrimitiveError[\s\S]*REFERENCE_RUNTIME_STATE_INVALID/);
   assert.match(runtime, /return 'REFERENCE_APPLICATION_RUNTIME_FAILED'/);
 });
@@ -99,6 +102,7 @@ test('application taxonomy stays category-only and keeps generic fallback', () =
 
 test('stage taxonomy does not expose exception text or provider payload through the invoker', () => {
   assert.match(invoker, /exactKeys\(result, \['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'\]\)/);
+  assert.match(invoker, /exactKeys\(result, \['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'ydbDataFailureCode'\]\)/);
   assert.match(invoker, /REFERENCE_AWARE_RUNTIME_CODES\.has\(result\.runtimeCode\)/);
   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
 });
