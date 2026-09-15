@@ -9,6 +9,7 @@ import type { YdbParameter } from './parameters.js';
 
 const TIMESTAMP_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/;
 const textEncoder = new TextEncoder();
+const NO_TRANSACTION_BODY_FAILURE = Symbol('NO_TRANSACTION_BODY_FAILURE');
 
 export const YANDEX_CLOUD_METADATA_AUTH = Object.freeze({
   endpoint: 'http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token',
@@ -194,6 +195,7 @@ export function createYdbJsV6DataTransport(
     },
     async serializableReadWrite<T>(work: (transaction: { execute<Row>(statement: YdbStatement): Promise<YdbQueryResult<Row>> }) => Promise<T>) {
       let bodyCompleted = false;
+      let bodyFailure: unknown | typeof NO_TRANSACTION_BODY_FAILURE = NO_TRANSACTION_BODY_FAILURE;
       try {
         return await sql.begin(
           { isolation: 'serializableReadWrite', idempotent: false },
@@ -203,14 +205,21 @@ export function createYdbJsV6DataTransport(
                 return executeStatement<Row>(transaction, statement, mapParameter);
               },
             });
-            const result = await work(transportTransaction);
-            bodyCompleted = true;
-            return result;
+            try {
+              const result = await work(transportTransaction);
+              bodyCompleted = true;
+              return result;
+            } catch (error) {
+              bodyFailure = error;
+              throw error;
+            }
           },
         );
       } catch (error) {
         if (bodyCompleted) throw new YdbTransportCommitOutcomeUnknownError(error);
-        throw error;
+        if (bodyFailure !== NO_TRANSACTION_BODY_FAILURE) throw bodyFailure;
+        if (error instanceof YdbJsV6DataTransportError) throw error;
+        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_FAILED');
       }
     },
   });
