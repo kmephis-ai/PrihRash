@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 env:
-  SOURCE_SHA: 552df00c4c3384a45a09cfd49981ee5767de35f8
+  SOURCE_SHA: 79509060ba27b14ba9e2c779fadab73f631ed8ae
   SOURCE_BRANCH: main
-  MIRROR_ARTIFACT_NAME: prihrash-main-552df00-r3a523
+  MIRROR_ARTIFACT_NAME: prihrash-main-7950906-r3a523
 
 jobs:
   build-bundle:
