@@ -105,3 +105,13 @@ process.exit(17);
 
   assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'DEADLINE');
 });
+
+
+test('GitHub Actions observability classifies documented Cloud Functions 502 without preserving provider details', async () => {
+  const result = await runInvoker(`
+process.stderr.write('BadGateway 502 ProxyIntegrationError ${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'INTERNAL');
+});

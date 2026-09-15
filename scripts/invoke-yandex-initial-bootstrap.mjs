@@ -328,7 +328,7 @@ function safeTransportClass(stderr) {
     [/(unavailable|service unavailable|connection refused|connection reset|network is unreachable|temporary failure|\b503\b)/, 'UNAVAILABLE'],
     [/(invalid(?:[_ ]?argument)|unknown flag|usage:)/, 'INVALID_REQUEST'],
     [/(failed(?:[_ ]?precondition))/, 'FAILED_PRECONDITION'],
-    [/(internal error|\binternal\b)/, 'INTERNAL'],
+    [/(bad gateway|badgateway|proxyintegrationerror|x-function-error|function invocation error|internal server error|internal error|\b500\b|\b502\b|\binternal\b)/, 'INTERNAL'],
   ];
   return rules.find(([pattern]) => pattern.test(normalized))?.[1] ?? 'OTHER';
 }
