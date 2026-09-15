@@ -1,0 +1,72 @@
+name: Restore exact-source artifact
+description: Restore verified R1 provider packages built by successful canonical CI for the exact source SHA.
+
+inputs:
+  source-sha:
+    description: Exact Git commit SHA to restore.
+    required: true
+  github-token:
+    description: Token with read access to Actions artifacts.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve successful canonical CI run for exact SHA
+      id: ci-run
+      shell: bash
+      env:
+        GH_API_TOKEN: ${{ inputs.github-token }}
+        SOURCE_SHA: ${{ inputs.source-sha }}
+      run: |
+        set -euo pipefail
+        test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+        test "$GITHUB_SHA" = "$SOURCE_SHA"
+        test "$GITHUB_REF" = 'refs/heads/main'
+        test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+
+        tmp="$RUNNER_TEMP/exact-source-artifact"
+        mkdir -p "$tmp"
+        api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+        auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+        curl --fail --silent --show-error \
+          --header "$auth_header" \
+          --header 'Accept: application/vnd.github+json' \
+          "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+          --output "$tmp/ci-runs.json" || {
+            echo 'R1_EXACT_SOURCE_CI_READ_FAILED'
+            exit 1
+          }
+
+        run_id="$(jq -er --arg sha "$SOURCE_SHA" '
+          [.workflow_runs[]
+            | select(
+                .name == "CI"
+                and .head_sha == $sha
+                and .head_branch == "main"
+                and .event == "push"
+                and .conclusion == "success"
+              )]
+          | if length == 1 then .[0].id else error("exact CI run count mismatch") end
+        ' "$tmp/ci-runs.json")" || {
+          echo 'R1_EXACT_SOURCE_CI_NOT_UNIQUE'
+          exit 1
+        }
+        echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
+
+    - name: Download exact-source artifact
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        name: r1-exact-source-${{ inputs.source-sha }}
+        path: .artifacts
+        github-token: ${{ inputs.github-token }}
+        repository: ${{ github.repository }}
+        run-id: ${{ steps.ci-run.outputs.run-id }}
+
+    - name: Verify exact-source artifact
+      shell: bash
+      env:
+        SOURCE_SHA: ${{ inputs.source-sha }}
+      run: |
+        set -euo pipefail
+        node scripts/exact-source-artifact.mjs verify "$SOURCE_SHA"
