@@ -1,0 +1,48 @@
+name: Transport R1 453 entrypoint workflow blob
+
+on:
+  push:
+    branches:
+      - transport/r1-453-entrypoint-workflow-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-blob:
+    if: github.repository == 'kmephis-ai/PrihRash'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EXPECTED_MAIN: 48a51dfba5f566bf1c69ae4204a00fb6877f36e3
+      EXPECTED_BLOB: c135e4cd3d857750bb73653721ff079f17c523a3
+      PATCH_PATH: tools/local-git-mirror/workflow-c135e4.patch
+      TAG_NAME: transport-r1-453-workflow-c135e4-20260915
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and publish exact verified workflow blob
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch origin main --quiet
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+
+          target='.github/workflows/r1-initial-shadow-bootstrap.yml'
+          git checkout "$EXPECTED_MAIN" -- "$target"
+          git apply --check "$PATCH_PATH"
+          git apply "$PATCH_PATH"
+
+          blob="$(git hash-object "$target")"
+          test "$blob" = "$EXPECTED_BLOB"
+          written="$(git hash-object -w "$target")"
+          test "$written" = "$EXPECTED_BLOB"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a "$TAG_NAME" "$written" -m 'transport verified R1 workflow blob'
+          git push origin "refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}"
