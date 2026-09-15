@@ -1,34 +1,30 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, '../..');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-initial-bootstrap.mjs');
+const FETCH_MOCK = resolve(ROOT, 'tests/fixtures/mock-yandex-function-fetch.mjs');
 const FUNCTION_ID = 'synthetic-bootstrap-function-id';
 const PRIVATE_LOOKING = 'private-sheet-id grpcs://private-ydb private-token-value 12345';
 
-async function fakeYc(source) {
-  const directory = await mkdtemp(join(tmpdir(), 'prihrash-fake-bootstrap-nonzero-yc-'));
-  const path = join(directory, 'yc');
-  await writeFile(path, `#!/usr/bin/env node\n${source}\n`, 'utf8');
-  await chmod(path, 0o755);
-  return { directory, path };
-}
-
-async function runInvoker(fakeSource) {
-  const fake = await fakeYc(fakeSource);
+async function runInvoker(body) {
   try {
     await execFileAsync(process.execPath, [INVOKER], {
       cwd: ROOT,
       env: {
         PATH: process.env.PATH,
         HOME: process.env.HOME,
-        PRIHRASH_YC_BIN: fake.path,
+        NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
+        PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
+        PRIHRASH_TEST_FETCH_BODY: body,
+        PRIHRASH_TEST_FETCH_STATUS: '200',
+        PRIHRASH_TEST_FETCH_MODE: 'response',
+        PRIHRASH_TEST_FUNCTION_ERROR: 'false',
         PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: FUNCTION_ID,
         YC_IAM_TOKEN: 'synthetic-short-lived-iam-token',
       },
@@ -41,8 +37,6 @@ async function runInvoker(fakeSource) {
       stdout: typeof error.stdout === 'string' ? error.stdout : '',
       stderr: typeof error.stderr === 'string' ? error.stderr : '',
     });
-  } finally {
-    await rm(fake.directory, { recursive: true, force: true });
   }
 }
 
@@ -54,7 +48,7 @@ function assertSafeOutput(result, expected) {
   assert.equal(result.stderr.includes(PRIVATE_LOOKING), false);
 }
 
-test('non-zero yc exit preserves an exact allowlisted runtime failure without provider detail', async () => {
+test('raw HTTPS 200 preserves an exact allowlisted runtime failure without wrapper text', async () => {
   const expected = {
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
@@ -62,36 +56,24 @@ test('non-zero yc exit preserves an exact allowlisted runtime failure without pr
     applicationPhase: 'FRESH_CONTEXT_PREPARATION',
     metadataFailureCode: null,
   };
-  const result = await runInvoker(`
-process.stdout.write(${JSON.stringify(JSON.stringify(expected))});
-process.stderr.write('${PRIVATE_LOOKING}');
-process.exit(17);
-`);
-
-  assertSafeOutput(result, expected);
+  assertSafeOutput(await runInvoker(JSON.stringify(expected)), expected);
 });
 
-test('non-zero yc exit preserves an exact allowlisted STOP result without provider detail', async () => {
+test('raw HTTPS 200 preserves an exact allowlisted STOP result', async () => {
   const expected = {
     status: 'STOP',
     code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
     recoveryReason: 'PROMOTION_OUTCOME_UNKNOWN',
   };
-  const result = await runInvoker(`
-process.stdout.write(${JSON.stringify(JSON.stringify(expected))});
-process.stderr.write('${PRIVATE_LOOKING}');
-process.exit(17);
-`);
-
-  assertSafeOutput(result, expected);
+  assertSafeOutput(await runInvoker(JSON.stringify(expected)), expected);
 });
 
-test('non-zero yc exit never turns an exact PASS payload into success', async () => {
-  const result = await runInvoker(`
-process.stdout.write(JSON.stringify({status:'PASS',code:'INITIAL_BOOTSTRAP_COMMITTED'}));
-process.stderr.write('${PRIVATE_LOOKING}');
-process.exit(17);
-`);
-
-  assertSafeOutput(result, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED' });
+test('multiple or wrapped result lines are rejected rather than heuristically recovered', async () => {
+  const first = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_CONFIG_INVALID' });
+  const second = JSON.stringify({ status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RESULT_INVALID' });
+  const body = `${PRIVATE_LOOKING}\n${first}\n${second}`;
+  assertSafeOutput(
+    await runInvoker(body),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID' },
+  );
 });
