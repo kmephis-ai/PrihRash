@@ -32,91 +32,9 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TARGET_HEAD"
-
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('.github/workflows/r1-initial-shadow-bootstrap.yml')
-          text = path.read_text()
-          replacements = [
-              (
-                  '                  "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED",',
-                  '                  "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",',
-              ),
-              (
-                  '''                $code != "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-                or (
-                  (.transportClass | type) == "string"
-                  and (.transportClass | IN(
-                    "EMPTY",
-                    "AUTH",
-                    "NOT_FOUND",
-                    "RATE_LIMIT",
-                    "DEADLINE",
-                    "UNAVAILABLE",
-                    "INVALID_REQUEST",
-                    "FAILED_PRECONDITION",
-                    "INTERNAL",
-                    "OTHER"
-                  ))
-                )''',
-                  '''                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-                or (
-                  (.httpStatus | type) == "string"
-                  and (.httpStatus | IN(
-                    "HTTP_400",
-                    "HTTP_403",
-                    "HTTP_404",
-                    "HTTP_413",
-                    "HTTP_429",
-                    "HTTP_500",
-                    "HTTP_502",
-                    "HTTP_503",
-                    "HTTP_504",
-                    "HTTP_4XX_OTHER",
-                    "HTTP_5XX_OTHER",
-                    "HTTP_OTHER"
-                  ))
-                  and (.functionError | type) == "string"
-                  and (.functionError | IN("PRESENT", "ABSENT"))
-                )''',
-              ),
-              (
-                  '''                outputShape: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-                     and (.outputShape | type) == "string"
-                     and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
-                  then .outputShape
-                  else null
-                  end
-                ),
-                transportClass: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED"
-                  then .transportClass
-                  else null
-                  end
-                )''',
-                  '''                httpStatus: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-                  then .httpStatus
-                  else null
-                  end
-                ),
-                functionError: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
-                  then .functionError
-                  else null
-                  end
-                )''',
-              ),
-          ]
-          for old, new in replacements:
-              if text.count(old) != 1:
-                  raise SystemExit('TRANSPORT_REPLACEMENT_MISMATCH')
-              text = text.replace(old, new)
-          path.write_text(text)
-          PY
-
+          printf '%s' 'ZGlmZiAtLWdpdCBhLy5naXRodWIvd29ya2Zsb3dzL3IxLWluaXRpYWwtc2hhZG93LWJvb3RzdHJhcC55bWwgYi8uZ2l0aHViL3dvcmtmbG93cy9yMS1pbml0aWFsLXNoYWRvdy1ib290c3RyYXAueW1sCmluZGV4IDRhZjM0YzYuLjY3YmM1M2YgMTAwNjQ0Ci0tLSBhLy5naXRodWIvd29ya2Zsb3dzL3IxLWluaXRpYWwtc2hhZG93LWJvb3RzdHJhcC55bWwKKysrIGIvLmdpdGh1Yi93b3JrZmxvd3MvcjEtaW5pdGlhbC1zaGFkb3ctYm9vdHN0cmFwLnltbApAQCAtNDE2LDcgKzQxNiw3IEBAIGpvYnM6CiAgICAgICAgICAgICAgICAgb3IgKCRzdGF0dXMgPT0gIkZBSUwiIGFuZCAoJGNvZGUgfCBJTigKICAgICAgICAgICAgICAgICAgICJJTklUSUFMX0JPT1RTVFJBUF9JTlZPS0VSX0NPTkZJR19JTlZBTElEIiwKICAgICAgICAgICAgICAgICAgICJJTklUSUFMX0JPT1RTVFJBUF9JTlZPS0VfRkFJTEVEIiwKLSAgICAgICAgICAgICAgICAgICJJTklUSUFMX0JPT1RTVFJBUF9JTlZPS0VfTk9OWkVST19VTkNMQVNTSUZJRUQiLAorICAgICAgICAgICAgICAgICAgIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9IVFRQX0ZBSUxFRCIsCiAgICAgICAgICAgICAgICAgICAiSU5JVElBTF9CT09UU1RSQVBfSU5WT0tFX0ZVTkNUSU9OX1RJTUVPVVQiLAogICAgICAgICAgICAgICAgICAgIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9PVVRQVVRfSU5WQUxJRCIsCiAgICAgICAgICAgICAgICAgICAiSU5JVElBTF9CT09UU1RSQVBfQ09ORklHX0lOVkFMSUQiLApAQCAtNDI2LDIxICs0MjYsMjUgQEAgam9iczoKICAgICAgICAgICAgICAgICApKSkKICAgICAgICAgICAgICAgKQogICAgICAgICAgICAgfCBzZWxlY3QoCi0gICAgICAgICAgICAgICAgJGNvZGUgIT0gIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9OT05aRVJPX1VOQ0xBU1NJRklFRCIKKyAgICAgICAgICAgICAgICAkY29kZSAhPSAiSU5JVElBTF9CT09UU1RSQVBfSU5WT0tFX0hUVFBfRkFJTEVEIgogICAgICAgICAgICAgICAgIG9yICgKLSAgICAgICAgICAgICAgICAgICgudHJhbnNwb3J0Q2xhc3MgfCB0eXBlKSA9PSAic3RyaW5nIgotICAgICAgICAgICAgICAgICAgYW5kICgudHJhbnNwb3J0Q2xhc3MgfCBJTigKLSAgICAgICAgICAgICAgICAgICAgIkVNUFRZIiwKLSAgICAgICAgICAgICAgICAgICAgIkFVVEgiLAotICAgICAgICAgICAgICAgICAgICAiTk9UX0ZPVU5EIiwKLSAgICAgICAgICAgICAgICAgICAgIlJBVEVfTElNSVQiLAotICAgICAgICAgICAgICAgICAgICAiREVBRExJTkUiLAotICAgICAgICAgICAgICAgICAgICAiVU5BVkFJTEFCTEUiLAotICAgICAgICAgICAgICAgICAgICAiSU5WQUxJRF9SRVFVRVNUIiwKLSAgICAgICAgICAgICAgICAgICAgIkZBSUxFRF9QUkVDT05ESVRJT04iLAotICAgICAgICAgICAgICAgICAgICAiSU5URVJOQUwiLAotICAgICAgICAgICAgICAgICAgICAiT1RIRVIiCisgICAgICAgICAgICAgICAgICAoLmh0dHBTdGF0dXMgfCB0eXBlKSA9PSAic3RyaW5nIgorICAgICAgICAgICAgICAgICAgYW5kICguaHR0cFN0YXR1cyB8IElOKAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80MDAiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80MDMiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80MDQiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80MTMiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80MjkiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF81MDAiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF81MDIiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF81MDMiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF81MDQiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF80WFhfT1RIRVIiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF81WFhfT1RIRVIiLAorICAgICAgICAgICAgICAgICAgICAiSFRUUF9PVEhFUiIKICAgICAgICAgICAgICAgICAgICkpCisgICAgICAgICAgICAgICAgICBhbmQgKC5mdW5jdGlvbkVycm9yIHwgdHlwZSkgPT0gInN0cmluZyIKKyAgICAgICAgICAgICAgICAgIGFuZCAoLmZ1bmN0aW9uRXJyb3IgfCBJTigiUFJFU0VOVCIsICJBQlNFTlQiKSkKICAgICAgICAgICAgICAgICApCiAgICAgICAgICAgICAgICkKICAgICAgICAgICAgIHwgewpAQCAtNTQwLDE3ICs1NDQsMTUgQEAgam9iczoKICAgICAgICAgICAgICAgICAgIGVsc2UgbnVsbAogICAgICAgICAgICAgICAgICAgZW5kCiAgICAgICAgICAgICAgICAgKSwKLSAgICAgICAgICAgICAgICBvdXRwdXRTaGFwZTogKAotICAgICAgICAgICAgICAgICAgaWYgJGNvZGUgPT0gIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9OT05aRVJPX1VOQ0xBU1NJRklFRCIKLSAgICAgICAgICAgICAgICAgICAgIGFuZCAoLm91dHB1dFNoYXBlIHwgdHlwZSkgPT0gInN0cmluZyIKLSAgICAgICAgICAgICAgICAgICAgIGFuZCAoLm91dHB1dFNoYXBlIHwgdGVzdCgiXlNURE9VVF8oRU1QVFl8VEVYVHxKU09OX09CSkVDVHxKU09OX0FSUkFZfEpTT05fU1RSSU5HfEpTT05fTlVNQkVSfEpTT05fQk9PTEVBTnxKU09OX05VTEwpX19TVERFUlJfKEVNUFRZfFRFWFR8SlNPTl9PQkpFQ1R8SlNPTl9BUlJBWXxKU09OX1NUUklOR3xKU09OX05VTUJFUnxKU09OX0JPT0xFQU58SlNPTl9OVUxMKSQiKSkKLSAgICAgICAgICAgICAgICAgIHRoZW4gLm91dHB1dFNoYXBlCisgICAgICAgICAgICAgICAgaHR0cFN0YXR1czogKAorICAgICAgICAgICAgICAgICAgaWYgJGNvZGUgPT0gIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9IVFRQX0ZBSUxFRCIKKyAgICAgICAgICAgICAgICAgIHRoZW4gLmh0dHBTdGF0dXMKICAgICAgICAgICAgICAgICAgIGVsc2UgbnVsbAogICAgICAgICAgICAgICAgICAgZW5kCiAgICAgICAgICAgICAgICAgKSwKLSAgICAgICAgICAgICAgICB0cmFuc3BvcnRDbGFzczogKAotICAgICAgICAgICAgICAgICAgaWYgJGNvZGUgPT0gIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9OT05aRVJPX1VOQ0xBU1NJRklFRCIKLSAgICAgICAgICAgICAgICAgIHRoZW4gLnRyYW5zcG9ydENsYXNzCisgICAgICAgICAgICAgICAgZnVuY3Rpb25FcnJvcjogKAorICAgICAgICAgICAgICAgICAgaWYgJGNvZGUgPT0gIklOSVRJQUxfQk9PVFNUUkFQX0lOVk9LRV9IVFRQX0ZBSUxFRCIKKyAgICAgICAgICAgICAgICAgIHRoZW4gLmZ1bmN0aW9uRXJyb3IKICAgICAgICAgICAgICAgICAgIGVsc2UgbnVsbAogICAgICAgICAgICAgICAgICAgZW5kCiAgICAgICAgICAgICAgICAgKQo=' | base64 --decode > "$RUNNER_TEMP/workflow.patch"
+          git apply --check "$RUNNER_TEMP/workflow.patch"
+          git apply "$RUNNER_TEMP/workflow.patch"
           test "$(git hash-object .github/workflows/r1-initial-shadow-bootstrap.yml)" = "$EXPECTED_WORKFLOW_BLOB"
 
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
