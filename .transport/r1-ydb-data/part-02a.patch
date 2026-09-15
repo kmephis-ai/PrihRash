@@ -1,0 +1,55 @@
++++ b/tests/integration/yandex-initial-bootstrap-function.test.mjs
+@@ -137,6 +137,7 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
+         runtimeCode,
+         applicationPhase: null,
+         metadataFailureCode: null,
++        ydbDataFailureCode: null,
+       },
+     );
+   }
+@@ -153,6 +154,24 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
+       runtimeCode: 'REFERENCE_APPLICATION_METADATA_FAILED',
+       applicationPhase: 'FRESH_CLAIM_WRITE',
+       metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
++      ydbDataFailureCode: null,
++    },
++  );
++
++  assert.deepEqual(
++    await execute(new InitialBootstrapReferenceAwareRuntimeError(
++      'REFERENCE_APPLICATION_YDB_DATA_FAILED',
++      'REVISION_EVIDENCE_WRITE',
++      null,
++      'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
++    )),
++    {
++      status: 'FAIL',
++      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
++      applicationPhase: 'REVISION_EVIDENCE_WRITE',
++      metadataFailureCode: null,
++      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+     },
+   );
+ 
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker-nonzero-output.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker-nonzero-output.test.mjs
+index 48c592c..e051662 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker-nonzero-output.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker-nonzero-output.test.mjs
+@@ -55,6 +55,7 @@ test('raw HTTPS 200 preserves an exact allowlisted runtime failure without wrapp
+     runtimeCode: 'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+     applicationPhase: 'FRESH_CONTEXT_PREPARATION',
+     metadataFailureCode: null,
++    ydbDataFailureCode: null,
+   };
+   assertSafeOutput(await runInvoker(JSON.stringify(expected)), expected);
+ });
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+index 8f28c4c..23b4eff 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+@@ -91,6 +91,7 @@ test('safe non-success Function results remain exact bounded output and exit non
+       runtimeCode: 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+       applicationPhase: null,
+       metadataFailureCode: null,
++      ydbDataFailureCode: null,
