@@ -1,4 +1,5 @@
 import type { CredentialsProvider } from '@ydbjs/auth';
+import { StatusIds_StatusCode } from '@ydbjs/api/operation';
 import {
   YdbTransportCommitOutcomeUnknownError,
   type YdbQueryResult,
@@ -24,12 +25,34 @@ export const YDB_JS_DATA_SDK_VERSIONS = Object.freeze({
   '@ydbjs/value': '6.0.8',
 });
 
+export type YdbJsV6QueryExecutionStatusCode =
+  | 'BAD_REQUEST'
+  | 'UNAUTHORIZED'
+  | 'INTERNAL_ERROR'
+  | 'ABORTED'
+  | 'UNAVAILABLE'
+  | 'OVERLOADED'
+  | 'SCHEME_ERROR'
+  | 'GENERIC_ERROR'
+  | 'TIMEOUT'
+  | 'BAD_SESSION'
+  | 'PRECONDITION_FAILED'
+  | 'ALREADY_EXISTS'
+  | 'NOT_FOUND'
+  | 'SESSION_EXPIRED'
+  | 'CANCELLED'
+  | 'UNDETERMINED'
+  | 'UNSUPPORTED'
+  | 'SESSION_BUSY'
+  | 'EXTERNAL_ERROR';
+
 export type YdbJsV6DataTransportErrorCode =
   | 'SDK_SHAPE_INVALID'
   | 'PARAMETER_VALUE_INVALID'
   | 'PARAMETER_TYPE_UNSUPPORTED'
   | 'TIMESTAMP_PRECISION_UNSUPPORTED'
   | 'QUERY_EXECUTION_FAILED'
+  | `QUERY_EXECUTION_YDB_${YdbJsV6QueryExecutionStatusCode}`
   | 'CLIENT_CONFIG_INVALID';
 
 export class YdbJsV6DataTransportError extends Error {
@@ -80,6 +103,45 @@ export interface YdbJsDataClient {
 
 function fail(code: YdbJsV6DataTransportErrorCode): never {
   throw new YdbJsV6DataTransportError(code);
+}
+
+const YDB_QUERY_EXECUTION_STATUS_BY_CODE = new Map<number, YdbJsV6QueryExecutionStatusCode>([
+  [StatusIds_StatusCode.BAD_REQUEST, 'BAD_REQUEST'],
+  [StatusIds_StatusCode.UNAUTHORIZED, 'UNAUTHORIZED'],
+  [StatusIds_StatusCode.INTERNAL_ERROR, 'INTERNAL_ERROR'],
+  [StatusIds_StatusCode.ABORTED, 'ABORTED'],
+  [StatusIds_StatusCode.UNAVAILABLE, 'UNAVAILABLE'],
+  [StatusIds_StatusCode.OVERLOADED, 'OVERLOADED'],
+  [StatusIds_StatusCode.SCHEME_ERROR, 'SCHEME_ERROR'],
+  [StatusIds_StatusCode.GENERIC_ERROR, 'GENERIC_ERROR'],
+  [StatusIds_StatusCode.TIMEOUT, 'TIMEOUT'],
+  [StatusIds_StatusCode.BAD_SESSION, 'BAD_SESSION'],
+  [StatusIds_StatusCode.PRECONDITION_FAILED, 'PRECONDITION_FAILED'],
+  [StatusIds_StatusCode.ALREADY_EXISTS, 'ALREADY_EXISTS'],
+  [StatusIds_StatusCode.NOT_FOUND, 'NOT_FOUND'],
+  [StatusIds_StatusCode.SESSION_EXPIRED, 'SESSION_EXPIRED'],
+  [StatusIds_StatusCode.CANCELLED, 'CANCELLED'],
+  [StatusIds_StatusCode.UNDETERMINED, 'UNDETERMINED'],
+  [StatusIds_StatusCode.UNSUPPORTED, 'UNSUPPORTED'],
+  [StatusIds_StatusCode.SESSION_BUSY, 'SESSION_BUSY'],
+  [StatusIds_StatusCode.EXTERNAL_ERROR, 'EXTERNAL_ERROR'],
+]);
+
+function classifyQueryExecutionFailure(error: unknown): YdbJsV6DataTransportErrorCode {
+  if (error === null || typeof error !== 'object') return 'QUERY_EXECUTION_FAILED';
+  const constructor = Reflect.get(error, 'constructor');
+  const code = Reflect.get(error, 'code');
+  if (
+    typeof constructor !== 'function'
+    || constructor.name !== 'YDBError'
+    || typeof code !== 'number'
+  ) {
+    return 'QUERY_EXECUTION_FAILED';
+  }
+  const status = YDB_QUERY_EXECUTION_STATUS_BY_CODE.get(code);
+  return status === undefined
+    ? 'QUERY_EXECUTION_FAILED'
+    : `QUERY_EXECUTION_YDB_${status}`;
 }
 
 function requireConstructor(sdk: SdkSurface, name: string): SdkConstructor {
@@ -186,7 +248,7 @@ async function executeStatement<Row>(
     return Object.freeze({ rows: Object.freeze([...rows]) });
   } catch (error) {
     if (error instanceof YdbJsV6DataTransportError) throw error;
-    throw new YdbJsV6DataTransportError('QUERY_EXECUTION_FAILED');
+    throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
   }
 }
 
@@ -233,7 +295,7 @@ export function createYdbJsV6DataTransport(
         if (bodyCompleted) throw new YdbTransportCommitOutcomeUnknownError(error);
         if (bodyFailure !== NO_TRANSACTION_BODY_FAILURE) throw bodyFailure;
         if (error instanceof YdbJsV6DataTransportError) throw error;
-        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_FAILED');
+        throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
       }
     },
   });
