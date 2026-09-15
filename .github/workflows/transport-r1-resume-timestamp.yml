@@ -28,7 +28,10 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/transport/r1-453-resume-timestamp-20260915'
-          patch='.transport/r1-resume-timestamp.patch'
+          patch_source='.transport/r1-resume-timestamp.patch'
+          patch="$RUNNER_TEMP/r1-resume-timestamp.patch"
+          printf '%s  %s\n' "$PATCH_SHA256" "$patch_source" | sha256sum --check -
+          cp "$patch_source" "$patch"
           printf '%s  %s\n' "$PATCH_SHA256" "$patch" | sha256sum --check -
 
           git fetch origin main
@@ -41,7 +44,7 @@ jobs:
           test "$(git rev-parse "$EXPECTED_MAIN:tests/migration-simulation/initial-bootstrap-application.test.mjs")" = 5a02be5b9321692a89a0aff38332988b55bc3473
 
           git checkout --detach "$EXPECTED_MAIN"
-          git apply --index "$GITHUB_WORKSPACE/$patch"
+          git apply --index "$patch"
           git diff --cached --check
 
           expected_files="$(printf '%s\n' \
