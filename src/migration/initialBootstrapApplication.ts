@@ -4,6 +4,7 @@ import {
   readStatement,
 } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
+import { normalizeYdbTimestampReadback } from '../integration/ydb/readbackTimestamp.js';
 import { promoteAtomicDelta } from './atomicPromotion.js';
 import {
   buildInitialBootstrapCandidate,
@@ -344,18 +345,16 @@ async function readDurableSnapshot(
   }
   const row = result.rows[0];
   const rowCount = counter(row?.row_count);
+  const capturedAt = normalizeYdbTimestampReadback(row?.captured_at);
   if (
     row === undefined
-    || typeof row.captured_at !== 'string'
-    || row.captured_at.length === 0
-    || row.captured_at !== row.captured_at.trim()
-    || !Number.isFinite(Date.parse(row.captured_at))
+    || capturedAt === null
     || row.snapshot_digest !== expectedDigest
     || rowCount !== expectedRowCount
   ) {
     throw new InitialBootstrapApplicationError('SNAPSHOT_EVIDENCE_MISMATCH');
   }
-  return Object.freeze({ capturedAt: row.captured_at });
+  return Object.freeze({ capturedAt });
 }
 
 async function assertCurrentStateEmpty(adapter: YdbAdapter): Promise<void> {

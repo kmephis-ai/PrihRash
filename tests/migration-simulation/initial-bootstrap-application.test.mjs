@@ -472,6 +472,23 @@ test('exact STAGING claim resumes durable identities without allocator reuse and
   assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, TX_1);
 });
 
+test('exact STAGING claim resumes when YDB returns source snapshot captured_at as native Date', async () => {
+  const db = fakeDatabase({ seed: stagingSeed({ capturedAt: new Date(CAPTURED_AT) }) });
+  const ids = allocator({ forbid: true });
+  const lifecycleClock = clock(PROMOTED_AT, FINISHED_AT);
+  const retryObservation = observation(undefined, '2026-09-12T07:30:00Z');
+
+  const result = await runInitialBootstrapApplication(
+    retryObservation,
+    dependencies(db, ids, lifecycleClock),
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.deepEqual(ids.calls, []);
+  assert.equal(db.state.revisions.get(`${SOURCE_1}|1`).observed_at, new Date(CAPTURED_AT).toISOString());
+  assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, TX_1);
+});
+
 
 
 test('existing COMMITTED baseline blocks a second initial bootstrap before any new identity allocation', async () => {
