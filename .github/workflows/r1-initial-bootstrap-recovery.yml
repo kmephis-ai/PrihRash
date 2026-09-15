@@ -27,8 +27,6 @@ jobs:
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
       YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
-      EXPECTED_FAILED_BOOTSTRAP_RUN_ID: '34911716334'
-      EXPECTED_FAILED_BOOTSTRAP_SHA: ae0bf553577d50acdf5120ba8dd36c15cd32d6fe
 
     steps:
       - name: Checkout exact main
@@ -65,7 +63,7 @@ jobs:
           source-sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
-      - name: Require exact current main and exact failed bootstrap attempt
+      - name: Require exact current main and dynamically proven failed bootstrap attempt
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
@@ -90,15 +88,42 @@ jobs:
 
           curl --fail --silent --show-error --header "$auth_header" \
             --header 'Accept: application/vnd.github+json' \
-            "$api/actions/runs/${EXPECTED_FAILED_BOOTSTRAP_RUN_ID}" \
+            "$api/actions/workflows/r1-initial-shadow-bootstrap.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100" \
+            --output "$tmp/bootstrap-runs.json" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_BOOTSTRAP_HISTORY_READ_FAILED'
+              exit 1
+            }
+          if ! target="$(jq -cer '
+            [.workflow_runs[] | select(
+              .name == "R1 initial shadow bootstrap"
+              and .head_branch == "main"
+              and .event == "workflow_dispatch"
+              and .conclusion == "failure"
+              and (.id | type == "number")
+              and (.head_sha | type == "string" and test("^[0-9a-f]{40}$"))
+              and (.created_at | type == "string")
+            )]
+            | sort_by(.created_at, .id)
+            | reverse
+            | if length > 0 then .[0] else empty end
+          ' "$tmp/bootstrap-runs.json")" || [ -z "$target" ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_FAILED_ATTEMPT_MISSING'
+            exit 1
+          fi
+          selected_run_id="$(jq -er '.id' <<<"$target")"
+          selected_run_sha="$(jq -er '.head_sha' <<<"$target")"
+
+          curl --fail --silent --show-error --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/actions/runs/${selected_run_id}" \
             --output "$tmp/bootstrap-run.json" || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_BOOTSTRAP_RUN_READ_FAILED'
               exit 1
             }
           if ! jq -e \
-            --arg expected_id "$EXPECTED_FAILED_BOOTSTRAP_RUN_ID" \
-            --arg expected_sha "$EXPECTED_FAILED_BOOTSTRAP_SHA" \
-            '(.id | tostring) == $expected_id
+            --argjson expected_id "$selected_run_id" \
+            --arg expected_sha "$selected_run_sha" \
+            '.id == $expected_id
               and .name == "R1 initial shadow bootstrap"
               and .head_sha == $expected_sha
               and .head_branch == "main"
@@ -111,19 +136,20 @@ jobs:
 
           curl --fail --silent --show-error --header "$auth_header" \
             --header 'Accept: application/vnd.github+json' \
-            "$api/actions/runs/${EXPECTED_FAILED_BOOTSTRAP_RUN_ID}/jobs?filter=latest&per_page=100" \
+            "$api/actions/runs/${selected_run_id}/jobs?filter=latest&per_page=100" \
             --output "$tmp/bootstrap-jobs.json" || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_BOOTSTRAP_RUN_READ_FAILED'
               exit 1
             }
           if ! jq -e '
-            .jobs | any(
-              .name == "initial-shadow-bootstrap"
-              and (.steps | any(
+            [.jobs[] | select(.name == "initial-shadow-bootstrap")] as $jobs
+            | ($jobs | length) == 1
+            and ([
+              $jobs[0].steps[]? | select(
                 .name == "Invoke exact initial bootstrap tag once"
                 and .conclusion == "failure"
-              ))
-            )
+              )
+            ] | length) == 1
           ' "$tmp/bootstrap-jobs.json" >/dev/null 2>&1; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN'
             exit 1
