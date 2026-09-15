@@ -8,6 +8,7 @@ const WORKFLOW = resolve(ROOT, '.github/workflows/r1-yandex-readiness.yml');
 const RUNBOOK = resolve(ROOT, 'docs/R1_YANDEX_READINESS_RUNBOOK.md');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-readiness.mjs');
 const READINESS_PROBE = resolve(ROOT, 'src/runtime/scheduledSyncReadinessProbe.ts');
+const YDB_DATA_TRANSPORT = resolve(ROOT, 'src/integration/ydb/ydbJsV6DataTransport.ts');
 
 async function text(path) {
   return readFile(path, 'utf8');
@@ -92,15 +93,20 @@ test('R1 readiness persists only allowlisted enum-only evidence while preserving
 });
 
 test('R1 readiness timeout envelopes preserve the bounded application deadline with transport headroom', async () => {
-  const [workflow, invoker, probe, runbook] = await Promise.all([
+  const [workflow, invoker, probe, transport, runbook] = await Promise.all([
     text(WORKFLOW),
     text(INVOKER),
     text(READINESS_PROBE),
+    text(YDB_DATA_TRANSPORT),
     text(RUNBOOK),
   ]);
 
   assert.match(probe, /SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const/);
+  assert.match(probe, /SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS = 21_000 as const/);
+  assert.match(probe, /readTimeoutMs: SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS/);
   assert.match(probe, /SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const/);
+  assert.match(transport, /query = query\.timeout\(timeoutMs\)/);
+  assert.match(transport, /executeStatement<Row>\(transaction, statement, mapParameter\);/);
   assert.match(workflow, /--execution-timeout 45s/);
   assert.match(invoker, /const INVOKE_TIMEOUT_MS = 60_000;/);
   assert.match(runbook, /execution timeout: 45s/);

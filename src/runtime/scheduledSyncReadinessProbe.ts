@@ -26,6 +26,7 @@ import {
 
 export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 3 as const;
 export const SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const;
+export const SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS = 21_000 as const;
 export const SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const;
 
 export interface ScheduledSyncReadinessResult {
@@ -361,6 +362,7 @@ const productionRuntime: Readonly<ScheduledSyncReadinessRuntime> = Object.freeze
     return createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
+      readTimeoutMs: SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS,
     });
   },
 });

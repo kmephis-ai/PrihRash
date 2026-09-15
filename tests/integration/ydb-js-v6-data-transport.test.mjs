@@ -67,6 +67,10 @@ function makeExecutor(events, rows = []) {
         events.push(['parameter', name, value]);
         return builder;
       },
+      timeout(timeoutMs) {
+        events.push(['timeout', timeoutMs]);
+        return builder;
+      },
       then(resolve, reject) {
         return Promise.resolve([rows]).then(resolve, reject);
       },
@@ -176,6 +180,28 @@ test('concrete transport binds values separately and supports adapter read plus 
   assert.equal(events.some(([kind, name]) => kind === 'parameter' && name === 'digest'), true);
 });
 
+test('optional read timeout reaches SDK query builder without changing transaction statements', async () => {
+  const { events, sql } = makeSql({
+    readRows: [{ id: 'synthetic-read' }],
+    transactionRows: [{ id: 'synthetic-write' }],
+  });
+  const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+    sql,
+    createYdbJsV6ParameterMapper(fakeSdk()),
+    { readTimeoutMs: 21_000 },
+  ));
+
+  await adapter.read(readStatement('SELECT 1'));
+  await adapter.serializableReadWrite((transaction) => (
+    transaction.execute(writeStatement('UPSERT INTO synthetic SELECT 1'))
+  ));
+
+  assert.deepEqual(
+    events.filter(([kind]) => kind === 'timeout'),
+    [['timeout', 21_000]],
+  );
+});
+
 test('driver query rejection becomes privacy-safe transport code for reads and transaction statements', async () => {
   const providerFailure = new Error('synthetic private provider detail');
   const sql = makeRejectingExecutor(providerFailure);
@@ -243,6 +269,14 @@ test('client config fails before dynamic SDK/client creation', async () => {
       connectionString: 'grpcs://synthetic.invalid:2135/?database=/synthetic',
       credentialFile: '/synthetic/key.json',
       poolMaxSize: 0,
+    }),
+    (error) => error instanceof YdbJsV6DataTransportError && error.code === 'CLIENT_CONFIG_INVALID',
+  );
+  await assert.rejects(
+    () => createYdbJsV6DataClient({
+      connectionString: 'grpcs://synthetic.invalid:2135/?database=/synthetic',
+      credentialFile: '/synthetic/key.json',
+      readTimeoutMs: 0,
     }),
     (error) => error instanceof YdbJsV6DataTransportError && error.code === 'CLIENT_CONFIG_INVALID',
   );
