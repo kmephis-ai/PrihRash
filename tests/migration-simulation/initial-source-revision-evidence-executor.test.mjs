@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { writeStatement, YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
 import {
+  INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT,
   InitialRevisionEvidenceError,
   executeInitialRevisionEvidenceBatches,
   planInitialRevisionEvidenceBatches,
@@ -28,6 +29,25 @@ test('greedily chunks staging revision evidence under calibrated transaction cap
   );
   assert.equal(Object.isFrozen(batches), true);
   assert.equal(batches.every((batch) => Object.isFrozen(batch) && Object.isFrozen(batch.writes)), true);
+});
+
+test('bounds the number of YQL statements in each revision evidence transaction', () => {
+  const writes = Array.from(
+    { length: INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT + 1 },
+    () => evidenceWrite(128),
+  );
+  const batches = planInitialRevisionEvidenceBatches(writes);
+
+  assert.deepEqual(
+    batches.map((batch) => batch.writes.length),
+    [INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT, 1],
+  );
+  assert.equal(
+    batches.every(
+      (batch) => batch.writes.length <= INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT,
+    ),
+    true,
+  );
 });
 
 test('rejects verified-current write from staging evidence path', () => {

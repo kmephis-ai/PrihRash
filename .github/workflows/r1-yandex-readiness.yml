@@ -384,4 +384,4 @@ jobs:
           name: r1-yandex-readiness-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/r1-yandex-readiness-evidence/classification.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30

@@ -89,7 +89,7 @@ test('R1 readiness persists only allowlisted enum-only evidence while preserving
   assert.match(workflow, /r1-yandex-readiness-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /r1-yandex-readiness-evidence\/classification\.json/);
   assert.match(workflow, /if-no-files-found:\s*error/);
-  assert.match(workflow, /retention-days:\s*1/);
+  assert.match(workflow, /retention-days:\s*30/);
 });
 
 test('R1 readiness timeout envelopes preserve the bounded application deadline with transport headroom', async () => {

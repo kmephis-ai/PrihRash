@@ -44,7 +44,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /classification\.json/);
-  assert.match(workflow, /retention-days: 1/);
+  assert.match(workflow, /retention-days: 30/);
 });
 
 test('initial bootstrap recovery invoker exposes enum-only classification evidence', () => {

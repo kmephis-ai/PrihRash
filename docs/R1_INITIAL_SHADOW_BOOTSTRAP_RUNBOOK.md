@@ -15,7 +15,7 @@ Authoritative transactional source остаётся только `Ответы �
 1. работает только из защищённого exact `main` canonical repository `kmephis-ai/PrihRash` и требует successful canonical CI на этом SHA;
 2. собирает exact-main recovery-only Function artifact и через dedicated WIF deployment identity проверяет заранее подготовленную private trigger-free Function, runtime service account и dedicated Lockbox secret;
 3. до любой новой write-capable попытки разворачивает exact read-only recovery version и выполняет durable classification;
-4. разрешает продолжить orchestration только из `NOT_APPLIED / EMPTY_DURABLE_STATE` либо `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE`;
+4. разрешает продолжить orchestration только из `NOT_APPLIED / EMPTY_DURABLE_STATE`, `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` либо из отдельно вооружённого Incident-M `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
 5. автоматически dispatch-ит canonical `R1 Yandex readiness`, ждёт его завершения на том же exact SHA и проверяет short-lived enum-only `PASS / READINESS_READY` artifact;
 6. повторно проверяет exact current `main`;
 7. автоматически dispatch-ит существующий canonical `R1 initial shadow bootstrap` **ровно один раз**; сам bootstrap child сохраняет собственные #433/exact-main/readiness/provider gates, canonical `npm run check`, private trigger-free deployment и `--retry 0`;
@@ -23,7 +23,24 @@ Authoritative transactional source остаётся только `Ответы �
 9. если bootstrap child достиг invoke и завершился non-success/unknown, выполняет ровно одну read-only recovery classification в том же orchestrator run и останавливается;
 10. никогда не выполняет второй bootstrap invoke, controlled rebuild, cleanup, timer, cutover или автоматическое расширение authority; публикует один short-lived privacy-safe orchestrator artifact.
 
-`RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes.
+Для доказанного Incident-M после прерванного application write orchestrator дополнительно может
+принять явный input `allow_staging_resume=true`. Он разрешён только из
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, передан autocontinue из проверенного PR marker
+`Recovery-State: STAGING_RESUMABLE` и не отменяет runtime guards: application обязана на fresh
+authoritative snapshot доказать exact manifest/source evidence, переиспользовать durable identities,
+прочитать уже записанные revision evidence и записать только отсутствующее. Любое расхождение
+остаётся fail-closed до новых writes. Default input — `false`.
+
+`RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes. Аналогично, `STAGING_RUN_PRESENT` без explicit Incident-M marker и `allow_staging_resume=true` всегда блокирует orchestrator.
+
+## Incident-M provider attempt contract
+
+Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
+по одной строке `Provider-Attempt`, `Observed-Signature`, `Expected-Transition`, `Recovery-State`,
+`Circuit-Rearm` и `Regression-Test` по contract из `AGENTS.md`. Autocontinue дополнительно проверяет,
+что exact regression test действительно изменён вместе с runtime/script/R1-workflow surface.
+Diagnostic-only PR, повтор уже использованного SHA или неограниченный changeset не dispatch-ит
+orchestrator.
 
 Standalone `R1 Yandex readiness`, `R1 initial shadow bootstrap` и `R1 initial bootstrap recovery` сохраняются как reviewed stage-specific primitives / diagnostic fallback, но пока #453 активен нормальный Owner path — orchestrator. Никакие child workflows не должны запускаться владельцем между шагами orchestrator run.
 

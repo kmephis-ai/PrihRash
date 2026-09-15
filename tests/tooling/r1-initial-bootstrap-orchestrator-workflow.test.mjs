@@ -15,6 +15,8 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /allow_staging_resume:/);
+  assert.match(workflow, /default: 'false'/);
   assert.doesNotMatch(workflow, /\n\s+(push|pull_request|schedule|repository_dispatch|workflow_run):/);
   assert.match(workflow, /github\.repository == 'kmephis-ai\/PrihRash'/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
@@ -48,6 +50,9 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
   assert.match(workflow, /EMPTY_DURABLE_STATE/);
   assert.match(workflow, /RECOVERY_REQUIRED/);
   assert.match(workflow, /RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE/);
+  assert.match(workflow, /STAGING_RUN_PRESENT/);
+  assert.match(workflow, /inputs\.allow_staging_resume/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED/);
   assert.match(workflow, /r1-bootstrap-orchestrator-child-workflow\.mjs readiness/);
   assert.match(workflow, /\.code == "READINESS_READY"/);
@@ -88,13 +93,14 @@ test('child dispatcher can launch only canonical child workflows and fails close
   assert.match(dispatcher, /result\.invokeStepConclusion = 'UNKNOWN'/);
 });
 
-test('orchestrator publishes one short-lived privacy-safe evidence artifact', async () => {
+test('orchestrator publishes one retained privacy-safe evidence artifact including resume authorization', async () => {
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED/);
-  assert.match(workflow, /retention-days: 1/);
-  assert.doesNotMatch(workflow, /rawPayload|row_count|amount|description|notes/i);
+  assert.match(workflow, /stagingResumeAuthorized/);
+  assert.match(workflow, /retention-days: 30/);
+  assert.doesNotMatch(workflow, /rawPayload|row_count|amount|notes/i);
 });

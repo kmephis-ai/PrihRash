@@ -27,7 +27,7 @@ test('R1 autocontinue is stage-specific, CI-gated, exact-main, and has no provid
   assert.doesNotMatch(workflow, /yandex|\byc\b|lockbox|service-account/i);
 });
 
-test('R1 autocontinue dispatches only active #453 exact-main source or one proven pre-invoke main-move successor and never duplicates a SHA', async () => {
+test('R1 autocontinue requires explicit root-cause attempt evidence or one proven pre-invoke main-move successor and never duplicates a SHA', async () => {
   const workflow = await workflowText();
 
   assert.match(workflow, /commits\/\$SOURCE_SHA\/pulls/);
@@ -35,6 +35,16 @@ test('R1 autocontinue dispatches only active #453 exact-main source or one prove
   assert.match(workflow, /base\.ref == "main"/);
   assert.match(workflow, /head\.repo\.full_name == \$repo/);
   assert.match(workflow, /startswith\("R1 #453:"\)/);
+  assert.match(workflow, /Provider-Attempt: READY/);
+  assert.match(workflow, /Observed-Signature:/);
+  assert.match(workflow, /Expected-Transition:/);
+  assert.match(workflow, /Recovery-State:/);
+  assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
+  assert.match(workflow, /Regression-Test: tests\//);
+  assert.match(workflow, /ATTEMPT_MARKER_INVALID/);
+  assert.match(workflow, /pulls\/\$source_pr_number\/files\?per_page=100/);
+  assert.match(workflow, /ROOT_CAUSE_EVIDENCE_MISSING/);
+  assert.match(workflow, /STAGING_RESUMABLE/);
   assert.match(workflow, /NOT_SINGLE_MERGED_MAIN_PR/);
   assert.match(workflow, /parents \| length\) == 1/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$interrupted_run_id/);
@@ -54,7 +64,8 @@ test('R1 autocontinue dispatches only active #453 exact-main source or one prove
   assert.match(workflow, /any\(\.head_sha == \$sha\)/);
   assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
-  assert.match(workflow, /--data '\{\"ref\":\"main\"\}'/);
+  assert.match(workflow, /allow_staging_resume/);
+  assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
 });
