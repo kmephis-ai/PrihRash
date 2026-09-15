@@ -2,6 +2,11 @@ import { YdbAdapter } from '../integration/ydb/adapter.js';
 import { assessAtomicPromotionWrites, type PromotionWrite } from './atomicPromotion.js';
 import type { PreparedInitialSourceLineageWrite } from './initialSourceLineagePersistence.js';
 
+// Each evidence row is currently a separate YQL statement inside one interactive
+// transaction. Bound the statement count independently of parameter bytes so a
+// large initial import remains short, retryable, and resumable between commits.
+export const INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT = 50;
+
 export interface InitialRevisionEvidenceBatch {
   readonly writes: readonly PreparedInitialSourceLineageWrite[];
   readonly totalEstimatedParameterBytes: number;
@@ -46,7 +51,10 @@ export function planInitialRevisionEvidenceBatches(
   for (const write of writes) {
     const candidate = [...current, write];
     const assessment = assessAtomicPromotionWrites(asPromotionWrites(candidate));
-    if (!assessment.eligible) {
+    if (
+      candidate.length > INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT
+      || !assessment.eligible
+    ) {
       const currentAssessment = assessAtomicPromotionWrites(asPromotionWrites(current));
       batches.push(Object.freeze({
         writes: Object.freeze([...current]),

@@ -84,6 +84,38 @@ Work item должен иметь:
 
 Если item завершён, сделай fresh discovery перед выбором следующего крупного Roadmap item.
 
+### 8.1. Incident-mode exception
+
+Если один и тот же provider gate дважды подряд не достигает ожидаемого перехода либо после
+write-capable invoke требуется recovery, разрешён bounded `Incident-M`.
+
+`Incident-M` обязан:
+
+- закрывать одну причинную гипотезу целиком: safe failure signature → reproducible
+  adapter/SDK fixture → fix → diagnostic contract → focused tests;
+- оставаться в одном PR, хотя внутри PR допустимы несколько логических commits;
+- не добавлять больше одной новой authority/schema boundary;
+- сохранять full canonical gates, privacy/fail-closed semantics и exact-main guards;
+- завершаться явным ожидаемым переходом и stop condition.
+
+Единица работы при incident-mode — **законченная причинная гипотеза**, а не отдельный enum
+или отдельная строка workflow. Diagnostic-only изменение не вооружает новый provider invoke.
+
+PR, который должен запустить provider attempt, содержит ровно один machine-readable блок:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: <ALLOWLISTED_ENUM_PATH>
+Expected-Transition: <ALLOWLISTED_ENUM_PATH>
+Recovery-State: <EMPTY_DURABLE_STATE|RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE|STAGING_RESUMABLE>
+Circuit-Rearm: ROOT_CAUSE_FIX
+Regression-Test: <tests/...>
+```
+
+Автономный provider path не вооружается только по title/Issue number. Повтор одного SHA
+запрещён. Две одинаковые safe failure signatures подряд требуют нового доказанного root-cause
+fix и regression fixture; blind diagnostic replay запрещён.
+
 ## 9. CI
 
 На старте GitHub Actions должны проверять минимум:

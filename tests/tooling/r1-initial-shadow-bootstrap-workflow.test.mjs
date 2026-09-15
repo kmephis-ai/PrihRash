@@ -111,7 +111,7 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /r1-initial-bootstrap-evidence\/classification\.json/);
-  assert.match(workflow, /retention-days:\s*1/);
+  assert.match(workflow, /retention-days:\s*30/);
   assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
 
   const projection = workflow.match(/\| \{[\s\S]*?\n\s+\}\n\s+' > "\$candidate"/)?.[0];

@@ -2,6 +2,15 @@ name: R1 initial bootstrap orchestrator
 
 on:
   workflow_dispatch:
+    inputs:
+      allow_staging_resume:
+        description: Allow one guarded application-level resume of exact durable STAGING evidence
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
@@ -381,6 +390,12 @@ jobs:
           if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE' ]; then
             exit 0
           fi
+          if [ "$verdict" = 'RECOVERY_REQUIRED' ] \
+            && [ "$reason" = 'STAGING_RUN_PRESENT' ] \
+            && [ "${{ inputs.allow_staging_resume }}" = 'true' ]; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED'
+            exit 0
+          fi
           echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED'
           exit 1
 
@@ -593,6 +608,7 @@ jobs:
             --arg bootstrapInvokeStep "$BOOTSTRAP_INVOKE_STEP" \
             --arg postRecoveryVerdict "$POST_VERDICT" \
             --arg postRecoveryReason "$POST_REASON" \
+            --arg stagingResumeAuthorized "${{ inputs.allow_staging_resume }}" \
             '{
               status: $status,
               code: $code,
@@ -605,7 +621,8 @@ jobs:
               bootstrapConclusion: ($bootstrapConclusion | select(length > 0) // null),
               bootstrapInvokeStep: ($bootstrapInvokeStep | select(length > 0) // null),
               postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
-              postRecoveryReason: ($postRecoveryReason | select(length > 0) // null)
+              postRecoveryReason: ($postRecoveryReason | select(length > 0) // null),
+              stagingResumeAuthorized: ($stagingResumeAuthorized == "true")
             }' > "$evidence_dir/classification.json"
 
       - name: Upload orchestrator evidence
@@ -615,4 +632,4 @@ jobs:
           name: r1-initial-bootstrap-orchestrator-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/r1-initial-bootstrap-orchestrator-evidence/classification.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30

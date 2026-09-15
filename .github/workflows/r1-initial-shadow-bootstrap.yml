@@ -612,4 +612,4 @@ jobs:
           name: r1-initial-bootstrap-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/r1-initial-bootstrap-evidence/classification.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30

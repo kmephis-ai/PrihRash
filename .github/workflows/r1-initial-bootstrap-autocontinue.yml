@@ -66,6 +66,70 @@ jobs:
             exit 0
           fi
           source_is_r1="$(jq -r '.title | startswith("R1 #453:")' <<<"$source_pr")"
+          allow_staging_resume='false'
+
+          if [ "$source_is_r1" = 'true' ]; then
+            source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+            source_pr_body="$(jq -r '.body // ""' <<<"$source_pr")"
+            marker="$(jq -Rn --arg body "$source_pr_body" '
+              def exact_line($prefix):
+                ($body | split("\n") | map(select(startswith($prefix))));
+              (exact_line("Provider-Attempt: ")) as $attempt
+              | (exact_line("Observed-Signature: ")) as $observed
+              | (exact_line("Expected-Transition: ")) as $expected
+              | (exact_line("Recovery-State: ")) as $recovery
+              | (exact_line("Circuit-Rearm: ")) as $rearm
+              | (exact_line("Regression-Test: ")) as $test
+              | {
+                  valid: (
+                    $attempt == ["Provider-Attempt: READY"]
+                    and ($observed | length) == 1
+                    and ($observed[0] | test("^Observed-Signature: [A-Z0-9_]+(?:/[A-Z0-9_]+){1,3}$"))
+                    and ($expected | length) == 1
+                    and ($expected[0] | test("^Expected-Transition: [A-Z0-9_]+(?:/[A-Z0-9_]+){0,3}$"))
+                    and ($recovery | length) == 1
+                    and ($recovery[0] | IN(
+                      "Recovery-State: EMPTY_DURABLE_STATE",
+                      "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
+                      "Recovery-State: STAGING_RESUMABLE"
+                    ))
+                    and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                    and ($test | length) == 1
+                    and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
+                  ),
+                  recovery: (if ($recovery | length) == 1 then ($recovery[0] | sub("^Recovery-State: "; "")) else null end),
+                  regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
+                }
+            ')"
+            if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_MARKER_INVALID'
+              exit 0
+            fi
+
+            source_files="$(curl --fail --silent --show-error \
+              --header "$auth_header" \
+              --header "$accept_header" \
+              "$api/pulls/$source_pr_number/files?per_page=100")"
+            if [ "$(jq 'length' <<<"$source_files")" -ge 100 ]; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_CHANGESET_UNBOUNDED'
+              exit 0
+            fi
+            regression_test="$(jq -r '.regressionTest' <<<"$marker")"
+            if ! jq -e --arg test "$regression_test" '
+              any(.filename == $test and .status != "removed")
+              and any(
+                (.filename | startswith("src/"))
+                or (.filename | startswith("scripts/"))
+                or (.filename | startswith(".github/workflows/r1-"))
+              )
+            ' <<<"$source_files" >/dev/null; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_ROOT_CAUSE_EVIDENCE_MISSING'
+              exit 0
+            fi
+            if [ "$(jq -r '.recovery' <<<"$marker")" = 'STAGING_RESUMABLE' ]; then
+              allow_staging_resume='true'
+            fi
+          fi
 
           issue_state="$(curl --fail --silent --show-error \
             --header "$auth_header" \
@@ -177,11 +241,14 @@ jobs:
             exit 0
           fi
 
+          dispatch_payload="$(jq -cn \
+            --arg resume "$allow_staging_resume" \
+            '{ref:"main", inputs:{allow_staging_resume:$resume}}')"
           curl --fail --silent --show-error \
             --request POST \
             --header "$auth_header" \
             --header "$accept_header" \
             --header 'Content-Type: application/json' \
             "$api/actions/workflows/r1-initial-bootstrap-orchestrator.yml/dispatches" \
-            --data '{"ref":"main"}'
+            --data "$dispatch_payload"
           echo 'R1_BOOTSTRAP_AUTOCONTINUE_DISPATCHED'
