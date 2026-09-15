@@ -1,4 +1,4 @@
-name: Local Git Mirror Writeback 5062e90
+name: Local Git Mirror Writeback 2b47862
 
 on:
   push:
@@ -12,7 +12,7 @@ env:
   SOURCE_SHA: e5083b4bb0c4a80ef1c7beb540e6c7c28ba2222a
   TARGET_BRANCH: fix/r1-453-classify-function-bad-gateway
   PATCH_PATH: tools/local-git-mirror/writeback-5062e90.patch
-  EXPECTED_TREE: 9ab23c9bb4e6209ae18269e572b86e0bb89b7f5e
+  EXPECTED_TREE: d43e36e4d9822808f7bd5532f7fe9bd6da52ee1d
 
 jobs:
   publish:
@@ -36,11 +36,9 @@ jobs:
           git apply "$RUNNER_TEMP/writeback.patch"
           git diff --check
           git add \
-            .github/workflows/r1-initial-shadow-bootstrap.yml \
             scripts/invoke-yandex-initial-bootstrap.mjs \
-            tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs \
-            tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs
-          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = '4'
+            tests/integration/yandex-initial-bootstrap-invoker-output-shape.test.mjs
+          test "$(git diff --cached --name-only | wc -l | tr -d ' ')" = '2'
           git config user.name 'OpenAI PrihRash Agent'
           git config user.email 'noreply@openai.com'
           git commit -m 'R1 #453: classify Cloud Functions 502 transport'
