@@ -1,0 +1,44 @@
+diff --git a/src/migration/initialBootstrapIdentityManifest.ts b/src/migration/initialBootstrapIdentityManifest.ts
+index 24ab93b..0d3cee7 100644
+--- a/src/migration/initialBootstrapIdentityManifest.ts
++++ b/src/migration/initialBootstrapIdentityManifest.ts
+@@ -362,8 +362,9 @@ function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdenti
+ 
+ export function initialBootstrapIdentityManifestReadStatement(migrationRunId: string): YdbStatement {
+   return readStatement(
+-    'SELECT m.source_snapshot_id, CAST(m.source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
+-      + 'm.binding_count, m.bindings, r.state AS run_state, '
++    'SELECT m.source_snapshot_id AS source_snapshot_id, '
++      + 'CAST(m.source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
++      + 'm.binding_count AS binding_count, m.bindings AS bindings, r.state AS run_state, '
+       + 'CAST(r.source_snapshot_digest AS Utf8) AS run_snapshot_digest, '
+       + 'CAST(s.snapshot_digest AS Utf8) AS snapshot_digest, s.row_count AS snapshot_row_count '
+       + 'FROM initial_bootstrap_identity_manifests AS m '
+diff --git a/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs b/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
+index d470860..e42eef9 100644
+--- a/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-identity-manifest.test.mjs
+@@ -6,6 +6,7 @@ import {
+   InitialBootstrapIdentityManifestError,
+   buildInitialBootstrapIdentityManifest,
+   prepareInitialBootstrapIdentityManifestWrite,
++  initialBootstrapIdentityManifestReadStatement,
+   parseInitialBootstrapIdentityManifestRows,
+   recoverInitialBootstrapIdentities,
+ } from '../../dist/migration/initialBootstrapIdentityManifest.js';
+@@ -151,6 +152,15 @@ test('prepares only a non-overwriting INSERT manifest write with versioned canon
+   assert.equal(write.estimatedParameterBytes > 0, true);
+ });
+ 
++test('manifest readback query aliases every qualified manifest column to the parser contract key', () => {
++  const statement = initialBootstrapIdentityManifestReadStatement(RUN_ID);
++  assert.match(statement.text, /m\.source_snapshot_id AS source_snapshot_id/);
++  assert.match(statement.text, /m\.binding_count AS binding_count/);
++  assert.match(statement.text, /m\.bindings AS bindings/);
++  assert.doesNotMatch(statement.text, /SELECT m\.source_snapshot_id,/);
++  assert.doesNotMatch(statement.text, /m\.binding_count, m\.bindings,/);
++});
++
+ test('financial identity must be explicit while ambiguous/non-financial rows cannot receive invented transaction IDs', () => {
+   assert.throws(
+     () => buildInitialBootstrapIdentityManifest(candidate(), projection(), []),
