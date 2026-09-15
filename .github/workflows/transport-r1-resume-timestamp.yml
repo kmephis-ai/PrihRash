@@ -1,0 +1,65 @@
+name: Transport R1 resume timestamp
+
+on:
+  push:
+    branches:
+      - transport/r1-453-resume-timestamp-20260915
+
+permissions:
+  contents: write
+
+jobs:
+  transport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify exact patch and publish product branch
+        shell: bash
+        env:
+          EXPECTED_MAIN: c895dbac48b7cc00316474d3a89dc7a04f713001
+          PRODUCT_BRANCH: fix/r1-453-resume-snapshot-timestamp
+          PATCH_SHA256: 89235ad334aaecfef3becd599507dd80e4d0606e249c008c214aa780f922b90e
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/transport/r1-453-resume-timestamp-20260915'
+          patch='.transport/r1-resume-timestamp.patch'
+          printf '%s  %s\n' "$PATCH_SHA256" "$patch" | sha256sum --check -
+
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          if git show-ref --verify --quiet "refs/remotes/origin/$PRODUCT_BRANCH"; then
+            test "$(git rev-parse "origin/$PRODUCT_BRANCH")" = "$EXPECTED_MAIN"
+          fi
+
+          test "$(git rev-parse "$EXPECTED_MAIN:src/migration/initialBootstrapApplication.ts")" = a3e0e0c341cad92cc84ce3d146795f2c8ca2b5ad
+          test "$(git rev-parse "$EXPECTED_MAIN:tests/migration-simulation/initial-bootstrap-application.test.mjs")" = 5a02be5b9321692a89a0aff38332988b55bc3473
+
+          git checkout --detach "$EXPECTED_MAIN"
+          git apply --index "$GITHUB_WORKSPACE/$patch"
+          git diff --cached --check
+
+          expected_files="$(printf '%s\n' \
+            src/migration/initialBootstrapApplication.ts \
+            tests/migration-simulation/initial-bootstrap-application.test.mjs | sort)"
+          actual_files="$(git diff --cached --name-only | sort)"
+          test "$actual_files" = "$expected_files"
+
+          test "$(git hash-object src/migration/initialBootstrapApplication.ts)" = f5563d726bce0a4633dc5403572c727abf547d4a
+          test "$(git hash-object tests/migration-simulation/initial-bootstrap-application.test.mjs)" = d7fe34212bc003509e944dcb6f175c698fd624df
+
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'R1 #453: normalize resume snapshot timestamp'
+          product_commit="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_MAIN"
+
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          git push origin "$product_commit:refs/heads/$PRODUCT_BRANCH"
+          echo "PRODUCT_COMMIT=$product_commit"
