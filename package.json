@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "package:function": "npm run build --silent && npm run package:function:from-build --silent",
     "readiness:invoke": "node scripts/invoke-yandex-readiness.mjs",
+    "r1:status": "node scripts/r1-status.mjs",
     "test": "npm run build --silent && npm run test:from-build --silent",
     "test:domain": "npm run build --silent && node --test tests/domain/*.test.mjs",
     "test:source-normalizer": "npm run build --silent && node --test tests/source-normalizer/*.test.mjs",
