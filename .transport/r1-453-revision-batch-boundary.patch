@@ -1,0 +1,53 @@
+diff --git a/docs/MIGRATION_CONTRACT.md b/docs/MIGRATION_CONTRACT.md
+index e77f8c4..d243299 100644
+--- a/docs/MIGRATION_CONTRACT.md
++++ b/docs/MIGRATION_CONTRACT.md
+@@ -435,6 +435,8 @@ Production prerequisite: перед первым real initial bootstrap `schema_
+ 7. существующая exact revision-1 не переписывается `UPSERT`-ом и не заменяется новым `SourceRecord.id`, digest или payload решением; extra/duplicate/contradictory revision evidence fail-closed;
+ 8. durable identity manifest является operational resume evidence, а не второй financial authority: Google observation остаётся authoritative, а Reader по-прежнему видит verified shadow только через `COMMITTED` current state.
+ 
++Contiguous durable revision-1 prefix доказывает только exact границу между уже materialized prefix и ещё отсутствующим suffix canonical manifest. Он **не** восстанавливает original revision-evidence batch partition или конкретный failing query: planner делит writes одновременно по statement-count limit и по `estimatedParameterBytes`, а identity manifest намеренно не хранит `raw_payload`/его byte size. Поэтому manifest-only recovery не имеет права выводить batch index/end, реконструировать missing write payload или replay'ить suffix как будто original batch известен. Для текущего stale run это causal evidence limit, а не разрешение нового write.
++
+ #### Stale initial `STAGING` retirement after authoritative snapshot drift
+ 
+ Если durable initial claim внутренне согласован (run ↔ identity manifest ↔ source snapshot), но fresh authoritative Google observation имеет **другой** `source_snapshot_digest`, такой run нельзя resume/replay: identity decisions принадлежат другому immutable source observation.
+diff --git a/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md b/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+index aa2c7da..b602089 100644
+--- a/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
++++ b/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+@@ -42,6 +42,8 @@ invoke, а не два provider invokes. Старое append-only evidence со
+ 
+ `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes. Аналогично, `STAGING_RUN_PRESENT` без explicit Incident-M marker и `allow_staging_resume=true` всегда блокирует orchestrator.
+ 
++Для `PARTIAL_CURRENT_RUN_ONLY` durable evidence трактуется узко: contiguous prefix доказывает только место, где persisted evidence заканчивается. Exact original revision-evidence batch/query из identity manifest не реконструируется, потому что production planner зависит от private revision payload byte size (`estimatedParameterBytes`), которого manifest не содержит. Нельзя публиковать prefix length/ordinal, угадывать batch index/end или использовать manifest-only evidence как replay plan.
++
+ ## Incident-M provider attempt contract
+ 
+ Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
+diff --git a/tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs b/tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs
+index 28932e2..b21b488 100644
+--- a/tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs
++++ b/tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs
+@@ -100,3 +100,22 @@ test('executes each evidence batch independently and preserves earlier unverifie
+     'begin:2', 'write:2:WRITE', 'rollback:2',
+   ]);
+ });
++
++test('identity-only evidence cannot reconstruct the exact revision batch partition', () => {
++  // The identity manifest records one binding per source row but intentionally does not
++  // persist revision raw-payload byte size. The planner therefore has information that
++  // manifest-only recovery does not: equal binding cardinality can produce different
++  // transaction partitions solely because estimated parameter bytes differ.
++  const identityEquivalentSmallWrites = Array.from({ length: 4 }, () => evidenceWrite(128));
++  const identityEquivalentLargeWrites = Array.from({ length: 4 }, () => evidenceWrite(200 * 1024));
++
++  assert.equal(identityEquivalentSmallWrites.length, identityEquivalentLargeWrites.length);
++  assert.deepEqual(
++    planInitialRevisionEvidenceBatches(identityEquivalentSmallWrites).map((batch) => batch.writes.length),
++    [4],
++  );
++  assert.deepEqual(
++    planInitialRevisionEvidenceBatches(identityEquivalentLargeWrites).map((batch) => batch.writes.length),
++    [2, 2],
++  );
++});
