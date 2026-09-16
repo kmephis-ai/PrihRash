@@ -75,3 +75,29 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
 });
+
+test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate signatures cross-run', async () => {
+  const workflow = await workflowText();
+
+  assert.match(workflow, /Checkout exact CI source for bounded evidence classifier/);
+  assert.match(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+  assert.match(workflow, /persist-credentials: false/);
+  assert.match(workflow, /observedSignature:/);
+  assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$latest_run_id/);
+  assert.match(workflow, /r1-initial-bootstrap-evidence-\$bootstrap_run_id/);
+  assert.match(workflow, /scripts\/r1-autocontinue-evidence\.mjs signature-bootstrap/);
+  assert.match(workflow, /scripts\/r1-autocontinue-evidence\.mjs signature-orchestrator/);
+  assert.match(workflow, /PREVIOUS_EVIDENCE_MISSING/);
+  assert.match(workflow, /PREVIOUS_EVIDENCE_INVALID/);
+  assert.match(workflow, /PREVIOUS_OUTCOME_UNCERTAIN/);
+  assert.match(workflow, /Observed-Signature: \$observed_signature/);
+  assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
+  assert.match(workflow, /bootstrapInvokeStep \| IN\("success", "failure"\)/);
+  assert.match(workflow, /prior_root_cause_attempts=\$\(\(prior_root_cause_attempts \+ 1\)\)/);
+  assert.match(workflow, /BLOCKED_NEEDS_ROOT_CAUSE/);
+  assert.match(workflow, /scripts\/r1-autocontinue-evidence\.mjs decision/);
+  assert.match(workflow, /HISTORY_EVIDENCE_MISSING/);
+  assert.match(workflow, /HISTORY_EVIDENCE_INVALID/);
+  assert.match(workflow, /HISTORY_UNBOUNDED/);
+  assert.doesNotMatch(workflow, /id-token:\s*write/);
+});
