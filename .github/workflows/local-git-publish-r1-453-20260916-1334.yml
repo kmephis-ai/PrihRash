@@ -1,0 +1,62 @@
+name: Local Git Publish R1 453
+
+on:
+  push:
+    branches:
+      - local-git-publish/r1-453-20260916-1334
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: 4d9c54031f1efaf73f9aa9169349d95fe90e243a
+  EXPECTED_TREE: dda70bd3f15479bb51fdc4ee6e06c41e060d6bef
+  EXPECTED_PATCH_SHA256: 1608f637bf389f58a52168a88f4cd2775f82dc4b7d2cb403ee7901cf8ed969c2
+  TARGET_BRANCH: r1-453-staging-retirable-binding
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Publish exact verified local tree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat .local-publish/r1-453/part-*.patch > /tmp/r1-453.patch
+          patch_sha="$(sha256sum /tmp/r1-453.patch | awk '{print $1}')"
+          test "$patch_sha" = "$EXPECTED_PATCH_SHA256"
+
+          main_sha="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$main_sha" = "$SOURCE_SHA"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/${TARGET_BRANCH}" >/dev/null 2>&1; then
+            echo 'TARGET_BRANCH_ALREADY_EXISTS'
+            exit 1
+          fi
+
+          git checkout --detach "$SOURCE_SHA"
+          git apply --check /tmp/r1-453.patch
+          git apply --index /tmp/r1-453.patch
+          actual_tree="$(git write-tree)"
+          test "$actual_tree" = "$EXPECTED_TREE"
+          git diff --cached --check
+          npm run privacy --silent
+          npm run lint --silent
+          node --test tests/tooling/*.test.mjs
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R1 #453: связать stale STAGING retirement с guarded bootstrap'
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
