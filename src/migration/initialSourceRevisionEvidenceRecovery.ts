@@ -1,4 +1,5 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
+import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
@@ -38,6 +39,7 @@ export class InitialSourceRevisionEvidenceRecoveryError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT = 50;
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
@@ -54,11 +56,6 @@ function positiveInteger(value: unknown): number {
     return Number(value);
   }
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) malformed();
-  return value;
-}
-
-function canonicalString(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
   return value;
 }
 
@@ -124,11 +121,62 @@ function existingMatches(
 ): boolean {
   return positiveInteger(row.revision) === 1
     && uuid(row.migration_run_id) === expected.migrationRunId.toLowerCase()
-    && canonicalString(row.observed_at) === expected.observedAt
+    && ydbTimestampReadbackMatches(row.observed_at, expected.observedAt)
     && positiveInteger(row.row_hint) === expected.rowHint
     && digestString(row.row_digest) === expected.rowDigest
     && row.change_class === null
     && canonicalRawPayload(row.raw_payload) === expected.rawPayload;
+}
+
+function validateExistingRevisionRows(
+  rows: readonly Readonly<ExistingInitialRevisionRow>[],
+  expected: Readonly<{
+    runId: string | null;
+    bySourceId: ReadonlyMap<string, Readonly<InitialSourceRecordRevisionProjection>>;
+  }>,
+  existingSourceIds: Set<string>,
+): void {
+  for (const row of rows) {
+    const sourceRecordId = uuid(row.source_record_id);
+    if (existingSourceIds.has(sourceRecordId)) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
+    }
+    existingSourceIds.add(sourceRecordId);
+    const expectedRevision = expected.bySourceId.get(sourceRecordId);
+    if (expectedRevision === undefined) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
+    }
+    if (!existingMatches(row, expectedRevision)) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
+    }
+  }
+}
+
+function primaryKeyReadStatement(
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+  runId: string | null,
+) {
+  const sourceIdParameters = Object.fromEntries(
+    revisions.map((revision, index) => [
+      `source_record_id_${index}`,
+      uuidParameter(revision.sourceRecordId),
+    ]),
+  );
+  const sourceIdPlaceholders = revisions
+    .map((_, index) => `$source_record_id_${index}`)
+    .join(', ');
+  const runPredicate = runId === null ? '' : 'migration_run_id = $migration_run_id OR ';
+  return readStatement(
+    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
+      + 'FROM source_record_revisions '
+      + `WHERE revision = $revision AND (${runPredicate}source_record_id IN (${sourceIdPlaceholders}))`,
+    {
+      revision: uint64Parameter(1),
+      ...(runId === null ? {} : { migration_run_id: uuidParameter(runId) }),
+      ...sourceIdParameters,
+    },
+  );
 }
 
 export async function planInitialSourceRevisionEvidenceResume(
@@ -143,32 +191,29 @@ export async function planInitialSourceRevisionEvidenceResume(
     });
   }
 
-  const statement = readStatement(
-    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
-      + 'FROM source_record_revisions '
-      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision',
-    {
-      migration_run_id: uuidParameter(expected.runId),
-      revision: uint64Parameter(1),
-    },
-  );
-  const result = await reader.read<ExistingInitialRevisionRow>(statement);
   const existingSourceIds = new Set<string>();
+  const firstBatch = expectedRevisions.slice(0, INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT);
+  const firstResult = await reader.read<ExistingInitialRevisionRow>(
+    primaryKeyReadStatement(firstBatch, expected.runId),
+  );
+  validateExistingRevisionRows(firstResult.rows, expected, existingSourceIds);
 
-  for (const row of result.rows) {
-    const sourceRecordId = uuid(row.source_record_id);
-    if (existingSourceIds.has(sourceRecordId)) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
-    }
-    existingSourceIds.add(sourceRecordId);
-    const expectedRevision = expected.bySourceId.get(sourceRecordId);
-    if (expectedRevision === undefined) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
-    }
-    if (!existingMatches(row, expectedRevision)) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
-    }
+  const uncheckedMissing = expectedRevisions
+    .slice(INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT)
+    .filter((revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()));
+  for (
+    let start = 0;
+    start < uncheckedMissing.length;
+    start += INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT
+  ) {
+    const batch = uncheckedMissing.slice(
+      start,
+      start + INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT,
+    );
+    const result = await reader.read<ExistingInitialRevisionRow>(
+      primaryKeyReadStatement(batch, null),
+    );
+    validateExistingRevisionRows(result.rows, expected, existingSourceIds);
   }
 
   const missingRevisions = expectedRevisions.filter(
