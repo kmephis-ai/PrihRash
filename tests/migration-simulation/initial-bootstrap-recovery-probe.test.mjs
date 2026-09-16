@@ -19,6 +19,7 @@ function evidence(overrides = {}) {
     stagingRuns: 0,
     validatedRuns: 0,
     failedRuns: 0,
+    staleRetiredRuns: 0,
     committedRowsSeen: null,
     sourceSnapshots: 0,
     identityManifests: 0,
@@ -57,6 +58,10 @@ test('bootstrap recovery exposes deterministic privacy-safe reason taxonomy', ()
     [evidence({ migrationRuns: 1, stagingRuns: 1 }), 'RECOVERY_REQUIRED', 'STAGING_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, validatedRuns: 1 }), 'RECOVERY_REQUIRED', 'VALIDATED_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, failedRuns: 1 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
+    [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceSnapshots: 1, identityManifests: 1, sourceRecordRevisions: 1 }), 'RECOVERY_REQUIRED', 'STALE_STAGING_RETIRED'],
+    [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceRecords: 1 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
+    [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 2 }), 'RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT'],
+    [evidence({ migrationRuns: 2, stagingRuns: 1, failedRuns: 1, staleRetiredRuns: 1 }), 'RECOVERY_REQUIRED', 'STAGING_RUN_PRESENT'],
     [evidence({ migrationRuns: 1 }), 'RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT'],
     [evidence({ migrationRuns: 1, committedRuns: 1 }), 'RECOVERY_REQUIRED', 'COMMITTED_ROWS_SEEN_MISSING'],
     [evidence({ migrationRuns: 1, committedRuns: 1, committedRowsSeen: 0, sourceSnapshots: 2 }), 'RECOVERY_REQUIRED', 'COMMITTED_SOURCE_SNAPSHOT_COUNT_INVALID'],
@@ -122,6 +127,17 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
     verdict: 'APPLIED',
     reason: 'COMMITTED_DURABLE_STATE',
+  });
+
+  const retired = await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STALE_STAGING_RETIRED',
+  }));
+  assert.deepEqual(retired, {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STALE_STAGING_RETIRED',
   });
 
   const staging = await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
