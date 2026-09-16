@@ -28,18 +28,24 @@ async function readCount(reader: YdbReadScope, table: 'source_records' | 'transa
   return exactCount(result.rows);
 }
 
+export async function readInitialBootstrapStaleStagingRetirementCurrentState(
+  reader: YdbReadScope,
+): Promise<InitialBootstrapStaleStagingRetirementDiagnostic> {
+  const sourceRecordCount = await readCount(reader, 'source_records');
+  const transactionCount = await readCount(reader, 'transactions');
+  if (sourceRecordCount === null || transactionCount === null) {
+    return 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
+  }
+  return sourceRecordCount === 0 && transactionCount === 0
+    ? 'STALE_STAGING_CURRENT_STATE_EMPTY'
+    : 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY';
+}
+
 export async function diagnoseInitialBootstrapStaleStagingRetirementCurrentState(
   reader: YdbReadScope,
 ): Promise<InitialBootstrapStaleStagingRetirementDiagnostic> {
   try {
-    const sourceRecordCount = await readCount(reader, 'source_records');
-    const transactionCount = await readCount(reader, 'transactions');
-    if (sourceRecordCount === null || transactionCount === null) {
-      return 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
-    }
-    return sourceRecordCount === 0 && transactionCount === 0
-      ? 'STALE_STAGING_CURRENT_STATE_EMPTY'
-      : 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY';
+    return await readInitialBootstrapStaleStagingRetirementCurrentState(reader);
   } catch {
     return 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
   }
