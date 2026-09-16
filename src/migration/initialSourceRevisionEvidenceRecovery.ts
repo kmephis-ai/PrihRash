@@ -128,45 +128,55 @@ function existingMatches(
     && canonicalRawPayload(row.raw_payload) === expected.rawPayload;
 }
 
-async function readExistingRevisionRows(
-  reader: YdbReadScope,
-  expectedRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
-): Promise<readonly ExistingInitialRevisionRow[]> {
-  const rows: ExistingInitialRevisionRow[] = [];
-
-  for (
-    let start = 0;
-    start < expectedRevisions.length;
-    start += INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT
-  ) {
-    const batch = expectedRevisions.slice(
-      start,
-      start + INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT,
-    );
-    const sourceIdParameters = Object.fromEntries(
-      batch.map((revision, index) => [
-        `source_record_id_${index}`,
-        uuidParameter(revision.sourceRecordId),
-      ]),
-    );
-    const sourceIdPlaceholders = batch
-      .map((_, index) => `$source_record_id_${index}`)
-      .join(', ');
-    const statement = readStatement(
-      'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-        + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
-        + 'FROM source_record_revisions '
-        + `WHERE revision = $revision AND source_record_id IN (${sourceIdPlaceholders})`,
-      {
-        revision: uint64Parameter(1),
-        ...sourceIdParameters,
-      },
-    );
-    const result = await reader.read<ExistingInitialRevisionRow>(statement);
-    rows.push(...result.rows);
+function validateExistingRevisionRows(
+  rows: readonly Readonly<ExistingInitialRevisionRow>[],
+  expected: Readonly<{
+    runId: string | null;
+    bySourceId: ReadonlyMap<string, Readonly<InitialSourceRecordRevisionProjection>>;
+  }>,
+  existingSourceIds: Set<string>,
+): void {
+  for (const row of rows) {
+    const sourceRecordId = uuid(row.source_record_id);
+    if (existingSourceIds.has(sourceRecordId)) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
+    }
+    existingSourceIds.add(sourceRecordId);
+    const expectedRevision = expected.bySourceId.get(sourceRecordId);
+    if (expectedRevision === undefined) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
+    }
+    if (!existingMatches(row, expectedRevision)) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
+    }
   }
+}
 
-  return rows;
+function primaryKeyReadStatement(
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+  runId: string | null,
+) {
+  const sourceIdParameters = Object.fromEntries(
+    revisions.map((revision, index) => [
+      `source_record_id_${index}`,
+      uuidParameter(revision.sourceRecordId),
+    ]),
+  );
+  const sourceIdPlaceholders = revisions
+    .map((_, index) => `$source_record_id_${index}`)
+    .join(', ');
+  const runPredicate = runId === null ? '' : 'migration_run_id = $migration_run_id OR ';
+  return readStatement(
+    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
+      + 'FROM source_record_revisions '
+      + `WHERE revision = $revision AND (${runPredicate}source_record_id IN (${sourceIdPlaceholders}))`,
+    {
+      revision: uint64Parameter(1),
+      ...(runId === null ? {} : { migration_run_id: uuidParameter(runId) }),
+      ...sourceIdParameters,
+    },
+  );
 }
 
 export async function planInitialSourceRevisionEvidenceResume(
@@ -181,22 +191,29 @@ export async function planInitialSourceRevisionEvidenceResume(
     });
   }
 
-  const existingRows = await readExistingRevisionRows(reader, expectedRevisions);
   const existingSourceIds = new Set<string>();
+  const firstBatch = expectedRevisions.slice(0, INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT);
+  const firstResult = await reader.read<ExistingInitialRevisionRow>(
+    primaryKeyReadStatement(firstBatch, expected.runId),
+  );
+  validateExistingRevisionRows(firstResult.rows, expected, existingSourceIds);
 
-  for (const row of existingRows) {
-    const sourceRecordId = uuid(row.source_record_id);
-    if (existingSourceIds.has(sourceRecordId)) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
-    }
-    existingSourceIds.add(sourceRecordId);
-    const expectedRevision = expected.bySourceId.get(sourceRecordId);
-    if (expectedRevision === undefined) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
-    }
-    if (!existingMatches(row, expectedRevision)) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
-    }
+  const uncheckedMissing = expectedRevisions
+    .slice(INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT)
+    .filter((revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()));
+  for (
+    let start = 0;
+    start < uncheckedMissing.length;
+    start += INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT
+  ) {
+    const batch = uncheckedMissing.slice(
+      start,
+      start + INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT,
+    );
+    const result = await reader.read<ExistingInitialRevisionRow>(
+      primaryKeyReadStatement(batch, null),
+    );
+    validateExistingRevisionRows(result.rows, expected, existingSourceIds);
   }
 
   const missingRevisions = expectedRevisions.filter(
