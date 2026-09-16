@@ -24,39 +24,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      # Temporary diagnostic split for PR #546; restore to `npm run check` after locating the failing gate.
-      - name: Check privacy
-        run: npm run privacy
-      - name: Check lint
-        run: npm run lint
-      - name: Check typecheck
-        run: npm run typecheck
-      - name: Check build
-        run: npm run build
-      - name: Check domain tests
-        run: node --test tests/domain/*.test.mjs
-      - name: Check reference tests
-        run: node --test tests/reference/*.test.mjs
-      - name: Check source-normalizer tests
-        run: node --test tests/source-normalizer/*.test.mjs
-      - name: Check migration-simulation tests
-        run: node --test tests/migration-simulation/*.test.mjs
-      - name: Check schema tests
-        run: node --test tests/schema/*.test.mjs
-      - name: Check integration tests
-        run: node --test tests/integration/*.test.mjs
-      - name: Check tooling tests
-        run: node --test tests/tooling/*.test.mjs
-      - name: Check scheduled-sync package
-        run: npm run package:function:from-build
-      - name: Check schema-bootstrap package
-        run: npm run package:schema-bootstrap:from-build
-      - name: Check schema-upgrade-003 package
-        run: npm run package:schema-upgrade-003:from-build
-      - name: Check initial-bootstrap package
-        run: npm run package:initial-bootstrap:from-build
-      - name: Check initial-bootstrap-recovery package
-        run: npm run package:initial-bootstrap-recovery:from-build
+      - run: npm run check
       - name: Bind provider packages to exact main SHA
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: node scripts/exact-source-artifact.mjs create "$GITHUB_SHA"
