@@ -59,6 +59,8 @@ test('bootstrap recovery exposes deterministic privacy-safe reason taxonomy', ()
     [evidence({ migrationRuns: 1, validatedRuns: 1 }), 'RECOVERY_REQUIRED', 'VALIDATED_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, failedRuns: 1 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceSnapshots: 1, identityManifests: 1, sourceRecordRevisions: 1 }), 'RECOVERY_REQUIRED', 'STALE_STAGING_RETIRED'],
+    [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceSnapshots: 2, identityManifests: 1 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
+    [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceSnapshots: 1, identityManifests: 2 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 1, sourceRecords: 1 }), 'RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT'],
     [evidence({ migrationRuns: 1, failedRuns: 1, staleRetiredRuns: 2 }), 'RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT'],
     [evidence({ migrationRuns: 2, stagingRuns: 1, failedRuns: 1, staleRetiredRuns: 1 }), 'RECOVERY_REQUIRED', 'STAGING_RUN_PRESENT'],
