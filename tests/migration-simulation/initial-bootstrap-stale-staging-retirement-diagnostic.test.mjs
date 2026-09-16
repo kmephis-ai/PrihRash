@@ -43,17 +43,19 @@ test('stale STAGING retirement diagnostic fails closed when either current table
   );
 });
 
-test('stale STAGING retirement diagnostic sanitizes malformed/read failures', async () => {
+test('stale STAGING retirement diagnostic keeps malformed evidence enum-safe but propagates query failures', async () => {
   assert.equal(
     await diagnoseInitialBootstrapStaleStagingRetirementCurrentState({
       async read() { return { rows: [] }; },
     }),
     'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
   );
-  assert.equal(
-    await diagnoseInitialBootstrapStaleStagingRetirementCurrentState({
-      async read() { throw new Error('synthetic read failure'); },
+
+  const providerFailure = new Error('synthetic read failure');
+  await assert.rejects(
+    () => diagnoseInitialBootstrapStaleStagingRetirementCurrentState({
+      async read() { throw providerFailure; },
     }),
-    'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
+    (error) => error === providerFailure,
   );
 });

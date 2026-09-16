@@ -51,6 +51,8 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
   assert.match(workflow, /EMPTY_DURABLE_STATE/);
   assert.match(workflow, /RECOVERY_REQUIRED/);
   assert.match(workflow, /RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE/);
+  assert.match(workflow, /STALE_STAGING_RETIRED/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STALE_RETIREMENT_FRESH_BOOTSTRAP_ARMED/);
   assert.match(workflow, /STAGING_RUN_PRESENT/);
   assert.match(workflow, /inputs\.allow_staging_resume/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED/);
