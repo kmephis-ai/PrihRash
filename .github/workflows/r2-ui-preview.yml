@@ -1,9 +1,14 @@
 name: R2 UI Preview
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    paths:
+      - '.github/workflows/r2-ui-preview.yml'
+      - 'web/**'
+      - 'scripts/build-r2-ui-preview.mjs'
+      - 'tests/integration/r2-safe-ui-preview.test.mjs'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
 
 permissions:
