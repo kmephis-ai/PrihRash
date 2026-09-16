@@ -1,0 +1,44 @@
+name: Local Git Stage R1 545 Workflow Blob
+
+on:
+  push:
+    branches:
+      - local-git-mirror/r1-545-20260916-0430
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: r1-545-provider-attempt-hardening
+          fetch-depth: 0
+      - name: Stage exact workflow bytes outside workflows path
+        shell: bash
+        env:
+          BASE_SHA: d428fe04bb2bdfe355c4c6dcbfe844a121d8becf
+          SOURCE_COMMIT: 42e062d3c2f583f1d167b0a1f6b0977dd5251b83
+          SOURCE_PATH: .github/workflows/local-git-apply-r1-545-20260916-0740.yml
+          EXPECTED_BLOB: ea0537eb3d9fe00839a207638ef286b99f0a2826
+        run: |
+          set -euo pipefail
+          git fetch origin refs/heads/local-git-mirror/r1-545-20260916-0430:refs/remotes/origin/local-git-mirror/r1-545-20260916-0430
+          payload="$(git show "$SOURCE_COMMIT:$SOURCE_PATH" | sed -n 's/^          PATCH_GZ_B64: //p')"
+          test -n "$payload"
+          printf '%s' "$payload" | base64 --decode | gzip -d > "$RUNNER_TEMP/r1-545-full.patch"
+          git worktree add --detach "$RUNNER_TEMP/r1-545-base" "$BASE_SHA"
+          git -C "$RUNNER_TEMP/r1-545-base" apply "$RUNNER_TEMP/r1-545-full.patch"
+          source="$RUNNER_TEMP/r1-545-base/.github/workflows/r1-initial-bootstrap-autocontinue.yml"
+          test "$(git hash-object "$source")" = "$EXPECTED_BLOB"
+          mkdir -p transport
+          cp "$source" transport/r1-initial-bootstrap-autocontinue.yml
+          test "$(git hash-object transport/r1-initial-bootstrap-autocontinue.yml)" = "$EXPECTED_BLOB"
+          git add transport/r1-initial-bootstrap-autocontinue.yml
+          git config user.name 'OpenAI'
+          git config user.email 'openai@example.invalid'
+          git commit -m 'chore: stage exact R1 #545 workflow blob'
+          git push origin HEAD:refs/heads/r1-545-provider-attempt-hardening
