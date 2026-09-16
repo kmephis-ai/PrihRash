@@ -106,7 +106,7 @@ test('R1 readiness timeout envelopes preserve the bounded application deadline w
   assert.match(probe, /readTimeoutMs: SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS/);
   assert.match(probe, /SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const/);
   assert.match(transport, /query = query\.timeout\(timeoutMs\)/);
-  assert.match(transport, /executeStatement<Row>\(transaction, statement, mapParameter\);/);
+  assert.match(transport, /executeStatement<Row>\(\s*transaction,\s*statement,\s*mapParameter,\s*undefined,\s*\(error\) =>/);
   assert.match(workflow, /--execution-timeout 45s/);
   assert.match(invoker, /const INVOKE_TIMEOUT_MS = 60_000;/);
   assert.match(runbook, /execution timeout: 45s/);

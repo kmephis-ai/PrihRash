@@ -228,9 +228,11 @@ async function executeStatement<Row>(
   statement: Readonly<YdbStatement>,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
   timeoutMs?: number,
+  deferQueryExecutionFailure?: (error: unknown) => never,
 ): Promise<YdbQueryResult<Row>> {
+  let query: YdbSqlQueryBuilder;
   try {
-    let query = executor(statement.text);
+    query = executor(statement.text);
     if (query === null || typeof query !== 'object' || typeof query.parameter !== 'function') {
       fail('SDK_SHAPE_INVALID');
     }
@@ -241,14 +243,36 @@ async function executeStatement<Row>(
       if (typeof query.timeout !== 'function') fail('SDK_SHAPE_INVALID');
       query = query.timeout(timeoutMs);
     }
-    const resultSets = await query;
-    const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
-      ? resultSets[0] as readonly Row[]
-      : [];
-    return Object.freeze({ rows: Object.freeze([...rows]) });
   } catch (error) {
     if (error instanceof YdbJsV6DataTransportError) throw error;
     throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
+  }
+
+  let resultSets: unknown;
+  try {
+    resultSets = await query;
+  } catch (error) {
+    if (error instanceof YdbJsV6DataTransportError) throw error;
+    if (deferQueryExecutionFailure !== undefined) deferQueryExecutionFailure(error);
+    throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
+  }
+
+  const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
+    ? resultSets[0] as readonly Row[]
+    : [];
+  return Object.freeze({ rows: Object.freeze([...rows]) });
+}
+
+function transactionFailureOriginatesFromBody(
+  transactionFailure: unknown,
+  bodyFailure: unknown,
+): boolean {
+  if (transactionFailure === bodyFailure) return true;
+  if (transactionFailure === null || typeof transactionFailure !== 'object') return false;
+  try {
+    return Reflect.get(transactionFailure, 'cause') === bodyFailure;
+  } catch {
+    return false;
   }
 }
 
@@ -272,13 +296,25 @@ export function createYdbJsV6DataTransport(
     async serializableReadWrite<T>(work: (transaction: { execute<Row>(statement: YdbStatement): Promise<YdbQueryResult<Row>> }) => Promise<T>) {
       let bodyCompleted = false;
       let bodyFailure: unknown | typeof NO_TRANSACTION_BODY_FAILURE = NO_TRANSACTION_BODY_FAILURE;
+      const deferredProviderFailures = new Set<unknown>();
       try {
         return await sql.begin(
           { isolation: 'serializableReadWrite', idempotent: false },
           async (transaction) => {
+            bodyCompleted = false;
+            bodyFailure = NO_TRANSACTION_BODY_FAILURE;
             const transportTransaction = Object.freeze({
               execute<Row>(statement: Readonly<YdbStatement>) {
-                return executeStatement<Row>(transaction, statement, mapParameter);
+                return executeStatement<Row>(
+                  transaction,
+                  statement,
+                  mapParameter,
+                  undefined,
+                  (error) => {
+                    deferredProviderFailures.add(error);
+                    throw error;
+                  },
+                );
               },
             });
             try {
@@ -293,7 +329,15 @@ export function createYdbJsV6DataTransport(
         );
       } catch (error) {
         if (bodyCompleted) throw new YdbTransportCommitOutcomeUnknownError(error);
-        if (bodyFailure !== NO_TRANSACTION_BODY_FAILURE) throw bodyFailure;
+        if (
+          bodyFailure !== NO_TRANSACTION_BODY_FAILURE
+          && transactionFailureOriginatesFromBody(error, bodyFailure)
+        ) {
+          if (deferredProviderFailures.has(bodyFailure)) {
+            throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(bodyFailure));
+          }
+          throw bodyFailure;
+        }
         if (error instanceof YdbJsV6DataTransportError) throw error;
         throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
       }
