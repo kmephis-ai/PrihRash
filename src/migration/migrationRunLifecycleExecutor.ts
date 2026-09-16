@@ -1,5 +1,6 @@
 import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
+import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import type { MigrationRun } from './migrationRunState.js';
 import type { PreparedMigrationRunLifecycleWrite } from './migrationRunPersistence.js';
 
@@ -43,7 +44,7 @@ function nullableTextMatches(value: unknown, expected: string | null): boolean {
 function rowMatches(row: MigrationRunLifecycleReadRow, expected: MigrationRun): boolean {
   return (
     row.state === expected.state
-    && nullableTextMatches(row.finished_at, expected.finishedAt)
+    && ydbTimestampReadbackMatches(row.finished_at, expected.finishedAt)
     && nullableTextMatches(row.error_code, expected.errorCode)
     && row.source_snapshot_digest === expected.sourceSnapshotDigest
     && counterMatches(row.rows_seen, expected.rowsSeen)
