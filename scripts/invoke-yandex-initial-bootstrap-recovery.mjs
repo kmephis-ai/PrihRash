@@ -36,6 +36,20 @@ const STAGING_REVISION_EVIDENCE = new Set([
   'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
   'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
 ]);
+const STAGING_DURABLE_REVISION_EVIDENCE = new Set([
+  'NO_REVISION_EVIDENCE',
+  'PARTIAL_CURRENT_RUN_ONLY',
+  'COMPLETE_CURRENT_RUN_ONLY',
+  'CROSS_RUN_PK_COLLISION',
+  'STAGING_MANIFEST_CARDINALITY_MISMATCH',
+  'STAGING_MANIFEST_STRUCTURE_MISMATCH',
+  'STAGING_DURABLE_METADATA_MISMATCH',
+  'REVISION_ROW_MALFORMED',
+  'REVISION_ROW_DUPLICATE',
+  'REVISION_ROW_UNEXPECTED_SOURCE',
+  'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
+  'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
+]);
 const REASONS = new Set([
   'EMPTY_DURABLE_STATE',
   'COMMITTED_DURABLE_STATE',
@@ -117,12 +131,23 @@ function parseExactResult(stdout) {
     && validPair(result.verdict, result.reason)
   ) {
     const stagingRevisionEvidence = result.stagingRevisionEvidence;
+    const stagingDurableRevisionEvidence = result.stagingDurableRevisionEvidence;
     const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
-      ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'stagingRevisionEvidence'])
+      ? exactKeys(result, [
+          'status',
+          'code',
+          'verdict',
+          'reason',
+          'stagingRevisionEvidence',
+          'stagingDurableRevisionEvidence',
+        ])
         && typeof stagingRevisionEvidence === 'string'
         && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
+        && typeof stagingDurableRevisionEvidence === 'string'
+        && STAGING_DURABLE_REVISION_EVIDENCE.has(stagingDurableRevisionEvidence)
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
-        && stagingRevisionEvidence === undefined;
+        && stagingRevisionEvidence === undefined
+        && stagingDurableRevisionEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -132,6 +157,9 @@ function parseExactResult(stdout) {
         reason: result.reason,
       }),
       stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence : null,
+      stagingDurableRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingDurableRevisionEvidence
+        : null,
     });
   }
   if (
@@ -142,6 +170,7 @@ function parseExactResult(stdout) {
     return Object.freeze({
       result: Object.freeze({ status: 'FAIL', code: result.code }),
       stagingRevisionEvidence: null,
+      stagingDurableRevisionEvidence: null,
     });
   }
   return null;
@@ -151,7 +180,11 @@ async function invokeRecovery(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
   const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
   if (!nonBlank(functionId) || !nonBlank(ycBinary)) {
-    return Object.freeze({ result: SAFE_CONFIG_FAILURE, stagingRevisionEvidence: null });
+    return Object.freeze({
+      result: SAFE_CONFIG_FAILURE,
+      stagingRevisionEvidence: null,
+      stagingDurableRevisionEvidence: null,
+    });
   }
 
   try {
@@ -169,15 +202,25 @@ async function invokeRecovery(environment = process.env) {
     return parseExactResult(stdout) ?? Object.freeze({
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
+      stagingDurableRevisionEvidence: null,
     });
   } catch {
-    return Object.freeze({ result: SAFE_INVOKE_FAILURE, stagingRevisionEvidence: null });
+    return Object.freeze({
+      result: SAFE_INVOKE_FAILURE,
+      stagingRevisionEvidence: null,
+      stagingDurableRevisionEvidence: null,
+    });
   }
 }
 
 const invocation = await invokeRecovery();
 if (invocation.stagingRevisionEvidence !== null) {
   process.stderr.write(`R1_STAGING_REVISION_EVIDENCE=${invocation.stagingRevisionEvidence}\n`);
+}
+if (invocation.stagingDurableRevisionEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_DURABLE_REVISION_EVIDENCE=${invocation.stagingDurableRevisionEvidence}\n`,
+  );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
 if (invocation.result.status !== 'PASS') process.exitCode = 2;

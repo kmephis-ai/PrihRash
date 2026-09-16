@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
 } from '../../dist/migration/initialBootstrapStagingRevisionDiagnostic.js';
 
@@ -182,6 +183,31 @@ test('staging revision diagnostic classifies authoritative source drift without 
     'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
   );
   assert.equal(driftReader.calls.length, 1);
+});
+
+test('durable staging revision diagnostic inspects immutable evidence despite authoritative source drift', async () => {
+  const sourceObservations = observations(2);
+  const durableReader = reader(sourceObservations, async () => [revisionRow(sourceObservations[0], 0)]);
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingDurableRevisionEvidence(durableReader),
+    'PARTIAL_CURRENT_RUN_ONLY',
+  );
+  assert.equal(durableReader.calls.length, 2);
+  assert.equal(durableReader.calls.every((statement) => statement.kind === 'READ'), true);
+});
+
+test('durable staging revision diagnostic exposes cross-run primary-key collision without Google evidence', async () => {
+  const sourceObservations = observations(1);
+  const durableReader = reader(
+    sourceObservations,
+    async () => [revisionRow(sourceObservations[0], 0, OTHER_RUN_ID)],
+  );
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingDurableRevisionEvidence(durableReader),
+    'CROSS_RUN_PK_COLLISION',
+  );
 });
 
 test('staging revision diagnostic distinguishes authoritative row-count and binding mismatch', async () => {
