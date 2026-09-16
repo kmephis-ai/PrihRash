@@ -418,10 +418,10 @@ async function prepareResumeContext(
   run: Readonly<MigrationRun>,
   dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<Readonly<PreparedBootstrapContext>> {
+  markApplicationPhase(dependencies, 'RESUME_CONTEXT_READ');
   if (run.sourceSnapshotDigest !== observation.snapshotDigest) {
     throw new InitialBootstrapApplicationError('RESUME_SNAPSHOT_DIGEST_MISMATCH');
   }
-  markApplicationPhase(dependencies, 'RESUME_CONTEXT_READ');
   const recovered = await recoverInitialBootstrapIdentities(
     dependencies.adapter,
     run.id,

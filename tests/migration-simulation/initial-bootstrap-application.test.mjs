@@ -398,6 +398,7 @@ function dependencies(db, ids, lifecycleClock, overrides = {}) {
       },
     }),
     clock: lifecycleClock,
+    observePhase: overrides.observePhase,
   });
 }
 
@@ -476,6 +477,33 @@ test('exact STAGING claim resumes durable identities without allocator reuse and
   assert.deepEqual(ids.calls, []);
   assert.equal(db.state.revisions.get(`${SOURCE_1}|1`).observed_at, CAPTURED_AT);
   assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, TX_1);
+});
+
+test('stale STAGING snapshot mismatch is classified at RESUME_CONTEXT_READ before any resume writes', async () => {
+  const db = fakeDatabase({ seed: stagingSeed() });
+  const ids = allocator({ forbid: true });
+  const lifecycleClock = clock();
+  const phases = [];
+  const staleObservation = Object.freeze({
+    ...observation(),
+    snapshotDigest: 'synthetic-new-authoritative-snapshot-digest',
+  });
+
+  await assert.rejects(
+    () => runInitialBootstrapApplication(
+      staleObservation,
+      dependencies(db, ids, lifecycleClock, {
+        observePhase(phase) { phases.push(phase); },
+      }),
+    ),
+    (error) => error instanceof InitialBootstrapApplicationError
+      && error.code === 'RESUME_SNAPSHOT_DIGEST_MISMATCH',
+  );
+
+  assert.equal(phases.at(-1), 'RESUME_CONTEXT_READ');
+  assert.deepEqual(ids.calls, []);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
 });
 
 test('exact STAGING claim resumes when YDB returns source snapshot captured_at as native Date', async () => {
