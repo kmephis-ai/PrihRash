@@ -100,3 +100,22 @@ test('executes each evidence batch independently and preserves earlier unverifie
     'begin:2', 'write:2:WRITE', 'rollback:2',
   ]);
 });
+
+test('identity-only evidence cannot reconstruct the exact revision batch partition', () => {
+  // The identity manifest records one binding per source row but intentionally does not
+  // persist revision raw-payload byte size. The planner therefore has information that
+  // manifest-only recovery does not: equal binding cardinality can produce different
+  // transaction partitions solely because estimated parameter bytes differ.
+  const identityEquivalentSmallWrites = Array.from({ length: 4 }, () => evidenceWrite(128));
+  const identityEquivalentLargeWrites = Array.from({ length: 4 }, () => evidenceWrite(200 * 1024));
+
+  assert.equal(identityEquivalentSmallWrites.length, identityEquivalentLargeWrites.length);
+  assert.deepEqual(
+    planInitialRevisionEvidenceBatches(identityEquivalentSmallWrites).map((batch) => batch.writes.length),
+    [4],
+  );
+  assert.deepEqual(
+    planInitialRevisionEvidenceBatches(identityEquivalentLargeWrites).map((batch) => batch.writes.length),
+    [2, 2],
+  );
+});
