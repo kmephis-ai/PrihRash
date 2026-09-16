@@ -340,7 +340,21 @@ async function diagnoseDurableRevisionEvidenceFromManifest(
 
   if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
   if (seen.size === manifest.bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
-  return 'PARTIAL_CURRENT_RUN_ONLY';
+
+  let firstMissingOrdinal = -1;
+  for (const [index, binding] of manifest.bindings.entries()) {
+    if (!seen.has(binding.sourceRecordId)) {
+      firstMissingOrdinal = index;
+      break;
+    }
+  }
+  if (firstMissingOrdinal < 0) return 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH';
+  const hasEvidenceAfterFirstMissing = manifest.bindings
+    .slice(firstMissingOrdinal + 1)
+    .some((binding) => seen.has(binding.sourceRecordId));
+  return hasEvidenceAfterFirstMissing
+    ? 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH'
+    : 'PARTIAL_CURRENT_RUN_ONLY';
 }
 
 export async function diagnoseInitialBootstrapStagingDurableRevisionEvidence(
