@@ -1,7 +1,7 @@
 name: R1 453 stale STAGING contract doc patch
 
-# Stage-specific branch-only writer. It self-retires in the same commit that applies
-# the exact byte-verified canonical document insertion.
+# Stage-specific branch-only writer. It self-retires together with its exact section file
+# in the same commit that updates the canonical migration contract.
 on:
   push:
     branches:
@@ -24,26 +24,21 @@ jobs:
           persist-credentials: true
           fetch-depth: 1
 
-      - name: Apply exact canonical contract insertion and retire this workflow
+      - name: Apply exact canonical contract insertion and retire temporary writer
         shell: bash
-        env:
-          SECTION_B64: IyMjIyBTdGFsZSBpbml0aWFsIGBTVEFHSU5HYCByZXRpcmVtZW50IGFmdGVyIGF1dGhvcml0YXRpdmUgc25hcHNob3QgZHJpZnQKCtCV0YHQu9C4IGR1cmFibGUgaW5pdGlhbCBjbGFpbSDQstC90YPRgtGA0LXQvdC90LUg0YHQvtCz0LvQsNGB0L7QstCw0L0gKHJ1biDihpQgaWRlbnRpdHkgbWFuaWZlc3Qg4oaUIHNvdXJjZSBzbmFwc2hvdCksINC90L4gZnJlc2ggYXV0aG9yaXRhdGl2ZSBHb29nbGUgb2JzZXJ2YXRpb24g0LjQvNC10LXRgiAqKtC00YDRg9Cz0L7QuSoqIGBzb3VyY2Vfc25hcHNob3RfZGlnZXN0YCwg0YLQsNC60L7QuSBydW4g0L3QtdC70YzQt9GPIHJlc3VtZS9yZXBsYXk6IGlkZW50aXR5IGRlY2lzaW9ucyDQv9GA0LjQvdCw0LTQu9C10LbQsNGCINC00YDRg9Cz0L7QvNGDIGltbXV0YWJsZSBzb3VyY2Ugb2JzZXJ2YXRpb24uCgrQoNCw0LfRgNC10YjRkdC9INGC0L7Qu9GM0LrQviBib3VuZGVkIHRlcm1pbmFsaXphdGlvbiBwYXRoINGB0L4g0LLRgdC10LzQuCDRg9GB0LvQvtCy0LjRj9C80Lgg0L7QtNC90L7QstGA0LXQvNC10L3QvdC+OgoKMS4gZHVyYWJsZSBhZG1pc3Npb24g0LTQvtC60LDQt9GL0LLQsNC10YIg0L7RgtGB0YPRgtGB0YLQstC40LUgYENPTU1JVFRFRGAgYmFzZWxpbmUg0Lgg0YDQvtCy0L3QviDQvtC00LjQvSBpbmNvbXBsZXRlIHJ1biDQsiBgU1RBR0lOR2A7CjIuIHJlYWQtb25seSBzdGFnaW5nIGRpYWdub3N0aWMg0LTQvtC60LDQt9GL0LLQsNC10YIg0LjQvNC10L3QvdC+IGBBVVRIT1JJVEFUSVZFX1NOQVBTSE9UX0RJR0VTVF9NSVNNQVRDSGA7IG1hbGZvcm1lZC9kdXBsaWNhdGUvY29udHJhZGljdG9yeSBtYW5pZmVzdC9zbmFwc2hvdC9yZXZpc2lvbiBldmlkZW5jZSDQvdC1INC/0L7QtNGF0L7QtNC40YI7CjMuIGNhbm9uaWNhbCB2ZXJpZmllZC1jdXJyZW50IGBzb3VyY2VfcmVjb3Jkc2Ag0LggYHRyYW5zYWN0aW9uc2AgaW5kZXBlbmRlbnRseSDQtNC+0LrQsNC30LDQvdGLIGV4YWN0IGVtcHR5Owo0LiB0cmFuc2l0aW9uINC80LXQvdGP0LXRgiDRgtC+0LvRjNC60L4gZXhhY3QgbWF0Y2hlZCBgbWlncmF0aW9uX3J1bnNgIHJvdyBgU1RBR0lORyDihpIgRkFJTEVEYCDRgSDRhNC40LrRgdC40YDQvtCy0LDQvdC90YvQvCBgZXJyb3JfY29kZT1JTklUSUFMX0JPT1RTVFJBUF9TVEFMRV9BVVRIT1JJVEFUSVZFX1NOQVBTSE9UYCwgb3B0aW1pc3RpYyBwcmVkaWNhdGVzINGB0L7RhdGA0LDQvdGP0Y7RgiBpbW11dGFibGUgcnVuIGZpZWxkcywg0LAgdHJhbnNhY3Rpb25hbCByZWFkLWJhY2sgZXhhY3Qt0YHQstC10YDRj9C10YIgdGVybWluYWwgcm93Owo1LiBgc291cmNlX3NuYXBzaG90c2AsIGBpbml0aWFsX2Jvb3RzdHJhcF9pZGVudGl0eV9tYW5pZmVzdHNgINC4INGD0LbQtSBtYXRlcmlhbGl6ZWQgYXBwZW5kLW9ubHkgYHNvdXJjZV9yZWNvcmRfcmV2aXNpb25zYCAqKtC90LUg0YPQtNCw0LvRj9GO0YLRgdGPLCDQvdC1INC/0LXRgNC10L/QuNGB0YvQstCw0Y7RgtGB0Y8g0Lgg0L3QtSDQv9C10YDQtdC40YHQv9C+0LvRjNC30YPRjtGC0YHRjyoqOyDRjdGC0L4gYXVkaXQvcmVjb3ZlcnkgZXZpZGVuY2UgZmFpbGVkIGF0dGVtcHQ7CjYuIGZyZXNoIGJvb3RzdHJhcCDQv9C+0YHQu9C1IHRlcm1pbmFsaXphdGlvbiDQvtCx0Y/Qt9Cw0L0g0YHQvtC30LTQsNGC0Ywg0L3QvtCy0YvQuSBydW4vc25hcHNob3QvbWFuaWZlc3Qg0LggZXhwbGljaXQg0L3QvtCy0YvQtSByb3cgaWRlbnRpdHkgYWxsb2NhdGlvbnMg0LjQtyDRgtC10LrRg9GJ0LXQs9C+IGF1dGhvcml0YXRpdmUgb2JzZXJ2YXRpb247IGlkZW50aXRpZXMgZmFpbGVkIGF0dGVtcHQg0L3QtSDRj9Cy0LvRj9GO0YLRgdGPIGNhbmRpZGF0ZSBwb29sOwo3LiDQtNC+INC/0L7Rj9Cy0LvQtdC90LjRjyDQvdC+0LLQvtCz0L4gZXhhY3QgYENPTU1JVFRFRGAgYmFzZWxpbmUgUmVhZGVyINC/0L4t0L/RgNC10LbQvdC10LzRgyDQvdC1INCy0LjQtNC40YIgdmVyaWZpZWQgc2hhZG93OyDRgdCw0LwgYEZBSUxFRGAgbWFya2VyINC90LUg0Y/QstC70Y/QtdGC0YHRjyBzdWNjZXNzL2N1dG92ZXIgZXZpZGVuY2UuCgrQldGB0LvQuCBjdXJyZW50IHN0YXRlINC90LUgZW1wdHksIGR1cmFibGUgbWV0YWRhdGEg0L3QtSDRgdC+0LPQu9Cw0YHQvtCy0LDQvdCwLCBkaWdlc3QgbWlzbWF0Y2gg0L3QtSDQtNC+0LrQsNC30LDQvSDQuNC70LggbGlmZWN5Y2xlIHdyaXRlL3JlYWQtYmFjayDQvdC10L7QtNC90L7Qt9C90LDRh9C10L0sIHRlcm1pbmFsaXphdGlvbiDQvdC1INCy0YvQv9C+0LvQvdGP0LXRgtGB0Y8g0LggYm91bmRhcnkg0L7RgdGC0LDQtdGC0YHRjyBgUkVDT1ZFUllfUkVRVUlSRURgLgoK
         run: |
           set -euo pipefail
-          base_hash="$(git hash-object docs/MIGRATION_CONTRACT.md)"
-          echo "R1_DOC_BASE_HASH=${base_hash}"
           test "$GITHUB_REF" = 'refs/heads/r1-453-stale-staging-retirement-contract'
-          test "$base_hash" = '5c65bddb6489c761425d3890cfe72581b8aeb6f4'
+          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = '5c65bddb6489c761425d3890cfe72581b8aeb6f4'
+          test "$(git hash-object .github/r1-453-stale-staging-contract-section.md)" = 'aef45c5de06bb509466559855aac85ec401fa2a2'
           python - <<'PY'
-          import base64
-          import os
           from pathlib import Path
 
           path = Path('docs/MIGRATION_CONTRACT.md')
+          section_path = Path('.github/r1-453-stale-staging-contract-section.md')
           text = path.read_text()
+          section = section_path.read_text()
           marker = '### Controlled rebuild scheme outcome recovery\n'
-          section = base64.b64decode(os.environ['SECTION_B64']).decode()
-          print(f'R1_DOC_MARKER_COUNT={text.count(marker)}')
           if text.count(marker) != 1:
               raise SystemExit('R1_STALE_STAGING_DOC_MARKER_INVALID')
           if section.splitlines()[0] in text:
@@ -54,6 +49,7 @@ jobs:
           echo "R1_DOC_PATCHED_HASH=${actual}"
           test "$actual" = 'e77f8c4a64fcde2b21056c008844f8fd38ba1b0c'
           git rm .github/workflows/r1-453-stale-staging-doc-patch.yml
+          git rm .github/r1-453-stale-staging-contract-section.md
           git add docs/MIGRATION_CONTRACT.md
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
