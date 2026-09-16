@@ -105,6 +105,8 @@ function staleRetiredHistoryIsSafeForFreshBootstrap(
 ): boolean {
   return evidence.staleRetiredRuns > 0
     && evidence.failedRuns === evidence.staleRetiredRuns
+    && evidence.sourceSnapshots === evidence.staleRetiredRuns
+    && evidence.identityManifests === evidence.staleRetiredRuns
     && evidence.sourceRecords === 0
     && evidence.transactions === 0;
 }
