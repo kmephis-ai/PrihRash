@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import {
   createMigrationRun,
+  markMigrationRunFailed,
   markMigrationRunValidated,
 } from '../../dist/migration/migrationRunState.js';
-import { prepareMigrationRunValidatedWrite } from '../../dist/migration/migrationRunPersistence.js';
+import {
+  prepareMigrationRunFailedWrite,
+  prepareMigrationRunValidatedWrite,
+} from '../../dist/migration/migrationRunPersistence.js';
 import {
   MigrationRunLifecycleExecutorError,
   executeMigrationRunLifecycleWrite,
@@ -74,6 +78,25 @@ test('commits lifecycle transition only after matching in-transaction read-back'
 
   assert.equal(result.state, 'VALIDATED');
   assert.equal(Object.isFrozen(result), true);
+  assert.deepEqual(fake.events, ['begin', 'write', 'readback', 'commit']);
+});
+
+test('accepts native Date timestamp read-back produced by pinned YDB SDK', async () => {
+  const { staging } = runs();
+  const failed = markMigrationRunFailed(
+    staging,
+    '2026-09-16T20:01:39.123Z',
+    'SYNTHETIC_FAILURE',
+  );
+  const prepared = prepareMigrationRunFailedWrite(staging, failed);
+  const fake = fakeTransport([
+    observedRow(failed, { finished_at: new Date(failed.finishedAt) }),
+  ]);
+
+  const result = await executeMigrationRunLifecycleWrite(new YdbAdapter(fake.transport), prepared, failed);
+
+  assert.equal(result.state, 'FAILED');
+  assert.equal(result.finishedAt, failed.finishedAt);
   assert.deepEqual(fake.events, ['begin', 'write', 'readback', 'commit']);
 });
 
