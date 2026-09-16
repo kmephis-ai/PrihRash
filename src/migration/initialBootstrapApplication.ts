@@ -18,16 +18,13 @@ import {
 } from './initialBootstrapIdentityManifest.js';
 import { executeInitialBootstrapMetadataWrites } from './initialBootstrapMetadataExecutor.js';
 import { prepareInitialBootstrapMetadataWrites } from './initialBootstrapPersistence.js';
-import { readControlledRebuildCurrentEvidence } from './initialControlledRebuildEvidenceReader.js';
 import {
-  buildExpectedControlledRebuildReconciliation,
-  compareControlledRebuildStagingReconciliation,
-} from './initialControlledRebuildReconciliation.js';
+  diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
+} from './initialBootstrapStaleStagingRetirementDiagnostic.js';
 import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
-  INITIAL_RECONCILIATION_CHECKS,
   evaluateInitialValidation,
   type InitialReconciliationEvidence,
   type InitialValidationBlocker,
@@ -358,16 +355,9 @@ async function readDurableSnapshot(
 }
 
 async function assertCurrentStateEmpty(adapter: YdbAdapter): Promise<void> {
-  const expected = buildExpectedControlledRebuildReconciliation({
-    sourceRecords: Object.freeze([]),
-    transactions: Object.freeze([]),
-  });
-  const observed = await readControlledRebuildCurrentEvidence(adapter);
-  const evidence = compareControlledRebuildStagingReconciliation(expected, observed);
-  if (
-    evidence.unexplainedHighImpactMismatchCount !== 0
-    || INITIAL_RECONCILIATION_CHECKS.some((check) => evidence.checks[check] !== 'MATCHED')
-  ) {
+  const diagnostic = await adapter.serializableReadWrite((transaction) =>
+    diagnoseInitialBootstrapStaleStagingRetirementCurrentState(transaction));
+  if (diagnostic !== 'STALE_STAGING_CURRENT_STATE_EMPTY') {
     throw new InitialBootstrapApplicationError('CURRENT_STATE_NOT_EMPTY');
   }
 }

@@ -247,6 +247,12 @@ function statementRows(statement, state) {
     const run = state.migrationRuns.get(parameter(statement, 'id'));
     return run === undefined ? [] : [migrationRunRow(run)];
   }
+  if (text === 'SELECT COUNT(*) AS row_count FROM source_records') {
+    return [{ row_count: BigInt(state.sourceRecords.size) }];
+  }
+  if (text === 'SELECT COUNT(*) AS row_count FROM transactions') {
+    return [{ row_count: BigInt(state.transactions.size) }];
+  }
   if (text.includes('FROM `source_records` GROUP BY classification, state')) return sourceAggregateRows(state);
   if (text.includes('FROM `transactions` GROUP BY type')) return typeAggregateRows(state);
   if (text.includes('category_id AS dimension_id')) return dimensionRows(state, 'category_id');
