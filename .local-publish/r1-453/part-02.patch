@@ -1,0 +1,181 @@
++`allow_staging_retirement=true` запрещены fail-closed.
++
+ `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes. Аналогично, `STAGING_RUN_PRESENT` без explicit Incident-M marker и `allow_staging_resume=true` всегда блокирует orchestrator.
+ 
+ ## Incident-M provider attempt contract
+diff --git a/scripts/r1-bootstrap-orchestrator-child-workflow.mjs b/scripts/r1-bootstrap-orchestrator-child-workflow.mjs
+index e656f7d..55cf5fa 100644
+--- a/scripts/r1-bootstrap-orchestrator-child-workflow.mjs
++++ b/scripts/r1-bootstrap-orchestrator-child-workflow.mjs
+@@ -68,7 +68,16 @@ function activeMainDispatch(run) {
+     && ACTIVE_STATUSES.has(run?.status);
+ }
+ 
+-async function dispatchAndResolveRun(token, workflow, expectedSha) {
++function dispatchInputs(kind) {
++  if (kind !== 'bootstrap') return null;
++  const allowStagingRetirement = process.env.R1_BOOTSTRAP_ALLOW_STAGING_RETIREMENT ?? 'false';
++  if (allowStagingRetirement !== 'true' && allowStagingRetirement !== 'false') {
++    throw new Error('BOOTSTRAP_STAGING_RETIREMENT_INPUT_INVALID');
++  }
++  return Object.freeze({ allow_staging_retirement: allowStagingRetirement });
++}
++
++async function dispatchAndResolveRun(token, workflow, expectedSha, kind) {
+   await requireExactMain(token, expectedSha);
+   const beforeRuns = await listDispatchRuns(token, workflow);
+   if (beforeRuns.some(activeMainDispatch)) {
+@@ -76,10 +85,11 @@ async function dispatchAndResolveRun(token, workflow, expectedSha) {
+   }
+   const beforeIds = new Set(beforeRuns.map((run) => run.id));
+ 
++  const inputs = dispatchInputs(kind);
+   await githubJson(`/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, token, {
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+-    body: JSON.stringify({ ref: 'main' }),
++    body: JSON.stringify({ ref: 'main', ...(inputs === null ? {} : { inputs }) }),
+   });
+ 
+   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
+@@ -137,7 +147,7 @@ async function main() {
+   }
+ 
+   try {
+-    const runId = await dispatchAndResolveRun(token, workflow, expectedSha);
++    const runId = await dispatchAndResolveRun(token, workflow, expectedSha, kind);
+     const run = await waitForCompletion(token, runId, expectedSha);
+     const result = {
+       status: 'PASS',
+diff --git a/scripts/r1-status.mjs b/scripts/r1-status.mjs
+index 760098d..1186dd4 100644
+--- a/scripts/r1-status.mjs
++++ b/scripts/r1-status.mjs
+@@ -106,6 +106,7 @@ function classifyOrchestratorEvidence(value) {
+     'postRecoveryVerdict',
+     'postRecoveryReason',
+     'stagingResumeAuthorized',
++    'stagingRetirementAuthorized',
+   ])) return null;
+ 
+   if (
+@@ -114,6 +115,7 @@ function classifyOrchestratorEvidence(value) {
+     || !ORCHESTRATOR_CODES.has(value.code)
+     || !SHA_RE.test(value.sourceSha ?? '')
+     || typeof value.stagingResumeAuthorized !== 'boolean'
++    || typeof value.stagingRetirementAuthorized !== 'boolean'
+     || !positiveIntegerOrNull(value.readinessRunId)
+     || !positiveIntegerOrNull(value.bootstrapRunId)
+     || !stringMemberOrNull(value.bootstrapConclusion, GITHUB_CONCLUSIONS)
+diff --git a/src/runtime/initialBootstrapReferenceAwareJob.ts b/src/runtime/initialBootstrapReferenceAwareJob.ts
+index 431b604..8e51a19 100644
+--- a/src/runtime/initialBootstrapReferenceAwareJob.ts
++++ b/src/runtime/initialBootstrapReferenceAwareJob.ts
+@@ -62,6 +62,9 @@ import {
+   diagnoseInitialBootstrapRecoverySurface,
+   type InitialBootstrapRecoverySurfaceClassification,
+ } from '../migration/initialBootstrapResidualSurface.js';
++import {
++  retireInitialBootstrapStaleStagingRun,
++} from '../migration/initialBootstrapStaleStagingRetirement.js';
+ import {
+   parseInitialBootstrapPrivateHistoricalEvidence,
+ } from '../migration/initialBootstrapPrivateEvidence.js';
+@@ -101,6 +104,13 @@ import {
+   type InitialBootstrapJobRuntime,
+ } from './initialBootstrapJob.js';
+ 
++export const INITIAL_BOOTSTRAP_STALE_STAGING_RETIREMENT_ENV =
++  'PRIHRASH_INITIAL_BOOTSTRAP_STAGING_RETIREMENT_AUTHORIZED';
++
++export interface InitialBootstrapReferenceAwareRuntimeOptions {
++  readonly allowStaleStagingRetirement?: boolean;
++}
++
+ export type InitialBootstrapReferenceAwareRuntimeErrorCode =
+   | 'REFERENCE_RUNTIME_STATE_INVALID'
+   | 'REFERENCE_SOURCE_READ_FAILED'
+@@ -312,7 +322,9 @@ async function runApplicationSafely(
+   }
+ }
+ 
+-function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
++function createReferenceAwareRuntime(
++  options: Readonly<InitialBootstrapReferenceAwareRuntimeOptions> = Object.freeze({}),
++): Readonly<InitialBootstrapJobRuntime> {
+   let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
+   let digest: Readonly<CanonicalSourceDigest> | null = null;
+   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
+@@ -397,7 +409,24 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
+       }
+ 
+       const recoverySurface = await diagnoseInitialBootstrapRecoverySurface(dependencies.adapter);
+-      if (recoverySurface.reason === 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') {
++      let staleStagingRetired = false;
++      if (options.allowStaleStagingRetirement === true) {
++        if (recoverySurface.reason !== 'STAGING_RUN_PRESENT') {
++          throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
++        }
++        try {
++          await retireInitialBootstrapStaleStagingRun(
++            dependencies.adapter,
++            observation.snapshotDigest,
++            dependencies.clock.now(),
++          );
++          staleStagingRetired = true;
++        } catch {
++          throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
++        }
++      }
++
++      if (!staleStagingRetired && recoverySurface.reason === 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') {
+         const reconciled = await reconcileInitialBootstrapReferenceState(
+           dependencies.adapter,
+           referenceRows,
+@@ -413,7 +442,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
+         }
+         return runApplicationSafely(observation, dependencies);
+       }
+-      if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
++      if (!staleStagingRetired && isUnsafeNoRunRecoverySurface(recoverySurface)) {
+         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
+       }
+       if (referencePlan.writes.length === 0) {
+@@ -444,12 +473,19 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
+ 
+ export function runInitialBootstrapReferenceAwareJob(
+   config: Readonly<InitialBootstrapJobConfig>,
++  options: Readonly<InitialBootstrapReferenceAwareRuntimeOptions> = Object.freeze({}),
+ ) {
+-  return executeInitialBootstrapJob(config, createReferenceAwareRuntime());
++  return executeInitialBootstrapJob(config, createReferenceAwareRuntime(options));
+ }
+ 
+ export function runInitialBootstrapReferenceAwareJobFromEnvironment(
+   environment: InitialBootstrapJobEnvironment = process.env,
+ ) {
+-  return runInitialBootstrapReferenceAwareJob(readInitialBootstrapJobConfig(environment));
++  return runInitialBootstrapReferenceAwareJob(
++    readInitialBootstrapJobConfig(environment),
++    Object.freeze({
++      allowStaleStagingRetirement:
++        environment[INITIAL_BOOTSTRAP_STALE_STAGING_RETIREMENT_ENV] === 'true',
++    }),
++  );
+ }
+diff --git a/tests/tooling/initial-bootstrap-stale-staging-runtime-binding.test.mjs b/tests/tooling/initial-bootstrap-stale-staging-runtime-binding.test.mjs
+new file mode 100644
+index 0000000..fff4fb9
+--- /dev/null
++++ b/tests/tooling/initial-bootstrap-stale-staging-runtime-binding.test.mjs
+@@ -0,0 +1,32 @@
++import assert from 'node:assert/strict';
++import { readFile } from 'node:fs/promises';
++import test from 'node:test';
++
++const runtime = await readFile('src/runtime/initialBootstrapReferenceAwareJob.ts', 'utf8');
++const autocontinue = await readFile('.github/workflows/r1-initial-bootstrap-autocontinue.yml', 'utf8');
++const orchestrator = await readFile('.github/workflows/r1-initial-bootstrap-orchestrator.yml', 'utf8');
++const child = await readFile('scripts/r1-bootstrap-orchestrator-child-workflow.mjs', 'utf8');
++const bootstrap = await readFile('.github/workflows/r1-initial-shadow-bootstrap.yml', 'utf8');
++
