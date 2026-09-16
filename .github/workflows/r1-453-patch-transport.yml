@@ -1,0 +1,35 @@
+name: R1 453 Patch Transport
+
+on:
+  push:
+    branches:
+      - r1/453-revision-batch-boundary
+    paths:
+      - .github/workflows/r1-453-patch-transport.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish-verified-patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Apply locally verified patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git merge-base HEAD 70327462e60a68df6d35fe49061de7fb6ed64c36)" = "70327462e60a68df6d35fe49061de7fb6ed64c36"
+          git apply --check .transport/r1-453-revision-batch-boundary.patch
+          git apply .transport/r1-453-revision-batch-boundary.patch
+          git add docs/MIGRATION_CONTRACT.md docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'R1 #453: зафиксировать границу batch evidence'
+          git push origin HEAD:r1/453-revision-batch-boundary
