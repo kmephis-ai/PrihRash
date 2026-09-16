@@ -1,0 +1,109 @@
+name: R1 durable STAGING recovery diagnostic
+
+# Stage-specific one-shot bridge for R1 #453 durable revision evidence.
+# Retirement condition: delete this workflow immediately after enum-only recovery evidence is captured.
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: r1-durable-staging-recovery-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  dispatch-recovery:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EXPECTED_DIAGNOSTIC_SHA: afe39cdb529d32e01ebbb2cefb398dc825351cb0
+    steps:
+      - name: Dispatch one read-only recovery from exact diagnostic base
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          accept_header='Accept: application/vnd.github+json'
+
+          main_sha="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$main_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_MAIN_MOVED'
+            exit 0
+          fi
+
+          associated_prs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/commits/$SOURCE_SHA/pulls")"
+          source_pr="$(jq -cer --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            [.[] | select(
+              .merged_at != null
+              and .merge_commit_sha == $sha
+              and .base.ref == "main"
+              and .head.repo.full_name == $repo
+              and .title == "R1 #453: запустить durable STAGING read-only diagnostic"
+            )] | if length == 1 then .[0] else empty end
+          ' <<<"$associated_prs" || true)"
+          if [ -z "$source_pr" ]; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_SOURCE_PR_INVALID'
+            exit 0
+          fi
+          if [ "$(jq -r '.base.sha' <<<"$source_pr")" != "$EXPECTED_DIAGNOSTIC_SHA" ]; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_BASE_SHA_MISMATCH'
+            exit 0
+          fi
+
+          source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+          source_pr_body="$(jq -r '.body // ""' <<<"$source_pr")"
+          marker_count="$(jq -Rn --arg body "$source_pr_body" '
+            [$body | split("\n")[] | select(. == "Recovery-Diagnostic: DURABLE_STAGING_REVISION_V1")] | length
+          ')"
+          if [ "$marker_count" != '1' ]; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_MARKER_INVALID'
+            exit 0
+          fi
+
+          source_files="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/pulls/$source_pr_number/files?per_page=100")"
+          if ! jq -e '
+            length == 2
+            and any(.filename == ".github/workflows/r1-initial-bootstrap-recovery-durable-diagnostic.yml" and .status == "added")
+            and any(.filename == "tests/tooling/r1-initial-bootstrap-recovery-durable-diagnostic-workflow.test.mjs" and .status == "added")
+          ' <<<"$source_files" >/dev/null; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_CHANGESET_INVALID'
+            exit 0
+          fi
+
+          existing="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if jq -e --arg sha "$SOURCE_SHA" '.workflow_runs | any(.head_sha == $sha)' <<<"$existing" >/dev/null; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_ALREADY_DISPATCHED'
+            exit 0
+          fi
+
+          current_sha="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$current_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_MAIN_MOVED_BEFORE_DISPATCH'
+            exit 0
+          fi
+
+          curl --fail --silent --show-error --request POST \
+            --header "$auth_header" --header "$accept_header" --header 'Content-Type: application/json' \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches" --data '{"ref":"main"}'
+          echo 'R1_DURABLE_RECOVERY_DIAGNOSTIC_DISPATCHED'
