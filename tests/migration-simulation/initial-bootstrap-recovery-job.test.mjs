@@ -49,6 +49,7 @@ function runtime(overrides = {}) {
   let sourceReads = 0;
   let reconcileCalls = 0;
   let diagnoseCalls = 0;
+  let stagingDiagnosticCalls = 0;
   let closes = 0;
   const result = {
     runtime: {
@@ -88,9 +89,19 @@ function runtime(overrides = {}) {
           reason: 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE',
         };
       },
+      async diagnoseStagingRevisionEvidence(_adapter, sourceSnapshotDigest, observations) {
+        stagingDiagnosticCalls += 1;
+        assert.equal(sourceSnapshotDigest, 'synthetic-digest');
+        assert.deepEqual(observations, [{
+          sourceOrdinal: 0,
+          rowHint: 2,
+          digest: 'synthetic-row-digest',
+        }]);
+        return 'PARTIAL_CURRENT_RUN_ONLY';
+      },
       ...overrides,
     },
-    counters: () => ({ sourceReads, reconcileCalls, diagnoseCalls, closes }),
+    counters: () => ({ sourceReads, reconcileCalls, diagnoseCalls, stagingDiagnosticCalls, closes }),
   };
   return result;
 }
@@ -105,8 +116,45 @@ test('recovery job reads fresh authoritative source only for residual reference 
     sourceReads: 1,
     reconcileCalls: 1,
     diagnoseCalls: 2,
+    stagingDiagnosticCalls: 0,
     closes: 1,
   });
+});
+
+
+test('recovery job adds enum-only revision evidence for a single STAGING run', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+  });
+  assert.equal(fixture.counters().sourceReads, 1);
+  assert.equal(fixture.counters().reconcileCalls, 0);
+  assert.equal(fixture.counters().stagingDiagnosticCalls, 1);
+  assert.equal(fixture.counters().closes, 1);
+});
+
+test('recovery job keeps STAGING classification fail-closed when revision diagnostic cannot be proven', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+    async diagnoseStagingRevisionEvidence() {
+      throw new Error('synthetic diagnostic failure');
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionEvidence: 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
+  });
+  assert.equal(fixture.counters().sourceReads, 1);
+  assert.equal(fixture.counters().closes, 1);
 });
 
 test('recovery job preserves non-reference classification without touching Google', async () => {

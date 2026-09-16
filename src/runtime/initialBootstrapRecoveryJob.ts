@@ -11,6 +11,11 @@ import {
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import {
+  diagnoseInitialBootstrapStagingRevisionEvidence,
+  type InitialBootstrapStagingRevisionDiagnostic,
+  type InitialBootstrapStagingRevisionObservation,
+} from '../migration/initialBootstrapStagingRevisionDiagnostic.js';
+import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
 import {
@@ -60,6 +65,10 @@ export interface InitialBootstrapRecoveryJobSource {
   readFullSnapshotObservation(): Promise<Readonly<GoogleSheetsFullSnapshotLease>>;
 }
 
+export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
+  readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
+}
+
 export interface InitialBootstrapRecoveryJobRuntime {
   createDigest(): Readonly<CanonicalSourceDigest>;
   createSource(
@@ -72,6 +81,11 @@ export interface InitialBootstrapRecoveryJobRuntime {
     adapter: YdbAdapter,
     rows: Parameters<typeof reconcileInitialBootstrapReferenceState>[1],
   ): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
+  diagnoseStagingRevisionEvidence(
+    adapter: YdbAdapter,
+    sourceSnapshotDigest: string,
+    observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
+  ): Promise<InitialBootstrapStagingRevisionDiagnostic>;
 }
 
 function requiredValue(value: unknown, code: InitialBootstrapRecoveryJobErrorCode): string {
@@ -141,6 +155,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   },
   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
+  diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
 });
 
 function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassification> {
@@ -153,7 +168,7 @@ function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassif
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
-): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
+): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
   const validated = validateConfig(config);
   const ydbClient = await runtime.createYdbClient(validated);
   const adapter = new YdbAdapter(ydbClient.transport);
@@ -161,6 +176,27 @@ export async function executeInitialBootstrapRecoveryJob(
 
   try {
     const before = await runtime.diagnoseSurface(adapter);
+    if (before.reason === 'STAGING_RUN_PRESENT') {
+      let stagingRevisionEvidence: InitialBootstrapStagingRevisionDiagnostic;
+      try {
+        const digest = runtime.createDigest();
+        const source = runtime.createSource(validated, digest);
+        const lease = await source.readFullSnapshotObservation();
+        const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
+        stagingRevisionEvidence = await runtime.diagnoseStagingRevisionEvidence(
+          adapter,
+          lease.snapshotDigest,
+          projected.rows.map((row, sourceOrdinal) => Object.freeze({
+            sourceOrdinal,
+            rowHint: row.rowHint,
+            digest: row.digest,
+          })),
+        );
+      } catch {
+        stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+      }
+      return Object.freeze({ ...before, stagingRevisionEvidence });
+    }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;
 
     let reconciled: Readonly<InitialBootstrapRecoverySurfaceClassification>;
