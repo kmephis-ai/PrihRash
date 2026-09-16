@@ -17,6 +17,7 @@ function evidence(overrides = {}) {
     stagingRuns: 0,
     validatedRuns: 0,
     failedRuns: 0,
+    staleRetiredRuns: 0,
     committedRowsSeen: null,
     sourceSnapshots: 0,
     identityManifests: 0,
