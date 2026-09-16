@@ -38,9 +38,13 @@ authoritative snapshot доказать exact manifest/source evidence, пере
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
 по одной строке `Provider-Attempt`, `Observed-Signature`, `Expected-Transition`, `Recovery-State`,
 `Circuit-Rearm` и `Regression-Test` по contract из `AGENTS.md`. Autocontinue дополнительно проверяет,
-что exact regression test действительно изменён вместе с runtime/script/R1-workflow surface.
-Diagnostic-only PR, повтор уже использованного SHA или неограниченный changeset не dispatch-ит
-orchestrator.
+что exact regression test действительно изменён вместе с runtime/script/R1-workflow surface, а
+`Observed-Signature` совпадает с deterministic signature из последнего relevant completed
+privacy-safe orchestrator/bootstrap evidence. Missing/ambiguous/mismatched evidence fail-closed до
+dispatch. Cross-run history считает только distinct-SHA root-cause attempts с доказанно достигнутым
+bootstrap invoke; если одна safe signature пережила две такие попытки, autocontinue завершает
+`BLOCKED_NEEDS_ROOT_CAUSE` и не запускает provider workflow. Diagnostic-only PR, повтор уже
+использованного SHA или неограниченный changeset также не dispatch-ит orchestrator.
 
 Standalone `R1 Yandex readiness`, `R1 initial shadow bootstrap` и `R1 initial bootstrap recovery` сохраняются как reviewed stage-specific primitives / diagnostic fallback, но пока #453 активен нормальный Owner path — orchestrator. Никакие child workflows не должны запускаться владельцем между шагами orchestrator run.
 

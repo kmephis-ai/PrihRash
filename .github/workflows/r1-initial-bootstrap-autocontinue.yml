@@ -27,6 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout exact CI source for bounded evidence classifier
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
       - name: Dispatch guarded exact-main orchestrator only for active R1 #453 source
         shell: bash
         env:
@@ -97,6 +103,7 @@ jobs:
                     and ($test | length) == 1
                     and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
                   ),
+                  observedSignature: (if ($observed | length) == 1 then ($observed[0] | sub("^Observed-Signature: "; "")) else null end),
                   recovery: (if ($recovery | length) == 1 then ($recovery[0] | sub("^Recovery-State: "; "")) else null end),
                   regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
                 }
@@ -149,6 +156,178 @@ jobs:
             <<<"$existing" >/dev/null; then
             echo 'R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED'
             exit 0
+          fi
+
+          download_classification() {
+            local run_id="$1"
+            local artifact_name="$2"
+            local destination="$3"
+            local artifacts artifact_id archive
+            artifacts="$(curl --fail --silent --show-error \
+              --header "$auth_header" \
+              --header "$accept_header" \
+              "$api/actions/runs/$run_id/artifacts?per_page=100")" || return 1
+            artifact_id="$(jq -r --arg name "$artifact_name" '
+              [.artifacts[] | select(.name == $name and .expired == false)]
+              | if length == 1 then .[0].id else empty end' \
+              <<<"$artifacts")"
+            [ -n "$artifact_id" ] || return 1
+            archive="$RUNNER_TEMP/r1-autocontinue-evidence-$run_id.zip"
+            curl --fail --silent --show-error --location \
+              --header "$auth_header" \
+              --header "$accept_header" \
+              "$api/actions/artifacts/$artifact_id/zip" \
+              --output "$archive" || return 1
+            unzip -p "$archive" classification.json > "$destination" || return 1
+          }
+
+          if [ "$source_is_r1" = 'true' ]; then
+            observed_signature="$(jq -er '.observedSignature' <<<"$marker")"
+            if [ "$(jq -r '.total_count' <<<"$existing")" -gt 100 ]; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_UNBOUNDED'
+              exit 0
+            fi
+
+            latest_run_id="$(jq -r '
+              [.workflow_runs[] | select(.status == "completed")]
+              | sort_by(.created_at) | reverse | .[0].id // empty
+            ' <<<"$existing")"
+            latest_run_sha="$(jq -r --argjson run_id "${latest_run_id:-0}" '
+              [.workflow_runs[] | select(.id == $run_id)] | .[0].head_sha // empty
+            ' <<<"$existing")"
+            if [ -z "$latest_run_id" ] || [ -z "$latest_run_sha" ]; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_MISSING'
+              exit 0
+            fi
+
+            latest_orchestrator="$RUNNER_TEMP/r1-autocontinue-latest-orchestrator.json"
+            if ! download_classification \
+              "$latest_run_id" \
+              "r1-initial-bootstrap-orchestrator-evidence-$latest_run_id" \
+              "$latest_orchestrator"; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_MISSING'
+              exit 0
+            fi
+            if ! jq -e --arg sha "$latest_run_sha" '.sourceSha == $sha' \
+              "$latest_orchestrator" >/dev/null; then
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_INVALID'
+              exit 0
+            fi
+
+            bootstrap_run_id="$(jq -r 'if (.bootstrapRunId | type) == "number" then .bootstrapRunId else empty end' \
+              "$latest_orchestrator")"
+            bootstrap_invoke_step="$(jq -r '.bootstrapInvokeStep // empty' "$latest_orchestrator")"
+            if [ -n "$bootstrap_run_id" ] \
+              && { [ "$bootstrap_invoke_step" = 'success' ] || [ "$bootstrap_invoke_step" = 'failure' ]; }; then
+              latest_bootstrap="$RUNNER_TEMP/r1-autocontinue-latest-bootstrap.json"
+              if ! download_classification \
+                "$bootstrap_run_id" \
+                "r1-initial-bootstrap-evidence-$bootstrap_run_id" \
+                "$latest_bootstrap"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_MISSING'
+                exit 0
+              fi
+              if ! latest_signature="$(node scripts/r1-autocontinue-evidence.mjs signature-bootstrap "$latest_bootstrap")"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_INVALID'
+                exit 0
+              fi
+            elif [ -z "$bootstrap_invoke_step" ] \
+              || [ "$bootstrap_invoke_step" = 'skipped' ] \
+              || [ "$bootstrap_invoke_step" = 'NOT_REACHED' ]; then
+              if ! latest_signature="$(node scripts/r1-autocontinue-evidence.mjs signature-orchestrator "$latest_orchestrator")"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_EVIDENCE_INVALID'
+                exit 0
+              fi
+            else
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREVIOUS_OUTCOME_UNCERTAIN'
+              exit 0
+            fi
+
+            prior_root_cause_attempts=0
+            while IFS=$'\t' read -r historical_run_id historical_sha; do
+              [ -n "$historical_run_id" ] || continue
+              [ "$historical_sha" != "$SOURCE_SHA" ] || continue
+              historical_prs="$(curl --fail --silent --show-error \
+                --header "$auth_header" \
+                --header "$accept_header" \
+                "$api/commits/$historical_sha/pulls")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_READ_FAILED'
+                  exit 0
+                }
+              historical_pr="$(jq -cer \
+                --arg sha "$historical_sha" \
+                --arg repo "$GITHUB_REPOSITORY" \
+                '[.[] | select(
+                  .merged_at != null
+                  and .merge_commit_sha == $sha
+                  and .base.ref == "main"
+                  and .head.repo.full_name == $repo
+                  and (.title | startswith("R1 #453:"))
+                )] | if length == 1 then .[0] else empty end' \
+                <<<"$historical_prs" || true)"
+              [ -n "$historical_pr" ] || continue
+              historical_body="$(jq -r '.body // ""' <<<"$historical_pr")"
+              historical_matches="$(jq -Rn \
+                --arg body "$historical_body" \
+                --arg observed "Observed-Signature: $observed_signature" '
+                ($body | split("\n")) as $lines
+                | {
+                    attempt: ([$lines[] | select(. == "Provider-Attempt: READY")] | length),
+                    observed: ([$lines[] | select(. == $observed)] | length),
+                    rearm: ([$lines[] | select(. == "Circuit-Rearm: ROOT_CAUSE_FIX")] | length)
+                  }
+              ')"
+              if ! jq -e '.attempt == 1 and .observed == 1 and .rearm == 1' \
+                <<<"$historical_matches" >/dev/null; then
+                continue
+              fi
+
+              historical_evidence="$RUNNER_TEMP/r1-autocontinue-history-$historical_run_id.json"
+              if ! download_classification \
+                "$historical_run_id" \
+                "r1-initial-bootstrap-orchestrator-evidence-$historical_run_id" \
+                "$historical_evidence"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_MISSING'
+                exit 0
+              fi
+              if ! jq -e --arg sha "$historical_sha" '
+                .sourceSha == $sha
+                and (.bootstrapRunId | type) == "number"
+                and (.bootstrapInvokeStep | IN("success", "failure"))
+              ' "$historical_evidence" >/dev/null; then
+                historical_step="$(jq -r '.bootstrapInvokeStep // empty' "$historical_evidence")"
+                if [ -z "$historical_step" ] \
+                  || [ "$historical_step" = 'skipped' ] \
+                  || [ "$historical_step" = 'NOT_REACHED' ]; then
+                  continue
+                fi
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_INVALID'
+                exit 0
+              fi
+              prior_root_cause_attempts=$((prior_root_cause_attempts + 1))
+              if [ "$prior_root_cause_attempts" -ge 2 ]; then
+                break
+              fi
+            done < <(jq -r '
+              [.workflow_runs[] | select(.status == "completed")]
+              | sort_by(.created_at) | reverse
+              | .[] | [.id, .head_sha] | @tsv
+            ' <<<"$existing")
+
+            decision="$(node scripts/r1-autocontinue-evidence.mjs decision \
+              "$observed_signature" "$latest_signature" "$prior_root_cause_attempts")" || {
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_DECISION_INVALID'
+                exit 0
+              }
+            decision_code="$(jq -er '.code' <<<"$decision")"
+            if [ "$decision_code" = 'BLOCKED_NEEDS_ROOT_CAUSE' ]; then
+              echo 'BLOCKED_NEEDS_ROOT_CAUSE'
+              exit 0
+            fi
+            if [ "$decision_code" != 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_READY' ]; then
+              echo "$decision_code"
+              exit 0
+            fi
           fi
 
           if [ "$source_is_r1" != 'true' ]; then

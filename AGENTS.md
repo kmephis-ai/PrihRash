@@ -112,9 +112,14 @@ Circuit-Rearm: ROOT_CAUSE_FIX
 Regression-Test: <tests/...>
 ```
 
-Автономный provider path не вооружается только по title/Issue number. Повтор одного SHA
-запрещён. Две одинаковые safe failure signatures подряд требуют нового доказанного root-cause
-fix и regression fixture; blind diagnostic replay запрещён.
+Автономный provider path не вооружается только по title/Issue number. `Observed-Signature`
+обязан точно совпадать с deterministic signature из последнего relevant completed privacy-safe
+orchestrator/bootstrap evidence; отсутствующее, неоднозначное или несовпадающее evidence всегда
+останавливает autocontinue до provider dispatch. Повтор одного SHA запрещён. В cross-run history
+считаются только distinct-SHA root-cause attempts, для которых privacy-safe orchestrator evidence
+доказывает реально достигнутый bootstrap invoke. Если одна safe failure signature пережила две
+такие root-cause attempts, следующий automatic cycle обязан завершиться точным
+`BLOCKED_NEEDS_ROOT_CAUSE` без provider workflow dispatch. Blind diagnostic replay запрещён.
 
 ## 9. CI
 
