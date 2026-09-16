@@ -45,6 +45,9 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /pulls\/\$source_pr_number\/files\?per_page=100/);
   assert.match(workflow, /ROOT_CAUSE_EVIDENCE_MISSING/);
   assert.match(workflow, /STAGING_RESUMABLE/);
+  assert.match(workflow, /STAGING_STALE_RETIREABLE/);
+  assert.match(workflow, /recovery_state=/);
+  assert.match(workflow, /allow_staging_resume='true'/);
   assert.match(workflow, /NOT_SINGLE_MERGED_MAIN_PR/);
   assert.match(workflow, /parents \| length\) == 1/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$interrupted_run_id/);
@@ -74,6 +77,15 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
+});
+
+test('R1 autocontinue keeps resumable and stale-retireable STAGING as distinct evidence states', async () => {
+  const workflow = await workflowText();
+
+  assert.match(workflow, /Recovery-State: STAGING_RESUMABLE/);
+  assert.match(workflow, /Recovery-State: STAGING_STALE_RETIREABLE/);
+  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_RESUMABLE' \]/);
+  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_STALE_RETIREABLE' \]/);
 });
 
 test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate signatures cross-run', async () => {

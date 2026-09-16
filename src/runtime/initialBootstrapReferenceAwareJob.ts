@@ -115,7 +115,8 @@ export type InitialBootstrapReferenceAwareRuntimeErrorCode =
   | 'REFERENCE_FUNCTION_MODULE_LOAD_FAILED'
   | 'REFERENCE_FUNCTION_HANDLER_UNCAUGHT'
   | 'REFERENCE_BOOTSTRAP_RESUME_UNSAFE'
-  | 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE';
+  | 'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE'
+  | 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED';
 
 export function isInitialBootstrapResidualReferenceRecoveryAuthorized(
   before: Readonly<InitialBootstrapRecoverySurfaceClassification>,

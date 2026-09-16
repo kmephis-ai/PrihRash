@@ -97,7 +97,8 @@ jobs:
                     and ($recovery[0] | IN(
                       "Recovery-State: EMPTY_DURABLE_STATE",
                       "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
-                      "Recovery-State: STAGING_RESUMABLE"
+                      "Recovery-State: STAGING_RESUMABLE",
+                      "Recovery-State: STAGING_STALE_RETIREABLE"
                     ))
                     and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
                     and ($test | length) == 1
@@ -133,7 +134,9 @@ jobs:
               echo 'R1_BOOTSTRAP_AUTOCONTINUE_ROOT_CAUSE_EVIDENCE_MISSING'
               exit 0
             fi
-            if [ "$(jq -r '.recovery' <<<"$marker")" = 'STAGING_RESUMABLE' ]; then
+            recovery_state="$(jq -r '.recovery' <<<"$marker")"
+            if [ "$recovery_state" = 'STAGING_RESUMABLE' ] \
+              || [ "$recovery_state" = 'STAGING_STALE_RETIREABLE' ]; then
               allow_staging_resume='true'
             fi
           fi

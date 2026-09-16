@@ -6,6 +6,9 @@ const DIST = resolve(ROOT, 'dist');
 const ARTIFACT_ROOT = resolve(ROOT, '.artifacts', 'yandex-initial-bootstrap-function');
 const RUNTIME_ROOT = resolve(ARTIFACT_ROOT, 'dist', 'runtime');
 const ALLOWED_RUNTIME_BASENAMES = new Set([
+  'initialBootstrapRecoveryConfig.js',
+  'initialBootstrapRecoveryConfig.js.map',
+  'initialBootstrapRecoveryConfig.d.ts',
   'initialBootstrapJob.js',
   'initialBootstrapJob.js.map',
   'initialBootstrapJob.d.ts',
@@ -15,6 +18,9 @@ const ALLOWED_RUNTIME_BASENAMES = new Set([
   'initialBootstrapReferenceClaimAdapter.js',
   'initialBootstrapReferenceClaimAdapter.js.map',
   'initialBootstrapReferenceClaimAdapter.d.ts',
+  'initialBootstrapStaleStagingRetirementJob.js',
+  'initialBootstrapStaleStagingRetirementJob.js.map',
+  'initialBootstrapStaleStagingRetirementJob.d.ts',
   'yandexCloudInitialBootstrapFunction.js',
   'yandexCloudInitialBootstrapFunction.js.map',
   'yandexCloudInitialBootstrapFunction.d.ts',

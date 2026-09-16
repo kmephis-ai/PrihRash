@@ -60,9 +60,11 @@ async function filesUnder(directory) {
 const requiredFiles = [
   'index.js',
   'package.json',
+  'dist/runtime/initialBootstrapRecoveryConfig.js',
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapReferenceAwareJob.js',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
@@ -97,6 +99,9 @@ for (const forbiddenKey of ['devDependencies', 'scripts', 'optionalDependencies'
 const files = await filesUnder(ARTIFACT_ROOT);
 const runtimeFiles = files.filter((file) => file.startsWith('dist/runtime/'));
 const allowedRuntimeFiles = [
+  'dist/runtime/initialBootstrapRecoveryConfig.d.ts',
+  'dist/runtime/initialBootstrapRecoveryConfig.js',
+  'dist/runtime/initialBootstrapRecoveryConfig.js.map',
   'dist/runtime/initialBootstrapJob.d.ts',
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapJob.js.map',
@@ -106,6 +111,9 @@ const allowedRuntimeFiles = [
   'dist/runtime/initialBootstrapReferenceClaimAdapter.d.ts',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js.map',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.d.ts',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js.map',
   'dist/runtime/yandexCloudInitialBootstrapFunction.d.ts',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js.map',

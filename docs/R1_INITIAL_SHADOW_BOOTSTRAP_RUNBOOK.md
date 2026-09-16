@@ -31,6 +31,15 @@ authoritative snapshot доказать exact manifest/source evidence, пере
 прочитать уже записанные revision evidence и записать только отсутствующее. Любое расхождение
 остаётся fail-closed до новых writes. Default input — `false`.
 
+Отдельный marker `Recovery-State: STAGING_STALE_RETIREABLE` допускает тот же gated input только
+для доказанного несовпадения authoritative snapshot digest. Внутри **одного** bootstrap Function
+invoke первая application attempt обязана остановиться на `RESUME_CONTEXT_READ` до новых writes;
+тогда runtime повторно читает authoritative source и допускает retirement только при единственном
+`STAGING`, отсутствии `COMMITTED` baseline и exact-empty verified current. Отказ retirement
+возвращает `REFERENCE_STALE_STAGING_RETIREMENT_FAILED` без нового bootstrap; successful retirement
+разрешает ровно одну fresh application attempt. Это две application attempts в одном provider
+invoke, а не два provider invokes. Старое append-only evidence сохраняется для диагностики.
+
 `RECOVERY_REQUIRED / RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE` **не является самостоятельным разрешением replay**. Оно разрешает только войти в уже существующий guarded reference-aware bootstrap runtime: тот обязан на своём fresh authoritative snapshot повторно доказать exact `RESIDUAL_REFERENCE_STATE_WITHOUT_RUN → RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE → RESIDUAL_REFERENCE_STATE_WITHOUT_RUN` при `plannedWriteCount == 0`. Если это не доказано, runtime возвращает `REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE` до application writes. Аналогично, `STAGING_RUN_PRESENT` без explicit Incident-M marker и `allow_staging_resume=true` всегда блокирует orchestrator.
 
 ## Incident-M provider attempt contract

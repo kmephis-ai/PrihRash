@@ -21,6 +21,9 @@ import {
   InitialBootstrapJobError,
   type InitialBootstrapJobEnvironment,
 } from './initialBootstrapJob.js';
+import {
+  runInitialBootstrapStaleStagingRetirementJobFromEnvironment,
+} from './initialBootstrapStaleStagingRetirementJob.js';
 
 export type YandexInitialBootstrapFunctionCode =
   | 'INITIAL_BOOTSTRAP_COMMITTED'
@@ -79,6 +82,10 @@ export type YandexInitialBootstrapFunctionResult =
 
 export interface YandexInitialBootstrapJob {
   (environment: InitialBootstrapJobEnvironment): Promise<unknown>;
+}
+
+export interface YandexInitialBootstrapStaleStagingRetirementJob {
+  (environment: InitialBootstrapJobEnvironment): Promise<void>;
 }
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
@@ -233,6 +240,35 @@ function isConfigError(code: InitialBootstrapJobError['code']): boolean {
     || code === 'INVALID_PRIVATE_HISTORICAL_EVIDENCE';
 }
 
+export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
+  environment: InitialBootstrapJobEnvironment,
+  runJob: YandexInitialBootstrapJob,
+  retireStaleStaging: YandexInitialBootstrapStaleStagingRetirementJob,
+): Promise<unknown> {
+  try {
+    return await runJob(environment);
+  } catch (error) {
+    if (
+      !(error instanceof InitialBootstrapReferenceAwareRuntimeError)
+      || error.code !== 'REFERENCE_APPLICATION_SEMANTIC_FAILED'
+      || error.applicationPhase !== 'RESUME_CONTEXT_READ'
+    ) {
+      throw error;
+    }
+
+    try {
+      await retireStaleStaging(environment);
+    } catch {
+      throw new InitialBootstrapReferenceAwareRuntimeError(
+        'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+        'RESUME_CONTEXT_READ',
+      );
+    }
+
+    return runJob(environment);
+  }
+}
+
 export async function executeYandexInitialBootstrapFunction(
   environment: InitialBootstrapJobEnvironment,
   runJob: YandexInitialBootstrapJob,
@@ -268,6 +304,10 @@ export async function initialBootstrapHandler(
 ): Promise<Readonly<YandexInitialBootstrapFunctionResult>> {
   return executeYandexInitialBootstrapFunction(
     process.env,
-    runInitialBootstrapReferenceAwareJobFromEnvironment,
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      runInitialBootstrapReferenceAwareJobFromEnvironment,
+      runInitialBootstrapStaleStagingRetirementJobFromEnvironment,
+    ),
   );
 }

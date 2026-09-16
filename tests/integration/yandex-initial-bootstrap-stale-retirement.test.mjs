@@ -1,0 +1,196 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  executeInitialBootstrapStaleStagingRetirementJob,
+} from '../../dist/runtime/initialBootstrapStaleStagingRetirementJob.js';
+import {
+  InitialBootstrapReferenceAwareRuntimeError,
+} from '../../dist/runtime/initialBootstrapReferenceAwareJob.js';
+import {
+  executeYandexInitialBootstrapFunction,
+  runInitialBootstrapJobWithOneStaleStagingRetirement,
+} from '../../dist/runtime/yandexCloudInitialBootstrapFunction.js';
+
+const CONFIG = Object.freeze({
+  spreadsheetId: 'synthetic-sheet',
+  googleServiceAccountEmail: 'synthetic@example.invalid',
+  googleServiceAccountPrivateKey: 'synthetic-private-key',
+  ydbConnectionString: 'grpcs://synthetic.invalid/?database=/local',
+});
+
+function staleResumeFailure() {
+  return new InitialBootstrapReferenceAwareRuntimeError(
+    'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+    'RESUME_CONTEXT_READ',
+  );
+}
+
+test('exact resume-context semantic failure retires once and performs exactly one fresh bootstrap retry', async () => {
+  const firstFailure = staleResumeFailure();
+  let attempts = 0;
+  let retirements = 0;
+
+  const result = await runInitialBootstrapJobWithOneStaleStagingRetirement(
+    {},
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw firstFailure;
+      return { status: 'COMMITTED' };
+    },
+    async () => {
+      retirements += 1;
+    },
+  );
+
+  assert.deepEqual(result, { status: 'COMMITTED' });
+  assert.equal(attempts, 2);
+  assert.equal(retirements, 1);
+});
+
+test('retirement refusal exposes one safe failure code and never retries bootstrap', async () => {
+  const firstFailure = staleResumeFailure();
+  let attempts = 0;
+  let retirements = 0;
+
+  await assert.rejects(
+    runInitialBootstrapJobWithOneStaleStagingRetirement(
+      {},
+      async () => {
+        attempts += 1;
+        throw firstFailure;
+      },
+      async () => {
+        retirements += 1;
+        throw new Error('synthetic retirement refusal');
+      },
+    ),
+    (error) => error instanceof InitialBootstrapReferenceAwareRuntimeError
+      && error.code === 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED'
+      && error.applicationPhase === 'RESUME_CONTEXT_READ',
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(retirements, 1);
+});
+
+test('unrelated bootstrap failures never cross the retirement authority boundary', async () => {
+  const unrelated = new InitialBootstrapReferenceAwareRuntimeError(
+    'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+    'REVISION_EVIDENCE_WRITE',
+  );
+  let retirements = 0;
+
+  await assert.rejects(
+    runInitialBootstrapJobWithOneStaleStagingRetirement(
+      {},
+      async () => {
+        throw unrelated;
+      },
+      async () => {
+        retirements += 1;
+      },
+    ),
+    (error) => error === unrelated,
+  );
+
+  assert.equal(retirements, 0);
+});
+
+test('a failed fresh retry is propagated without a second retirement or third bootstrap attempt', async () => {
+  const firstFailure = staleResumeFailure();
+  const secondFailure = new InitialBootstrapReferenceAwareRuntimeError(
+    'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+    'FRESH_CLAIM_WRITE',
+  );
+  let attempts = 0;
+  let retirements = 0;
+
+  await assert.rejects(
+    runInitialBootstrapJobWithOneStaleStagingRetirement(
+      {},
+      async () => {
+        attempts += 1;
+        if (attempts === 1) throw firstFailure;
+        throw secondFailure;
+      },
+      async () => {
+        retirements += 1;
+      },
+    ),
+    (error) => error === secondFailure,
+  );
+
+  assert.equal(attempts, 2);
+  assert.equal(retirements, 1);
+});
+
+test('Yandex function sanitizes the successful stale-retirement path as normal bootstrap commit', async () => {
+  const firstFailure = staleResumeFailure();
+  let attempts = 0;
+
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        attempts += 1;
+        if (attempts === 1) throw firstFailure;
+        return { status: 'COMMITTED' };
+      },
+      async () => {},
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_COMMITTED',
+  });
+  assert.equal(attempts, 2);
+});
+
+test('retirement job uses one fresh authoritative digest, one YDB client and always closes it', async () => {
+  const observations = [];
+  const closes = [];
+  const runtime = {
+    createDigest() {
+      return { digest: () => 'synthetic' };
+    },
+    createSource() {
+      return {
+        async readFullSnapshotObservation() {
+          return { snapshotDigest: 'fresh-authoritative-digest' };
+        },
+      };
+    },
+    async createYdbClient() {
+      return {
+        transport: {
+          async executeRead() {
+            throw new Error('unexpected read');
+          },
+          async serializableReadWrite() {
+            throw new Error('unexpected write');
+          },
+        },
+        async close() {
+          closes.push('closed');
+        },
+      };
+    },
+    now() {
+      return '2026-09-16T08:30:00.000Z';
+    },
+    async retire(_adapter, authoritativeSnapshotDigest, finishedAt) {
+      observations.push({ authoritativeSnapshotDigest, finishedAt });
+    },
+  };
+
+  await executeInitialBootstrapStaleStagingRetirementJob(CONFIG, runtime);
+
+  assert.deepEqual(observations, [{
+    authoritativeSnapshotDigest: 'fresh-authoritative-digest',
+    finishedAt: '2026-09-16T08:30:00.000Z',
+  }]);
+  assert.deepEqual(closes, ['closed']);
+});
