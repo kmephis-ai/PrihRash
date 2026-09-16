@@ -165,6 +165,28 @@ const METADATA_FAILURE_CODES = new Set([
   'YDB_PARAMETER_INVALID_JSON_DOCUMENT',
 ]);
 
+const YDB_QUERY_STATUS_CODES = new Set([
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_ABORTED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_OVERLOADED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_TIMEOUT',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_BAD_SESSION',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_NOT_FOUND',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_CANCELLED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNDETERMINED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'YDB_TRANSPORT_QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+]);
+
 const YDB_DATA_FAILURE_CODES = new Set([
   'YDB_TRANSPORT_SDK_SHAPE_INVALID',
   'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
@@ -292,7 +314,9 @@ function parseExactFunctionResult(stdout) {
     && (result.metadataFailureCode === null
       || (typeof result.metadataFailureCode === 'string' && METADATA_FAILURE_CODES.has(result.metadataFailureCode)))
     && (result.ydbDataFailureCode === undefined
-      || (typeof result.ydbDataFailureCode === 'string' && YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)))
+      || (typeof result.ydbDataFailureCode === 'string'
+        && (YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)
+          || YDB_QUERY_STATUS_CODES.has(result.ydbDataFailureCode))))
   ) {
     return Object.freeze({
       status: 'FAIL',
@@ -371,6 +395,22 @@ function isTransportTimeout(error) {
     && (typeof error === 'object' || typeof error === 'function')
     && Reflect.get(error, 'name') === 'TimeoutError';
 }
+function normalizeQueryStatusDiagnostic(result) {
+  if (
+    result?.code === 'INITIAL_BOOTSTRAP_RUNTIME_FAILED'
+    && typeof result.ydbDataFailureCode === 'string'
+    && YDB_QUERY_STATUS_CODES.has(result.ydbDataFailureCode)
+  ) {
+    const status = result.ydbDataFailureCode.slice('YDB_TRANSPORT_QUERY_EXECUTION_YDB_'.length);
+    process.stderr.write(`INITIAL_BOOTSTRAP_YDB_QUERY_STATUS_${status}\n`);
+    return Object.freeze({
+      ...result,
+      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    });
+  }
+  return result;
+}
+
 async function invokeInitialBootstrap(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
   const iamToken = environment.YC_IAM_TOKEN;
@@ -401,6 +441,6 @@ async function invokeInitialBootstrap(environment = process.env) {
   return parseExactFunctionResult(body) ?? SAFE_INVOKE_OUTPUT_INVALID;
 }
 
-const result = await invokeInitialBootstrap();
+const result = normalizeQueryStatusDiagnostic(await invokeInitialBootstrap());
 process.stdout.write(`${JSON.stringify(result)}\n`);
 if (result.status !== 'PASS') process.exitCode = 2;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { StatusIds_StatusCode } from '@ydbjs/api/operation';
 
 import {
   YdbAdapter,
@@ -228,6 +229,49 @@ test('driver query rejection becomes privacy-safe transport code for reads and t
     () => adapter.serializableReadWrite((transaction) => transaction.execute(writeStatement('UPSERT INTO synthetic SELECT 1'))),
     assertSanitized,
   );
+});
+
+test('YDB query status is preserved as an enum-only transport code without provider issues', async () => {
+  class YDBError extends Error {
+    constructor(code) {
+      super('synthetic private YDB issue text');
+      this.code = code;
+      this.issues = [{ message: 'synthetic private issue payload' }];
+    }
+  }
+
+  for (const [status, expected] of [
+    [StatusIds_StatusCode.BAD_REQUEST, 'QUERY_EXECUTION_YDB_BAD_REQUEST'],
+    [StatusIds_StatusCode.PRECONDITION_FAILED, 'QUERY_EXECUTION_YDB_PRECONDITION_FAILED'],
+    [StatusIds_StatusCode.ALREADY_EXISTS, 'QUERY_EXECUTION_YDB_ALREADY_EXISTS'],
+    [StatusIds_StatusCode.UNAVAILABLE, 'QUERY_EXECUTION_YDB_UNAVAILABLE'],
+  ]) {
+    const providerFailure = new YDBError(status);
+    const sql = makeRejectingExecutor(providerFailure);
+    sql.begin = async (_options, work) => work(makeRejectingExecutor(providerFailure));
+    const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+      sql,
+      createYdbJsV6ParameterMapper(fakeSdk()),
+    ));
+
+    const assertSanitized = (error) => {
+      assert.equal(error instanceof YdbJsV6DataTransportError, true);
+      assert.equal(error.code, expected);
+      assert.equal(error.message, expected);
+      assert.equal(error.message.includes('private'), false);
+      assert.equal('issues' in error, false);
+      assert.equal('cause' in error, false);
+      return true;
+    };
+
+    await assert.rejects(() => adapter.read(readStatement('SELECT 1')), assertSanitized);
+    await assert.rejects(
+      () => adapter.serializableReadWrite((transaction) => (
+        transaction.execute(writeStatement('UPSERT INTO synthetic SELECT 1'))
+      )),
+      assertSanitized,
+    );
+  }
 });
 
 test('transaction body failure stays definite while post-body commit failure becomes outcome unknown', async () => {

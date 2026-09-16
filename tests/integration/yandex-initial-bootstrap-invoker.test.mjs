@@ -181,7 +181,7 @@ test('all structural manifest parser diagnostics are accepted only as enum-only 
 });
 
 test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
-  const codes = [
+  const ordinaryCodes = [
     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
     'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
     'YDB_TRANSPORT_PARAMETER_TYPE_UNSUPPORTED',
@@ -191,7 +191,7 @@ test('all YDB data diagnostics are accepted only as bounded enum-only runtime fa
     'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION',
     'YDB_COMMIT_OUTCOME_UNKNOWN',
   ];
-  for (const ydbDataFailureCode of codes) {
+  for (const ydbDataFailureCode of ordinaryCodes) {
     const value = {
       status: 'FAIL',
       code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
@@ -203,6 +203,26 @@ test('all YDB data diagnostics are accepted only as bounded enum-only runtime fa
     const result = await runInvoker({ body: JSON.stringify(value) });
     assert.equal(result.exitCode, 2);
     assertSafeOutput(result, value);
+  }
+
+  for (const status of ['BAD_REQUEST', 'PRECONDITION_FAILED', 'ALREADY_EXISTS', 'UNAVAILABLE']) {
+    const exactCode = `YDB_TRANSPORT_QUERY_EXECUTION_YDB_${status}`;
+    const value = {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+      applicationPhase: 'REVISION_EVIDENCE_WRITE',
+      metadataFailureCode: null,
+      ydbDataFailureCode: exactCode,
+    };
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      ...value,
+      ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    });
+    assert.equal(result.stderr.trim(), `INITIAL_BOOTSTRAP_YDB_QUERY_STATUS_${status}`);
+    assert.equal(result.stderr.includes(PRIVATE_LOOKING), false);
   }
 });
 
