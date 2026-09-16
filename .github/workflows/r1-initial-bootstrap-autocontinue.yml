@@ -273,15 +273,17 @@ jobs:
               historical_body="$(jq -r '.body // ""' <<<"$historical_pr")"
               historical_matches="$(jq -Rn \
                 --arg body "$historical_body" \
-                --arg observed "Observed-Signature: $observed_signature" '
+                --arg observed "Observed-Signature: $observed_signature" \
+                --arg recovery "Recovery-State: $recovery_state" '
                 ($body | split("\n")) as $lines
                 | {
                     attempt: ([$lines[] | select(. == "Provider-Attempt: READY")] | length),
                     observed: ([$lines[] | select(. == $observed)] | length),
+                    recovery: ([$lines[] | select(. == $recovery)] | length),
                     rearm: ([$lines[] | select(. == "Circuit-Rearm: ROOT_CAUSE_FIX")] | length)
                   }
               ')"
-              if ! jq -e '.attempt == 1 and .observed == 1 and .rearm == 1' \
+              if ! jq -e '.attempt == 1 and .observed == 1 and .recovery == 1 and .rearm == 1' \
                 <<<"$historical_matches" >/dev/null; then
                 continue
               fi
