@@ -71,7 +71,11 @@ R1 bootstrap/incremental `shadow/migration writes` в YDB являются ча�
 - unexplained high-impact mismatch отсутствуют;
 - Google всё ещё authoritative.
 
-> Пока идёт реальный расчётный цикл, R2/R3A можно разрабатывать на synthetic/test/candidate data. Нельзя обходить production gate, но и нельзя простаивать календарный месяц.
+> Пока открыт provider gate #453, synthetic R2/R3A можно готовить отдельно,
+> но не сдвигать `main` нерелевантными merge в середине exact-main provider attempt.
+> После `COMMITTED`, независимой сверки и retirement временных прав можно продолжать
+> product merge в ходе реального расчётного цикла. Нельзя обходить production gate
+> или считать закрытие #453 выполнением полного R1 exit criteria.
 
 ## R2 — Reader
 
