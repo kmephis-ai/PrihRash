@@ -18,6 +18,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       verdict: InitialBootstrapRecoveryVerdict;
       reason: InitialBootstrapRecoverySurfaceReason;
       stagingRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionEvidence'];
+      stagingDurableRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingDurableRevisionEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -40,6 +41,21 @@ const STAGING_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJo
   'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
   'AUTHORITATIVE_ROW_COUNT_MISMATCH',
   'AUTHORITATIVE_BINDING_MISMATCH',
+  'REVISION_ROW_MALFORMED',
+  'REVISION_ROW_DUPLICATE',
+  'REVISION_ROW_UNEXPECTED_SOURCE',
+  'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
+  'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
+]);
+
+const STAGING_DURABLE_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingDurableRevisionEvidence']>>([
+  'NO_REVISION_EVIDENCE',
+  'PARTIAL_CURRENT_RUN_ONLY',
+  'COMPLETE_CURRENT_RUN_ONLY',
+  'CROSS_RUN_PK_COLLISION',
+  'STAGING_MANIFEST_CARDINALITY_MISMATCH',
+  'STAGING_MANIFEST_STRUCTURE_MISMATCH',
+  'STAGING_DURABLE_METADATA_MISMATCH',
   'REVISION_ROW_MALFORMED',
   'REVISION_ROW_DUPLICATE',
   'REVISION_ROW_UNEXPECTED_SOURCE',
@@ -71,9 +87,11 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
 
 function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>): boolean {
   const diagnostic = value.stagingRevisionEvidence;
+  const durableDiagnostic = value.stagingDurableRevisionEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
-  } else if (diagnostic !== undefined) {
+    if (durableDiagnostic === undefined || !STAGING_DURABLE_REVISION_EVIDENCE.has(durableDiagnostic)) return false;
+  } else if (diagnostic !== undefined || durableDiagnostic !== undefined) {
     return false;
   }
   if (value.verdict === 'APPLIED') return value.reason === 'COMMITTED_DURABLE_STATE';
@@ -101,6 +119,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingRevisionEvidence === undefined
         ? {}
         : { stagingRevisionEvidence: classification.stagingRevisionEvidence }),
+      ...(classification.stagingDurableRevisionEvidence === undefined
+        ? {}
+        : { stagingDurableRevisionEvidence: classification.stagingDurableRevisionEvidence }),
     });
   } catch (error) {
     if (

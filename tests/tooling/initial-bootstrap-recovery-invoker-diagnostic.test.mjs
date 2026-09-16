@@ -23,6 +23,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -44,5 +45,56 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   });
-  assert.equal(stderr.trim(), 'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH');
+  assert.deepEqual(stderr.trim().split('\n'), [
+    'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    'R1_STAGING_DURABLE_REVISION_EVIDENCE=CROSS_RUN_PK_COLLISION',
+  ]);
+});
+
+
+test('recovery invoker rejects missing or unknown durable STAGING diagnostic fail-closed', async () => {
+  const invalidPayloads = [
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    },
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+      stagingDurableRevisionEvidence: 'SYNTHETIC_UNKNOWN_DIAGNOSTIC',
+    },
+  ];
+
+  for (const payload of invalidPayloads) {
+    const yc = await fakeYc(payload);
+    await assert.rejects(
+      execFileAsync(
+        process.execPath,
+        ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+            PRIHRASH_YC_BIN: yc,
+          },
+        },
+      ),
+      (error) => {
+        assert.equal(error.code, 2);
+        assert.deepEqual(JSON.parse(error.stdout), {
+          status: 'FAIL',
+          code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
+        });
+        assert.equal(error.stderr, '');
+        return true;
+      },
+    );
+  }
 });

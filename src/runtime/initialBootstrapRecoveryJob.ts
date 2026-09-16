@@ -11,7 +11,9 @@ import {
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import {
+  diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
+  type InitialBootstrapStagingDurableRevisionDiagnostic,
   type InitialBootstrapStagingRevisionDiagnostic,
   type InitialBootstrapStagingRevisionObservation,
 } from '../migration/initialBootstrapStagingRevisionDiagnostic.js';
@@ -50,6 +52,7 @@ export interface InitialBootstrapRecoveryJobSource {
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
+  readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -69,6 +72,9 @@ export interface InitialBootstrapRecoveryJobRuntime {
     sourceSnapshotDigest: string,
     observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
   ): Promise<InitialBootstrapStagingRevisionDiagnostic>;
+  diagnoseStagingDurableRevisionEvidence(
+    adapter: YdbAdapter,
+  ): Promise<InitialBootstrapStagingDurableRevisionDiagnostic>;
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -97,6 +103,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
+  diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
 });
 
 function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassification> {
@@ -118,6 +125,12 @@ export async function executeInitialBootstrapRecoveryJob(
   try {
     const before = await runtime.diagnoseSurface(adapter);
     if (before.reason === 'STAGING_RUN_PRESENT') {
+      let stagingDurableRevisionEvidence: InitialBootstrapStagingDurableRevisionDiagnostic;
+      try {
+        stagingDurableRevisionEvidence = await runtime.diagnoseStagingDurableRevisionEvidence(adapter);
+      } catch {
+        stagingDurableRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+      }
       let stagingRevisionEvidence: InitialBootstrapStagingRevisionDiagnostic;
       try {
         const digest = runtime.createDigest();
@@ -136,7 +149,11 @@ export async function executeInitialBootstrapRecoveryJob(
       } catch {
         stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
       }
-      return Object.freeze({ ...before, stagingRevisionEvidence });
+      return Object.freeze({
+        ...before,
+        stagingRevisionEvidence,
+        stagingDurableRevisionEvidence,
+      });
     }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;
 

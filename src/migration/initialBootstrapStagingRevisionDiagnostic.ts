@@ -18,6 +18,20 @@ export type InitialBootstrapStagingRevisionDiagnostic =
   | 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH'
   | 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapStagingDurableRevisionDiagnostic = Exclude<
+  InitialBootstrapStagingRevisionDiagnostic,
+  | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+  | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
+  | 'AUTHORITATIVE_BINDING_MISMATCH'
+>;
+
+type InitialBootstrapStagingManifestDiagnostic = Extract<
+  InitialBootstrapStagingDurableRevisionDiagnostic,
+  | 'STAGING_MANIFEST_CARDINALITY_MISMATCH'
+  | 'STAGING_MANIFEST_STRUCTURE_MISMATCH'
+  | 'STAGING_DURABLE_METADATA_MISMATCH'
+>;
+
 export interface InitialBootstrapStagingRevisionObservation {
   readonly sourceOrdinal: number;
   readonly rowHint: number;
@@ -60,7 +74,7 @@ interface ParsedStagingManifest {
 
 type ManifestParseResult =
   | Readonly<{ readonly ok: true; readonly manifest: Readonly<ParsedStagingManifest> }>
-  | Readonly<{ readonly ok: false; readonly diagnostic: InitialBootstrapStagingRevisionDiagnostic }>;
+  | Readonly<{ readonly ok: false; readonly diagnostic: InitialBootstrapStagingManifestDiagnostic }>;
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const READ_KEYS_PER_QUERY_LIMIT = 50;
@@ -277,7 +291,7 @@ function inspectRevisionRows(
   migrationRunId: string,
   expected: ReadonlyMap<string, Readonly<ManifestBinding>>,
   seen: Set<string>,
-): InitialBootstrapStagingRevisionDiagnostic | null {
+): InitialBootstrapStagingDurableRevisionDiagnostic | null {
   for (const row of rows) {
     const sourceRecordId = normalizedUuid(row.source_record_id);
     const rowRunId = normalizedUuid(row.migration_run_id);
@@ -299,6 +313,47 @@ function inspectRevisionRows(
   return null;
 }
 
+async function diagnoseDurableRevisionEvidenceFromManifest(
+  reader: YdbReadScope,
+  manifest: Readonly<ParsedStagingManifest>,
+): Promise<InitialBootstrapStagingDurableRevisionDiagnostic> {
+  if (manifest.bindings.length === 0) return 'NO_REVISION_EVIDENCE';
+
+  const expected = new Map(manifest.bindings.map((binding) => [binding.sourceRecordId, binding]));
+  const seen = new Set<string>();
+  const firstBatch = manifest.bindings.slice(0, READ_KEYS_PER_QUERY_LIMIT);
+  const firstResult = await reader.read<ExistingRevisionEvidenceRow>(
+    revisionEvidenceStatement(firstBatch, manifest.migrationRunId),
+  );
+  const firstFinding = inspectRevisionRows(firstResult.rows, manifest.migrationRunId, expected, seen);
+  if (firstFinding !== null) return firstFinding;
+
+  const unchecked = manifest.bindings
+    .slice(READ_KEYS_PER_QUERY_LIMIT)
+    .filter((binding) => !seen.has(binding.sourceRecordId));
+  for (let start = 0; start < unchecked.length; start += READ_KEYS_PER_QUERY_LIMIT) {
+    const batch = unchecked.slice(start, start + READ_KEYS_PER_QUERY_LIMIT);
+    const result = await reader.read<ExistingRevisionEvidenceRow>(revisionEvidenceStatement(batch, null));
+    const finding = inspectRevisionRows(result.rows, manifest.migrationRunId, expected, seen);
+    if (finding !== null) return finding;
+  }
+
+  if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
+  if (seen.size === manifest.bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
+  return 'PARTIAL_CURRENT_RUN_ONLY';
+}
+
+export async function diagnoseInitialBootstrapStagingDurableRevisionEvidence(
+  reader: YdbReadScope,
+): Promise<InitialBootstrapStagingDurableRevisionDiagnostic> {
+  const manifestResult = await reader.read<StagingManifestEvidenceRow>(stagingManifestStatement());
+  const parsed = parseStagingManifest(manifestResult.rows);
+  if (!parsed.ok) {
+    return parsed.diagnostic;
+  }
+  return diagnoseDurableRevisionEvidenceFromManifest(reader, parsed.manifest);
+}
+
 export async function diagnoseInitialBootstrapStagingRevisionEvidence(
   reader: YdbReadScope,
   sourceSnapshotDigest: string,
@@ -310,28 +365,5 @@ export async function diagnoseInitialBootstrapStagingRevisionEvidence(
 
   const sourceDiagnostic = authoritativeBindingDiagnostic(parsed.manifest, sourceSnapshotDigest, observations);
   if (sourceDiagnostic !== null) return sourceDiagnostic;
-  if (parsed.manifest.bindings.length === 0) return 'NO_REVISION_EVIDENCE';
-
-  const expected = new Map(parsed.manifest.bindings.map((binding) => [binding.sourceRecordId, binding]));
-  const seen = new Set<string>();
-  const firstBatch = parsed.manifest.bindings.slice(0, READ_KEYS_PER_QUERY_LIMIT);
-  const firstResult = await reader.read<ExistingRevisionEvidenceRow>(
-    revisionEvidenceStatement(firstBatch, parsed.manifest.migrationRunId),
-  );
-  const firstFinding = inspectRevisionRows(firstResult.rows, parsed.manifest.migrationRunId, expected, seen);
-  if (firstFinding !== null) return firstFinding;
-
-  const unchecked = parsed.manifest.bindings
-    .slice(READ_KEYS_PER_QUERY_LIMIT)
-    .filter((binding) => !seen.has(binding.sourceRecordId));
-  for (let start = 0; start < unchecked.length; start += READ_KEYS_PER_QUERY_LIMIT) {
-    const batch = unchecked.slice(start, start + READ_KEYS_PER_QUERY_LIMIT);
-    const result = await reader.read<ExistingRevisionEvidenceRow>(revisionEvidenceStatement(batch, null));
-    const finding = inspectRevisionRows(result.rows, parsed.manifest.migrationRunId, expected, seen);
-    if (finding !== null) return finding;
-  }
-
-  if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
-  if (seen.size === parsed.manifest.bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
-  return 'PARTIAL_CURRENT_RUN_ONLY';
+  return diagnoseDurableRevisionEvidenceFromManifest(reader, parsed.manifest);
 }
