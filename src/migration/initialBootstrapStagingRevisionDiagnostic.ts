@@ -1,5 +1,6 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import { diffSequences } from './sequenceDiff.js';
 
 export type InitialBootstrapStagingRevisionDiagnostic =
   | 'NO_REVISION_EVIDENCE'
@@ -11,6 +12,7 @@ export type InitialBootstrapStagingRevisionDiagnostic =
   | 'STAGING_DURABLE_METADATA_MISMATCH'
   | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
   | 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'
+  | 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'
   | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
   | 'AUTHORITATIVE_BINDING_MISMATCH'
   | 'REVISION_ROW_MALFORMED'
@@ -23,6 +25,7 @@ export type InitialBootstrapStagingDurableRevisionDiagnostic = Exclude<
   InitialBootstrapStagingRevisionDiagnostic,
   | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
   | 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'
+  | 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'
   | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
   | 'AUTHORITATIVE_BINDING_MISMATCH'
 >;
@@ -246,6 +249,31 @@ function bindingMatchesObservation(
     && binding.rowDigest === observation.digest;
 }
 
+function insertionOnlySequencePreserved(
+  manifest: Readonly<ParsedStagingManifest>,
+  observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
+): boolean {
+  if (manifest.bindings.length === 0 || observations.length <= manifest.bindings.length) return false;
+  const operations = diffSequences(
+    manifest.bindings.map((binding) => ({
+      sourceRecordId: binding.sourceRecordId,
+      rowHint: binding.rowHint,
+      digest: binding.rowDigest,
+    })),
+    observations.map((observation) => ({
+      rowHint: observation.rowHint,
+      digest: observation.digest,
+    })),
+  );
+  if (!operations.some((operation) => operation.kind === 'INSERTED')) return false;
+  if (!operations.every((operation) => operation.kind === 'UNCHANGED' || operation.kind === 'INSERTED')) return false;
+  const unchangedSourceIds = new Set(
+    operations.flatMap((operation) => operation.kind === 'UNCHANGED' ? [operation.sourceRecordId] : []),
+  );
+  return unchangedSourceIds.size === manifest.bindings.length
+    && manifest.bindings.every((binding) => unchangedSourceIds.has(binding.sourceRecordId));
+}
+
 function authoritativeBindingDiagnostic(
   manifest: Readonly<ParsedStagingManifest>,
   sourceSnapshotDigest: string,
@@ -257,19 +285,17 @@ function authoritativeBindingDiagnostic(
   const digestMatches = sourceSnapshotDigest === manifest.durableSnapshotDigest;
   const normalizedObservations = normalizeObservations(observations);
   if (!digestMatches) {
-    if (
-      normalizedObservations === null
-      || normalizedObservations.length <= manifest.durableRowCount
-      || normalizedObservations.length < manifest.bindings.length
-    ) {
+    if (normalizedObservations === null || normalizedObservations.length <= manifest.durableRowCount) {
       return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
     }
-    for (const [index, binding] of manifest.bindings.entries()) {
-      if (!bindingMatchesObservation(binding, normalizedObservations[index])) {
-        return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
-      }
+    const exactPrefix = manifest.bindings.every((binding, index) => (
+      bindingMatchesObservation(binding, normalizedObservations[index])
+    ));
+    if (exactPrefix) return 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED';
+    if (insertionOnlySequencePreserved(manifest, normalizedObservations)) {
+      return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY';
     }
-    return 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED';
+    return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
   }
   if (normalizedObservations === null) return 'AUTHORITATIVE_BINDING_MISMATCH';
   if (
