@@ -93,6 +93,39 @@ test('transaction query failure stays raw until SDK retry policy can retry the w
   assert.equal(attempts, 2);
 });
 
+test('bounded transaction passes one AbortSignal into SDK begin without changing idempotency', async () => {
+  let observedOptions = null;
+  const sql = rejectingExecutor(new Error('query not expected'));
+  sql.begin = async (options, work) => {
+    observedOptions = options;
+    return work(rejectingExecutor(new Error('query not expected')));
+  };
+  const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+    sql,
+    ignoredParameterMapper,
+    { transactionTimeoutMs: 25_000 },
+  ));
+
+  assert.equal(await adapter.serializableReadWrite(async () => 'done'), 'done');
+  assert.equal(observedOptions?.isolation, 'serializableReadWrite');
+  assert.equal(observedOptions?.idempotent, false);
+  assert.equal(observedOptions?.signal instanceof AbortSignal, true);
+  assert.equal(observedOptions?.signal.aborted, false);
+});
+
+test('invalid transaction timeout fails closed before any SDK call', () => {
+  const sql = rejectingExecutor(new Error('unused'));
+  sql.begin = async () => {
+    throw new Error('SDK begin must not be called');
+  };
+
+  assert.throws(
+    () => createYdbJsV6DataTransport(sql, ignoredParameterMapper, { transactionTimeoutMs: 0 }),
+    (error) => error instanceof YdbJsV6DataTransportError
+      && error.code === 'CLIENT_CONFIG_INVALID',
+  );
+});
+
 test('SDK transaction wrapper preserves application body failure identity', async () => {
   const bodyFailure = new Error('synthetic application body failure');
   const sql = rejectingExecutor(new Error('unused'));
