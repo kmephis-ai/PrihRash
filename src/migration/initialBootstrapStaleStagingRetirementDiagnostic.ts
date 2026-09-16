@@ -41,12 +41,11 @@ export async function readInitialBootstrapStaleStagingRetirementCurrentState(
     : 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY';
 }
 
-export async function diagnoseInitialBootstrapStaleStagingRetirementCurrentState(
+export function diagnoseInitialBootstrapStaleStagingRetirementCurrentState(
   reader: YdbReadScope,
 ): Promise<InitialBootstrapStaleStagingRetirementDiagnostic> {
-  try {
-    return await readInitialBootstrapStaleStagingRetirementCurrentState(reader);
-  } catch {
-    return 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
-  }
+  // Keep provider/query failures outside this helper. Transactional callers must
+  // let the YDB SDK observe retryable errors; recovery callers already sanitize
+  // failures at their external enum-only boundary.
+  return readInitialBootstrapStaleStagingRetirementCurrentState(reader);
 }
