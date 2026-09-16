@@ -185,6 +185,33 @@ test('staging revision diagnostic classifies authoritative source drift without 
   assert.equal(driftReader.calls.length, 1);
 });
 
+test('staging revision diagnostic proves only an exact preserved authoritative prefix after append-only growth', async () => {
+  const durableObservations = observations(2);
+  const currentObservations = observations(3);
+  const prefixReader = reader(durableObservations, async () => {
+    throw new Error('revision evidence must not be read after source-prefix classification');
+  });
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(prefixReader, 'fresh-source-digest', currentObservations),
+    'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
+  );
+  assert.equal(prefixReader.calls.length, 1);
+
+  const changedCurrent = Object.freeze([
+    Object.freeze({ ...currentObservations[0], digest: 'changed-old-row' }),
+    ...currentObservations.slice(1),
+  ]);
+  const changedReader = reader(durableObservations, async () => {
+    throw new Error('revision evidence must not be read after authoritative drift');
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(changedReader, 'fresh-source-digest', changedCurrent),
+    'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+  );
+  assert.equal(changedReader.calls.length, 1);
+});
+
 test('durable staging revision diagnostic inspects immutable evidence despite authoritative source drift', async () => {
   const sourceObservations = observations(2);
   const durableReader = reader(sourceObservations, async () => [revisionRow(sourceObservations[0], 0)]);
