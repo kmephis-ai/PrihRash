@@ -197,6 +197,22 @@ test('durable staging revision diagnostic inspects immutable evidence despite au
   assert.equal(durableReader.calls.every((statement) => statement.kind === 'READ'), true);
 });
 
+test('durable staging revision diagnostic rejects non-contiguous partial current-run evidence', async () => {
+  const sourceObservations = observations(3);
+  const durableReader = reader(
+    sourceObservations,
+    async () => [
+      revisionRow(sourceObservations[0], 0),
+      revisionRow(sourceObservations[2], 2),
+    ],
+  );
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingDurableRevisionEvidence(durableReader),
+    'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
+  );
+});
+
 test('durable staging revision diagnostic exposes cross-run primary-key collision without Google evidence', async () => {
   const sourceObservations = observations(1);
   const durableReader = reader(
