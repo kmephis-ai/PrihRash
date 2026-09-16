@@ -24,6 +24,8 @@ import {
 export type InitialBootstrapStaleStagingRetirementJobEnvironment =
   InitialBootstrapRecoveryJobEnvironment;
 
+export const INITIAL_BOOTSTRAP_STALE_STAGING_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
 export interface InitialBootstrapStaleStagingRetirementJobSource {
   readFullSnapshotObservation(): Promise<Readonly<GoogleSheetsFullSnapshotLease>>;
 }
@@ -69,6 +71,7 @@ const productionRuntime: Readonly<InitialBootstrapStaleStagingRetirementJobRunti
     return createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
+      transactionTimeoutMs: INITIAL_BOOTSTRAP_STALE_STAGING_TRANSACTION_TIMEOUT_MS,
     });
   },
   now(): string {
