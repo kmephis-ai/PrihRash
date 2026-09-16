@@ -127,14 +127,14 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
   const staging = await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
+    stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
   }));
   assert.deepEqual(staging, {
     status: 'PASS',
     code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
+    stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
   });
 
   const invalid = await executeYandexInitialBootstrapRecoveryFunction({}, async () => /** @type {any} */ ({

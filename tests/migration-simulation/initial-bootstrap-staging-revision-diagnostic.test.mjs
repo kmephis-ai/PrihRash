@@ -125,11 +125,32 @@ test('staging revision diagnostic rejects duplicate transaction ids in manifest 
   });
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(mismatchReader, SNAPSHOT_DIGEST, sourceObservations),
-    'REVISION_EVIDENCE_MISMATCH',
+    'STAGING_MANIFEST_STRUCTURE_MISMATCH',
   );
 });
 
-test('staging revision diagnostic fails closed when manifest does not match fresh authoritative snapshot', async () => {
+test('staging revision diagnostic separates manifest cardinality from structure failures', async () => {
+  const sourceObservations = observations(1);
+  const cardinalityReader = Object.freeze({
+    async read() { return { rows: [] }; },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(cardinalityReader, SNAPSHOT_DIGEST, sourceObservations),
+    'STAGING_MANIFEST_CARDINALITY_MISMATCH',
+  );
+
+  const malformedReader = Object.freeze({
+    async read() {
+      return { rows: [{ ...manifestRow(sourceObservations), migration_run_id: 'not-a-uuid' }] };
+    },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(malformedReader, SNAPSHOT_DIGEST, sourceObservations),
+    'STAGING_MANIFEST_STRUCTURE_MISMATCH',
+  );
+});
+
+test('staging revision diagnostic fails closed when durable manifest metadata disagrees internally', async () => {
   const sourceObservations = observations(1);
   const mismatchReader = Object.freeze({
     async read(statement) {
@@ -142,7 +163,72 @@ test('staging revision diagnostic fails closed when manifest does not match fres
   });
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(mismatchReader, SNAPSHOT_DIGEST, sourceObservations),
-    'REVISION_EVIDENCE_MISMATCH',
+    'STAGING_DURABLE_METADATA_MISMATCH',
+  );
+});
+
+test('staging revision diagnostic classifies authoritative source drift without reading revisions', async () => {
+  const sourceObservations = observations(1);
+  const driftReader = Object.freeze({
+    calls: [],
+    async read(statement) {
+      this.calls.push(statement);
+      if (statement.text.includes("WHERE r.state = 'STAGING'")) return { rows: [manifestRow(sourceObservations)] };
+      throw new Error('revision evidence must not be read after authoritative drift');
+    },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(driftReader, 'fresh-source-digest', sourceObservations),
+    'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+  );
+  assert.equal(driftReader.calls.length, 1);
+});
+
+test('staging revision diagnostic distinguishes authoritative row-count and binding mismatch', async () => {
+  const sourceObservations = observations(2);
+  const manifestOneRowReader = Object.freeze({
+    async read(statement) {
+      if (statement.text.includes("WHERE r.state = 'STAGING'")) return { rows: [manifestRow(observations(1))] };
+      throw new Error('revision evidence must not be read after source row-count mismatch');
+    },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(manifestOneRowReader, SNAPSHOT_DIGEST, sourceObservations),
+    'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+  );
+
+  const bindingMismatch = Object.freeze([
+    Object.freeze({ ...sourceObservations[0], digest: 'different' }),
+    sourceObservations[1],
+  ]);
+  const manifestTwoRowReader = Object.freeze({
+    async read(statement) {
+      if (statement.text.includes("WHERE r.state = 'STAGING'")) return { rows: [manifestRow(sourceObservations)] };
+      throw new Error('revision evidence must not be read after source binding mismatch');
+    },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(manifestTwoRowReader, SNAPSHOT_DIGEST, bindingMismatch),
+    'AUTHORITATIVE_BINDING_MISMATCH',
+  );
+});
+
+test('staging revision diagnostic separates malformed and duplicate revision rows', async () => {
+  const sourceObservations = observations(1);
+  const malformedReader = reader(sourceObservations, async () => [{
+    ...revisionRow(sourceObservations[0], 0),
+    revision: 0n,
+  }]);
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(malformedReader, SNAPSHOT_DIGEST, sourceObservations),
+    'REVISION_ROW_MALFORMED',
+  );
+
+  const duplicate = revisionRow(sourceObservations[0], 0);
+  const duplicateReader = reader(sourceObservations, async () => [duplicate, duplicate]);
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRevisionEvidence(duplicateReader, SNAPSHOT_DIGEST, sourceObservations),
+    'REVISION_ROW_DUPLICATE',
   );
 });
 
@@ -152,7 +238,7 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
   const extraReader = reader(sourceObservations, async () => [revisionRow(extraObservation, 9)]);
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(extraReader, SNAPSHOT_DIGEST, sourceObservations),
-    'REVISION_EVIDENCE_MISMATCH',
+    'REVISION_ROW_UNEXPECTED_SOURCE',
   );
 
   const mismatchReader = reader(sourceObservations, async () => [{
@@ -161,7 +247,7 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
   }]);
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(mismatchReader, SNAPSHOT_DIGEST, sourceObservations),
-    'REVISION_EVIDENCE_MISMATCH',
+    'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
   );
 });
 
