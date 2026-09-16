@@ -1,7 +1,7 @@
 const BOOTSTRAP_TAG = 'r1-initial-bootstrap';
 const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const MAX_CAPTURE_BYTES = 64 * 1024;
-const INVOKE_TIMEOUT_MS = 180_000;
+const INVOKE_TIMEOUT_MS = 330_000;
 
 const SAFE_CONFIG_FAILURE = Object.freeze({
   status: 'FAIL',
