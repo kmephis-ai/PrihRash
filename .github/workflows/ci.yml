@@ -33,8 +33,20 @@ jobs:
         run: npm run typecheck
       - name: Check build
         run: npm run build
-      - name: Check tests from build
-        run: npm run test:from-build
+      - name: Check domain tests
+        run: node --test tests/domain/*.test.mjs
+      - name: Check reference tests
+        run: node --test tests/reference/*.test.mjs
+      - name: Check source-normalizer tests
+        run: node --test tests/source-normalizer/*.test.mjs
+      - name: Check migration-simulation tests
+        run: node --test tests/migration-simulation/*.test.mjs
+      - name: Check schema tests
+        run: node --test tests/schema/*.test.mjs
+      - name: Check integration tests
+        run: node --test tests/integration/*.test.mjs
+      - name: Check tooling tests
+        run: node --test tests/tooling/*.test.mjs
       - name: Check scheduled-sync package
         run: npm run package:function:from-build
       - name: Check schema-bootstrap package
