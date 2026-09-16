@@ -1,0 +1,171 @@
+diff --git a/.github/workflows/r1-initial-bootstrap-autocontinue.yml b/.github/workflows/r1-initial-bootstrap-autocontinue.yml
+index ea0537e..6a354a5 100644
+--- a/.github/workflows/r1-initial-bootstrap-autocontinue.yml
++++ b/.github/workflows/r1-initial-bootstrap-autocontinue.yml
+@@ -73,6 +73,7 @@ jobs:
+           fi
+           source_is_r1="$(jq -r '.title | startswith("R1 #453:")' <<<"$source_pr")"
+           allow_staging_resume='false'
++          allow_staging_retirement='false'
+ 
+           if [ "$source_is_r1" = 'true' ]; then
+             source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+@@ -97,7 +98,8 @@ jobs:
+                     and ($recovery[0] | IN(
+                       "Recovery-State: EMPTY_DURABLE_STATE",
+                       "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
+-                      "Recovery-State: STAGING_RESUMABLE"
++                      "Recovery-State: STAGING_RESUMABLE",
++                      "Recovery-State: STAGING_RETIRABLE"
+                     ))
+                     and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                     and ($test | length) == 1
+@@ -133,8 +135,11 @@ jobs:
+               echo 'R1_BOOTSTRAP_AUTOCONTINUE_ROOT_CAUSE_EVIDENCE_MISSING'
+               exit 0
+             fi
+-            if [ "$(jq -r '.recovery' <<<"$marker")" = 'STAGING_RESUMABLE' ]; then
++            recovery_state="$(jq -r '.recovery' <<<"$marker")"
++            if [ "$recovery_state" = 'STAGING_RESUMABLE' ]; then
+               allow_staging_resume='true'
++            elif [ "$recovery_state" = 'STAGING_RETIRABLE' ]; then
++              allow_staging_retirement='true'
+             fi
+           fi
+ 
+@@ -422,7 +427,8 @@ jobs:
+ 
+           dispatch_payload="$(jq -cn \
+             --arg resume "$allow_staging_resume" \
+-            '{ref:"main", inputs:{allow_staging_resume:$resume}}')"
++            --arg retirement "$allow_staging_retirement" \
++            '{ref:"main", inputs:{allow_staging_resume:$resume,allow_staging_retirement:$retirement}}')"
+           curl --fail --silent --show-error \
+             --request POST \
+             --header "$auth_header" \
+diff --git a/.github/workflows/r1-initial-bootstrap-orchestrator.yml b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+index fe71158..e488cb9 100644
+--- a/.github/workflows/r1-initial-bootstrap-orchestrator.yml
++++ b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+@@ -11,6 +11,14 @@ on:
+         options:
+           - 'false'
+           - 'true'
++      allow_staging_retirement:
++        description: Allow one guarded stale STAGING terminalization before a fresh bootstrap claim
++        required: true
++        default: 'false'
++        type: choice
++        options:
++          - 'false'
++          - 'true'
+ 
+ permissions:
+   contents: read
+@@ -395,12 +403,23 @@ jobs:
+           if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE' ]; then
+             exit 0
+           fi
++          if [ "${{ inputs.allow_staging_resume }}" = 'true' ] \
++            && [ "${{ inputs.allow_staging_retirement }}" = 'true' ]; then
++            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_AUTHORITY_AMBIGUOUS'
++            exit 1
++          fi
+           if [ "$verdict" = 'RECOVERY_REQUIRED' ] \
+             && [ "$reason" = 'STAGING_RUN_PRESENT' ] \
+             && [ "${{ inputs.allow_staging_resume }}" = 'true' ]; then
+             echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED'
+             exit 0
+           fi
++          if [ "$verdict" = 'RECOVERY_REQUIRED' ] \
++            && [ "$reason" = 'STAGING_RUN_PRESENT' ] \
++            && [ "${{ inputs.allow_staging_retirement }}" = 'true' ]; then
++            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RETIREMENT_ARMED'
++            exit 0
++          fi
+           echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED'
+           exit 1
+ 
+@@ -491,6 +510,7 @@ jobs:
+         shell: bash
+         env:
+           GITHUB_TOKEN: ${{ github.token }}
++          R1_BOOTSTRAP_ALLOW_STAGING_RETIREMENT: ${{ inputs.allow_staging_retirement }}
+         run: |
+           set -euo pipefail
+           result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs bootstrap)"
+@@ -614,6 +634,7 @@ jobs:
+             --arg postRecoveryVerdict "$POST_VERDICT" \
+             --arg postRecoveryReason "$POST_REASON" \
+             --arg stagingResumeAuthorized "${{ inputs.allow_staging_resume }}" \
++            --arg stagingRetirementAuthorized "${{ inputs.allow_staging_retirement }}" \
+             '{
+               status: $status,
+               code: $code,
+@@ -627,7 +648,8 @@ jobs:
+               bootstrapInvokeStep: ($bootstrapInvokeStep | select(length > 0) // null),
+               postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
+               postRecoveryReason: ($postRecoveryReason | select(length > 0) // null),
+-              stagingResumeAuthorized: ($stagingResumeAuthorized == "true")
++              stagingResumeAuthorized: ($stagingResumeAuthorized == "true"),
++              stagingRetirementAuthorized: ($stagingRetirementAuthorized == "true")
+             }' > "$evidence_dir/classification.json"
+ 
+       - name: Upload orchestrator evidence
+diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+index e00e144..e10fdba 100644
+--- a/.github/workflows/r1-initial-shadow-bootstrap.yml
++++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+@@ -2,6 +2,15 @@ name: R1 initial shadow bootstrap
+ 
+ on:
+   workflow_dispatch:
++    inputs:
++      allow_staging_retirement:
++        description: Allow guarded retirement of one proven stale STAGING run before fresh claim
++        required: true
++        default: 'false'
++        type: choice
++        options:
++          - 'false'
++          - 'true'
+ 
+ permissions:
+   contents: read
+@@ -336,6 +345,7 @@ jobs:
+             --tags r1-initial-bootstrap \
+             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+             --no-logging \
++            --environment "PRIHRASH_INITIAL_BOOTSTRAP_STAGING_RETIREMENT_AUTHORIZED=${{ inputs.allow_staging_retirement }}" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+diff --git a/AGENTS.md b/AGENTS.md
+index f6a271a..e73f0f5 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -107,7 +107,7 @@ PR, который должен запустить provider attempt, содер
+ Provider-Attempt: READY
+ Observed-Signature: <ALLOWLISTED_ENUM_PATH>
+ Expected-Transition: <ALLOWLISTED_ENUM_PATH>
+-Recovery-State: <EMPTY_DURABLE_STATE|RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE|STAGING_RESUMABLE>
++Recovery-State: <EMPTY_DURABLE_STATE|RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE|STAGING_RESUMABLE|STAGING_RETIRABLE>
+ Circuit-Rearm: ROOT_CAUSE_FIX
+ Regression-Test: <tests/...>
+ ```
+diff --git a/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md b/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+index 1813765..e51bc62 100644
+--- a/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
++++ b/docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+@@ -31,6 +31,16 @@ authoritative snapshot доказать exact manifest/source evidence, пере
+ прочитать уже записанные revision evidence и записать только отсутствующее. Любое расхождение
+ остаётся fail-closed до новых writes. Default input — `false`.
+ 
++Для доказанного authoritative snapshot drift отдельный Incident-M marker может использовать
++`Recovery-State: STAGING_RETIRABLE`. Autocontinue передаёт `allow_staging_retirement=true` только
++через orchestrator в bootstrap child; default в обоих workflows — `false`. Bootstrap Function получает
++authorization только как non-secret deployment environment value и может выполнить terminalization
++только при fresh `STAGING_RUN_PRESENT`, exact `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` и independently
++empty canonical current state. После exact `STAGING → FAILED` тот же единственный Function invoke
++переходит к fresh claim с новыми run/snapshot/manifest/row identities; failed-attempt evidence не
++удаляется и не переиспользуется. Одновременные `allow_staging_resume=true` и
