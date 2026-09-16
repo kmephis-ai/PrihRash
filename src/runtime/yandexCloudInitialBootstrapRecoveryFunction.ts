@@ -19,6 +19,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       reason: InitialBootstrapRecoverySurfaceReason;
       stagingRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionEvidence'];
       stagingDurableRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingDurableRevisionEvidence'];
+      stagingRetirementEvidence?: InitialBootstrapRecoveryJobResult['stagingRetirementEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -28,7 +29,6 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
 export interface YandexInitialBootstrapRecoveryJob {
   (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoveryJobResult>>;
 }
-
 
 const STAGING_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingRevisionEvidence']>>([
   'NO_REVISION_EVIDENCE',
@@ -65,6 +65,12 @@ const STAGING_DURABLE_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRe
   'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_RETIREMENT_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingRetirementEvidence']>>([
+  'STALE_STAGING_CURRENT_STATE_EMPTY',
+  'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
+  'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
+]);
+
 const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>([
   'READ_FAILED',
   'RUN_STATE_COUNT_INCONSISTENT',
@@ -90,10 +96,16 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
 function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>): boolean {
   const diagnostic = value.stagingRevisionEvidence;
   const durableDiagnostic = value.stagingDurableRevisionEvidence;
+  const retirementDiagnostic = value.stagingRetirementEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
     if (durableDiagnostic === undefined || !STAGING_DURABLE_REVISION_EVIDENCE.has(durableDiagnostic)) return false;
-  } else if (diagnostic !== undefined || durableDiagnostic !== undefined) {
+    if (retirementDiagnostic === undefined || !STAGING_RETIREMENT_EVIDENCE.has(retirementDiagnostic)) return false;
+  } else if (
+    diagnostic !== undefined
+    || durableDiagnostic !== undefined
+    || retirementDiagnostic !== undefined
+  ) {
     return false;
   }
   if (value.verdict === 'APPLIED') return value.reason === 'COMMITTED_DURABLE_STATE';
@@ -124,6 +136,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingDurableRevisionEvidence === undefined
         ? {}
         : { stagingDurableRevisionEvidence: classification.stagingDurableRevisionEvidence }),
+      ...(classification.stagingRetirementEvidence === undefined
+        ? {}
+        : { stagingRetirementEvidence: classification.stagingRetirementEvidence }),
     });
   } catch (error) {
     if (

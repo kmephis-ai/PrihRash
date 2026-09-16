@@ -24,6 +24,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     reason: 'STAGING_RUN_PRESENT',
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -48,11 +49,11 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
   assert.deepEqual(stderr.trim().split('\n'), [
     'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     'R1_STAGING_DURABLE_REVISION_EVIDENCE=CROSS_RUN_PK_COLLISION',
+    'R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
   ]);
 });
 
-
-test('recovery invoker rejects missing or unknown durable STAGING diagnostic fail-closed', async () => {
+test('recovery invoker rejects missing or unknown STAGING diagnostics fail-closed', async () => {
   const invalidPayloads = [
     {
       status: 'PASS',
@@ -60,6 +61,7 @@ test('recovery invoker rejects missing or unknown durable STAGING diagnostic fai
       verdict: 'RECOVERY_REQUIRED',
       reason: 'STAGING_RUN_PRESENT',
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+      stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
     },
     {
       status: 'PASS',
@@ -68,6 +70,24 @@ test('recovery invoker rejects missing or unknown durable STAGING diagnostic fai
       reason: 'STAGING_RUN_PRESENT',
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
       stagingDurableRevisionEvidence: 'SYNTHETIC_UNKNOWN_DIAGNOSTIC',
+      stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    },
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+      stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+    },
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+      stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+      stagingRetirementEvidence: 'SYNTHETIC_UNKNOWN_RETIREMENT_DIAGNOSTIC',
     },
   ];
 

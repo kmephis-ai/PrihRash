@@ -18,6 +18,10 @@ import {
   type InitialBootstrapStagingRevisionObservation,
 } from '../migration/initialBootstrapStagingRevisionDiagnostic.js';
 import {
+  diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
+  type InitialBootstrapStaleStagingRetirementDiagnostic,
+} from '../migration/initialBootstrapStaleStagingRetirementDiagnostic.js';
+import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
 import {
@@ -53,6 +57,7 @@ export interface InitialBootstrapRecoveryJobSource {
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
   readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
+  readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -75,6 +80,9 @@ export interface InitialBootstrapRecoveryJobRuntime {
   diagnoseStagingDurableRevisionEvidence(
     adapter: YdbAdapter,
   ): Promise<InitialBootstrapStagingDurableRevisionDiagnostic>;
+  diagnoseStaleStagingRetirementCurrentState(
+    adapter: YdbAdapter,
+  ): Promise<InitialBootstrapStaleStagingRetirementDiagnostic>;
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -104,6 +112,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
   diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
 });
 
 function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassification> {
@@ -131,6 +140,12 @@ export async function executeInitialBootstrapRecoveryJob(
       } catch {
         stagingDurableRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
       }
+      let stagingRetirementEvidence: InitialBootstrapStaleStagingRetirementDiagnostic;
+      try {
+        stagingRetirementEvidence = await runtime.diagnoseStaleStagingRetirementCurrentState(adapter);
+      } catch {
+        stagingRetirementEvidence = 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
+      }
       let stagingRevisionEvidence: InitialBootstrapStagingRevisionDiagnostic;
       try {
         const digest = runtime.createDigest();
@@ -153,6 +168,7 @@ export async function executeInitialBootstrapRecoveryJob(
         ...before,
         stagingRevisionEvidence,
         stagingDurableRevisionEvidence,
+        stagingRetirementEvidence,
       });
     }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;

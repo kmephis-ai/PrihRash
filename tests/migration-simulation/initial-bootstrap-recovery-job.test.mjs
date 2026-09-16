@@ -51,6 +51,7 @@ function runtime(overrides = {}) {
   let diagnoseCalls = 0;
   let stagingDiagnosticCalls = 0;
   let stagingDurableDiagnosticCalls = 0;
+  let stagingRetirementDiagnosticCalls = 0;
   let closes = 0;
   const result = {
     runtime: {
@@ -104,6 +105,10 @@ function runtime(overrides = {}) {
         stagingDurableDiagnosticCalls += 1;
         return 'PARTIAL_CURRENT_RUN_ONLY';
       },
+      async diagnoseStaleStagingRetirementCurrentState() {
+        stagingRetirementDiagnosticCalls += 1;
+        return 'STALE_STAGING_CURRENT_STATE_EMPTY';
+      },
       ...overrides,
     },
     counters: () => ({
@@ -112,6 +117,7 @@ function runtime(overrides = {}) {
       diagnoseCalls,
       stagingDiagnosticCalls,
       stagingDurableDiagnosticCalls,
+      stagingRetirementDiagnosticCalls,
       closes,
     }),
   };
@@ -130,12 +136,12 @@ test('recovery job reads fresh authoritative source only for residual reference 
     diagnoseCalls: 2,
     stagingDiagnosticCalls: 0,
     stagingDurableDiagnosticCalls: 0,
+    stagingRetirementDiagnosticCalls: 0,
     closes: 1,
   });
 });
 
-
-test('recovery job adds enum-only revision evidence for a single STAGING run', async () => {
+test('recovery job adds enum-only revision and retirement evidence for a single STAGING run', async () => {
   const fixture = runtime({
     async diagnoseSurface() {
       return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
@@ -146,11 +152,13 @@ test('recovery job adds enum-only revision evidence for a single STAGING run', a
     reason: 'STAGING_RUN_PRESENT',
     stagingRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
   });
   assert.equal(fixture.counters().sourceReads, 1);
   assert.equal(fixture.counters().reconcileCalls, 0);
   assert.equal(fixture.counters().stagingDiagnosticCalls, 1);
   assert.equal(fixture.counters().stagingDurableDiagnosticCalls, 1);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 1);
   assert.equal(fixture.counters().closes, 1);
 });
 
@@ -168,10 +176,30 @@ test('recovery job keeps STAGING classification fail-closed when revision diagno
     reason: 'STAGING_RUN_PRESENT',
     stagingRevisionEvidence: 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
   });
   assert.equal(fixture.counters().sourceReads, 1);
   assert.equal(fixture.counters().stagingDurableDiagnosticCalls, 1);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 1);
   assert.equal(fixture.counters().closes, 1);
+});
+
+test('recovery job sanitizes stale retirement current-state diagnostic failure', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+    async diagnoseStaleStagingRetirementCurrentState() {
+      throw new Error('synthetic retirement diagnostic failure');
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+    stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
+  });
 });
 
 test('recovery job preserves durable STAGING evidence when the Google-aware diagnostic is stale', async () => {
@@ -185,12 +213,16 @@ test('recovery job preserves durable STAGING evidence when the Google-aware diag
     async diagnoseStagingDurableRevisionEvidence() {
       return 'CROSS_RUN_PK_COLLISION';
     },
+    async diagnoseStaleStagingRetirementCurrentState() {
+      return 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY';
+    },
   });
   assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
   });
 });
 
@@ -206,6 +238,7 @@ test('recovery job preserves non-reference classification without touching Googl
   });
   assert.equal(fixture.counters().sourceReads, 0);
   assert.equal(fixture.counters().reconcileCalls, 0);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
   assert.equal(fixture.counters().closes, 1);
 });
 

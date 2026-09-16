@@ -52,6 +52,11 @@ const STAGING_DURABLE_REVISION_EVIDENCE = new Set([
   'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
   'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
 ]);
+const STAGING_RETIREMENT_EVIDENCE = new Set([
+  'STALE_STAGING_CURRENT_STATE_EMPTY',
+  'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
+  'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
+]);
 const REASONS = new Set([
   'EMPTY_DURABLE_STATE',
   'COMMITTED_DURABLE_STATE',
@@ -134,6 +139,7 @@ function parseExactResult(stdout) {
   ) {
     const stagingRevisionEvidence = result.stagingRevisionEvidence;
     const stagingDurableRevisionEvidence = result.stagingDurableRevisionEvidence;
+    const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -142,14 +148,18 @@ function parseExactResult(stdout) {
           'reason',
           'stagingRevisionEvidence',
           'stagingDurableRevisionEvidence',
+          'stagingRetirementEvidence',
         ])
         && typeof stagingRevisionEvidence === 'string'
         && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
         && typeof stagingDurableRevisionEvidence === 'string'
         && STAGING_DURABLE_REVISION_EVIDENCE.has(stagingDurableRevisionEvidence)
+        && typeof stagingRetirementEvidence === 'string'
+        && STAGING_RETIREMENT_EVIDENCE.has(stagingRetirementEvidence)
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && stagingRevisionEvidence === undefined
-        && stagingDurableRevisionEvidence === undefined;
+        && stagingDurableRevisionEvidence === undefined
+        && stagingRetirementEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -162,6 +172,9 @@ function parseExactResult(stdout) {
       stagingDurableRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingDurableRevisionEvidence
         : null,
+      stagingRetirementEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingRetirementEvidence
+        : null,
     });
   }
   if (
@@ -173,6 +186,7 @@ function parseExactResult(stdout) {
       result: Object.freeze({ status: 'FAIL', code: result.code }),
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
+      stagingRetirementEvidence: null,
     });
   }
   return null;
@@ -186,6 +200,7 @@ async function invokeRecovery(environment = process.env) {
       result: SAFE_CONFIG_FAILURE,
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
+      stagingRetirementEvidence: null,
     });
   }
 
@@ -205,12 +220,14 @@ async function invokeRecovery(environment = process.env) {
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
+      stagingRetirementEvidence: null,
     });
   } catch {
     return Object.freeze({
       result: SAFE_INVOKE_FAILURE,
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
+      stagingRetirementEvidence: null,
     });
   }
 }
@@ -223,6 +240,9 @@ if (invocation.stagingDurableRevisionEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_DURABLE_REVISION_EVIDENCE=${invocation.stagingDurableRevisionEvidence}\n`,
   );
+}
+if (invocation.stagingRetirementEvidence !== null) {
+  process.stderr.write(`R1_STAGING_RETIREMENT_EVIDENCE=${invocation.stagingRetirementEvidence}\n`);
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
 if (invocation.result.status !== 'PASS') process.exitCode = 2;
