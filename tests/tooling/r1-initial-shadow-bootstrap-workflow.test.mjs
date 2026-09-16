@@ -55,7 +55,7 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /index\.initialBootstrapHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap/);
   assert.match(workflow, /--memory 256m/);
-  assert.match(workflow, /--execution-timeout 150s/);
+  assert.match(workflow, /--execution-timeout 300s/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /serverless trigger list/);
   assert.doesNotMatch(workflow, /serverless trigger create/);
@@ -122,6 +122,15 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(projection, /httpStatus:/);
   assert.match(projection, /functionError:/);
   assert.doesNotMatch(projection, /\.(?:stdout|stderr|message|payload|details)\b/i);
+});
+
+test('bootstrap execution envelope gives provider timeout precedence without enabling retries', async () => {
+  const workflow = await text(WORKFLOW);
+  const invoker = await text(INVOKER);
+
+  assert.match(workflow, /--execution-timeout 300s/);
+  assert.match(invoker, /INVOKE_TIMEOUT_MS = 330_000/);
+  assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
 });
 
 test('bootstrap package exports only the dedicated handler and removes scheduled/schema runtime entrypoints', async () => {

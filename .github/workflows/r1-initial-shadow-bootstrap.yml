@@ -330,7 +330,7 @@ jobs:
             --runtime nodejs22 \
             --entrypoint index.initialBootstrapHandler \
             --memory 256m \
-            --execution-timeout 150s \
+            --execution-timeout 300s \
             --source-path .artifacts/yandex-initial-bootstrap-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-bootstrap \
