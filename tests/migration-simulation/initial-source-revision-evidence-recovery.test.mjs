@@ -9,6 +9,7 @@ import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initial
 import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
 const RUN_ID = '00000000-0000-0000-0000-000000009501';
+const OTHER_RUN_ID = '00000000-0000-0000-0000-000000009591';
 const SOURCE_ID_1 = '00000000-0000-0000-0000-000000009502';
 const SOURCE_ID_2 = '00000000-0000-0000-0000-000000009503';
 const EXTRA_SOURCE_ID = '00000000-0000-0000-0000-000000009599';
@@ -63,7 +64,7 @@ function reader(rows, queryChecks = () => {}) {
   return new YdbAdapter({
     async executeRead(statement) {
       queryChecks(statement);
-      return { rows };
+      return { rows: typeof rows === 'function' ? rows(statement) : rows };
     },
     async serializableReadWrite() { throw new Error('write not expected'); },
   });
@@ -76,16 +77,19 @@ function expectRecoveryError(code, work) {
   );
 }
 
-test('restart after partial revision evidence reuses exact existing revision and returns only missing append-only writes', async () => {
+test('restart after partial revision evidence reads by primary key and returns only missing append-only writes', async () => {
   const expected = [
     revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A'),
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
   ];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader([providerRow(expected[0])], (statement) => {
-      assert.match(statement.text, /WHERE migration_run_id = \$migration_run_id AND revision = \$revision/);
-      assert.equal(statement.parameters.migration_run_id.value, RUN_ID);
+      assert.match(statement.text, /WHERE revision = \$revision AND source_record_id IN \(\$source_record_id_0, \$source_record_id_1\)/);
+      assert.doesNotMatch(statement.text, /WHERE migration_run_id/);
       assert.equal(statement.parameters.revision.value, 1n);
+      assert.equal(statement.parameters.source_record_id_0.value, SOURCE_ID_1);
+      assert.equal(statement.parameters.source_record_id_1.value, SOURCE_ID_2);
+      assert.equal(statement.parameters.migration_run_id, undefined);
     }),
     expected,
   );
@@ -98,15 +102,33 @@ test('restart after partial revision evidence reuses exact existing revision and
   assert.equal(writes[0].statement.parameters.source_record_id.value, SOURCE_ID_2);
 });
 
+test('primary-key collision from another migration run fails closed instead of planning a conflicting INSERT', async () => {
+  const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
+  await expectRecoveryError(
+    'EXISTING_REVISION_MISMATCH',
+    () => planInitialSourceRevisionEvidenceResume(
+      reader([providerRow(expected[0], { migration_run_id: OTHER_RUN_ID })]),
+      expected,
+    ),
+  );
+});
+
+test('native Date timestamp readback matches the same expected instant', async () => {
+  const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader([providerRow(expected[0], { observed_at: new Date(expected[0].observedAt) })]),
+    expected,
+  );
+  assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
 test('fully materialized exact revision evidence makes replay a no-op', async () => {
   const expected = [
     revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A'),
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
   ];
-  const resume = await planInitialSourceRevisionEvidenceResume(
-    reader(expected.map(providerRow)),
-    expected,
-  );
+  const resume = await planInitialSourceRevisionEvidenceResume(reader(expected.map(providerRow)), expected);
   assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1, SOURCE_ID_2]);
   assert.deepEqual(resume.missingRevisions, []);
   assert.deepEqual(prepareInitialSourceRevisionWrites(resume.missingRevisions), []);
@@ -123,7 +145,7 @@ test('contradictory existing revision-1 evidence blocks resume instead of overwr
   );
 });
 
-test('foreign or duplicate source evidence under the claimed run fails closed', async () => {
+test('foreign or duplicate source evidence returned by the provider fails closed', async () => {
   const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
   await expectRecoveryError(
     'EXTRA_EXISTING_REVISION',
@@ -140,6 +162,24 @@ test('foreign or duplicate source evidence under the claimed run fails closed', 
       expected,
     ),
   );
+});
+
+test('revision primary-key reads are bounded to 50 source ids per query', async () => {
+  const expected = Array.from({ length: 51 }, (_, index) => revision(
+    `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    index + 1,
+    `synthetic-row-${index + 1}`,
+    `Synthetic ${index + 1}`,
+  ));
+  const statements = [];
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader([], (statement) => statements.push(statement)),
+    expected,
+  );
+  assert.equal(statements.length, 2);
+  assert.equal(Object.keys(statements[0].parameters).length, 51);
+  assert.equal(Object.keys(statements[1].parameters).length, 2);
+  assert.deepEqual(resume.missingRevisions, expected);
 });
 
 test('malformed raw payload is not accepted as equivalent revision evidence', async () => {

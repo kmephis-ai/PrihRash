@@ -1,4 +1,5 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
+import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
@@ -38,6 +39,7 @@ export class InitialSourceRevisionEvidenceRecoveryError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT = 50;
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
@@ -54,11 +56,6 @@ function positiveInteger(value: unknown): number {
     return Number(value);
   }
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) malformed();
-  return value;
-}
-
-function canonicalString(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value !== value.trim()) malformed();
   return value;
 }
 
@@ -124,11 +121,52 @@ function existingMatches(
 ): boolean {
   return positiveInteger(row.revision) === 1
     && uuid(row.migration_run_id) === expected.migrationRunId.toLowerCase()
-    && canonicalString(row.observed_at) === expected.observedAt
+    && ydbTimestampReadbackMatches(row.observed_at, expected.observedAt)
     && positiveInteger(row.row_hint) === expected.rowHint
     && digestString(row.row_digest) === expected.rowDigest
     && row.change_class === null
     && canonicalRawPayload(row.raw_payload) === expected.rawPayload;
+}
+
+async function readExistingRevisionRows(
+  reader: YdbReadScope,
+  expectedRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+): Promise<readonly ExistingInitialRevisionRow[]> {
+  const rows: ExistingInitialRevisionRow[] = [];
+
+  for (
+    let start = 0;
+    start < expectedRevisions.length;
+    start += INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT
+  ) {
+    const batch = expectedRevisions.slice(
+      start,
+      start + INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT,
+    );
+    const sourceIdParameters = Object.fromEntries(
+      batch.map((revision, index) => [
+        `source_record_id_${index}`,
+        uuidParameter(revision.sourceRecordId),
+      ]),
+    );
+    const sourceIdPlaceholders = batch
+      .map((_, index) => `$source_record_id_${index}`)
+      .join(', ');
+    const statement = readStatement(
+      'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
+        + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
+        + 'FROM source_record_revisions '
+        + `WHERE revision = $revision AND source_record_id IN (${sourceIdPlaceholders})`,
+      {
+        revision: uint64Parameter(1),
+        ...sourceIdParameters,
+      },
+    );
+    const result = await reader.read<ExistingInitialRevisionRow>(statement);
+    rows.push(...result.rows);
+  }
+
+  return rows;
 }
 
 export async function planInitialSourceRevisionEvidenceResume(
@@ -143,20 +181,10 @@ export async function planInitialSourceRevisionEvidenceResume(
     });
   }
 
-  const statement = readStatement(
-    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
-      + 'FROM source_record_revisions '
-      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision',
-    {
-      migration_run_id: uuidParameter(expected.runId),
-      revision: uint64Parameter(1),
-    },
-  );
-  const result = await reader.read<ExistingInitialRevisionRow>(statement);
+  const existingRows = await readExistingRevisionRows(reader, expectedRevisions);
   const existingSourceIds = new Set<string>();
 
-  for (const row of result.rows) {
+  for (const row of existingRows) {
     const sourceRecordId = uuid(row.source_record_id);
     if (existingSourceIds.has(sourceRecordId)) {
       throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
