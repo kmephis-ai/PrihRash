@@ -91,7 +91,7 @@ test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery st
   assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
 });
 
-test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate signatures cross-run', async () => {
+test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate incident keys cross-run', async () => {
   const workflow = await workflowText();
 
   assert.match(workflow, /Checkout exact CI source for bounded evidence classifier/);
@@ -106,6 +106,8 @@ test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks d
   assert.match(workflow, /PREVIOUS_EVIDENCE_INVALID/);
   assert.match(workflow, /PREVIOUS_OUTCOME_UNCERTAIN/);
   assert.match(workflow, /Observed-Signature: \$observed_signature/);
+  assert.match(workflow, /--arg recovery "Recovery-State: \$recovery_state"/);
+  assert.match(workflow, /\.recovery == 1/);
   assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
   assert.match(workflow, /bootstrapInvokeStep \| IN\("success", "failure"\)/);
   assert.match(workflow, /prior_root_cause_attempts=\$\(\(prior_root_cause_attempts \+ 1\)\)/);
