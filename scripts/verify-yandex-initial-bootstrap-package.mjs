@@ -63,6 +63,7 @@ const requiredFiles = [
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapReferenceAwareJob.js',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
@@ -106,6 +107,9 @@ const allowedRuntimeFiles = [
   'dist/runtime/initialBootstrapReferenceClaimAdapter.d.ts',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js.map',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.d.ts',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js',
+  'dist/runtime/initialBootstrapStaleStagingRetirementJob.js.map',
   'dist/runtime/yandexCloudInitialBootstrapFunction.d.ts',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js',
   'dist/runtime/yandexCloudInitialBootstrapFunction.js.map',
