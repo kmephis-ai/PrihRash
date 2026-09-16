@@ -217,7 +217,6 @@ jobs:
               echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_RESOLUTION_FAILED'; exit 1;
             }
           function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
-
           yc serverless function list-access-bindings --id "$function_id" \
             --format json --retry 0 --no-user-output >"$tmp/bindings.json" 2>"$tmp/bindings.err" || {
               echo 'R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_BINDINGS_READ_FAILED'; exit 1;
@@ -252,7 +251,8 @@ jobs:
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           secret_json="$(yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
             --format json --retry 0 --no-user-output 2>"$tmp/secret.err")" || {
-              echo 'R1_BOOTSTRAP_ORCHESTRATOR_LOCKBOX_SECRET_RESOLUTION_FAILED'; exit 1;
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_LOCKBOX_SECRET_RESOLUTION_FAILED'
+              exit 1
             }
           if ! jq -e \
             --arg expected_id "$YC_LOCKBOX_SECRET_ID" \
@@ -393,6 +393,10 @@ jobs:
             exit 0
           fi
           if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE' ]; then
+            exit 0
+          fi
+          if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'STALE_STAGING_RETIRED' ]; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STALE_RETIREMENT_FRESH_BOOTSTRAP_ARMED'
             exit 0
           fi
           if [ "$verdict" = 'RECOVERY_REQUIRED' ] \
