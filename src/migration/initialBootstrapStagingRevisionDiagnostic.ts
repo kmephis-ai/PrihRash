@@ -10,6 +10,7 @@ export type InitialBootstrapStagingRevisionDiagnostic =
   | 'STAGING_MANIFEST_STRUCTURE_MISMATCH'
   | 'STAGING_DURABLE_METADATA_MISMATCH'
   | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+  | 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'
   | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
   | 'AUTHORITATIVE_BINDING_MISMATCH'
   | 'REVISION_ROW_MALFORMED'
@@ -21,6 +22,7 @@ export type InitialBootstrapStagingRevisionDiagnostic =
 export type InitialBootstrapStagingDurableRevisionDiagnostic = Exclude<
   InitialBootstrapStagingRevisionDiagnostic,
   | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+  | 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'
   | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
   | 'AUTHORITATIVE_BINDING_MISMATCH'
 >;
@@ -234,15 +236,41 @@ function parseStagingManifest(
   });
 }
 
+function bindingMatchesObservation(
+  binding: Readonly<ManifestBinding>,
+  observation: Readonly<InitialBootstrapStagingRevisionObservation> | undefined,
+): boolean {
+  return observation !== undefined
+    && binding.sourceOrdinal === observation.sourceOrdinal
+    && binding.rowHint === observation.rowHint
+    && binding.rowDigest === observation.digest;
+}
+
 function authoritativeBindingDiagnostic(
   manifest: Readonly<ParsedStagingManifest>,
   sourceSnapshotDigest: string,
   observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
 ): InitialBootstrapStagingRevisionDiagnostic | null {
-  if (sourceSnapshotDigest.trim().length === 0 || sourceSnapshotDigest !== manifest.durableSnapshotDigest) {
+  if (sourceSnapshotDigest.trim().length === 0) {
     return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
   }
+  const digestMatches = sourceSnapshotDigest === manifest.durableSnapshotDigest;
   const normalizedObservations = normalizeObservations(observations);
+  if (!digestMatches) {
+    if (
+      normalizedObservations === null
+      || normalizedObservations.length <= manifest.durableRowCount
+      || normalizedObservations.length < manifest.bindings.length
+    ) {
+      return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
+    }
+    for (const [index, binding] of manifest.bindings.entries()) {
+      if (!bindingMatchesObservation(binding, normalizedObservations[index])) {
+        return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
+      }
+    }
+    return 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED';
+  }
   if (normalizedObservations === null) return 'AUTHORITATIVE_BINDING_MISMATCH';
   if (
     normalizedObservations.length !== manifest.durableRowCount
@@ -251,13 +279,7 @@ function authoritativeBindingDiagnostic(
     return 'AUTHORITATIVE_ROW_COUNT_MISMATCH';
   }
   for (const [index, binding] of manifest.bindings.entries()) {
-    const observation = normalizedObservations[index];
-    if (
-      observation === undefined
-      || binding.sourceOrdinal !== observation.sourceOrdinal
-      || binding.rowHint !== observation.rowHint
-      || binding.rowDigest !== observation.digest
-    ) {
+    if (!bindingMatchesObservation(binding, normalizedObservations[index])) {
       return 'AUTHORITATIVE_BINDING_MISMATCH';
     }
   }
