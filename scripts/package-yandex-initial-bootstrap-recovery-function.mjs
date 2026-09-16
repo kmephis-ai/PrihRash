@@ -6,6 +6,9 @@ const DIST = resolve(ROOT, 'dist');
 const ARTIFACT_ROOT = resolve(ROOT, '.artifacts', 'yandex-initial-bootstrap-recovery-function');
 const RUNTIME_ROOT = resolve(ARTIFACT_ROOT, 'dist', 'runtime');
 const ALLOWED_RUNTIME_BASENAMES = new Set([
+  'initialBootstrapRecoveryConfig.js',
+  'initialBootstrapRecoveryConfig.js.map',
+  'initialBootstrapRecoveryConfig.d.ts',
   'initialBootstrapRecoveryJob.js',
   'initialBootstrapRecoveryJob.js.map',
   'initialBootstrapRecoveryJob.d.ts',

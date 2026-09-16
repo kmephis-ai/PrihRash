@@ -259,7 +259,10 @@ export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
     try {
       await retireStaleStaging(environment);
     } catch {
-      throw error;
+      throw new InitialBootstrapReferenceAwareRuntimeError(
+        'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+        'RESUME_CONTEXT_READ',
+      );
     }
 
     return runJob(environment);

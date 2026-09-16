@@ -60,6 +60,7 @@ async function filesUnder(directory) {
 const requiredFiles = [
   'index.js',
   'package.json',
+  'dist/runtime/initialBootstrapRecoveryConfig.js',
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapReferenceAwareJob.js',
   'dist/runtime/initialBootstrapReferenceClaimAdapter.js',
@@ -98,6 +99,9 @@ for (const forbiddenKey of ['devDependencies', 'scripts', 'optionalDependencies'
 const files = await filesUnder(ARTIFACT_ROOT);
 const runtimeFiles = files.filter((file) => file.startsWith('dist/runtime/'));
 const allowedRuntimeFiles = [
+  'dist/runtime/initialBootstrapRecoveryConfig.d.ts',
+  'dist/runtime/initialBootstrapRecoveryConfig.js',
+  'dist/runtime/initialBootstrapRecoveryConfig.js.map',
   'dist/runtime/initialBootstrapJob.d.ts',
   'dist/runtime/initialBootstrapJob.js',
   'dist/runtime/initialBootstrapJob.js.map',

@@ -48,7 +48,7 @@ test('exact resume-context semantic failure retires once and performs exactly on
   assert.equal(retirements, 1);
 });
 
-test('retirement refusal preserves the original fail-closed error and never retries bootstrap', async () => {
+test('retirement refusal exposes one safe failure code and never retries bootstrap', async () => {
   const firstFailure = staleResumeFailure();
   let attempts = 0;
   let retirements = 0;
@@ -65,7 +65,9 @@ test('retirement refusal preserves the original fail-closed error and never retr
         throw new Error('synthetic retirement refusal');
       },
     ),
-    (error) => error === firstFailure,
+    (error) => error instanceof InitialBootstrapReferenceAwareRuntimeError
+      && error.code === 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED'
+      && error.applicationPhase === 'RESUME_CONTEXT_READ',
   );
 
   assert.equal(attempts, 1);

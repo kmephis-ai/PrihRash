@@ -128,6 +128,7 @@ test('reference-aware runtime failures expose only the bounded runtime taxonomy'
     'REFERENCE_RUNTIME_STATE_INVALID',
     'REFERENCE_BOOTSTRAP_RESUME_UNSAFE',
     'REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE',
+    'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
   ]) {
     assert.deepEqual(
       await execute(new InitialBootstrapReferenceAwareRuntimeError(runtimeCode)),

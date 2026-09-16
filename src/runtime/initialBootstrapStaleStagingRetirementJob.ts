@@ -19,7 +19,7 @@ import {
   readInitialBootstrapRecoveryJobConfig,
   type InitialBootstrapRecoveryJobConfig,
   type InitialBootstrapRecoveryJobEnvironment,
-} from './initialBootstrapRecoveryJob.js';
+} from './initialBootstrapRecoveryConfig.js';
 
 export type InitialBootstrapStaleStagingRetirementJobEnvironment =
   InitialBootstrapRecoveryJobEnvironment;
