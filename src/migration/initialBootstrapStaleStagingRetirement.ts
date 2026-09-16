@@ -1,12 +1,7 @@
 import type { YdbAdapter } from '../integration/ydb/adapter.js';
 import {
-  readControlledRebuildCurrentEvidence,
-} from './initialControlledRebuildEvidenceReader.js';
-import {
-  buildExpectedControlledRebuildReconciliation,
-  compareControlledRebuildStagingReconciliation,
-} from './initialControlledRebuildReconciliation.js';
-import { INITIAL_RECONCILIATION_CHECKS } from './initialValidationGate.js';
+  diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
+} from './initialBootstrapStaleStagingRetirementDiagnostic.js';
 import {
   diagnoseInitialBootstrapStagingRevisionEvidence,
   type InitialBootstrapStagingRevisionDiagnostic,
@@ -58,16 +53,9 @@ function requiredExactText(
 }
 
 async function assertVerifiedCurrentStateEmpty(adapter: YdbAdapter): Promise<void> {
-  const expected = buildExpectedControlledRebuildReconciliation({
-    sourceRecords: Object.freeze([]),
-    transactions: Object.freeze([]),
-  });
-  const observed = await readControlledRebuildCurrentEvidence(adapter);
-  const evidence = compareControlledRebuildStagingReconciliation(expected, observed);
-  if (
-    evidence.unexplainedHighImpactMismatchCount !== 0
-    || INITIAL_RECONCILIATION_CHECKS.some((check) => evidence.checks[check] !== 'MATCHED')
-  ) {
+  const diagnostic = await adapter.serializableReadWrite((transaction) =>
+    diagnoseInitialBootstrapStaleStagingRetirementCurrentState(transaction));
+  if (diagnostic !== 'STALE_STAGING_CURRENT_STATE_EMPTY') {
     throw new InitialBootstrapStaleStagingRetirementError('VERIFIED_CURRENT_STATE_NOT_EMPTY');
   }
 }

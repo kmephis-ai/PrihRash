@@ -59,7 +59,7 @@ function failedReadbackRow() {
   };
 }
 
-function fixture({ admissionRows, manifestRows, currentSourceRows = [], currentTransactionRows = [] } = {}) {
+function fixture({ admissionRows, manifestRows, currentSourceCount = 0n, currentTransactionCount = 0n } = {}) {
   const readStatements = [];
   const transactionStatements = [];
   const transport = {
@@ -77,14 +77,14 @@ function fixture({ admissionRows, manifestRows, currentSourceRows = [], currentT
       return callback({
         async execute(statement) {
           transactionStatements.push(statement);
-          if (statement.text.includes('FROM `source_records` GROUP BY classification, state')) {
-            return { rows: currentSourceRows };
+          if (statement.text === 'SELECT COUNT(*) AS row_count FROM source_records') {
+            return { rows: [{ row_count: currentSourceCount }] };
           }
-          if (statement.text.includes('FROM `transactions` GROUP BY type, category_id')) return { rows: [] };
-          if (statement.text.includes("FROM `transactions` WHERE type = 'EXPENSE'")) return { rows: [] };
-          if (statement.text.includes("FROM `transactions` WHERE type = 'INCOME'")) return { rows: [] };
-          if (statement.text.includes('FROM `transactions` GROUP BY type')) {
-            return { rows: currentTransactionRows };
+          if (statement.text === 'SELECT COUNT(*) AS row_count FROM transactions') {
+            return { rows: [{ row_count: currentTransactionCount }] };
+          }
+          if (/GROUP BY|WHERE type =/.test(statement.text)) {
+            throw new Error(`aggregate current-state query is not allowed: ${statement.text}`);
           }
           if (statement.text.startsWith('UPDATE migration_runs SET state = $state')) return { rows: [] };
           if (statement.text.startsWith('SELECT state, finished_at, error_code')) {
@@ -127,6 +127,11 @@ test('stale STAGING retirement marks only the exact run FAILED and preserves all
   assert.doesNotMatch(writes[0].text, /DELETE|UPSERT|source_snapshots|initial_bootstrap_identity_manifests|source_record_revisions/i);
   assert.equal(writes[0].parameters.expected_state.value, 'STAGING');
   assert.equal(writes[0].parameters.source_snapshot_digest.value, OLD_DIGEST);
+  assert.equal(
+    f.transactionStatements.filter((statement) => statement.text.startsWith('SELECT COUNT(*) AS row_count')).length,
+    2,
+  );
+  assert.equal(f.transactionStatements.some((statement) => /GROUP BY|WHERE type =/.test(statement.text)), false);
 });
 
 test('stale STAGING retirement refuses the same authoritative snapshot', async () => {
@@ -149,7 +154,7 @@ test('stale STAGING retirement refuses malformed durable manifest context', asyn
 
 test('stale STAGING retirement refuses non-empty verified current state', async () => {
   const f = fixture({
-    currentSourceRows: [{ classification: 'FINANCIAL_RECORD', state: null, row_count: 1n }],
+    currentSourceCount: 1n,
   });
   assert.equal(
     await errorCode(retireInitialBootstrapStaleStagingRun(f.adapter, FRESH_DIGEST, FINISHED_AT)),
