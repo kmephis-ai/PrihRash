@@ -1,0 +1,69 @@
+name: R1 #453 stale STAGING contract doc patch
+
+# Stage-specific branch-only writer used because the connector contents API cannot patch
+# a ~50 KB canonical document without replacing the whole file. Retirement is self-enforced:
+# this workflow removes itself in the same commit that applies the exact validated insertion.
+on:
+  push:
+    branches:
+      - r1-453-stale-staging-retirement-contract
+    paths:
+      - .github/workflows/r1-453-stale-staging-doc-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-doc:
+    if: github.repository == 'kmephis-ai/PrihRash'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact branch head
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Apply exact canonical contract insertion and retire this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/r1-453-stale-staging-retirement-contract'
+          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = '5c65bddb6489c761425d3890cfe72581b8aeb6f4'
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/MIGRATION_CONTRACT.md')
+          text = path.read_text()
+          marker = '### Controlled rebuild scheme outcome recovery\n'
+          section = '''#### Stale initial STAGING retirement after authoritative snapshot drift
+
+Если durable initial claim внутренне согласован (`migration_runs(STAGING)` + exact run-scoped identity manifest + linked `source_snapshots`), но fresh authoritative Google observation имеет другой `source_snapshot_digest`, такой run **нельзя resume/replay**: immutable source evidence уже относится к другому authoritative snapshot.
+
+Разрешён только bounded terminalization старого run при одновременном доказательстве всех условий:
+
+1. durable `COMMITTED` baseline отсутствует и существует ровно один incomplete run, причём он exact `STAGING`;
+2. read-only staging diagnostic возвращает exact `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`; malformed/partial/contradictory durable metadata или любой другой diagnostic не разрешают mutation;
+3. canonical current `source_records` и `transactions` независимо доказаны exact empty; любой current-state drift блокирует recovery;
+4. mutation ограничена exact optimistic lifecycle transition того же `migration_runs` row `STAGING → FAILED` с fixed error code `INITIAL_BOOTSTRAP_STALE_AUTHORITATIVE_SNAPSHOT`, сохранением immutable run fields и transactional exact read-back;
+5. `source_snapshots`, `initial_bootstrap_identity_manifests` и `source_record_revisions` старого attempt не удаляются, не переписываются и не переиспользуются как identity authority: это append-only audit/recovery evidence;
+6. следующий initial bootstrap является **fresh claim** и обязан выделить новый `migration_run_id`, новый `source_snapshot_id`, новый manifest и новые explicit row/transaction identities; identities старого failed attempt не переносятся автоматически;
+7. до появления нового exact `COMMITTED` baseline Reader по-прежнему не видит verified shadow state.
+
+Если хотя бы одно условие не доказано, результат остаётся `RECOVERY_REQUIRED`; автоматический cleanup evidence, blind replay, identity reuse и guessed relink запрещены.
+
+'''
+          if text.count(marker) != 1:
+              raise SystemExit('R1_STALE_STAGING_DOC_MARKER_INVALID')
+          if '#### Stale initial STAGING retirement after authoritative snapshot drift' in text:
+              raise SystemExit('R1_STALE_STAGING_DOC_ALREADY_PATCHED')
+          path.write_text(text.replace(marker, section + marker, 1))
+          PY
+          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = '951bd608edbe2afb49572ac391b47f780d9fea03'
+          git rm .github/workflows/r1-453-stale-staging-doc-patch.yml
+          git add docs/MIGRATION_CONTRACT.md
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'R1 #453: закрепить stale STAGING retirement contract'
+          git push origin HEAD:r1-453-stale-staging-retirement-contract
