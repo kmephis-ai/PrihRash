@@ -47,7 +47,7 @@ jobs:
               raise SystemExit('R1_STALE_STAGING_DOC_ALREADY_PATCHED')
           path.write_text(text.replace(marker, section + marker, 1))
           PY
-          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = '951bd608edbe2afb49572ac391b47f780d9fea03'
+          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = 'e77f8c4a64fcde2b21056c008844f8fd38ba1b0c'
           git rm .github/workflows/r1-453-stale-staging-doc-patch.yml
           git add docs/MIGRATION_CONTRACT.md
           git config user.name 'github-actions[bot]'
