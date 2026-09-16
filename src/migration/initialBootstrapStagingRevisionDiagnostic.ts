@@ -6,7 +6,16 @@ export type InitialBootstrapStagingRevisionDiagnostic =
   | 'PARTIAL_CURRENT_RUN_ONLY'
   | 'COMPLETE_CURRENT_RUN_ONLY'
   | 'CROSS_RUN_PK_COLLISION'
-  | 'REVISION_EVIDENCE_MISMATCH'
+  | 'STAGING_MANIFEST_CARDINALITY_MISMATCH'
+  | 'STAGING_MANIFEST_STRUCTURE_MISMATCH'
+  | 'STAGING_DURABLE_METADATA_MISMATCH'
+  | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+  | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
+  | 'AUTHORITATIVE_BINDING_MISMATCH'
+  | 'REVISION_ROW_MALFORMED'
+  | 'REVISION_ROW_DUPLICATE'
+  | 'REVISION_ROW_UNEXPECTED_SOURCE'
+  | 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH'
   | 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
 
 export interface InitialBootstrapStagingRevisionObservation {
@@ -41,6 +50,17 @@ interface ManifestBinding {
   readonly rowDigest: string;
   readonly sourceRecordId: string;
 }
+
+interface ParsedStagingManifest {
+  readonly migrationRunId: string;
+  readonly durableSnapshotDigest: string;
+  readonly durableRowCount: number;
+  readonly bindings: readonly Readonly<ManifestBinding>[];
+}
+
+type ManifestParseResult =
+  | Readonly<{ readonly ok: true; readonly manifest: Readonly<ParsedStagingManifest> }>
+  | Readonly<{ readonly ok: false; readonly diagnostic: InitialBootstrapStagingRevisionDiagnostic }>;
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const READ_KEYS_PER_QUERY_LIMIT = 50;
@@ -150,14 +170,16 @@ function stagingManifestStatement() {
   );
 }
 
-function expectedRowsFromManifest(
+function parseStagingManifest(
   rows: readonly Readonly<StagingManifestEvidenceRow>[],
-  sourceSnapshotDigest: string,
-  observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
-): Readonly<{ migrationRunId: string; bindings: readonly Readonly<ManifestBinding>[] }> | null {
-  if (rows.length !== 1) return null;
+): ManifestParseResult {
+  if (rows.length !== 1) {
+    return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_CARDINALITY_MISMATCH' as const });
+  }
   const row = rows[0];
-  if (row === undefined || row.run_state !== 'STAGING') return null;
+  if (row === undefined || row.run_state !== 'STAGING') {
+    return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_STRUCTURE_MISMATCH' as const });
+  }
   const migrationRunId = normalizedUuid(row.migration_run_id);
   const runDigest = digest(row.run_snapshot_digest);
   const manifestDigest = digest(row.manifest_snapshot_digest);
@@ -166,25 +188,55 @@ function expectedRowsFromManifest(
   const bindingCount = safeInteger(row.binding_count, 0);
   const snapshotRowCount = safeInteger(row.snapshot_row_count, 0);
   const bindings = parseBindings(row.bindings);
-  const normalizedObservations = normalizeObservations(observations);
   if (
     migrationRunId === null
-    || runDigest !== sourceSnapshotDigest
-    || manifestDigest !== sourceSnapshotDigest
-    || snapshotDigest !== sourceSnapshotDigest
+    || runDigest === null
+    || manifestDigest === null
+    || snapshotDigest === null
     || rowsSeen === null
     || bindingCount === null
     || snapshotRowCount === null
     || bindings === null
-    || normalizedObservations === null
-    || rowsSeen !== normalizedObservations.length
-    || bindingCount !== normalizedObservations.length
-    || snapshotRowCount !== normalizedObservations.length
-    || bindings.length !== normalizedObservations.length
   ) {
-    return null;
+    return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_STRUCTURE_MISMATCH' as const });
   }
-  for (const [index, binding] of bindings.entries()) {
+  if (
+    runDigest !== manifestDigest
+    || runDigest !== snapshotDigest
+    || rowsSeen !== bindingCount
+    || rowsSeen !== snapshotRowCount
+    || rowsSeen !== bindings.length
+  ) {
+    return Object.freeze({ ok: false, diagnostic: 'STAGING_DURABLE_METADATA_MISMATCH' as const });
+  }
+  return Object.freeze({
+    ok: true,
+    manifest: Object.freeze({
+      migrationRunId,
+      durableSnapshotDigest: runDigest,
+      durableRowCount: rowsSeen,
+      bindings,
+    }),
+  });
+}
+
+function authoritativeBindingDiagnostic(
+  manifest: Readonly<ParsedStagingManifest>,
+  sourceSnapshotDigest: string,
+  observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
+): InitialBootstrapStagingRevisionDiagnostic | null {
+  if (sourceSnapshotDigest.trim().length === 0 || sourceSnapshotDigest !== manifest.durableSnapshotDigest) {
+    return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
+  }
+  const normalizedObservations = normalizeObservations(observations);
+  if (normalizedObservations === null) return 'AUTHORITATIVE_BINDING_MISMATCH';
+  if (
+    normalizedObservations.length !== manifest.durableRowCount
+    || normalizedObservations.length !== manifest.bindings.length
+  ) {
+    return 'AUTHORITATIVE_ROW_COUNT_MISMATCH';
+  }
+  for (const [index, binding] of manifest.bindings.entries()) {
     const observation = normalizedObservations[index];
     if (
       observation === undefined
@@ -192,10 +244,10 @@ function expectedRowsFromManifest(
       || binding.rowHint !== observation.rowHint
       || binding.rowDigest !== observation.digest
     ) {
-      return null;
+      return 'AUTHORITATIVE_BINDING_MISMATCH';
     }
   }
-  return Object.freeze({ migrationRunId, bindings });
+  return null;
 }
 
 function revisionEvidenceStatement(
@@ -232,21 +284,15 @@ function inspectRevisionRows(
     const revision = safeInteger(row.revision, 1);
     const rowHint = safeInteger(row.row_hint, 1);
     const rowDigest = digest(row.row_digest);
-    if (
-      sourceRecordId === null
-      || rowRunId === null
-      || revision !== 1
-      || rowHint === null
-      || rowDigest === null
-      || seen.has(sourceRecordId)
-    ) {
-      return 'REVISION_EVIDENCE_MISMATCH';
+    if (sourceRecordId === null || rowRunId === null || revision !== 1 || rowHint === null || rowDigest === null) {
+      return 'REVISION_ROW_MALFORMED';
     }
+    if (seen.has(sourceRecordId)) return 'REVISION_ROW_DUPLICATE';
     const expectedBinding = expected.get(sourceRecordId);
-    if (expectedBinding === undefined) return 'REVISION_EVIDENCE_MISMATCH';
+    if (expectedBinding === undefined) return 'REVISION_ROW_UNEXPECTED_SOURCE';
     if (rowRunId !== migrationRunId) return 'CROSS_RUN_PK_COLLISION';
     if (rowHint !== expectedBinding.rowHint || rowDigest !== expectedBinding.rowDigest) {
-      return 'REVISION_EVIDENCE_MISMATCH';
+      return 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH';
     }
     seen.add(sourceRecordId);
   }
@@ -258,34 +304,34 @@ export async function diagnoseInitialBootstrapStagingRevisionEvidence(
   sourceSnapshotDigest: string,
   observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
 ): Promise<InitialBootstrapStagingRevisionDiagnostic> {
-  if (typeof sourceSnapshotDigest !== 'string' || sourceSnapshotDigest.trim().length === 0) {
-    return 'REVISION_EVIDENCE_MISMATCH';
-  }
   const manifestResult = await reader.read<StagingManifestEvidenceRow>(stagingManifestStatement());
-  const manifest = expectedRowsFromManifest(manifestResult.rows, sourceSnapshotDigest, observations);
-  if (manifest === null) return 'REVISION_EVIDENCE_MISMATCH';
-  if (manifest.bindings.length === 0) return 'NO_REVISION_EVIDENCE';
+  const parsed = parseStagingManifest(manifestResult.rows);
+  if (!parsed.ok) return parsed.diagnostic;
 
-  const expected = new Map(manifest.bindings.map((binding) => [binding.sourceRecordId, binding]));
+  const sourceDiagnostic = authoritativeBindingDiagnostic(parsed.manifest, sourceSnapshotDigest, observations);
+  if (sourceDiagnostic !== null) return sourceDiagnostic;
+  if (parsed.manifest.bindings.length === 0) return 'NO_REVISION_EVIDENCE';
+
+  const expected = new Map(parsed.manifest.bindings.map((binding) => [binding.sourceRecordId, binding]));
   const seen = new Set<string>();
-  const firstBatch = manifest.bindings.slice(0, READ_KEYS_PER_QUERY_LIMIT);
+  const firstBatch = parsed.manifest.bindings.slice(0, READ_KEYS_PER_QUERY_LIMIT);
   const firstResult = await reader.read<ExistingRevisionEvidenceRow>(
-    revisionEvidenceStatement(firstBatch, manifest.migrationRunId),
+    revisionEvidenceStatement(firstBatch, parsed.manifest.migrationRunId),
   );
-  const firstFinding = inspectRevisionRows(firstResult.rows, manifest.migrationRunId, expected, seen);
+  const firstFinding = inspectRevisionRows(firstResult.rows, parsed.manifest.migrationRunId, expected, seen);
   if (firstFinding !== null) return firstFinding;
 
-  const unchecked = manifest.bindings
+  const unchecked = parsed.manifest.bindings
     .slice(READ_KEYS_PER_QUERY_LIMIT)
     .filter((binding) => !seen.has(binding.sourceRecordId));
   for (let start = 0; start < unchecked.length; start += READ_KEYS_PER_QUERY_LIMIT) {
     const batch = unchecked.slice(start, start + READ_KEYS_PER_QUERY_LIMIT);
     const result = await reader.read<ExistingRevisionEvidenceRow>(revisionEvidenceStatement(batch, null));
-    const finding = inspectRevisionRows(result.rows, manifest.migrationRunId, expected, seen);
+    const finding = inspectRevisionRows(result.rows, parsed.manifest.migrationRunId, expected, seen);
     if (finding !== null) return finding;
   }
 
   if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
-  if (seen.size === manifest.bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
+  if (seen.size === parsed.manifest.bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
   return 'PARTIAL_CURRENT_RUN_ONLY';
 }

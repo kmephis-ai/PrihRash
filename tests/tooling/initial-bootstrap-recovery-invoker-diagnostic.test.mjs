@@ -22,7 +22,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
+    stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -44,5 +44,5 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   });
-  assert.equal(stderr.trim(), 'R1_STAGING_REVISION_EVIDENCE=CROSS_RUN_PK_COLLISION');
+  assert.equal(stderr.trim(), 'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH');
 });
