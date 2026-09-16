@@ -77,9 +77,15 @@ export interface YdbSqlExecutor {
   (text: string): YdbSqlQueryBuilder;
 }
 
+interface YdbSqlTransactionOptions {
+  readonly isolation: 'serializableReadWrite';
+  readonly idempotent: false;
+  readonly signal?: AbortSignal;
+}
+
 export interface YdbSqlClient extends YdbSqlExecutor {
   begin<T>(
-    options: Readonly<{ isolation: 'serializableReadWrite'; idempotent: false }>,
+    options: Readonly<YdbSqlTransactionOptions>,
     work: (transaction: YdbSqlExecutor) => Promise<T>,
   ): Promise<T>;
 }
@@ -88,6 +94,7 @@ interface YdbJsCommonDataClientConfig {
   readonly connectionString: string;
   readonly poolMaxSize?: number;
   readonly readTimeoutMs?: number;
+  readonly transactionTimeoutMs?: number;
 }
 
 export interface YdbJsDataClientConfig extends YdbJsCommonDataClientConfig {
@@ -276,16 +283,17 @@ function transactionFailureOriginatesFromBody(
   }
 }
 
+function positiveTimeout(value: number | undefined): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && value > 0);
+}
+
 export function createYdbJsV6DataTransport(
   sql: YdbSqlClient,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
-  options: Readonly<{ readTimeoutMs?: number }> = {},
+  options: Readonly<{ readTimeoutMs?: number; transactionTimeoutMs?: number }> = {},
 ): YdbTransport {
   if (typeof sql !== 'function' || typeof sql.begin !== 'function') fail('SDK_SHAPE_INVALID');
-  if (
-    options.readTimeoutMs !== undefined
-    && (!Number.isSafeInteger(options.readTimeoutMs) || options.readTimeoutMs <= 0)
-  ) {
+  if (!positiveTimeout(options.readTimeoutMs) || !positiveTimeout(options.transactionTimeoutMs)) {
     fail('CLIENT_CONFIG_INVALID');
   }
 
@@ -297,9 +305,16 @@ export function createYdbJsV6DataTransport(
       let bodyCompleted = false;
       let bodyFailure: unknown | typeof NO_TRANSACTION_BODY_FAILURE = NO_TRANSACTION_BODY_FAILURE;
       const deferredProviderFailures = new Set<unknown>();
+      const beginOptions: Readonly<YdbSqlTransactionOptions> = options.transactionTimeoutMs === undefined
+        ? Object.freeze({ isolation: 'serializableReadWrite', idempotent: false })
+        : Object.freeze({
+            isolation: 'serializableReadWrite',
+            idempotent: false,
+            signal: AbortSignal.timeout(options.transactionTimeoutMs),
+          });
       try {
         return await sql.begin(
-          { isolation: 'serializableReadWrite', idempotent: false },
+          beginOptions,
           async (transaction) => {
             bodyCompleted = false;
             bodyFailure = NO_TRANSACTION_BODY_FAILURE;
@@ -351,7 +366,8 @@ function validateCommonClientConfig(config: Readonly<YdbJsCommonDataClientConfig
     || config.connectionString.length === 0
     || config.connectionString !== config.connectionString.trim()
     || (config.poolMaxSize !== undefined && (!Number.isSafeInteger(config.poolMaxSize) || config.poolMaxSize <= 0))
-    || (config.readTimeoutMs !== undefined && (!Number.isSafeInteger(config.readTimeoutMs) || config.readTimeoutMs <= 0))
+    || !positiveTimeout(config.readTimeoutMs)
+    || !positiveTimeout(config.transactionTimeoutMs)
   ) {
     fail('CLIENT_CONFIG_INVALID');
   }
@@ -387,7 +403,10 @@ async function createDataClientWithCredentials(
   const transport = createYdbJsV6DataTransport(
     sql,
     createYdbJsV6ParameterMapper(sdk),
-    config.readTimeoutMs === undefined ? {} : { readTimeoutMs: config.readTimeoutMs },
+    Object.freeze({
+      ...(config.readTimeoutMs === undefined ? {} : { readTimeoutMs: config.readTimeoutMs }),
+      ...(config.transactionTimeoutMs === undefined ? {} : { transactionTimeoutMs: config.transactionTimeoutMs }),
+    }),
   );
 
   return Object.freeze({
