@@ -1,5 +1,4 @@
 import type {
-  InitialBootstrapRecoverySurfaceClassification,
   InitialBootstrapRecoverySurfaceReason,
 } from '../migration/initialBootstrapResidualSurface.js';
 import type {
@@ -9,6 +8,7 @@ import {
   InitialBootstrapRecoveryJobError,
   runInitialBootstrapRecoveryJobFromEnvironment,
   type InitialBootstrapRecoveryJobEnvironment,
+  type InitialBootstrapRecoveryJobResult,
 } from './initialBootstrapRecoveryJob.js';
 
 export type YandexInitialBootstrapRecoveryFunctionResult =
@@ -17,6 +17,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED';
       verdict: InitialBootstrapRecoveryVerdict;
       reason: InitialBootstrapRecoverySurfaceReason;
+      stagingRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -24,8 +25,18 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
     }>;
 
 export interface YandexInitialBootstrapRecoveryJob {
-  (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
+  (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoveryJobResult>>;
 }
+
+
+const STAGING_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingRevisionEvidence']>>([
+  'NO_REVISION_EVIDENCE',
+  'PARTIAL_CURRENT_RUN_ONLY',
+  'COMPLETE_CURRENT_RUN_ONLY',
+  'CROSS_RUN_PK_COLLISION',
+  'REVISION_EVIDENCE_MISMATCH',
+  'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
+]);
 
 const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>([
   'READ_FAILED',
@@ -49,7 +60,13 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
 
-function validClassification(value: Readonly<InitialBootstrapRecoverySurfaceClassification>): boolean {
+function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>): boolean {
+  const diagnostic = value.stagingRevisionEvidence;
+  if (value.reason === 'STAGING_RUN_PRESENT') {
+    if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
+  } else if (diagnostic !== undefined) {
+    return false;
+  }
   if (value.verdict === 'APPLIED') return value.reason === 'COMMITTED_DURABLE_STATE';
   if (value.verdict === 'NOT_APPLIED') return value.reason === 'EMPTY_DURABLE_STATE';
   return value.verdict === 'RECOVERY_REQUIRED' && RECOVERY_REQUIRED_REASONS.has(value.reason);
@@ -72,6 +89,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED' as const,
       verdict: classification.verdict,
       reason: classification.reason,
+      ...(classification.stagingRevisionEvidence === undefined
+        ? {}
+        : { stagingRevisionEvidence: classification.stagingRevisionEvidence }),
     });
   } catch (error) {
     if (

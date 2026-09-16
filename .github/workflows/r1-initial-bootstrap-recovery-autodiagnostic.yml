@@ -1,0 +1,125 @@
+name: R1 initial bootstrap recovery autodiagnostic
+
+# Stage-specific one-shot bridge for R1 #453.
+# Retirement condition: delete this workflow immediately after enum-only STAGING revision evidence is captured.
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: r1-initial-bootstrap-recovery-autodiagnostic
+  cancel-in-progress: false
+
+jobs:
+  dispatch-recovery:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch read-only recovery only for the one-shot diagnostic PR
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          accept_header='Accept: application/vnd.github+json'
+
+          main_sha="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$main_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_MAIN_MOVED'
+            exit 0
+          fi
+
+          associated_prs="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/commits/$SOURCE_SHA/pulls")"
+          source_pr="$(jq -cer \
+            --arg sha "$SOURCE_SHA" \
+            --arg repo "$GITHUB_REPOSITORY" '
+              [.[] | select(
+                .merged_at != null
+                and .merge_commit_sha == $sha
+                and .base.ref == "main"
+                and .head.repo.full_name == $repo
+                and (.title | startswith("R1 #453:"))
+              )] | if length == 1 then .[0] else empty end
+            ' <<<"$associated_prs" || true)"
+          if [ -z "$source_pr" ]; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_NOT_SINGLE_R1_PR'
+            exit 0
+          fi
+
+          source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+          source_pr_body="$(jq -r '.body // ""' <<<"$source_pr")"
+          marker_count="$(jq -Rn --arg body "$source_pr_body" '
+            [$body | split("\n")[] | select(. == "Recovery-Diagnostic: STAGING_REVISION_EVIDENCE")] | length
+          ')"
+          if [ "$marker_count" != '1' ]; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_MARKER_INVALID'
+            exit 0
+          fi
+
+          source_files="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/pulls/$source_pr_number/files?per_page=100")"
+          if [ "$(jq 'length' <<<"$source_files")" -ge 100 ]; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_CHANGESET_UNBOUNDED'
+            exit 0
+          fi
+          if ! jq -e '
+            any(.filename == ".github/workflows/r1-initial-bootstrap-recovery-autodiagnostic.yml" and .status == "added")
+            and any(.filename == "src/migration/initialBootstrapStagingRevisionDiagnostic.ts" and .status == "added")
+            and any(.filename == "src/runtime/initialBootstrapRecoveryJob.ts" and .status != "removed")
+            and any(.filename == "scripts/invoke-yandex-initial-bootstrap-recovery.mjs" and .status != "removed")
+          ' <<<"$source_files" >/dev/null; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_CHANGESET_INVALID'
+            exit 0
+          fi
+
+          existing="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if jq -e --arg sha "$SOURCE_SHA" '.workflow_runs | any(.head_sha == $sha)' \
+            <<<"$existing" >/dev/null; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_ALREADY_DISPATCHED'
+            exit 0
+          fi
+
+          current_sha="$(curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$current_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_RECOVERY_AUTODIAGNOSTIC_MAIN_MOVED_BEFORE_DISPATCH'
+            exit 0
+          fi
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "$auth_header" \
+            --header "$accept_header" \
+            --header 'Content-Type: application/json' \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches" \
+            --data '{"ref":"main"}'
+          echo 'R1_RECOVERY_AUTODIAGNOSTIC_DISPATCHED'

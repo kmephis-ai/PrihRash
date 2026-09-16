@@ -19,6 +19,14 @@ const SAFE_OUTPUT_FAILURE = Object.freeze({
   code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
 });
 const VERDICTS = new Set(['APPLIED', 'NOT_APPLIED', 'RECOVERY_REQUIRED']);
+const STAGING_REVISION_EVIDENCE = new Set([
+  'NO_REVISION_EVIDENCE',
+  'PARTIAL_CURRENT_RUN_ONLY',
+  'COMPLETE_CURRENT_RUN_ONLY',
+  'CROSS_RUN_PK_COLLISION',
+  'REVISION_EVIDENCE_MISMATCH',
+  'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
+]);
 const REASONS = new Set([
   'EMPTY_DURABLE_STATE',
   'COMMITTED_DURABLE_STATE',
@@ -93,18 +101,28 @@ function parseExactResult(stdout) {
   if (
     result.status === 'PASS'
     && result.code === 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED'
-    && exactKeys(result, ['status', 'code', 'verdict', 'reason'])
     && typeof result.verdict === 'string'
     && VERDICTS.has(result.verdict)
     && typeof result.reason === 'string'
     && REASONS.has(result.reason)
     && validPair(result.verdict, result.reason)
   ) {
+    const stagingRevisionEvidence = result.stagingRevisionEvidence;
+    const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
+      ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'stagingRevisionEvidence'])
+        && typeof stagingRevisionEvidence === 'string'
+        && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
+      : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+        && stagingRevisionEvidence === undefined;
+    if (!validDiagnosticShape) return null;
     return Object.freeze({
-      status: 'PASS',
-      code: result.code,
-      verdict: result.verdict,
-      reason: result.reason,
+      result: Object.freeze({
+        status: 'PASS',
+        code: result.code,
+        verdict: result.verdict,
+        reason: result.reason,
+      }),
+      stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence : null,
     });
   }
   if (
@@ -112,7 +130,10 @@ function parseExactResult(stdout) {
     && FUNCTION_FAILURE_CODES.has(result.code)
     && exactKeys(result, ['status', 'code'])
   ) {
-    return Object.freeze({ status: 'FAIL', code: result.code });
+    return Object.freeze({
+      result: Object.freeze({ status: 'FAIL', code: result.code }),
+      stagingRevisionEvidence: null,
+    });
   }
   return null;
 }
@@ -120,7 +141,9 @@ function parseExactResult(stdout) {
 async function invokeRecovery(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
   const ycBinary = environment.PRIHRASH_YC_BIN ?? 'yc';
-  if (!nonBlank(functionId) || !nonBlank(ycBinary)) return SAFE_CONFIG_FAILURE;
+  if (!nonBlank(functionId) || !nonBlank(ycBinary)) {
+    return Object.freeze({ result: SAFE_CONFIG_FAILURE, stagingRevisionEvidence: null });
+  }
 
   try {
     const { stdout } = await execFileAsync(
@@ -134,12 +157,18 @@ async function invokeRecovery(environment = process.env) {
         windowsHide: true,
       },
     );
-    return parseExactResult(stdout) ?? SAFE_OUTPUT_FAILURE;
+    return parseExactResult(stdout) ?? Object.freeze({
+      result: SAFE_OUTPUT_FAILURE,
+      stagingRevisionEvidence: null,
+    });
   } catch {
-    return SAFE_INVOKE_FAILURE;
+    return Object.freeze({ result: SAFE_INVOKE_FAILURE, stagingRevisionEvidence: null });
   }
 }
 
-const result = await invokeRecovery();
-process.stdout.write(`${JSON.stringify(result)}\n`);
-if (result.status !== 'PASS') process.exitCode = 2;
+const invocation = await invokeRecovery();
+if (invocation.stagingRevisionEvidence !== null) {
+  process.stderr.write(`R1_STAGING_REVISION_EVIDENCE=${invocation.stagingRevisionEvidence}\n`);
+}
+process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
+if (invocation.result.status !== 'PASS') process.exitCode = 2;

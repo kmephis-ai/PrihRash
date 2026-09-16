@@ -28,6 +28,7 @@ const requiredFiles = [
   'dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js',
   'dist/migration/initialBootstrapRecoveryProbe.js',
   'dist/migration/initialBootstrapResidualSurface.js',
+  'dist/migration/initialBootstrapStagingRevisionDiagnostic.js',
   'dist/migration/initialBootstrapReferenceReconciliation.js',
   'dist/reference/initialBootstrapReferenceSemantics.js',
 ];
@@ -82,6 +83,7 @@ for (const forbidden of [
 for (const recoveryModule of [
   'initialBootstrapRecoveryProbe.js',
   'initialBootstrapResidualSurface.js',
+  'initialBootstrapStagingRevisionDiagnostic.js',
   'initialBootstrapReferenceReconciliation.js',
 ]) {
   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
