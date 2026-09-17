@@ -12,9 +12,11 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
   assert.match(invoker, /APPLICATION_PHASES\.has\(result\.applicationPhase\)/);
   assert.match(invoker, /METADATA_FAILURE_CODES\.has\(result\.metadataFailureCode\)/);
   assert.match(invoker, /YDB_DATA_FAILURE_CODES\.has\(result\.ydbDataFailureCode\)/);
-  assert.match(runtime, /classifyYdbDataFailureCode\(error\)/);
-  assert.match(runtime, /classifyMetadataFailureCode\(error: unknown\)/);
+  assert.match(runtime, /classifyInitialBootstrapYdbDataFailureCode\(error\)/);
+  assert.match(runtime, /classifyInitialBootstrapMetadataFailureCode/);
   assert.match(runtime, /METADATA_EXECUTOR_\$\{error\.code\}/);
+  assert.match(runtime, /MIGRATION_RUN_LIFECYCLE_\$\{error\.code\}/);
+  assert.match(runtime, /MIGRATION_RUN_PERSISTENCE_\$\{error\.code\}/);
   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
 });
 
@@ -56,6 +58,18 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
   assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
+  for (const code of [
+    'MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION',
+    'MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION',
+    'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
+    'MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION',
+    'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
+    'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
+    'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
+  ]) {
+    assert.match(workflow, new RegExp(code));
+    assert.match(invoker, new RegExp(code));
+  }
   for (const code of [
     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
     'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',

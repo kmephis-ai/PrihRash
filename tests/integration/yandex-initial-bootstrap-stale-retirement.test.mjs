@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
+import {
+  MigrationRunLifecycleExecutorError,
+} from '../../dist/migration/migrationRunLifecycleExecutor.js';
 import {
   executeInitialBootstrapStaleStagingRetirementJob,
 } from '../../dist/runtime/initialBootstrapStaleStagingRetirementJob.js';
@@ -72,6 +76,53 @@ test('retirement refusal exposes one safe failure code and never retries bootstr
 
   assert.equal(attempts, 1);
   assert.equal(retirements, 1);
+});
+
+test('retirement lifecycle failure preserves bounded metadata cause without exposing raw error text', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new MigrationRunLifecycleExecutorError('RUN_TRANSITION_EVIDENCE_MISMATCH');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: 'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
+  });
+});
+
+test('retirement YDB failure preserves bounded transport cause for the existing invoker sanitizer', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_OVERLOADED');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_YDB_OVERLOADED',
+  });
 });
 
 test('unrelated bootstrap failures never cross the retirement authority boundary', async () => {
