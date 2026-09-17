@@ -144,7 +144,7 @@ jobs:
           echo "::add-mask::${iam_token}"
           printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
 
-      - name: Classify WIF subject and Lockbox locators without exposing identifiers
+      - name: Classify WIF subject and Lockbox metadata paths without exposing identifiers
         id: classify
         shell: bash
         run: |
@@ -232,11 +232,42 @@ jobs:
             locator_match='UNKNOWN'
           fi
 
+          set +e
+          rest_http="$(curl --silent --show-error \
+            --output "$tmp/rest.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            "https://lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${YC_LOCKBOX_SECRET_ID}" \
+            2>"$tmp/rest.err")"
+          rest_rc=$?
+          set -e
+          if [ "$rest_rc" -ne 0 ]; then
+            rest_lookup_class='TRANSPORT'
+          else
+            case "$rest_http" in
+              2??)
+                jq -e --arg expected "$YC_LOCKBOX_SECRET_ID" '.id == $expected' \
+                  "$tmp/rest.json" >/dev/null 2>&1 || {
+                    rm -f "$tmp"/*.err "$tmp"/*.json
+                    echo 'LOCKBOX_REST_RESPONSE_INVALID'
+                    exit 1
+                  }
+                rest_lookup_class='OK'
+                ;;
+              401) rest_lookup_class='AUTH' ;;
+              403) rest_lookup_class='PERMISSION_DENIED' ;;
+              404) rest_lookup_class='NOT_FOUND' ;;
+              408|425|429|5??) rest_lookup_class='TRANSPORT' ;;
+              *) rest_lookup_class='OTHER' ;;
+            esac
+          fi
+
           status='FAIL'
           if [ "$identity_match" = 'MATCH' ] \
             && [ "$id_lookup_class" = 'OK' ] \
             && [ "$name_lookup_class" = 'OK' ] \
-            && [ "$locator_match" = 'MATCH' ]; then
+            && [ "$locator_match" = 'MATCH' ] \
+            && [ "$rest_lookup_class" = 'OK' ]; then
             status='PASS'
             code='LOCKBOX_METADATA_OK'
           elif [ "$identity_match" = 'MISMATCH' ]; then
@@ -248,8 +279,19 @@ jobs:
             && [ "$locator_match" = 'MISMATCH' ]; then
             code='LOCKBOX_ID_LOCATOR_MISMATCH'
           elif [ "$id_lookup_class" = 'NOT_FOUND' ] \
-            && [ "$name_lookup_class" = 'NOT_FOUND' ]; then
-            code='LOCKBOX_UNSEEN_BY_ID_OR_NAME'
+            && [ "$name_lookup_class" = 'NOT_FOUND' ] \
+            && [ "$rest_lookup_class" = 'OK' ]; then
+            code='LOCKBOX_CLI_API_DIVERGENCE'
+          elif [ "$id_lookup_class" = 'NOT_FOUND' ] \
+            && [ "$name_lookup_class" = 'NOT_FOUND' ] \
+            && [ "$rest_lookup_class" = 'NOT_FOUND' ]; then
+            code='LOCKBOX_API_UNSEEN'
+          elif [ "$rest_lookup_class" = 'PERMISSION_DENIED' ]; then
+            code='LOCKBOX_REST_PERMISSION_DENIED'
+          elif [ "$rest_lookup_class" = 'AUTH' ]; then
+            code='LOCKBOX_REST_AUTH'
+          elif [ "$rest_lookup_class" = 'TRANSPORT' ]; then
+            code='LOCKBOX_REST_TRANSPORT'
           else
             code='LOCKBOX_LOCATOR_DIAGNOSTIC_OTHER'
           fi
@@ -262,6 +304,7 @@ jobs:
           printf 'idLookupClass=%s\n' "$id_lookup_class" >> "$GITHUB_OUTPUT"
           printf 'nameLookupClass=%s\n' "$name_lookup_class" >> "$GITHUB_OUTPUT"
           printf 'locatorMatch=%s\n' "$locator_match" >> "$GITHUB_OUTPUT"
+          printf 'restLookupClass=%s\n' "$rest_lookup_class" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$code"
 
       - name: Publish enum-only classifier evidence
@@ -275,6 +318,7 @@ jobs:
           CLASSIFIER_ID_LOOKUP_CLASS: ${{ steps.classify.outputs.idLookupClass }}
           CLASSIFIER_NAME_LOOKUP_CLASS: ${{ steps.classify.outputs.nameLookupClass }}
           CLASSIFIER_LOCATOR_MATCH: ${{ steps.classify.outputs.locatorMatch }}
+          CLASSIFIER_REST_LOOKUP_CLASS: ${{ steps.classify.outputs.restLookupClass }}
         run: |
           set -euo pipefail
           evidence_dir="$RUNNER_TEMP/r1-lockbox-error-classifier-evidence"
@@ -286,6 +330,7 @@ jobs:
           id_lookup_class="${CLASSIFIER_ID_LOOKUP_CLASS:-UNKNOWN}"
           name_lookup_class="${CLASSIFIER_NAME_LOOKUP_CLASS:-UNKNOWN}"
           locator_match="${CLASSIFIER_LOCATOR_MATCH:-UNKNOWN}"
+          rest_lookup_class="${CLASSIFIER_REST_LOOKUP_CLASS:-UNKNOWN}"
           jq -cn \
             --arg status "$status" \
             --arg code "$code" \
@@ -294,8 +339,9 @@ jobs:
             --arg idLookupClass "$id_lookup_class" \
             --arg nameLookupClass "$name_lookup_class" \
             --arg locatorMatch "$locator_match" \
+            --arg restLookupClass "$rest_lookup_class" \
             --arg sourceSha "$GITHUB_SHA" \
-            '{status:$status,code:$code,identityMatch:$identityMatch,identityLookupClass:$identityLookupClass,idLookupClass:$idLookupClass,nameLookupClass:$nameLookupClass,locatorMatch:$locatorMatch,sourceSha:$sourceSha}' \
+            '{status:$status,code:$code,identityMatch:$identityMatch,identityLookupClass:$identityLookupClass,idLookupClass:$idLookupClass,nameLookupClass:$nameLookupClass,locatorMatch:$locatorMatch,restLookupClass:$restLookupClass,sourceSha:$sourceSha}' \
             > "$evidence_dir/classification.json"
 
       - name: Upload enum-only classifier evidence
