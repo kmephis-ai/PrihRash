@@ -599,7 +599,14 @@ jobs:
                        "COMMITTED_BASELINE_EXISTS",
                        "STAGING_RUN_NOT_UNIQUE",
                        "STALE_SNAPSHOT_NOT_PROVEN",
-                       "VERIFIED_CURRENT_STATE_NOT_EMPTY"
+                       "VERIFIED_CURRENT_STATE_NOT_EMPTY",
+                       "JOB_CONFIG_INVALID",
+                       "JOB_SOURCE_READ_FAILED",
+                       "JOB_YDB_CLIENT_CREATE_FAILED",
+                       "JOB_YDB_CLIENT_CLOSE_FAILED",
+                       "ADMISSION_MALFORMED_RUN_EVIDENCE",
+                       "ADMISSION_DUPLICATE_RUN_EVIDENCE",
+                       "MIGRATION_RUN_STATE_ILLEGAL_MIGRATION_RUN_TRANSITION"
                      ))
                   then .staleRetirementFailureCode
                   else null
