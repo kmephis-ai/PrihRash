@@ -59,6 +59,17 @@ test('decodes current adapter schema v3 with the same typed financial semantics'
   assert.equal(result.value.amountMinor, 12345);
 });
 
+test('canonical numeric note is preserved as provider decimal text', () => {
+  const result = decodeLegacyFinancialRawPayload(expense({ note: N('123.45') }));
+  assert.equal(result.ok, true);
+  assert.equal(result.value.note, '123.45');
+});
+
+test('noncanonical numeric note remains fail-closed', () => {
+  const result = decodeLegacyFinancialRawPayload(expense({ note: N('01') }));
+  assert.deepEqual(result, { ok: false, errorCode: 'INVALID_TEXT_CELL', field: 'note' });
+});
+
 test('uses only the operation-active amount column', () => {
   const result = decodeLegacyFinancialRawPayload(income());
   assert.equal(result.ok, true);

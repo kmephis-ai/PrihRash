@@ -57,6 +57,17 @@ test('current adapter schema v3 preserves classification decode semantics', () =
   assert.equal(result.value.expenseAmountMinor, 12345);
 });
 
+test('canonical numeric note preserves text value without affecting financial classification', () => {
+  const decoded = decodeRawPayloadForSourceClassification(payload({ note: N('123.45') }));
+  assert.equal(decoded.ok, true);
+  assert.equal(decoded.value.note, '123.45');
+
+  const classification = classifyMeaningfulSourceRow(
+    toSourceRowClassificationInput(decoded.value, 'NOT_APPLICABLE'),
+  );
+  assert.equal(classification, 'FINANCIAL_RECORD');
+});
+
 test('inactive string amount preserves physical presence but is never parsed as money', () => {
   const decoded = decodeRawPayloadForSourceClassification(payload({ income_amount: S('legacy inactive text') }));
   assert.equal(decoded.ok, true);
@@ -118,6 +129,7 @@ test('presence hints prevent physically nonblank amount from becoming a note-onl
 test('typed text/date mismatches fail closed before source classification', () => {
   for (const [overrides, errorCode, field] of [
     [{ operation_type: N('1') }, 'INVALID_TEXT_CELL', 'operation_type'],
+    [{ note: N('01') }, 'INVALID_TEXT_CELL', 'note'],
     [{ date: S('2024-01-01') }, 'INVALID_DATE_CELL', 'date'],
     [{ expense_amount: N('1.001') }, 'INVALID_AMOUNT_SCALE', 'expense_amount'],
   ]) {

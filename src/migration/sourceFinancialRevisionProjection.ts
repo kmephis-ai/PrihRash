@@ -3,6 +3,7 @@ import type { SourceFinancialRevision } from './changeClassification.js';
 import {
   decodeRawPayloadAmountMinor,
   isSupportedAdapterSchemaVersion,
+  decodeRawPayloadNoteCell,
   decodeRawPayloadOccurredOn,
   decodeRawPayloadTextCell,
   type RawPayloadDecodeErrorCode,
@@ -65,6 +66,6 @@ export function projectSourceFinancialRevision(
     incomeAmountMinor: nullableAmount(payload, 'income_amount'),
     description: valueOrThrow(decodeRawPayloadTextCell(payload.description, 'description')),
     vikaFlag: valueOrThrow(decodeRawPayloadTextCell(payload.vika_flag, 'vika_flag')),
-    note: valueOrThrow(decodeRawPayloadTextCell(payload.note, 'note')),
+    note: valueOrThrow(decodeRawPayloadNoteCell(payload.note)),
   });
 }
