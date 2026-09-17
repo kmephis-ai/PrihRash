@@ -9,7 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+  materialize:
+    if: ${{ github.event.head_commit.message != 'R1 #453: materialize workflow blob' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -17,33 +18,28 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Apply bounded non-workflow patch
+      - name: Materialize updated workflow as ordinary blob
         shell: bash
         env:
-          EXPECTED_HEAD: 1e6831c09d3709e77c27ed2fe9514894e5cc7dab
+          EXPECTED_HEAD: 0421a7cee5a78aa1bed42f99f14defe3f4682d30
           TARGET_BRANCH: fix/r1-453-stale-retirement-cause
+          TRANSPORT_BRANCH: transport/r1-453-stale-cause-20260917
         run: |
           set -euo pipefail
-          cp .transport/r1_453_nonworkflow_remaining.patch /tmp/remaining.patch
-          git fetch origin "$TARGET_BRANCH"
+          cp .transport/r1_453_workflow.patch /tmp/workflow.patch
+          git fetch origin "$TARGET_BRANCH" "$TRANSPORT_BRANCH"
           git checkout --detach "origin/$TARGET_BRANCH"
           test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
-          git apply --check /tmp/remaining.patch
-          git apply /tmp/remaining.patch
+          git apply --check /tmp/workflow.patch
+          git apply /tmp/workflow.patch
           git diff --check
-          mapfile -t changed < <(git diff --name-only)
-          expected=(
-            scripts/invoke-yandex-initial-bootstrap.mjs
-            src/runtime/initialBootstrapReferenceAwareJob.ts
-            tests/integration/yandex-initial-bootstrap-invoker.test.mjs
-            tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
-          )
-          printf '%s\n' "${changed[@]}" | sort > /tmp/changed
-          printf '%s\n' "${expected[@]}" | sort > /tmp/expected
-          diff -u /tmp/expected /tmp/changed
+          test "$(git diff --name-only)" = ".github/workflows/r1-initial-shadow-bootstrap.yml"
+          cp .github/workflows/r1-initial-shadow-bootstrap.yml /tmp/updated.yml
+          git reset --hard HEAD
+          git checkout -B "$TRANSPORT_BRANCH" "origin/$TRANSPORT_BRANCH"
+          cp /tmp/updated.yml .transport/r1-initial-shadow-bootstrap.updated.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -- "${expected[@]}"
-          git commit -m 'R1 #453: carry stale retirement semantic cause'
-          test "$(git rev-parse HEAD^)" = "$EXPECTED_HEAD"
-          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          git add .transport/r1-initial-shadow-bootstrap.updated.yml
+          git commit -m 'R1 #453: materialize workflow blob'
+          git push origin "HEAD:refs/heads/$TRANSPORT_BRANCH"
