@@ -25,6 +25,10 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
+    stagingSourceDecodeEvidence: [
+      { errorCode: 'INVALID_DATE_CELL', field: 'date' },
+      { errorCode: 'INVALID_TEXT_CELL', field: 'description' },
+    ],
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -50,6 +54,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     'R1_STAGING_DURABLE_REVISION_EVIDENCE=CROSS_RUN_PK_COLLISION',
     'R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
+    'R1_STAGING_SOURCE_DECODE_EVIDENCE=INVALID_DATE_CELL@date,INVALID_TEXT_CELL@description',
   ]);
 });
 
@@ -62,6 +67,7 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       reason: 'STAGING_RUN_PRESENT',
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
       stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+      stagingSourceDecodeEvidence: [],
     },
     {
       status: 'PASS',
@@ -71,6 +77,7 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
       stagingDurableRevisionEvidence: 'SYNTHETIC_UNKNOWN_DIAGNOSTIC',
       stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+      stagingSourceDecodeEvidence: [],
     },
     {
       status: 'PASS',
@@ -88,6 +95,19 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
       stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
       stagingRetirementEvidence: 'SYNTHETIC_UNKNOWN_RETIREMENT_DIAGNOSTIC',
+      stagingSourceDecodeEvidence: [],
+    },
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+      stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
+      stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+      stagingSourceDecodeEvidence: [
+        { errorCode: 'INVALID_TEXT_CELL', field: 'synthetic_private_field' },
+      ],
     },
   ];
 
