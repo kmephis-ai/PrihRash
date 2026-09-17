@@ -1,0 +1,65 @@
+name: transport-r1-453-stale-job-cause
+
+on:
+  push:
+    branches:
+      - transport/r1-453-stale-job-cause-20260917
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: "${{ github.event.head_commit.message != 'R1 #453: materialize stale-job workflow blob' }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Publish bounded non-workflow patch and materialize workflow blob
+        shell: bash
+        env:
+          EXPECTED_HEAD: bf2c6d0f42bc333e1d334da5074f8a8ba97df786
+          TARGET_BRANCH: fix/r1-453-stale-retirement-job-cause
+          TRANSPORT_BRANCH: transport/r1-453-stale-job-cause-20260917
+        run: |
+          set -euo pipefail
+          cp .transport/r1_453_stale_job_nonworkflow.patch /tmp/nonworkflow.patch
+          cp .transport/r1_453_stale_job_workflow.patch /tmp/workflow.patch
+          git fetch origin "$TARGET_BRANCH" "$TRANSPORT_BRANCH"
+          git checkout --detach "origin/$TARGET_BRANCH"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          git apply --check /tmp/nonworkflow.patch
+          git apply /tmp/nonworkflow.patch
+          git diff --check
+          expected_paths=$(cat <<'EOF'
+          scripts/invoke-yandex-initial-bootstrap.mjs
+          src/runtime/initialBootstrapReferenceAwareJob.ts
+          src/runtime/initialBootstrapStaleStagingRetirementJob.ts
+          tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+          tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
+          tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
+          EOF
+          )
+          test "$(git diff --name-only)" = "$expected_paths"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- $expected_paths
+          git commit -m 'R1 #453: preserve stale retirement job causes'
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+          git fetch origin "$TARGET_BRANCH"
+          git checkout --detach "origin/$TARGET_BRANCH"
+          git apply --check /tmp/workflow.patch
+          git apply /tmp/workflow.patch
+          git diff --check
+          test "$(git diff --name-only)" = '.github/workflows/r1-initial-shadow-bootstrap.yml'
+          cp .github/workflows/r1-initial-shadow-bootstrap.yml /tmp/updated.yml
+          git reset --hard HEAD
+          git checkout -B "$TRANSPORT_BRANCH" "origin/$TRANSPORT_BRANCH"
+          cp /tmp/updated.yml .transport/r1-initial-shadow-bootstrap.updated.yml
+          git add .transport/r1-initial-shadow-bootstrap.updated.yml
+          git commit -m 'R1 #453: materialize stale-job workflow blob'
+          git push origin "HEAD:refs/heads/$TRANSPORT_BRANCH"
