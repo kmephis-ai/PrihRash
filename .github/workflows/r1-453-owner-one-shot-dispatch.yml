@@ -1,0 +1,101 @@
+name: R1 #453 owner one-shot diagnostic dispatch
+
+on:
+  push:
+    branches:
+      - control/r1-453-owner-one-shot-20260917
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+jobs:
+  dispatch:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash' &&
+      github.event.head_commit.message == 'R1 #453 one-shot diagnostic orchestrator dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_MAIN_SHA: 6728b1ffacdc1c9ef692b56d80edf4653aa6e476
+    steps:
+      - name: Guard exact owner-authorized boundary and dispatch once
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+          tmp="$RUNNER_TEMP/r1-453-one-shot"
+          mkdir -p "$tmp"
+
+          test "$GITHUB_REF" = 'refs/heads/control/r1-453-owner-one-shot-20260917'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+
+          curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/branches/main" --output "$tmp/main.json"
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" \
+            '.commit.sha == $sha and .protected == true' "$tmp/main.json" >/dev/null
+
+          curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/issues/453" --output "$tmp/r1.json"
+          jq -e '.state == "open"' "$tmp/r1.json" >/dev/null
+
+          curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/issues/433" --output "$tmp/quality.json"
+          jq -e '.state == "closed"' "$tmp/quality.json" >/dev/null
+
+          curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/actions/runs?head_sha=${EXPECTED_MAIN_SHA}&per_page=100" --output "$tmp/gates.json"
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            (.workflow_runs | any(.name == "CI" and .head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success"))
+            and (.workflow_runs | any(.name == "Browser Quality" and .head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success"))
+            and (.workflow_runs | any(.path == "dynamic/github-code-scanning/codeql" and .head_sha == $sha and .conclusion == "success"))
+          ' "$tmp/gates.json" >/dev/null
+
+          curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/actions/runs?branch=main&event=workflow_dispatch&per_page=100" --output "$tmp/manual.json"
+          if jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            .workflow_runs | any(
+              .head_sha == $sha
+              and (.name == "R1 initial bootstrap orchestrator" or .name == "R1 initial shadow bootstrap")
+            )
+          ' "$tmp/manual.json" >/dev/null; then
+            echo 'R1_453_ONE_SHOT_ALREADY_USED'
+            exit 1
+          fi
+          if jq -e '
+            .workflow_runs | any(
+              (.name == "R1 initial bootstrap orchestrator" or .name == "R1 initial shadow bootstrap")
+              and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested")
+            )
+          ' "$tmp/manual.json" >/dev/null; then
+            echo 'R1_453_ONE_SHOT_WRITER_CONFLICT'
+            exit 1
+          fi
+
+          current_sha="$(curl --fail --silent --show-error --header "$auth" --header "$accept" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$EXPECTED_MAIN_SHA" || {
+            echo 'R1_453_ONE_SHOT_MAIN_MOVED'
+            exit 1
+          }
+
+          payload='{"ref":"main","inputs":{"allow_staging_resume":"true"}}'
+          http="$(curl --silent --show-error \
+            --output "$tmp/dispatch.json" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "$auth" \
+            --header "$accept" \
+            --header 'Content-Type: application/json' \
+            "$api/actions/workflows/r1-initial-bootstrap-orchestrator.yml/dispatches" \
+            --data "$payload")"
+          test "$http" = '204' || {
+            echo 'R1_453_ONE_SHOT_DISPATCH_FAILED'
+            exit 1
+          }
+          echo 'R1_453_ONE_SHOT_DISPATCHED'
