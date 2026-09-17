@@ -33,8 +33,54 @@ jobs:
           for path in "${paths[@]}"; do
             test "$(git rev-parse "${source_sha}:${path}")" = "$(git rev-parse "HEAD:${path}")"
           done
-          git apply --check .transport/r1-453-600s.patch
-          git apply .transport/r1-453-600s.patch
+
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_exact(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              actual = text.count(old)
+              if actual != count:
+                  raise SystemExit(f'{path}: expected {count} exact matches, found {actual}')
+              p.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          replace_exact(
+              '.github/workflows/r1-initial-shadow-bootstrap.yml',
+              '--execution-timeout 300s',
+              '--execution-timeout 600s',
+          )
+          replace_exact(
+              'scripts/invoke-yandex-initial-bootstrap.mjs',
+              'const INVOKE_TIMEOUT_MS = 330_000;',
+              'const INVOKE_TIMEOUT_MS = 630_000;',
+          )
+          replace_exact(
+              'tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs',
+              '--execution-timeout 300s',
+              '--execution-timeout 600s',
+              2,
+          )
+          replace_exact(
+              'tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs',
+              'INVOKE_TIMEOUT_MS = 330_000',
+              'INVOKE_TIMEOUT_MS = 630_000',
+          )
+          anchor = '`INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` означает только exact privacy-safe classification provider envelope `Function execution timeout (504)`. `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` означает numeric non-zero provider exit без доказанного allowlisted non-success result/marker. Оба кода являются non-success diagnostic evidence и сами по себе **не** разрешают retry/replay bootstrap.\n'
+          addition = '\nПосле bootstrap #59 (`35260379450`) exact provider evidence доказал HTTP 504 практически на 300-секундной границе ранее configured Function timeout. Поэтому initial-bootstrap Function использует bounded execution timeout `600s`, а HTTPS invoker — `630s`: provider deadline остаётся раньше client transport deadline. Это исправление только доказанного execution-envelope blocker; retries, atomic cap, write predicates и authority не расширяются.\n'
+          replace_exact(
+              'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md',
+              anchor,
+              anchor + addition,
+          )
+          PY
+
+          printf '%s  %s\n' \
+            '4eb5f33087a00cb26665a8df0bd0427a599a25156566956cdbb03df3afa0f45e' '.github/workflows/r1-initial-shadow-bootstrap.yml' \
+            '2f4fa3c68a54c9093222915b103feac608c73ca23b8371edb2f3dfc0108bb6ba' 'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md' \
+            '57f6c55cf752637cdc99e19f1173cd75bfd9a1905fe09c11b88e46cc214bc264' 'scripts/invoke-yandex-initial-bootstrap.mjs' \
+            '31e41e87556486eff284ab37b81f41d8888f14d5927d1f6d6e0c83ea4d3cf738' 'tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs' \
+            | sha256sum --check --strict
 
           mkdir -p .transport/materialized
           cp .github/workflows/r1-initial-shadow-bootstrap.yml .transport/materialized/r1-initial-shadow-bootstrap.yml
@@ -44,7 +90,6 @@ jobs:
 
           git restore --source="$source_sha" -- "${paths[@]}"
           git diff --check
-          git status --short
           test "$(git status --short | grep '^?? .transport/materialized/' | wc -l)" -eq 4
 
           git config user.name 'github-actions[bot]'
