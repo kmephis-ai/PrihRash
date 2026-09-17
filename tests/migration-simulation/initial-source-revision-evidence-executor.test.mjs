@@ -200,7 +200,8 @@ test('identity-only evidence cannot reconstruct the exact revision batch partiti
   // transaction partitions solely because estimated parameter bytes differ.
   const identityEquivalentSmallWrites = Array.from({ length: 4 }, (_, index) => evidenceWrite(128, index));
   const identityEquivalentLargeWrites = Array.from(
-    { length: 4 }, (_, index) => evidenceWrite(200 * 1024, index),
+    { length: 4 },
+    (_, index) => evidenceWrite(200 * 1024, index),
   );
 
   assert.equal(identityEquivalentSmallWrites.length, identityEquivalentLargeWrites.length);
