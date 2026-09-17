@@ -1,0 +1,221 @@
+name: R1 Lockbox error classifier
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: r1-lockbox-error-classifier
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify exact current main
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test -n "$YC_LOCKBOX_SECRET_ID"
+
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || {
+            echo 'LOCKBOX_CLASSIFIER_MAIN_MOVED'
+            exit 1
+          }
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange GitHub OIDC token for short-lived Yandex IAM token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-lockbox-error-classifier-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+
+          if ! oidc_status="$(curl --silent --show-error \
+            --output "$tmp/oidc.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" \
+            2>"$tmp/oidc.err")"; then
+            echo 'LOCKBOX_CLASSIFIER_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          case "$oidc_status" in
+            2??) ;;
+            *) echo 'LOCKBOX_CLASSIFIER_OIDC_REQUEST_FAILED'; exit 1 ;;
+          esac
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")" || {
+            echo 'LOCKBOX_CLASSIFIER_OIDC_REQUEST_FAILED'
+            exit 1
+          }
+          echo "::add-mask::${oidc_token}"
+
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *) echo 'LOCKBOX_CLASSIFIER_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>/dev/null || {
+            echo 'LOCKBOX_CLASSIFIER_OIDC_CLAIMS_INVALID'
+            exit 1
+          }
+          jq -e --arg expected "$OIDC_ISSUER" '.iss == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'LOCKBOX_CLASSIFIER_OIDC_ISSUER_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_AUDIENCE" '(.aud == $expected) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $expected)' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'LOCKBOX_CLASSIFIER_OIDC_AUDIENCE_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_SUBJECT" '.sub == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'LOCKBOX_CLASSIFIER_OIDC_SUBJECT_MISMATCH'; exit 1;
+          }
+
+          if ! iam_status="$(curl --silent --show-error \
+            --output "$tmp/iam.json" \
+            --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            2>"$tmp/iam.err")"; then
+            echo 'LOCKBOX_CLASSIFIER_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          case "$iam_status" in
+            2??) ;;
+            *) echo 'LOCKBOX_CLASSIFIER_WIF_EXCHANGE_FAILED'; exit 1 ;;
+          esac
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")" || {
+            echo 'LOCKBOX_CLASSIFIER_WIF_EXCHANGE_FAILED'
+            exit 1
+          }
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Classify Lockbox metadata lookup without exposing stderr
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-lockbox-error-classifier"
+          mkdir -p "$tmp"
+          echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+
+          set +e
+          yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
+            --format json --retry 0 --no-user-output \
+            >"$tmp/secret.json" 2>"$tmp/secret.err"
+          rc=$?
+          set -e
+
+          if [ "$rc" -eq 0 ]; then
+            jq -e --arg expected "$YC_LOCKBOX_SECRET_ID" '.id == $expected' \
+              "$tmp/secret.json" >/dev/null 2>&1 || {
+                rm -f "$tmp/secret.err" "$tmp/secret.json"
+                echo 'LOCKBOX_METADATA_RESPONSE_INVALID'
+                exit 1
+              }
+            status='PASS'
+            code='LOCKBOX_METADATA_OK'
+            transport_class='OK'
+          else
+            if grep -Eiq 'code[[:space:]]*=[[:space:]]*NotFound|NOT_FOUND|not found|(^|[^0-9])404([^0-9]|$)' "$tmp/secret.err"; then
+              transport_class='NOT_FOUND'
+            elif grep -Eiq 'PermissionDenied|PERMISSION_DENIED|permission denied|Forbidden|(^|[^0-9])403([^0-9]|$)' "$tmp/secret.err"; then
+              transport_class='PERMISSION_DENIED'
+            elif grep -Eiq 'Unauthenticated|UNAUTHENTICATED|Unauthorized|(^|[^0-9])401([^0-9]|$)|invalid[^[:alnum:]]+token|token[^[:alnum:]]+(invalid|expired)' "$tmp/secret.err"; then
+              transport_class='AUTH'
+            elif grep -Eiq 'Unavailable|UNAVAILABLE|DeadlineExceeded|DEADLINE_EXCEEDED|context deadline exceeded|timed out|timeout|connection (reset|refused)|temporary failure|transport error|TLS' "$tmp/secret.err"; then
+              transport_class='TRANSPORT'
+            else
+              transport_class='OTHER'
+            fi
+            status='FAIL'
+            code="LOCKBOX_METADATA_${transport_class}"
+          fi
+
+          rm -f "$tmp/secret.err" "$tmp/secret.json"
+          printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
+          printf 'code=%s\n' "$code" >> "$GITHUB_OUTPUT"
+          printf 'transportClass=%s\n' "$transport_class" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$code"
+
+      - name: Publish enum-only classifier evidence
+        if: always()
+        shell: bash
+        env:
+          CLASSIFIER_STATUS: ${{ steps.classify.outputs.status }}
+          CLASSIFIER_CODE: ${{ steps.classify.outputs.code }}
+          CLASSIFIER_TRANSPORT_CLASS: ${{ steps.classify.outputs.transportClass }}
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-lockbox-error-classifier-evidence"
+          mkdir -p "$evidence_dir"
+          status="${CLASSIFIER_STATUS:-FAIL}"
+          code="${CLASSIFIER_CODE:-LOCKBOX_METADATA_CLASSIFIER_NOT_REACHED}"
+          transport_class="${CLASSIFIER_TRANSPORT_CLASS:-UNKNOWN}"
+          jq -cn \
+            --arg status "$status" \
+            --arg code "$code" \
+            --arg transportClass "$transport_class" \
+            --arg sourceSha "$GITHUB_SHA" \
+            '{status:$status,code:$code,transportClass:$transportClass,sourceSha:$sourceSha}' \
+            > "$evidence_dir/classification.json"
+
+      - name: Upload enum-only classifier evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-lockbox-error-classifier-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-lockbox-error-classifier-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 30
