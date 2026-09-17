@@ -44,6 +44,8 @@ invoke, а не два provider invokes. Старое append-only evidence со�
 
 Для `PARTIAL_CURRENT_RUN_ONLY` durable evidence трактуется узко: contiguous prefix доказывает только место, где persisted evidence заканчивается. Exact original revision-evidence batch/query из identity manifest не реконструируется, потому что production planner зависит от private revision payload byte size (`estimatedParameterBytes`), которого manifest не содержит. Нельзя публиковать prefix length/ordinal, угадывать batch index/end или использовать manifest-only evidence как replay plan.
 
+Write-capable Function использует provider invocation context как cooperative execution-budget guard только на границе между revision-evidence transactions. Если перед следующим bounded batch остаётся меньше `60_000 ms`, новый transaction не начинается: application возвращает `RECOVERY_REQUIRED / REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED`, уже committed append-only evidence сохраняется как resumable checkpoint, а verified current не меняется. Это не retry и не дополнительный provider invoke; следующий write-capable resume всё равно требует обычного Incident-M/Owner gate.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

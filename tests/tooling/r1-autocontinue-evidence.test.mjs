@@ -39,6 +39,15 @@ test('stale-retirement semantic evidence becomes an exact bounded observed signa
   }), 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED/RESUME_CONTEXT_READ/STALE_SNAPSHOT_NOT_PROVEN');
 });
 
+
+test('bounded runtime-budget recovery keeps its exact reason in the observed signature', () => {
+  assert.equal(deriveBootstrapEvidenceSignature({
+    status: 'STOP',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+    recoveryReason: 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED',
+  }), 'STOP/INITIAL_BOOTSTRAP_RECOVERY_REQUIRED/REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED');
+});
+
 test('bootstrap signature derivation is fail-closed for success and ambiguous runtime detail', () => {
   assert.throws(
     () => deriveBootstrapEvidenceSignature({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED' }),

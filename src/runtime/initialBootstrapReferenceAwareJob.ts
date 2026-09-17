@@ -368,7 +368,13 @@ async function runApplicationSafely(
   }
 }
 
-function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
+export interface InitialBootstrapReferenceAwareExecutionBudget {
+  readonly canStartRevisionEvidenceBatch: () => boolean;
+}
+
+function createReferenceAwareRuntime(
+  executionBudget?: Readonly<InitialBootstrapReferenceAwareExecutionBudget>,
+): Readonly<InitialBootstrapJobRuntime> {
   let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
   let digest: Readonly<CanonicalSourceDigest> | null = null;
   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
@@ -448,6 +454,12 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
       );
     },
     async runApplication(observation, dependencies) {
+      const controlledDependencies = executionBudget === undefined
+        ? dependencies
+        : Object.freeze({
+            ...dependencies,
+            canStartRevisionEvidenceBatch: executionBudget.canStartRevisionEvidenceBatch,
+          });
       if (referencePlan === null || referenceRows === null) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RUNTIME_STATE_INVALID');
       }
@@ -467,13 +479,13 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         )) {
           throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
         }
-        return runApplicationSafely(observation, dependencies);
+        return runApplicationSafely(observation, controlledDependencies);
       }
       if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
       }
       if (referencePlan.writes.length === 0) {
-        return runApplicationSafely(observation, dependencies);
+        return runApplicationSafely(observation, controlledDependencies);
       }
 
       let admission;
@@ -490,7 +502,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         referencePlan,
       );
       return runApplicationSafely(observation, Object.freeze({
-        ...dependencies,
+        ...controlledDependencies,
         adapter,
       }));
     },
@@ -500,12 +512,14 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
 
 export function runInitialBootstrapReferenceAwareJob(
   config: Readonly<InitialBootstrapJobConfig>,
+  executionBudget?: Readonly<InitialBootstrapReferenceAwareExecutionBudget>,
 ) {
-  return executeInitialBootstrapJob(config, createReferenceAwareRuntime());
+  return executeInitialBootstrapJob(config, createReferenceAwareRuntime(executionBudget));
 }
 
 export function runInitialBootstrapReferenceAwareJobFromEnvironment(
   environment: InitialBootstrapJobEnvironment = process.env,
+  executionBudget?: Readonly<InitialBootstrapReferenceAwareExecutionBudget>,
 ) {
-  return runInitialBootstrapReferenceAwareJob(readInitialBootstrapJobConfig(environment));
+  return runInitialBootstrapReferenceAwareJob(readInitialBootstrapJobConfig(environment), executionBudget);
 }

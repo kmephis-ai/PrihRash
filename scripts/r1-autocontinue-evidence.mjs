@@ -71,6 +71,11 @@ export function deriveBootstrapEvidenceSignature(input) {
       : signature([runtimeCode, applicationPhase, ...(detail === null ? [] : [detail])]);
   }
 
+  if (code === 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED') {
+    if (status !== 'STOP') fail('R1_BOOTSTRAP_AUTOCONTINUE_EVIDENCE_INVALID');
+    return signature([status, code, enumSegment(evidence.recoveryReason)]);
+  }
+
   if (code === 'INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED') {
     if (status !== 'FAIL') fail('R1_BOOTSTRAP_AUTOCONTINUE_EVIDENCE_INVALID');
     return signature([

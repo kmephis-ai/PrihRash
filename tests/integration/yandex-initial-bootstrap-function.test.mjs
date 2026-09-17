@@ -7,7 +7,9 @@ import {
 } from '../../dist/runtime/initialBootstrapReferenceAwareJob.js';
 import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob.js';
 import {
+  createInitialBootstrapExecutionBudgetFromYandexContext,
   executeYandexInitialBootstrapFunction,
+  INITIAL_BOOTSTRAP_REVISION_EVIDENCE_MIN_REMAINING_MS,
 } from '../../dist/runtime/yandexCloudInitialBootstrapFunction.js';
 
 const ENV = Object.freeze({
@@ -84,6 +86,28 @@ test('baseline, controlled rebuild and recovery outcomes remain non-success boun
     code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
     recoveryReason: 'PROMOTION_OUTCOME_UNKNOWN',
   });
+  assert.deepEqual(await execute({
+    status: 'RECOVERY_REQUIRED',
+    reason: 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED',
+    run: { id: 'private' },
+  }), {
+    status: 'STOP',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+    recoveryReason: 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED',
+  });
+});
+
+test('Yandex remaining-time context gates only new revision evidence batches', () => {
+  let remaining = INITIAL_BOOTSTRAP_REVISION_EVIDENCE_MIN_REMAINING_MS;
+  const context = {
+    getRemainingTimeInMillis() { return remaining; },
+  };
+  const budget = createInitialBootstrapExecutionBudgetFromYandexContext(context);
+  assert.notEqual(budget, null);
+  assert.equal(budget.canStartRevisionEvidenceBatch(), true);
+  remaining -= 1;
+  assert.equal(budget.canStartRevisionEvidenceBatch(), false);
+  assert.equal(createInitialBootstrapExecutionBudgetFromYandexContext({}), null);
 });
 
 test('malformed or unknown application result fails closed without echoing input', async () => {

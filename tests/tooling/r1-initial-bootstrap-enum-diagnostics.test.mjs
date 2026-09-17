@@ -27,6 +27,8 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
 
 test('bootstrap workflow projects only allowlisted phase and metadata failure enums', () => {
   assert.match(workflow, /applicationPhase:/);
+  assert.match(workflow, /recoveryReason:/);
+  assert.match(workflow, /REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED/);
   assert.match(workflow, /metadataFailureCode:/);
   assert.match(workflow, /ydbDataFailureCode:/);
   assert.match(workflow, /staleRetirementFailureCode:/);

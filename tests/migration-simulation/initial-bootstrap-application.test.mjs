@@ -399,6 +399,7 @@ function dependencies(db, ids, lifecycleClock, overrides = {}) {
     }),
     clock: lifecycleClock,
     observePhase: overrides.observePhase,
+    canStartRevisionEvidenceBatch: overrides.canStartRevisionEvidenceBatch,
   });
 }
 
@@ -725,6 +726,32 @@ test('oversized ordinary promotion is surfaced as CONTROLLED_REBUILD_REQUIRED wi
   assert.equal(result.status, 'CONTROLLED_REBUILD_REQUIRED');
   assert.equal(result.preflight.eligible, false);
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+});
+
+
+test('runtime budget exhaustion checkpoints before revision evidence without touching verified current', async () => {
+  const db = fakeDatabase();
+  const ids = allocator();
+  const lifecycleClock = clock(STARTED_AT);
+  let budgetChecks = 0;
+
+  const result = await runInitialBootstrapApplication(
+    observation(),
+    dependencies(db, ids, lifecycleClock, {
+      canStartRevisionEvidenceBatch() {
+        budgetChecks += 1;
+        return false;
+      },
+    }),
+  );
+
+  assert.equal(result.status, 'RECOVERY_REQUIRED');
+  assert.equal(result.reason, 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED');
+  assert.equal(result.run?.state, 'STAGING');
+  assert.equal(budgetChecks, 1);
+  assert.equal(db.state.revisions.size, 0);
   assert.equal(db.state.sourceRecords.size, 0);
   assert.equal(db.state.transactions.size, 0);
 });

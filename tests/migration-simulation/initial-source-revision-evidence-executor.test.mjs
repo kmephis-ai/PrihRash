@@ -200,6 +200,40 @@ test('executes each evidence batch independently and preserves earlier unverifie
   ]);
 });
 
+
+test('runtime budget guard checkpoints before starting the next evidence transaction', async () => {
+  const batches = planInitialRevisionEvidenceBatches([
+    evidenceWrite(300 * 1024, 0),
+    evidenceWrite(300 * 1024, 1),
+  ]);
+  const events = [];
+  let budgetChecks = 0;
+  const adapter = new YdbAdapter({
+    async executeRead() { throw new Error('standalone read not expected'); },
+    async serializableReadWrite(work) {
+      const transaction = events.filter((event) => event.startsWith('begin:')).length + 1;
+      events.push(`begin:${transaction}`);
+      const result = await work({
+        async execute(statement) {
+          events.push(`write:${transaction}:${statement.kind}`);
+          return { rows: [] };
+        },
+      });
+      events.push(`commit:${transaction}`);
+      return result;
+    },
+  });
+
+  const result = await executeInitialRevisionEvidenceBatches(adapter, batches, () => {
+    budgetChecks += 1;
+    return budgetChecks === 1;
+  });
+
+  assert.equal(result, 'RUNTIME_BUDGET_EXHAUSTED');
+  assert.equal(budgetChecks, 2);
+  assert.deepEqual(events, ['begin:1', 'write:1:WRITE', 'commit:1']);
+});
+
 test('identity-only evidence cannot reconstruct the exact revision batch partition', () => {
   // The identity manifest records one binding per source row but intentionally does not
   // persist revision raw-payload byte size. The planner therefore has information that

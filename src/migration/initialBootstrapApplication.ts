@@ -133,6 +133,7 @@ export interface InitialBootstrapApplicationDependencies {
   readonly reconciliation: InitialBootstrapReconciliationPort;
   readonly clock: InitialBootstrapApplicationClock;
   readonly observePhase?: (phase: InitialBootstrapApplicationPhase) => void;
+  readonly canStartRevisionEvidenceBatch?: () => boolean;
 }
 
 function markApplicationPhase(
@@ -145,6 +146,7 @@ function markApplicationPhase(
 export type InitialBootstrapRecoveryReason =
   | 'CLAIM_OUTCOME_UNKNOWN'
   | 'REVISION_EVIDENCE_OUTCOME_UNKNOWN'
+  | 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED'
   | 'COUNTER_REFINEMENT_OUTCOME_UNKNOWN'
   | 'VALIDATION_TRANSITION_OUTCOME_UNKNOWN'
   | 'PROMOTION_OUTCOME_UNKNOWN'
@@ -474,7 +476,14 @@ async function persistRevisionEvidence(
   const batches = planInitialRevisionEvidenceBatches(missingWrites);
   markApplicationPhase(dependencies, 'REVISION_EVIDENCE_WRITE');
   try {
-    await executeInitialRevisionEvidenceBatches(adapter, batches);
+    const execution = await executeInitialRevisionEvidenceBatches(
+      adapter,
+      batches,
+      dependencies.canStartRevisionEvidenceBatch,
+    );
+    if (execution === 'RUNTIME_BUDGET_EXHAUSTED') {
+      return recoveryRequired('REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED', context.candidate.run);
+    }
   } catch (error) {
     if (error instanceof YdbCommitOutcomeUnknownError) {
       return recoveryRequired('REVISION_EVIDENCE_OUTCOME_UNKNOWN', context.candidate.run);

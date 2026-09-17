@@ -80,6 +80,8 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(workflow, /invoke_status="\$\{PIPESTATUS\[0\]\}"/);
   assert.match(workflow, /exit "\$invoke_status"/);
   assert.match(workflow, /runtimeCode:/);
+  assert.match(workflow, /recoveryReason:/);
+  assert.match(workflow, /REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED/);
   assert.match(workflow, /REFERENCE_APPLICATION_YDB_DATA_FAILED/);
   assert.match(workflow, /REFERENCE_FUNCTION_MODULE_LOAD_FAILED/);
   assert.match(workflow, /REFERENCE_FUNCTION_HANDLER_UNCAUGHT/);
@@ -119,6 +121,7 @@ test('reached bootstrap invoke publishes one short-lived enum-only artifact with
   assert.match(projection, /status: \$status/);
   assert.match(projection, /code: \$code/);
   assert.match(projection, /runtimeCode:/);
+  assert.match(projection, /recoveryReason:/);
   assert.match(projection, /httpStatus:/);
   assert.match(projection, /functionError:/);
   assert.doesNotMatch(projection, /\.(?:stdout|stderr|message|payload|details)\b/i);

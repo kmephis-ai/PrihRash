@@ -75,6 +75,11 @@ test('safe non-success Function results remain exact bounded output and exit non
     },
     {
       status: 'STOP',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+      recoveryReason: 'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED',
+    },
+    {
+      status: 'STOP',
       code: 'INITIAL_BOOTSTRAP_VALIDATION_BLOCKED',
       blockers: [
         { code: 'INVALID_ROWS_PRESENT' },

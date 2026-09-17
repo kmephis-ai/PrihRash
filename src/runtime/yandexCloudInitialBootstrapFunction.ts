@@ -18,6 +18,7 @@ import {
   runInitialBootstrapReferenceAwareJobFromEnvironment,
   type InitialBootstrapMetadataFailureCode,
   type InitialBootstrapReferenceAwareRuntimeErrorCode,
+  type InitialBootstrapReferenceAwareExecutionBudget,
   type InitialBootstrapStaleRetirementFailureCode,
   type InitialBootstrapYdbDataFailureCode,
 } from './initialBootstrapReferenceAwareJob.js';
@@ -112,6 +113,7 @@ const VALIDATION_BLOCKER_CODES = new Set<InitialValidationBlockerCode>([
 const RECOVERY_REASONS = new Set<InitialBootstrapRecoveryReason>([
   'CLAIM_OUTCOME_UNKNOWN',
   'REVISION_EVIDENCE_OUTCOME_UNKNOWN',
+  'REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED',
   'COUNTER_REFINEMENT_OUTCOME_UNKNOWN',
   'VALIDATION_TRANSITION_OUTCOME_UNKNOWN',
   'PROMOTION_OUTCOME_UNKNOWN',
@@ -119,6 +121,26 @@ const RECOVERY_REASONS = new Set<InitialBootstrapRecoveryReason>([
 ]);
 
 const RECONCILIATION_CHECKS = new Set<InitialReconciliationCheck>(INITIAL_RECONCILIATION_CHECKS);
+
+// Reserve a conservative provider window before starting another bounded YDB transaction,
+// so the Function can close the client and return sanitized recovery evidence before its deadline.
+export const INITIAL_BOOTSTRAP_REVISION_EVIDENCE_MIN_REMAINING_MS = 60_000;
+
+export function createInitialBootstrapExecutionBudgetFromYandexContext(
+  context: unknown,
+): Readonly<InitialBootstrapReferenceAwareExecutionBudget> | null {
+  if (context === null || (typeof context !== 'object' && typeof context !== 'function')) return null;
+  const getRemainingTimeInMillis = Reflect.get(context, 'getRemainingTimeInMillis');
+  if (typeof getRemainingTimeInMillis !== 'function') return null;
+  return Object.freeze({
+    canStartRevisionEvidenceBatch() {
+      const remaining = Reflect.apply(getRemainingTimeInMillis, context, []);
+      return typeof remaining === 'number'
+        && Number.isFinite(remaining)
+        && remaining >= INITIAL_BOOTSTRAP_REVISION_EVIDENCE_MIN_REMAINING_MS;
+    },
+  });
+}
 
 function record(value: unknown): UnknownRecord | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -313,13 +335,18 @@ export async function executeYandexInitialBootstrapFunction(
 
 export async function initialBootstrapHandler(
   _event: unknown,
-  _context: unknown,
+  context: unknown,
 ): Promise<Readonly<YandexInitialBootstrapFunctionResult>> {
+  const executionBudget = createInitialBootstrapExecutionBudgetFromYandexContext(context);
+  if (executionBudget === null) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
   return executeYandexInitialBootstrapFunction(
     process.env,
     (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
       environment,
-      runInitialBootstrapReferenceAwareJobFromEnvironment,
+      (jobEnvironment) => runInitialBootstrapReferenceAwareJobFromEnvironment(
+        jobEnvironment,
+        executionBudget,
+      ),
       runInitialBootstrapStaleStagingRetirementJobFromEnvironment,
     ),
   );

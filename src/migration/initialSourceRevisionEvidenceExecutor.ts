@@ -34,6 +34,8 @@ export interface InitialRevisionEvidenceBatch {
   readonly totalEstimatedParameterBytes: number;
 }
 
+export type InitialRevisionEvidenceExecutionResult = 'COMPLETE' | 'RUNTIME_BUDGET_EXHAUSTED';
+
 export type InitialRevisionEvidenceErrorCode =
   | 'NON_EVIDENCE_WRITE'
   | 'EVIDENCE_WRITE_TOO_LARGE'
@@ -169,9 +171,11 @@ export function planInitialRevisionEvidenceBatches(
 export async function executeInitialRevisionEvidenceBatches(
   adapter: YdbAdapter,
   batches: readonly InitialRevisionEvidenceBatch[],
-): Promise<void> {
+  canStartBatch?: () => boolean,
+): Promise<InitialRevisionEvidenceExecutionResult> {
   for (const batch of batches) {
     if (batch.writes.length === 0) continue;
+    if (canStartBatch !== undefined && !canStartBatch()) return 'RUNTIME_BUDGET_EXHAUSTED';
     const statement = buildRevisionEvidenceBatchStatement(batch.writes);
     await adapter.serializableReadWrite(async (transaction) => {
       if (statement !== null) {
@@ -183,4 +187,5 @@ export async function executeInitialRevisionEvidenceBatches(
       }
     });
   }
+  return 'COMPLETE';
 }
