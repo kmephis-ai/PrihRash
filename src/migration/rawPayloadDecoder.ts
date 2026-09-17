@@ -83,6 +83,15 @@ export function decodeRawPayloadTextCell(
   return success(cell.value);
 }
 
+export function decodeRawPayloadNoteCell(
+  cell: SourceCellPayloadV2,
+): RawPayloadFieldDecodeResult<string | null> {
+  if (cell === null) return success(null);
+  if (cell.kind === 'STRING') return success(cell.value);
+  if (cell.kind === 'NUMBER' && isCanonicalGoogleNumberText(cell.value)) return success(cell.value);
+  return failure('INVALID_TEXT_CELL', 'note');
+}
+
 export function decodeRawPayloadOccurredOn(
   cell: SourceCellPayloadV2,
 ): RawPayloadFieldDecodeResult<string> {
@@ -149,7 +158,7 @@ export function decodeLegacyFinancialRawPayload(payload: RawPayload): RawPayload
   if (!categoryLabel.ok) return categoryLabel;
   const description = decodeRawPayloadTextCell(payload.description, 'description');
   if (!description.ok) return description;
-  const note = decodeRawPayloadTextCell(payload.note, 'note');
+  const note = decodeRawPayloadNoteCell(payload.note);
   if (!note.ok) return note;
   const vikaFlag = decodeRawPayloadTextCell(payload.vika_flag, 'vika_flag');
   if (!vikaFlag.ok) return vikaFlag;

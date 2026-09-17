@@ -4,6 +4,7 @@ import type { SourceCellPayloadV2 } from '../integration/google/sourceValueCodec
 import {
   decodeRawPayloadAmountMinor,
   isSupportedAdapterSchemaVersion,
+  decodeRawPayloadNoteCell,
   decodeRawPayloadOccurredOn,
   decodeRawPayloadTextCell,
   type RawPayloadDecodeFailure,
@@ -69,7 +70,7 @@ export function decodeRawPayloadForSourceClassification(
   if (!vikaFlag.ok) return vikaFlag;
   const description = decodeRawPayloadTextCell(payload.description, 'description');
   if (!description.ok) return description;
-  const note = decodeRawPayloadTextCell(payload.note, 'note');
+  const note = decodeRawPayloadNoteCell(payload.note);
   if (!note.ok) return note;
 
   let sourceDate: string | null = null;

@@ -110,7 +110,7 @@ Synthetic example:
 - active amount обязан быть typed `NUMBER`; `STRING`, formula-like/unsupported cell или non-canonical decimal → fail-closed;
 - RUB minor units вычисляются integer parsing-ом canonical decimal: максимум 2 fractional digits, без rounding; unsafe integer range → fail-closed;
 - Google Sheets serial date использует epoch `1899-12-30`; whole serial day задаёт `occurred_on`, fractional part остаётся raw provenance и не превращается в отдельный guessed timestamp;
-- text fields decoder принимает только typed `STRING | null`; numeric/text coercion запрещён;
+- text fields decoder по умолчанию принимает только typed `STRING | null`; единственное доказанное исключение — physical `note`, где canonical provider `NUMBER` принимается как уже сохранённый plain-decimal text с сохранением typed provenance `NUMBER`; numeric-looking `STRING` не coercится, остальные text/vocabulary fields остаются fail-closed;
 - existing negative/zero financial semantics по-прежнему решает classifier/normalizer, decoder их не переопределяет.
 
 

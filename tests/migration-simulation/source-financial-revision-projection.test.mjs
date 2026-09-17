@@ -49,6 +49,13 @@ test('current adapter schema v3 projects the same canonical financial revision',
   assert.equal(revision.sourceDate, '2024-07-27');
 });
 
+test('canonical numeric note projects as provider decimal text', () => {
+  const revision = projectSourceFinancialRevision(payload({
+    note: { kind: 'NUMBER', value: '123.45' },
+  }));
+  assert.equal(revision.note, '123.45');
+});
+
 test('projects exact income-side financial revision independently of expense side', () => {
   const revision = projectSourceFinancialRevision(payload({
     operation_type: { kind: 'STRING', value: 'Доход' },
@@ -109,6 +116,7 @@ test('malformed canonical cells fail closed with the original decoder error and 
     [payload({ expense_amount: { kind: 'NUMBER', value: '1.234' } }), 'INVALID_AMOUNT_SCALE', 'expense_amount'],
     [payload({ income_amount: { kind: 'NUMBER', value: '01' } }), 'INVALID_AMOUNT_DECIMAL', 'income_amount'],
     [payload({ description: { kind: 'NUMBER', value: '1' } }), 'INVALID_TEXT_CELL', 'description'],
+    [payload({ note: { kind: 'NUMBER', value: '01' } }), 'INVALID_TEXT_CELL', 'note'],
   ];
 
   for (const [candidate, code, field] of malformed) {
