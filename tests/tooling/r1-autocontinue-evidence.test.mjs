@@ -6,6 +6,7 @@ import {
   decideAutocontinueAttempt,
   deriveBootstrapEvidenceSignature,
   deriveOrchestratorEvidenceSignature,
+  selectArtifactIdAtOrBefore,
 } from '../../scripts/r1-autocontinue-evidence.mjs';
 
 function code(error, expected) {
@@ -86,4 +87,43 @@ test('attempt decision requires exact evidence binding and blocks a third root-c
     latestSignature: 'REFERENCE_APPLICATION_YDB_DATA_FAILED/REVISION_EVIDENCE_READ/YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
     priorRootCauseAttempts: 0,
   }), { status: 'STOP', code: 'R1_BOOTSTRAP_AUTOCONTINUE_OBSERVED_SIGNATURE_MISMATCH' });
+});
+
+
+test('historical artifact selection ignores rerun artifacts created after the orchestrator completed', () => {
+  const artifactName = 'r1-initial-bootstrap-evidence-35186924018';
+  const artifacts = {
+    artifacts: [
+      {
+        id: 10482414057,
+        name: artifactName,
+        expired: false,
+        created_at: '2026-09-17T05:50:36Z',
+      },
+      {
+        id: 10483996299,
+        name: artifactName,
+        expired: false,
+        created_at: '2026-09-17T06:24:41Z',
+      },
+    ],
+  };
+
+  assert.equal(selectArtifactIdAtOrBefore(artifacts, {
+    artifactName,
+    cutoff: '2026-09-17T05:52:48Z',
+  }), 10482414057);
+});
+
+test('historical artifact selection stays fail-closed when more than one matching artifact existed before completion', () => {
+  const artifactName = 'r1-initial-bootstrap-evidence-1';
+  assert.throws(
+    () => selectArtifactIdAtOrBefore({
+      artifacts: [
+        { id: 1, name: artifactName, expired: false, created_at: '2026-09-17T05:50:00Z' },
+        { id: 2, name: artifactName, expired: false, created_at: '2026-09-17T05:51:00Z' },
+      ],
+    }, { artifactName, cutoff: '2026-09-17T05:52:00Z' }),
+    (error) => code(error, 'R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_AMBIGUOUS'),
+  );
 });
