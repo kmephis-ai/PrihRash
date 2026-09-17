@@ -10,7 +10,7 @@ async function text(path) {
   return readFile(path, 'utf8');
 }
 
-test('Lockbox classifier is manual-only, exact-main, read-only, and proves WIF subject plus both locators', async () => {
+test('Lockbox classifier is manual-only, exact-main, read-only, and proves WIF subject plus CLI and REST metadata paths', async () => {
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /workflow_dispatch:/);
@@ -25,19 +25,25 @@ test('Lockbox classifier is manual-only, exact-main, read-only, and proves WIF s
   assert.match(workflow, /yc iam whoami --format json/);
   assert.match(workflow, /yc lockbox secret get --id/);
   assert.match(workflow, /yc lockbox secret get --name "\$LOCKBOX_SECRET_NAME" --folder-id "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /https:\/\/lockbox\.api\.cloud\.yandex\.net\/lockbox\/v1\/secrets\/\$\{YC_LOCKBOX_SECRET_ID\}/);
+  assert.match(workflow, /Authorization: Bearer \$\{YC_IAM_TOKEN\}/);
   assert.doesNotMatch(workflow, /lockbox payload/);
   assert.doesNotMatch(workflow, /lockbox secret list(?:\s|$)/);
   assert.doesNotMatch(workflow, /serverless function (?:version )?(?:create|update|delete|invoke)/);
   assert.doesNotMatch(workflow, /ydb|google_spreadsheet|initial-bootstrap:invoke/i);
 });
 
-test('Lockbox classifier exposes only bounded identity/locator enums and never raw provider output', async () => {
+test('Lockbox classifier exposes only bounded identity, locator, and REST enums and never raw provider output', async () => {
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /LOCKBOX_METADATA_OK/);
   assert.match(workflow, /WIF_SUBJECT_MISMATCH/);
   assert.match(workflow, /LOCKBOX_ID_LOCATOR_MISMATCH/);
-  assert.match(workflow, /LOCKBOX_UNSEEN_BY_ID_OR_NAME/);
+  assert.match(workflow, /LOCKBOX_CLI_API_DIVERGENCE/);
+  assert.match(workflow, /LOCKBOX_API_UNSEEN/);
+  assert.match(workflow, /LOCKBOX_REST_PERMISSION_DENIED/);
+  assert.match(workflow, /LOCKBOX_REST_AUTH/);
+  assert.match(workflow, /LOCKBOX_REST_TRANSPORT/);
   assert.match(workflow, /NOT_FOUND/);
   assert.match(workflow, /PERMISSION_DENIED/);
   assert.match(workflow, /printf '%s' 'AUTH'/);
@@ -46,14 +52,16 @@ test('Lockbox classifier exposes only bounded identity/locator enums and never r
   assert.match(workflow, /2>"\$tmp\/whoami\.err"/);
   assert.match(workflow, /2>"\$tmp\/by-id\.err"/);
   assert.match(workflow, /2>"\$tmp\/by-name\.err"/);
+  assert.match(workflow, /2>"\$tmp\/rest\.err"/);
   assert.match(workflow, /rm -f "\$tmp"\/\*\.err "\$tmp"\/\*\.json/);
-  assert.doesNotMatch(workflow, /cat\s+[^\n]*(whoami|by-id|by-name)\.(err|json)/);
-  assert.doesNotMatch(workflow, /echo\s+[^\n]*(whoami|by-id|by-name)\.(err|json)/);
+  assert.doesNotMatch(workflow, /cat\s+[^\n]*(whoami|by-id|by-name|rest)\.(err|json)/);
+  assert.doesNotMatch(workflow, /echo\s+[^\n]*(whoami|by-id|by-name|rest)\.(err|json)/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /identityMatch/);
   assert.match(workflow, /identityLookupClass/);
   assert.match(workflow, /idLookupClass/);
   assert.match(workflow, /nameLookupClass/);
   assert.match(workflow, /locatorMatch/);
+  assert.match(workflow, /restLookupClass/);
   assert.match(workflow, /retention-days: 30/);
 });
