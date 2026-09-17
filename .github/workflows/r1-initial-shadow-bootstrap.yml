@@ -590,6 +590,21 @@ jobs:
                   else null
                   end
                 ),
+                staleRetirementFailureCode: (
+                  if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
+                     and (.staleRetirementFailureCode | type) == "string"
+                     and (.staleRetirementFailureCode | IN(
+                       "INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST",
+                       "INVALID_FINISHED_AT",
+                       "COMMITTED_BASELINE_EXISTS",
+                       "STAGING_RUN_NOT_UNIQUE",
+                       "STALE_SNAPSHOT_NOT_PROVEN",
+                       "VERIFIED_CURRENT_STATE_NOT_EMPTY"
+                     ))
+                  then .staleRetirementFailureCode
+                  else null
+                  end
+                ),
                 ydbDataFailureCode: (
                   if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
                      and (.ydbDataFailureCode | type) == "string"
