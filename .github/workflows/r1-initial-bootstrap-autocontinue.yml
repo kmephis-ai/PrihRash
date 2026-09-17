@@ -310,6 +310,24 @@ jobs:
                 echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_INVALID'
                 exit 0
               fi
+
+              historical_bootstrap_run_id="$(jq -er '.bootstrapRunId' "$historical_evidence")"
+              historical_bootstrap="$RUNNER_TEMP/r1-autocontinue-history-bootstrap-$historical_bootstrap_run_id.json"
+              if ! download_classification \
+                "$historical_bootstrap_run_id" \
+                "r1-initial-bootstrap-evidence-$historical_bootstrap_run_id" \
+                "$historical_bootstrap"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_MISSING'
+                exit 0
+              fi
+              if ! historical_signature="$(node scripts/r1-autocontinue-evidence.mjs signature-bootstrap "$historical_bootstrap")"; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_INVALID'
+                exit 0
+              fi
+              if [ "$historical_signature" != "$observed_signature" ]; then
+                continue
+              fi
+
               prior_root_cause_attempts=$((prior_root_cause_attempts + 1))
               if [ "$prior_root_cause_attempts" -ge 2 ]; then
                 break
