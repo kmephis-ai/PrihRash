@@ -1,0 +1,59 @@
+name: R1 589 publish doc sync
+
+on:
+  push:
+    branches:
+      - transport/local-mirror-r1-589-40dad1a-0917a
+
+permissions:
+  contents: write
+
+env:
+  TARGET_BRANCH: fix/r1-453-numeric-note-decode
+  EXPECTED_HEAD: 40dad1a452df614fc18281493ce522527784fb1a
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.EXPECTED_HEAD }}
+          fetch-depth: 0
+
+      - name: Guard exact target head
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL="$(git ls-remote origin "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          test "${ACTUAL}" = "${EXPECTED_HEAD}"
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+
+      - name: Synchronize Migration Contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('docs/MIGRATION_CONTRACT.md')
+          old = '- text fields decoder принимает только typed `STRING | null`; numeric/text coercion запрещён;'
+          new = '- text fields decoder по умолчанию принимает только typed `STRING | null`; единственное доказанное исключение — physical `note`, где canonical provider `NUMBER` принимается как уже сохранённый plain-decimal text с сохранением typed provenance `NUMBER`; numeric-looking `STRING` не coercится, остальные text/vocabulary fields остаются fail-closed;'
+          text = p.read_text(encoding='utf-8')
+          if text.count(old) != 1:
+              raise SystemExit('expected decoder contract line not found exactly once')
+          p.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "docs/MIGRATION_CONTRACT.md"
+          git diff --exit-code -- docs/MIGRATION_CONTRACT.md >/dev/null && exit 1 || true
+
+      - name: Commit and fast-forward target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'PrihRash AI'
+          git config user.email 'ai@localhost'
+          git add docs/MIGRATION_CONTRACT.md
+          git commit -m 'docs: синхронизировать numeric note contract'
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
