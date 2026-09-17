@@ -24,6 +24,22 @@ import {
 export type InitialBootstrapStaleStagingRetirementJobEnvironment =
   InitialBootstrapRecoveryJobEnvironment;
 
+export type InitialBootstrapStaleStagingRetirementJobErrorCode =
+  | 'CONFIG_INVALID'
+  | 'SOURCE_READ_FAILED'
+  | 'YDB_CLIENT_CREATE_FAILED'
+  | 'YDB_CLIENT_CLOSE_FAILED';
+
+export class InitialBootstrapStaleStagingRetirementJobError extends Error {
+  readonly code: InitialBootstrapStaleStagingRetirementJobErrorCode;
+
+  constructor(code: InitialBootstrapStaleStagingRetirementJobErrorCode) {
+    super(code);
+    this.name = 'InitialBootstrapStaleStagingRetirementJobError';
+    this.code = code;
+  }
+}
+
 export const INITIAL_BOOTSTRAP_STALE_STAGING_TRANSACTION_TIMEOUT_MS = 25_000 as const;
 
 export interface InitialBootstrapStaleStagingRetirementJobSource {
@@ -84,10 +100,21 @@ export async function executeInitialBootstrapStaleStagingRetirementJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapStaleStagingRetirementJobRuntime>,
 ): Promise<void> {
-  const digest = runtime.createDigest();
-  const source = runtime.createSource(config, digest);
-  const lease = await source.readFullSnapshotObservation();
-  const ydbClient = await runtime.createYdbClient(config);
+  let lease: Readonly<GoogleSheetsFullSnapshotLease>;
+  try {
+    const digest = runtime.createDigest();
+    const source = runtime.createSource(config, digest);
+    lease = await source.readFullSnapshotObservation();
+  } catch {
+    throw new InitialBootstrapStaleStagingRetirementJobError('SOURCE_READ_FAILED');
+  }
+
+  let ydbClient: Readonly<InitialBootstrapStaleStagingRetirementJobYdbClient>;
+  try {
+    ydbClient = await runtime.createYdbClient(config);
+  } catch {
+    throw new InitialBootstrapStaleStagingRetirementJobError('YDB_CLIENT_CREATE_FAILED');
+  }
   let primaryError: unknown = null;
 
   try {
@@ -102,8 +129,10 @@ export async function executeInitialBootstrapStaleStagingRetirementJob(
   } finally {
     try {
       await ydbClient.close();
-    } catch (error) {
-      if (primaryError === null) throw error;
+    } catch {
+      if (primaryError === null) {
+        throw new InitialBootstrapStaleStagingRetirementJobError('YDB_CLIENT_CLOSE_FAILED');
+      }
     }
   }
 }
@@ -111,6 +140,11 @@ export async function executeInitialBootstrapStaleStagingRetirementJob(
 export function runInitialBootstrapStaleStagingRetirementJobFromEnvironment(
   environment: InitialBootstrapStaleStagingRetirementJobEnvironment = process.env,
 ): Promise<void> {
-  const config = readInitialBootstrapRecoveryJobConfig(environment);
+  let config: Readonly<InitialBootstrapRecoveryJobConfig>;
+  try {
+    config = readInitialBootstrapRecoveryJobConfig(environment);
+  } catch {
+    throw new InitialBootstrapStaleStagingRetirementJobError('CONFIG_INVALID');
+  }
   return executeInitialBootstrapStaleStagingRetirementJob(config, productionRuntime);
 }

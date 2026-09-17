@@ -5,11 +5,17 @@ import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6Dat
 import {
   InitialBootstrapStaleStagingRetirementError,
 } from '../../dist/migration/initialBootstrapStaleStagingRetirement.js';
+import { MigrationRunStateError } from '../../dist/migration/migrationRunState.js';
+import {
+  ScheduledSyncAdmissionEvidenceError,
+} from '../../dist/migration/scheduledSyncAdmissionEvidence.js';
 import {
   MigrationRunLifecycleExecutorError,
 } from '../../dist/migration/migrationRunLifecycleExecutor.js';
 import {
   executeInitialBootstrapStaleStagingRetirementJob,
+  InitialBootstrapStaleStagingRetirementJobError,
+  runInitialBootstrapStaleStagingRetirementJobFromEnvironment,
 } from '../../dist/runtime/initialBootstrapStaleStagingRetirementJob.js';
 import {
   InitialBootstrapReferenceAwareRuntimeError,
@@ -103,6 +109,78 @@ test('retirement semantic refusal preserves its exact bounded stale-retirement c
     applicationPhase: 'RESUME_CONTEXT_READ',
     metadataFailureCode: null,
     staleRetirementFailureCode: 'STALE_SNAPSHOT_NOT_PROVEN',
+  });
+});
+
+test('retirement job failure preserves bounded job-stage cause', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new InitialBootstrapStaleStagingRetirementJobError('SOURCE_READ_FAILED');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    staleRetirementFailureCode: 'JOB_SOURCE_READ_FAILED',
+  });
+});
+
+test('retirement admission evidence failure preserves its existing bounded cause', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new ScheduledSyncAdmissionEvidenceError('MALFORMED_RUN_EVIDENCE');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    staleRetirementFailureCode: 'ADMISSION_MALFORMED_RUN_EVIDENCE',
+  });
+});
+
+test('retirement migration-run state failure preserves its existing bounded cause', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new MigrationRunStateError('COMMITTED', 'FAILED');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    staleRetirementFailureCode: 'MIGRATION_RUN_STATE_ILLEGAL_MIGRATION_RUN_TRANSITION',
   });
 });
 
@@ -226,6 +304,93 @@ test('Yandex function sanitizes the successful stale-retirement path as normal b
     code: 'INITIAL_BOOTSTRAP_COMMITTED',
   });
   assert.equal(attempts, 2);
+});
+
+test('retirement job folds config/source/client/close preparation failures into bounded stage codes', async (t) => {
+  assert.throws(
+    () => runInitialBootstrapStaleStagingRetirementJobFromEnvironment({}),
+    (error) => error instanceof InitialBootstrapStaleStagingRetirementJobError
+      && error.code === 'CONFIG_INVALID',
+  );
+
+  const baseRuntime = {
+    createDigest() {
+      return { digest: () => 'synthetic' };
+    },
+    createSource() {
+      return {
+        async readFullSnapshotObservation() {
+          return { snapshotDigest: 'fresh-authoritative-digest' };
+        },
+      };
+    },
+    async createYdbClient() {
+      return {
+        transport: {
+          async executeRead() {
+            throw new Error('unexpected read');
+          },
+          async serializableReadWrite() {
+            throw new Error('unexpected write');
+          },
+        },
+        async close() {},
+      };
+    },
+    now() {
+      return '2026-09-16T08:30:00.000Z';
+    },
+    async retire() {},
+  };
+
+  await t.test('source read', async () => {
+    await assert.rejects(
+      executeInitialBootstrapStaleStagingRetirementJob(CONFIG, {
+        ...baseRuntime,
+        createSource() {
+          return {
+            async readFullSnapshotObservation() {
+              throw new Error('synthetic private source error');
+            },
+          };
+        },
+      }),
+      (error) => error instanceof InitialBootstrapStaleStagingRetirementJobError
+        && error.code === 'SOURCE_READ_FAILED',
+    );
+  });
+
+  await t.test('YDB client create', async () => {
+    await assert.rejects(
+      executeInitialBootstrapStaleStagingRetirementJob(CONFIG, {
+        ...baseRuntime,
+        async createYdbClient() {
+          throw new Error('synthetic private YDB error');
+        },
+      }),
+      (error) => error instanceof InitialBootstrapStaleStagingRetirementJobError
+        && error.code === 'YDB_CLIENT_CREATE_FAILED',
+    );
+  });
+
+  await t.test('YDB client close', async () => {
+    await assert.rejects(
+      executeInitialBootstrapStaleStagingRetirementJob(CONFIG, {
+        ...baseRuntime,
+        async createYdbClient() {
+          const client = await baseRuntime.createYdbClient();
+          return {
+            ...client,
+            async close() {
+              throw new Error('synthetic private close error');
+            },
+          };
+        },
+      }),
+      (error) => error instanceof InitialBootstrapStaleStagingRetirementJobError
+        && error.code === 'YDB_CLIENT_CLOSE_FAILED',
+    );
+  });
 });
 
 test('retirement job uses one fresh authoritative digest, one YDB client and always closes it', async () => {
