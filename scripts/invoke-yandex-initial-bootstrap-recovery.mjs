@@ -57,6 +57,53 @@ const STAGING_RETIREMENT_EVIDENCE = new Set([
   'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
   'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
 ]);
+
+const SOURCE_DECODE_ERROR_CODES = new Set([
+  'INVALID_PAYLOAD_SCHEMA',
+  'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
+  'INVALID_DATE_CELL',
+  'INVALID_DATE_SERIAL',
+  'INVALID_AMOUNT_CELL',
+  'INVALID_AMOUNT_DECIMAL',
+  'INVALID_AMOUNT_SCALE',
+  'AMOUNT_OUT_OF_RANGE',
+  'INVALID_TEXT_CELL',
+]);
+const SOURCE_DECODE_FIELDS = new Set([
+  'adapter_schema_version',
+  'date',
+  'operation_type',
+  'expense_account',
+  'expense_category',
+  'description',
+  'expense_amount',
+  'income_account',
+  'income_category',
+  'income_amount',
+  'vika_flag',
+  'note',
+]);
+
+function validSourceDecodeEvidence(value) {
+  if (value === 'SOURCE_DECODE_DIAGNOSTIC_FAILED') return true;
+  if (!Array.isArray(value)) return false;
+  const tokens = [];
+  for (const entry of value) {
+    const candidate = record(entry);
+    if (candidate === null || !exactKeys(candidate, ['errorCode', 'field'])) return false;
+    if (typeof candidate.errorCode !== 'string' || !SOURCE_DECODE_ERROR_CODES.has(candidate.errorCode)) return false;
+    if (typeof candidate.field !== 'string' || !SOURCE_DECODE_FIELDS.has(candidate.field)) return false;
+    tokens.push(`${candidate.errorCode}@${candidate.field}`);
+  }
+  if (new Set(tokens).size !== tokens.length) return false;
+  return tokens.every((token, index) => index === 0 || tokens[index - 1] < token);
+}
+
+function formatSourceDecodeEvidence(value) {
+  if (value === 'SOURCE_DECODE_DIAGNOSTIC_FAILED') return 'DIAGNOSTIC_FAILED';
+  if (value.length === 0) return 'NONE';
+  return value.map((entry) => `${entry.errorCode}@${entry.field}`).join(',');
+}
 const REASONS = new Set([
   'EMPTY_DURABLE_STATE',
   'COMMITTED_DURABLE_STATE',
@@ -141,6 +188,7 @@ function parseExactResult(stdout) {
     const stagingRevisionEvidence = result.stagingRevisionEvidence;
     const stagingDurableRevisionEvidence = result.stagingDurableRevisionEvidence;
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
+    const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -150,6 +198,7 @@ function parseExactResult(stdout) {
           'stagingRevisionEvidence',
           'stagingDurableRevisionEvidence',
           'stagingRetirementEvidence',
+          'stagingSourceDecodeEvidence',
         ])
         && typeof stagingRevisionEvidence === 'string'
         && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
@@ -157,10 +206,12 @@ function parseExactResult(stdout) {
         && STAGING_DURABLE_REVISION_EVIDENCE.has(stagingDurableRevisionEvidence)
         && typeof stagingRetirementEvidence === 'string'
         && STAGING_RETIREMENT_EVIDENCE.has(stagingRetirementEvidence)
+        && validSourceDecodeEvidence(stagingSourceDecodeEvidence)
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && stagingRevisionEvidence === undefined
         && stagingDurableRevisionEvidence === undefined
-        && stagingRetirementEvidence === undefined;
+        && stagingRetirementEvidence === undefined
+        && stagingSourceDecodeEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -176,6 +227,9 @@ function parseExactResult(stdout) {
       stagingRetirementEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingRetirementEvidence
         : null,
+      stagingSourceDecodeEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingSourceDecodeEvidence
+        : null,
     });
   }
   if (
@@ -188,6 +242,7 @@ function parseExactResult(stdout) {
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
+      stagingSourceDecodeEvidence: null,
     });
   }
   return null;
@@ -202,6 +257,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
+      stagingSourceDecodeEvidence: null,
     });
   }
 
@@ -222,6 +278,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
+      stagingSourceDecodeEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -229,6 +286,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
+      stagingSourceDecodeEvidence: null,
     });
   }
 }
@@ -244,6 +302,11 @@ if (invocation.stagingDurableRevisionEvidence !== null) {
 }
 if (invocation.stagingRetirementEvidence !== null) {
   process.stderr.write(`R1_STAGING_RETIREMENT_EVIDENCE=${invocation.stagingRetirementEvidence}\n`);
+}
+if (invocation.stagingSourceDecodeEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_SOURCE_DECODE_EVIDENCE=${formatSourceDecodeEvidence(invocation.stagingSourceDecodeEvidence)}\n`,
+  );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
 if (invocation.result.status !== 'PASS') process.exitCode = 2;

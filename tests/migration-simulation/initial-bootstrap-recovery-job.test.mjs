@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  diagnoseInitialBootstrapSourceDecodeEvidence,
   executeInitialBootstrapRecoveryJob,
   readInitialBootstrapRecoveryJobConfig,
 } from '../../dist/runtime/initialBootstrapRecoveryJob.js';
@@ -153,6 +154,7 @@ test('recovery job adds enum-only revision and retirement evidence for a single 
     stagingRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [],
   });
   assert.equal(fixture.counters().sourceReads, 1);
   assert.equal(fixture.counters().reconcileCalls, 0);
@@ -177,6 +179,7 @@ test('recovery job keeps STAGING classification fail-closed when revision diagno
     stagingRevisionEvidence: 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [],
   });
   assert.equal(fixture.counters().sourceReads, 1);
   assert.equal(fixture.counters().stagingDurableDiagnosticCalls, 1);
@@ -199,6 +202,7 @@ test('recovery job sanitizes stale retirement current-state diagnostic failure',
     stagingRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
+    stagingSourceDecodeEvidence: [],
   });
 });
 
@@ -223,6 +227,7 @@ test('recovery job preserves durable STAGING evidence when the Google-aware diag
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
+    stagingSourceDecodeEvidence: [],
   });
 });
 
@@ -257,6 +262,32 @@ test('recovery job fails closed if durable surface changes during authoritative 
     verdict: 'RECOVERY_REQUIRED',
     reason: 'REFERENCE_RECONCILIATION_FAILED',
   });
+});
+
+test('recovery source decode diagnostic exposes only distinct canonical error-code and field pairs', () => {
+  const base = {
+    adapter_schema_version: 3,
+    date: { kind: 'NUMBER', value: '45292' },
+    operation_type: { kind: 'STRING', value: 'Расход' },
+    expense_account: { kind: 'STRING', value: 'Карта Visa' },
+    expense_category: { kind: 'STRING', value: 'Synthetic Food' },
+    description: { kind: 'NUMBER', value: '7' },
+    expense_amount: { kind: 'NUMBER', value: '10' },
+    income_account: null,
+    income_category: null,
+    income_amount: null,
+    vika_flag: null,
+    note: null,
+  };
+  const evidence = diagnoseInitialBootstrapSourceDecodeEvidence([
+    { rawPayload: base },
+    { rawPayload: base },
+    { rawPayload: { ...base, description: { kind: 'STRING', value: 'Synthetic' }, date: { kind: 'STRING', value: '2024-01-01' } } },
+  ]);
+  assert.deepEqual(evidence, [
+    { errorCode: 'INVALID_DATE_CELL', field: 'date' },
+    { errorCode: 'INVALID_TEXT_CELL', field: 'description' },
+  ]);
 });
 
 test('recovery config requires read-only Google credentials plus YDB connection', () => {

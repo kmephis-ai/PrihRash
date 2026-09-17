@@ -148,6 +148,9 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [
+      { errorCode: 'INVALID_TEXT_CELL', field: 'description' },
+    ],
   }));
   assert.deepEqual(staging, {
     status: 'PASS',
@@ -157,6 +160,9 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
     stagingDurableRevisionEvidence: 'CROSS_RUN_PK_COLLISION',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [
+      { errorCode: 'INVALID_TEXT_CELL', field: 'description' },
+    ],
   });
 
   const invalid = await executeYandexInitialBootstrapRecoveryFunction({}, async () => /** @type {any} */ ({

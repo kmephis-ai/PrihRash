@@ -1,4 +1,5 @@
 import { createCanonicalSourceDigest, type CanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
+import type { AdapterKey } from '../integration/google/sourceSchema.js';
 import {
   GoogleSheetsFullSnapshotReader,
   type GoogleSheetsFullSnapshotLease,
@@ -10,6 +11,8 @@ import {
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+import { decodeRawPayloadForSourceClassification } from '../migration/rawPayloadClassificationAdapter.js';
+import type { RawPayload, RawPayloadDecodeErrorCode } from '../migration/rawPayloadDecoder.js';
 import {
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
@@ -54,10 +57,20 @@ export interface InitialBootstrapRecoveryJobSource {
   readFullSnapshotObservation(): Promise<Readonly<GoogleSheetsFullSnapshotLease>>;
 }
 
+export interface InitialBootstrapSourceDecodeFailureEvidence {
+  readonly errorCode: RawPayloadDecodeErrorCode;
+  readonly field: AdapterKey | 'adapter_schema_version';
+}
+
+export type InitialBootstrapSourceDecodeDiagnostic =
+  | readonly Readonly<InitialBootstrapSourceDecodeFailureEvidence>[]
+  | 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
+
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
   readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
+  readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -115,6 +128,26 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
 });
 
+export function diagnoseInitialBootstrapSourceDecodeEvidence(
+  rows: readonly Readonly<{ rawPayload: RawPayload }>[],
+): readonly Readonly<InitialBootstrapSourceDecodeFailureEvidence>[] {
+  const unique = new Map<string, Readonly<InitialBootstrapSourceDecodeFailureEvidence>>();
+  for (const row of rows) {
+    const decoded = decodeRawPayloadForSourceClassification(row.rawPayload);
+    if (decoded.ok) continue;
+    const evidence = Object.freeze({
+      errorCode: decoded.errorCode,
+      field: decoded.field,
+    });
+    unique.set(`${evidence.errorCode}@${evidence.field}`, evidence);
+  }
+  return Object.freeze(
+    [...unique.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, evidence]) => evidence),
+  );
+}
+
 function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassification> {
   return Object.freeze({
     verdict: 'RECOVERY_REQUIRED' as const,
@@ -147,28 +180,36 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingRetirementEvidence = 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED';
       }
       let stagingRevisionEvidence: InitialBootstrapStagingRevisionDiagnostic;
+      let stagingSourceDecodeEvidence: InitialBootstrapSourceDecodeDiagnostic;
       try {
         const digest = runtime.createDigest();
         const source = runtime.createSource(validated, digest);
         const lease = await source.readFullSnapshotObservation();
         const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
-        stagingRevisionEvidence = await runtime.diagnoseStagingRevisionEvidence(
-          adapter,
-          lease.snapshotDigest,
-          projected.rows.map((row, sourceOrdinal) => Object.freeze({
-            sourceOrdinal,
-            rowHint: row.rowHint,
-            digest: row.digest,
-          })),
-        );
+        stagingSourceDecodeEvidence = diagnoseInitialBootstrapSourceDecodeEvidence(projected.rows);
+        try {
+          stagingRevisionEvidence = await runtime.diagnoseStagingRevisionEvidence(
+            adapter,
+            lease.snapshotDigest,
+            projected.rows.map((row, sourceOrdinal) => Object.freeze({
+              sourceOrdinal,
+              rowHint: row.rowHint,
+              digest: row.digest,
+            })),
+          );
+        } catch {
+          stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+        }
       } catch {
         stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+        stagingSourceDecodeEvidence = 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
         stagingRevisionEvidence,
         stagingDurableRevisionEvidence,
         stagingRetirementEvidence,
+        stagingSourceDecodeEvidence,
       });
     }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;
@@ -207,12 +248,12 @@ export async function executeInitialBootstrapRecoveryJob(
 
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
-): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
+): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
   return executeInitialBootstrapRecoveryJob(config, productionRuntime);
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
   environment: InitialBootstrapRecoveryJobEnvironment = process.env,
-): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>> {
+): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
   return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
 }
