@@ -166,15 +166,23 @@ jobs:
             local run_id="$1"
             local artifact_name="$2"
             local destination="$3"
-            local artifacts artifact_id archive
+            local created_at_or_before="${4:-}"
+            local artifacts artifact_id archive artifacts_file
             artifacts="$(curl --fail --silent --show-error \
               --header "$auth_header" \
               --header "$accept_header" \
               "$api/actions/runs/$run_id/artifacts?per_page=100")" || return 1
-            artifact_id="$(jq -r --arg name "$artifact_name" '
-              [.artifacts[] | select(.name == $name and .expired == false)]
-              | if length == 1 then .[0].id else empty end' \
-              <<<"$artifacts")"
+            if [ -n "$created_at_or_before" ]; then
+              artifacts_file="$RUNNER_TEMP/r1-autocontinue-artifacts-$run_id.json"
+              printf '%s' "$artifacts" > "$artifacts_file"
+              artifact_id="$(node scripts/r1-autocontinue-evidence.mjs artifact-id-at-or-before \
+                "$artifacts_file" "$artifact_name" "$created_at_or_before")" || return 1
+            else
+              artifact_id="$(jq -r --arg name "$artifact_name" '
+                [.artifacts[] | select(.name == $name and .expired == false)]
+                | if length == 1 then .[0].id else empty end' \
+                <<<"$artifacts")"
+            fi
             [ -n "$artifact_id" ] || return 1
             archive="$RUNNER_TEMP/r1-autocontinue-evidence-$run_id.zip"
             curl --fail --silent --show-error --location \
@@ -248,7 +256,7 @@ jobs:
             fi
 
             prior_root_cause_attempts=0
-            while IFS=$'\t' read -r historical_run_id historical_sha; do
+            while IFS=$'\t' read -r historical_run_id historical_sha historical_completed_at; do
               [ -n "$historical_run_id" ] || continue
               [ "$historical_sha" != "$SOURCE_SHA" ] || continue
               historical_prs="$(curl --fail --silent --show-error \
@@ -316,7 +324,8 @@ jobs:
               if ! download_classification \
                 "$historical_bootstrap_run_id" \
                 "r1-initial-bootstrap-evidence-$historical_bootstrap_run_id" \
-                "$historical_bootstrap"; then
+                "$historical_bootstrap" \
+                "$historical_completed_at"; then
                 echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_EVIDENCE_MISSING'
                 exit 0
               fi
@@ -335,7 +344,7 @@ jobs:
             done < <(jq -r '
               [.workflow_runs[] | select(.status == "completed")]
               | sort_by(.created_at) | reverse
-              | .[] | [.id, .head_sha] | @tsv
+              | .[] | [.id, .head_sha, .updated_at] | @tsv
             ' <<<"$existing")
 
             decision="$(node scripts/r1-autocontinue-evidence.mjs decision \
