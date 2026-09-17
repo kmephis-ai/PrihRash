@@ -10,7 +10,6 @@ permissions:
 
 jobs:
   materialize:
-    if: github.event.head_commit.message != 'chore: materialize R1 #453 600s patch blobs'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -23,6 +22,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if git ls-files --error-unmatch .transport/materialized/r1-initial-shadow-bootstrap.yml >/dev/null 2>&1; then
+            echo 'MATERIALIZED_BLOBS_ALREADY_PRESENT'
+            exit 0
+          fi
+
           source_sha='6728b1ffacdc1c9ef692b56d80edf4653aa6e476'
           paths=(
             '.github/workflows/r1-initial-shadow-bootstrap.yml'
