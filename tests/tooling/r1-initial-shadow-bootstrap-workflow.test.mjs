@@ -55,7 +55,7 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /index\.initialBootstrapHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap/);
   assert.match(workflow, /--memory 256m/);
-  assert.match(workflow, /--execution-timeout 300s/);
+  assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /serverless trigger list/);
   assert.doesNotMatch(workflow, /serverless trigger create/);
@@ -128,8 +128,8 @@ test('bootstrap execution envelope gives provider timeout precedence without ena
   const workflow = await text(WORKFLOW);
   const invoker = await text(INVOKER);
 
-  assert.match(workflow, /--execution-timeout 300s/);
-  assert.match(invoker, /INVOKE_TIMEOUT_MS = 330_000/);
+  assert.match(workflow, /--execution-timeout 600s/);
+  assert.match(invoker, /INVOKE_TIMEOUT_MS = 630_000/);
   assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
 });
 

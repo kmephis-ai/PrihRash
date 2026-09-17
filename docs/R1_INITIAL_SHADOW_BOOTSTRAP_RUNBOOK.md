@@ -271,6 +271,8 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 `INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT` означает только exact privacy-safe classification provider envelope `Function execution timeout (504)`. `INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED` означает numeric non-zero provider exit без доказанного allowlisted non-success result/marker. Оба кода являются non-success diagnostic evidence и сами по себе **не** разрешают retry/replay bootstrap.
 
+После bootstrap #59 (`35260379450`) exact provider evidence доказал HTTP 504 практически на 300-секундной границе ранее configured Function timeout. Поэтому initial-bootstrap Function использует bounded execution timeout `600s`, а HTTPS invoker — `630s`: provider deadline остаётся раньше client transport deadline. Это исправление только доказанного execution-envelope blocker; retries, atomic cap, write predicates и authority не расширяются.
+
 `VALIDATION_BLOCKED` может вернуть только allowlisted blocker taxonomy и optional allowlisted reconciliation check. `RECOVERY_REQUIRED` возвращает только allowlisted recovery reason. Run IDs, source IDs, row counts, amounts, raw payload, descriptions, provider exception text и credentials наружу не возвращаются.
 
 `BASELINE_EXISTS` — безопасный NOOP, но **не** доказательство, что этот workflow выполнил первый bootstrap; invoker завершает его non-zero.
