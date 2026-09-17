@@ -14,6 +14,7 @@ import {
   dateParameter,
   int64Parameter,
   jsonDocumentParameter,
+  listStructParameter,
   stringParameter,
   timestampParameter,
   uint32Parameter,
@@ -105,6 +106,34 @@ test('parameter mapping fails closed on invalid or lossy values', () => {
   expectParameterError('UINT64_OUT_OF_RANGE', () => uint64Parameter(-1n));
   expectParameterError('UINT32_OUT_OF_RANGE', () => uint32Parameter(4_294_967_296));
   expectParameterError('INVALID_JSON_DOCUMENT', () => jsonDocumentParameter('{broken'));
+});
+
+test('List<Struct> parameter validates exact schema, cell types and nullability', () => {
+  const columns = [
+    { name: 'id', type: 'Uuid', nullable: false },
+    { name: 'note', type: 'Utf8', nullable: true },
+  ];
+  const value = listStructParameter(columns, [{
+    id: uuidParameter(VALID_UUID),
+    note: utf8Parameter(null),
+  }]);
+
+  assert.equal(value.type, 'ListStruct');
+  assert.equal(value.value.rows.length, 1);
+  assert.equal(Object.isFrozen(value.value.rows), true);
+  expectParameterError('INVALID_LIST_STRUCT_PARAMETER', () => listStructParameter(columns, [{
+    id: uuidParameter(null),
+    note: utf8Parameter(null),
+  }]));
+  expectParameterError('INVALID_LIST_STRUCT_PARAMETER', () => listStructParameter(columns, [{
+    id: uuidParameter(VALID_UUID),
+    note: stringParameter('wrong scalar type'),
+  }]));
+  expectParameterError('INVALID_LIST_STRUCT_PARAMETER', () => listStructParameter(columns, [{
+    id: uuidParameter(VALID_UUID),
+    note: utf8Parameter(null),
+    extra: utf8Parameter('unexpected'),
+  }]));
 });
 
 test('read path rejects write statements before transport invocation', async () => {
