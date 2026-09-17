@@ -12,11 +12,13 @@ import {
 } from '../migration/initialValidationGate.js';
 import {
   classifyInitialBootstrapMetadataFailureCode,
+  classifyInitialBootstrapStaleRetirementFailureCode,
   classifyInitialBootstrapYdbDataFailureCode,
   InitialBootstrapReferenceAwareRuntimeError,
   runInitialBootstrapReferenceAwareJobFromEnvironment,
   type InitialBootstrapMetadataFailureCode,
   type InitialBootstrapReferenceAwareRuntimeErrorCode,
+  type InitialBootstrapStaleRetirementFailureCode,
   type InitialBootstrapYdbDataFailureCode,
 } from './initialBootstrapReferenceAwareJob.js';
 import {
@@ -80,6 +82,7 @@ export type YandexInitialBootstrapFunctionResult =
       applicationPhase?: InitialBootstrapApplicationPhase | null;
       metadataFailureCode?: InitialBootstrapMetadataFailureCode | null;
       ydbDataFailureCode?: InitialBootstrapYdbDataFailureCode | null;
+      staleRetirementFailureCode?: InitialBootstrapStaleRetirementFailureCode | null;
     }>;
 
 export interface YandexInitialBootstrapJob {
@@ -137,6 +140,7 @@ function runtimeFailure(
   applicationPhase: InitialBootstrapApplicationPhase | null = null,
   metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
   ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
+  staleRetirementFailureCode: InitialBootstrapStaleRetirementFailureCode | null = null,
 ): Readonly<YandexInitialBootstrapFunctionResult> {
   if (runtimeCode === undefined) return failure('INITIAL_BOOTSTRAP_RUNTIME_FAILED');
   const result = {
@@ -146,6 +150,9 @@ function runtimeFailure(
     applicationPhase,
     metadataFailureCode,
   };
+  if (staleRetirementFailureCode !== null) {
+    return Object.freeze({ ...result, staleRetirementFailureCode });
+  }
   return ydbDataFailureCode === null
     ? Object.freeze(result)
     : Object.freeze({ ...result, ydbDataFailureCode });
@@ -266,6 +273,7 @@ export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
         'RESUME_CONTEXT_READ',
         classifyInitialBootstrapMetadataFailureCode(retirementError),
         classifyInitialBootstrapYdbDataFailureCode(retirementError),
+        classifyInitialBootstrapStaleRetirementFailureCode(retirementError),
       );
     }
 
@@ -289,6 +297,7 @@ export async function executeYandexInitialBootstrapFunction(
         error.applicationPhase,
         error.metadataFailureCode,
         error.ydbDataFailureCode,
+        error.staleRetirementFailureCode,
       );
     }
     if (error instanceof InitialBootstrapJobError) {
