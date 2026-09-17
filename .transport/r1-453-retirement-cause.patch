@@ -1,21 +1,3 @@
-diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
-index 199c81a..23b1dfe 100644
---- a/.github/workflows/r1-initial-shadow-bootstrap.yml
-+++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
-@@ -570,6 +570,13 @@ jobs:
-                        "BOOTSTRAP_PERSISTENCE_SNAPSHOT_RUN_DIGEST_MISMATCH",
-                        "BOOTSTRAP_PERSISTENCE_SNAPSHOT_ROW_COUNT_MISMATCH",
-                        "BOOTSTRAP_PERSISTENCE_RUN_COUNTERS_MISMATCH",
-+                       "MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION",
-+                       "MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION",
-+                       "MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH",
-+                       "MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION",
-+                       "MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH",
-+                       "MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED",
-+                       "MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN",
-                        "YDB_PARAMETER_INVALID_UUID",
-                        "YDB_PARAMETER_INVALID_DATE",
-                        "YDB_PARAMETER_INVALID_TIMESTAMP",
 diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
 index aa816b5..d053f9f 100644
 --- a/scripts/invoke-yandex-initial-bootstrap.mjs
@@ -136,7 +118,7 @@ index a107c5e..290ed66 100644
        );
      }
  
- diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
 index b18c741..718fcaf 100644
 --- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
 +++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
