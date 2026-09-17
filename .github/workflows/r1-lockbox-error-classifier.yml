@@ -20,6 +20,8 @@ jobs:
       OIDC_AUDIENCE: https://github.com/kmephis-ai
       OIDC_ISSUER: https://token.actions.githubusercontent.com
       OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
       YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
 
@@ -38,6 +40,7 @@ jobs:
           test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           test -n "$YC_LOCKBOX_SECRET_ID"
 
@@ -141,52 +144,124 @@ jobs:
           echo "::add-mask::${iam_token}"
           printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
 
-      - name: Classify Lockbox metadata lookup without exposing stderr
+      - name: Classify WIF subject and Lockbox locators without exposing identifiers
         id: classify
         shell: bash
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-lockbox-error-classifier"
           mkdir -p "$tmp"
+          echo "::add-mask::${YC_FOLDER_ID}"
+          echo "::add-mask::${YC_WIF_SERVICE_ACCOUNT_ID}"
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+
+          classify_error() {
+            local file="$1"
+            if grep -Eiq 'code[[:space:]]*=[[:space:]]*NotFound|NOT_FOUND|not found|(^|[^0-9])404([^0-9]|$)' "$file"; then
+              printf '%s' 'NOT_FOUND'
+            elif grep -Eiq 'PermissionDenied|PERMISSION_DENIED|permission denied|Forbidden|(^|[^0-9])403([^0-9]|$)' "$file"; then
+              printf '%s' 'PERMISSION_DENIED'
+            elif grep -Eiq 'Unauthenticated|UNAUTHENTICATED|Unauthorized|(^|[^0-9])401([^0-9]|$)|invalid[^[:alnum:]]+token|token[^[:alnum:]]+(invalid|expired)' "$file"; then
+              printf '%s' 'AUTH'
+            elif grep -Eiq 'Unavailable|UNAVAILABLE|DeadlineExceeded|DEADLINE_EXCEEDED|context deadline exceeded|timed out|timeout|connection (reset|refused)|temporary failure|transport error|TLS' "$file"; then
+              printf '%s' 'TRANSPORT'
+            else
+              printf '%s' 'OTHER'
+            fi
+          }
+
+          set +e
+          yc iam whoami --format json --retry 0 --no-user-output \
+            >"$tmp/whoami.json" 2>"$tmp/whoami.err"
+          whoami_rc=$?
+          set -e
+          if [ "$whoami_rc" -eq 0 ]; then
+            if jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+              '.. | strings | select(. == $expected)' "$tmp/whoami.json" >/dev/null 2>&1; then
+              identity_match='MATCH'
+            else
+              identity_match='MISMATCH'
+            fi
+            identity_lookup_class='OK'
+          else
+            identity_match='UNKNOWN'
+            identity_lookup_class="$(classify_error "$tmp/whoami.err")"
+          fi
 
           set +e
           yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
             --format json --retry 0 --no-user-output \
-            >"$tmp/secret.json" 2>"$tmp/secret.err"
-          rc=$?
+            >"$tmp/by-id.json" 2>"$tmp/by-id.err"
+          id_rc=$?
           set -e
-
-          if [ "$rc" -eq 0 ]; then
+          if [ "$id_rc" -eq 0 ]; then
             jq -e --arg expected "$YC_LOCKBOX_SECRET_ID" '.id == $expected' \
-              "$tmp/secret.json" >/dev/null 2>&1 || {
-                rm -f "$tmp/secret.err" "$tmp/secret.json"
+              "$tmp/by-id.json" >/dev/null 2>&1 || {
+                rm -f "$tmp"/*.err "$tmp"/*.json
                 echo 'LOCKBOX_METADATA_RESPONSE_INVALID'
                 exit 1
               }
-            status='PASS'
-            code='LOCKBOX_METADATA_OK'
-            transport_class='OK'
+            id_lookup_class='OK'
           else
-            if grep -Eiq 'code[[:space:]]*=[[:space:]]*NotFound|NOT_FOUND|not found|(^|[^0-9])404([^0-9]|$)' "$tmp/secret.err"; then
-              transport_class='NOT_FOUND'
-            elif grep -Eiq 'PermissionDenied|PERMISSION_DENIED|permission denied|Forbidden|(^|[^0-9])403([^0-9]|$)' "$tmp/secret.err"; then
-              transport_class='PERMISSION_DENIED'
-            elif grep -Eiq 'Unauthenticated|UNAUTHENTICATED|Unauthorized|(^|[^0-9])401([^0-9]|$)|invalid[^[:alnum:]]+token|token[^[:alnum:]]+(invalid|expired)' "$tmp/secret.err"; then
-              transport_class='AUTH'
-            elif grep -Eiq 'Unavailable|UNAVAILABLE|DeadlineExceeded|DEADLINE_EXCEEDED|context deadline exceeded|timed out|timeout|connection (reset|refused)|temporary failure|transport error|TLS' "$tmp/secret.err"; then
-              transport_class='TRANSPORT'
-            else
-              transport_class='OTHER'
-            fi
-            status='FAIL'
-            code="LOCKBOX_METADATA_${transport_class}"
+            id_lookup_class="$(classify_error "$tmp/by-id.err")"
           fi
 
-          rm -f "$tmp/secret.err" "$tmp/secret.json"
+          set +e
+          yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output \
+            >"$tmp/by-name.json" 2>"$tmp/by-name.err"
+          name_rc=$?
+          set -e
+          if [ "$name_rc" -eq 0 ]; then
+            jq -e --arg expected_name "$LOCKBOX_SECRET_NAME" --arg expected_folder "$YC_FOLDER_ID" \
+              '.name == $expected_name and .folder_id == $expected_folder' \
+              "$tmp/by-name.json" >/dev/null 2>&1 || {
+                rm -f "$tmp"/*.err "$tmp"/*.json
+                echo 'LOCKBOX_NAME_RESPONSE_INVALID'
+                exit 1
+              }
+            name_lookup_class='OK'
+            if jq -e --arg expected "$YC_LOCKBOX_SECRET_ID" '.id == $expected' \
+              "$tmp/by-name.json" >/dev/null 2>&1; then
+              locator_match='MATCH'
+            else
+              locator_match='MISMATCH'
+            fi
+          else
+            name_lookup_class="$(classify_error "$tmp/by-name.err")"
+            locator_match='UNKNOWN'
+          fi
+
+          status='FAIL'
+          if [ "$identity_match" = 'MATCH' ] \
+            && [ "$id_lookup_class" = 'OK' ] \
+            && [ "$name_lookup_class" = 'OK' ] \
+            && [ "$locator_match" = 'MATCH' ]; then
+            status='PASS'
+            code='LOCKBOX_METADATA_OK'
+          elif [ "$identity_match" = 'MISMATCH' ]; then
+            code='WIF_SUBJECT_MISMATCH'
+          elif [ "$identity_match" = 'UNKNOWN' ]; then
+            code="WIF_SUBJECT_${identity_lookup_class}"
+          elif [ "$id_lookup_class" = 'NOT_FOUND' ] \
+            && [ "$name_lookup_class" = 'OK' ] \
+            && [ "$locator_match" = 'MISMATCH' ]; then
+            code='LOCKBOX_ID_LOCATOR_MISMATCH'
+          elif [ "$id_lookup_class" = 'NOT_FOUND' ] \
+            && [ "$name_lookup_class" = 'NOT_FOUND' ]; then
+            code='LOCKBOX_UNSEEN_BY_ID_OR_NAME'
+          else
+            code='LOCKBOX_LOCATOR_DIAGNOSTIC_OTHER'
+          fi
+
+          rm -f "$tmp"/*.err "$tmp"/*.json
           printf 'status=%s\n' "$status" >> "$GITHUB_OUTPUT"
           printf 'code=%s\n' "$code" >> "$GITHUB_OUTPUT"
-          printf 'transportClass=%s\n' "$transport_class" >> "$GITHUB_OUTPUT"
+          printf 'identityMatch=%s\n' "$identity_match" >> "$GITHUB_OUTPUT"
+          printf 'identityLookupClass=%s\n' "$identity_lookup_class" >> "$GITHUB_OUTPUT"
+          printf 'idLookupClass=%s\n' "$id_lookup_class" >> "$GITHUB_OUTPUT"
+          printf 'nameLookupClass=%s\n' "$name_lookup_class" >> "$GITHUB_OUTPUT"
+          printf 'locatorMatch=%s\n' "$locator_match" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$code"
 
       - name: Publish enum-only classifier evidence
@@ -195,20 +270,32 @@ jobs:
         env:
           CLASSIFIER_STATUS: ${{ steps.classify.outputs.status }}
           CLASSIFIER_CODE: ${{ steps.classify.outputs.code }}
-          CLASSIFIER_TRANSPORT_CLASS: ${{ steps.classify.outputs.transportClass }}
+          CLASSIFIER_IDENTITY_MATCH: ${{ steps.classify.outputs.identityMatch }}
+          CLASSIFIER_IDENTITY_LOOKUP_CLASS: ${{ steps.classify.outputs.identityLookupClass }}
+          CLASSIFIER_ID_LOOKUP_CLASS: ${{ steps.classify.outputs.idLookupClass }}
+          CLASSIFIER_NAME_LOOKUP_CLASS: ${{ steps.classify.outputs.nameLookupClass }}
+          CLASSIFIER_LOCATOR_MATCH: ${{ steps.classify.outputs.locatorMatch }}
         run: |
           set -euo pipefail
           evidence_dir="$RUNNER_TEMP/r1-lockbox-error-classifier-evidence"
           mkdir -p "$evidence_dir"
           status="${CLASSIFIER_STATUS:-FAIL}"
           code="${CLASSIFIER_CODE:-LOCKBOX_METADATA_CLASSIFIER_NOT_REACHED}"
-          transport_class="${CLASSIFIER_TRANSPORT_CLASS:-UNKNOWN}"
+          identity_match="${CLASSIFIER_IDENTITY_MATCH:-UNKNOWN}"
+          identity_lookup_class="${CLASSIFIER_IDENTITY_LOOKUP_CLASS:-UNKNOWN}"
+          id_lookup_class="${CLASSIFIER_ID_LOOKUP_CLASS:-UNKNOWN}"
+          name_lookup_class="${CLASSIFIER_NAME_LOOKUP_CLASS:-UNKNOWN}"
+          locator_match="${CLASSIFIER_LOCATOR_MATCH:-UNKNOWN}"
           jq -cn \
             --arg status "$status" \
             --arg code "$code" \
-            --arg transportClass "$transport_class" \
+            --arg identityMatch "$identity_match" \
+            --arg identityLookupClass "$identity_lookup_class" \
+            --arg idLookupClass "$id_lookup_class" \
+            --arg nameLookupClass "$name_lookup_class" \
+            --arg locatorMatch "$locator_match" \
             --arg sourceSha "$GITHUB_SHA" \
-            '{status:$status,code:$code,transportClass:$transportClass,sourceSha:$sourceSha}' \
+            '{status:$status,code:$code,identityMatch:$identityMatch,identityLookupClass:$identityLookupClass,idLookupClass:$idLookupClass,nameLookupClass:$nameLookupClass,locatorMatch:$locatorMatch,sourceSha:$sourceSha}' \
             > "$evidence_dir/classification.json"
 
       - name: Upload enum-only classifier evidence
