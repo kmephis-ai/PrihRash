@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 10
     env:
       SOURCE_SHA: 2c05645bc8532159fbc920f67bc11fff31e6693c
-      EXPECTED_TREE: 3ce65dbb32b80483a3d9ef213e22bcb85a504b72
+      EXPECTED_TREE: 198e9ed239d83485d24d290e7c9f286f39db5451
       TARGET_BRANCH: fix/r1-453-retirement-cause-classification
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -27,8 +27,6 @@ jobs:
           set -euo pipefail
           patch_file="$RUNNER_TEMP/r1-453.patch"
           cp .transport/r1-453-retirement-cause.patch "$patch_file"
-          # Normalize an accidental transport-only leading space before a diff header if present.
-          sed -i 's/^ diff --git /diff --git /' "$patch_file"
           git cat-file -e "${SOURCE_SHA}^{commit}"
           git reset --hard "$SOURCE_SHA"
           git clean -fdx
