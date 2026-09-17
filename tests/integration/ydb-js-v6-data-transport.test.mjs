@@ -72,8 +72,8 @@ function fakeSdk() {
     Struct: class {
       constructor(fields, type) {
         this.kind = 'Struct';
-        this.fields = fields;
         this.type = type;
+        this.items = type.names.map((name) => fields[name]);
       }
     },
     List: class {
@@ -193,11 +193,11 @@ test('parameter mapper builds a List<Struct> table parameter with exact nullabil
   assert.equal(mapped.kind, 'List');
   assert.equal(mapped.items.length, 2);
   assert.equal(mapped.items[0].kind, 'Struct');
-  assert.equal(mapped.items[0].fields.id.kind, 'Uuid');
-  assert.equal(mapped.items[0].fields.note.kind, 'Optional');
-  assert.equal(mapped.items[0].fields.note.item, null);
-  assert.equal(mapped.items[1].fields.note.kind, 'Optional');
-  assert.equal(mapped.items[1].fields.note.item.kind, 'Utf8');
+  assert.equal(mapped.items[0].items[0].kind, 'Uuid');
+  assert.equal(mapped.items[0].items[1].kind, 'Optional');
+  assert.equal(mapped.items[0].items[1].item, null);
+  assert.equal(mapped.items[1].items[1].kind, 'Optional');
+  assert.equal(mapped.items[1].items[1].item.kind, 'Utf8');
   assert.deepEqual(mapped.items[0].type.names, ['id', 'note']);
   assert.equal(mapped.items[0].type.types[0].kind, 'UuidType');
   assert.equal(mapped.items[0].type.types[1].kind, 'OptionalType');
