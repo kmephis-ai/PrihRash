@@ -114,6 +114,36 @@ export function deriveOrchestratorEvidenceSignature(input) {
   return signature([status, code]);
 }
 
+function timestampMillis(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value)) {
+    fail('R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_INVALID');
+  }
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds)) {
+    fail('R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_INVALID');
+  }
+  return milliseconds;
+}
+
+export function selectArtifactIdAtOrBefore(input, { artifactName, cutoff }) {
+  const payload = record(input);
+  if (!Array.isArray(payload.artifacts) || typeof artifactName !== 'string' || artifactName.length === 0) {
+    fail('R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_INVALID');
+  }
+  const cutoffMilliseconds = timestampMillis(cutoff);
+  const matching = payload.artifacts.filter((artifact) => artifact?.name === artifactName && artifact?.expired === false);
+  const eligible = matching.filter((artifact) => {
+    if (!Number.isSafeInteger(artifact.id) || artifact.id <= 0) {
+      fail('R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_INVALID');
+    }
+    return timestampMillis(artifact.created_at) <= cutoffMilliseconds;
+  });
+  if (eligible.length !== 1) {
+    fail('R1_BOOTSTRAP_AUTOCONTINUE_ARTIFACT_HISTORY_AMBIGUOUS');
+  }
+  return eligible[0].id;
+}
+
 export function decideAutocontinueAttempt({
   observedSignature,
   latestSignature,
@@ -149,6 +179,13 @@ async function main(argv) {
   }
   if (command === 'signature-orchestrator' && args.length === 1) {
     process.stdout.write(`${deriveOrchestratorEvidenceSignature(await readJson(args[0]))}\n`);
+    return;
+  }
+  if (command === 'artifact-id-at-or-before' && args.length === 3) {
+    process.stdout.write(`${selectArtifactIdAtOrBefore(await readJson(args[0]), {
+      artifactName: args[1],
+      cutoff: args[2],
+    })}\n`);
     return;
   }
   if (command === 'decision' && args.length === 3) {

@@ -111,6 +111,9 @@ test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks d
   assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
   assert.match(workflow, /bootstrapInvokeStep \| IN\("success", "failure"\)/);
   assert.match(workflow, /r1-initial-bootstrap-evidence-\$historical_bootstrap_run_id/);
+  assert.match(workflow, /historical_completed_at/);
+  assert.match(workflow, /artifact-id-at-or-before/);
+  assert.match(workflow, /\[\.id, \.head_sha, \.updated_at\] \| @tsv/);
   assert.match(workflow, /signature-bootstrap "\$historical_bootstrap"/);
   assert.match(workflow, /historical_signature.*observed_signature/s);
   assert.match(workflow, /if \[ "\$historical_signature" != "\$observed_signature" \]; then\s+continue/s);
