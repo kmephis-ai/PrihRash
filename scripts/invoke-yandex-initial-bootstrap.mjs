@@ -173,6 +173,15 @@ const METADATA_FAILURE_CODES = new Set([
   'YDB_PARAMETER_INVALID_JSON_DOCUMENT',
 ]);
 
+const STALE_RETIREMENT_FAILURE_CODES = new Set([
+  'INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST',
+  'INVALID_FINISHED_AT',
+  'COMMITTED_BASELINE_EXISTS',
+  'STAGING_RUN_NOT_UNIQUE',
+  'STALE_SNAPSHOT_NOT_PROVEN',
+  'VERIFIED_CURRENT_STATE_NOT_EMPTY',
+]);
+
 const YDB_QUERY_STATUS_CODES = new Set([
   'YDB_TRANSPORT_QUERY_EXECUTION_YDB_BAD_REQUEST',
   'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNAUTHORIZED',
@@ -314,6 +323,7 @@ function parseExactFunctionResult(stdout) {
     && (
       exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'])
       || exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'ydbDataFailureCode'])
+      || exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'staleRetirementFailureCode'])
     )
     && typeof result.runtimeCode === 'string'
     && REFERENCE_AWARE_RUNTIME_CODES.has(result.runtimeCode)
@@ -325,6 +335,12 @@ function parseExactFunctionResult(stdout) {
       || (typeof result.ydbDataFailureCode === 'string'
         && (YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)
           || YDB_QUERY_STATUS_CODES.has(result.ydbDataFailureCode))))
+    && (result.staleRetirementFailureCode === undefined
+      || (result.runtimeCode === 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED'
+        && result.metadataFailureCode === null
+        && result.ydbDataFailureCode === undefined
+        && typeof result.staleRetirementFailureCode === 'string'
+        && STALE_RETIREMENT_FAILURE_CODES.has(result.staleRetirementFailureCode)))
   ) {
     return Object.freeze({
       status: 'FAIL',
@@ -333,6 +349,9 @@ function parseExactFunctionResult(stdout) {
       applicationPhase: result.applicationPhase,
       metadataFailureCode: result.metadataFailureCode,
       ...(result.ydbDataFailureCode === undefined ? {} : { ydbDataFailureCode: result.ydbDataFailureCode }),
+      ...(result.staleRetirementFailureCode === undefined
+        ? {}
+        : { staleRetirementFailureCode: result.staleRetirementFailureCode }),
     });
   }
   if (

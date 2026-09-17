@@ -71,6 +71,10 @@ import {
   type InitialBootstrapRuntimePrimitives,
 } from '../migration/initialBootstrapRuntimePrimitives.js';
 import { InitialBootstrapError } from '../migration/initialSnapshot.js';
+import {
+  InitialBootstrapStaleStagingRetirementError,
+  type InitialBootstrapStaleStagingRetirementErrorCode,
+} from '../migration/initialBootstrapStaleStagingRetirement.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import {
   InitialSnapshotProjectionStructuralError,
@@ -162,17 +166,22 @@ export type InitialBootstrapYdbDataFailureCode =
   | 'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION'
   | 'YDB_COMMIT_OUTCOME_UNKNOWN';
 
+export type InitialBootstrapStaleRetirementFailureCode =
+  InitialBootstrapStaleStagingRetirementErrorCode;
+
 export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
   readonly applicationPhase: InitialBootstrapApplicationPhase | null;
   readonly metadataFailureCode: InitialBootstrapMetadataFailureCode | null;
   readonly ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null;
+  readonly staleRetirementFailureCode: InitialBootstrapStaleRetirementFailureCode | null;
 
   constructor(
     code: InitialBootstrapReferenceAwareRuntimeErrorCode,
     applicationPhase: InitialBootstrapApplicationPhase | null = null,
     metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
     ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
+    staleRetirementFailureCode: InitialBootstrapStaleRetirementFailureCode | null = null,
   ) {
     super(code);
     this.name = 'InitialBootstrapReferenceAwareRuntimeError';
@@ -180,6 +189,7 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
     this.applicationPhase = applicationPhase;
     this.metadataFailureCode = metadataFailureCode;
     this.ydbDataFailureCode = ydbDataFailureCode;
+    this.staleRetirementFailureCode = staleRetirementFailureCode;
   }
 }
 
@@ -205,6 +215,12 @@ export function classifyInitialBootstrapMetadataFailureCode(
     return `YDB_PARAMETER_${error.code}`;
   }
   return null;
+}
+
+export function classifyInitialBootstrapStaleRetirementFailureCode(
+  error: unknown,
+): InitialBootstrapStaleRetirementFailureCode | null {
+  return error instanceof InitialBootstrapStaleStagingRetirementError ? error.code : null;
 }
 
 export function classifyInitialBootstrapYdbDataFailureCode(

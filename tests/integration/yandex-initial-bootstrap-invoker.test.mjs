@@ -203,6 +203,30 @@ test('stale-retirement lifecycle diagnostics are accepted as enum-only metadata 
   }
 });
 
+
+test('stale-retirement semantic diagnostics are accepted only as bounded enum-only failures', async () => {
+  for (const staleRetirementFailureCode of [
+    'INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST',
+    'INVALID_FINISHED_AT',
+    'COMMITTED_BASELINE_EXISTS',
+    'STAGING_RUN_NOT_UNIQUE',
+    'STALE_SNAPSHOT_NOT_PROVEN',
+    'VERIFIED_CURRENT_STATE_NOT_EMPTY',
+  ]) {
+    const value = {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+      applicationPhase: 'RESUME_CONTEXT_READ',
+      metadataFailureCode: null,
+      staleRetirementFailureCode,
+    };
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, value);
+  }
+});
+
 test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
   const ordinaryCodes = [
     'YDB_TRANSPORT_SDK_SHAPE_INVALID',

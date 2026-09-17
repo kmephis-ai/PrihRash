@@ -3,6 +3,9 @@ import test from 'node:test';
 
 import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
+  InitialBootstrapStaleStagingRetirementError,
+} from '../../dist/migration/initialBootstrapStaleStagingRetirement.js';
+import {
   MigrationRunLifecycleExecutorError,
 } from '../../dist/migration/migrationRunLifecycleExecutor.js';
 import {
@@ -76,6 +79,31 @@ test('retirement refusal exposes one safe failure code and never retries bootstr
 
   assert.equal(attempts, 1);
   assert.equal(retirements, 1);
+});
+
+
+test('retirement semantic refusal preserves its exact bounded stale-retirement cause', async () => {
+  const result = await executeYandexInitialBootstrapFunction(
+    {},
+    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
+      environment,
+      async () => {
+        throw staleResumeFailure();
+      },
+      async () => {
+        throw new InitialBootstrapStaleStagingRetirementError('STALE_SNAPSHOT_NOT_PROVEN');
+      },
+    ),
+  );
+
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    staleRetirementFailureCode: 'STALE_SNAPSHOT_NOT_PROVEN',
+  });
 });
 
 test('retirement lifecycle failure preserves bounded metadata cause without exposing raw error text', async () => {
