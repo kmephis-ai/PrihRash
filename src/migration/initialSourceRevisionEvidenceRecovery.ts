@@ -39,7 +39,9 @@ export class InitialSourceRevisionEvidenceRecoveryError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT = 50;
+// 300 UUID placeholders keep the generated read below the existing 8 KiB pre-live
+// query safety margin while cutting recovery/resume provider round-trips sixfold.
+const INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT = 300;
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
