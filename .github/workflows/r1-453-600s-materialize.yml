@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           persist-credentials: true
 
       - name: Materialize exact four-file patch as ordinary blobs
