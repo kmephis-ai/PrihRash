@@ -1,0 +1,278 @@
+diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+index 199c81a..23b1dfe 100644
+--- a/.github/workflows/r1-initial-shadow-bootstrap.yml
++++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+@@ -570,6 +570,13 @@ jobs:
+                        "BOOTSTRAP_PERSISTENCE_SNAPSHOT_RUN_DIGEST_MISMATCH",
+                        "BOOTSTRAP_PERSISTENCE_SNAPSHOT_ROW_COUNT_MISMATCH",
+                        "BOOTSTRAP_PERSISTENCE_RUN_COUNTERS_MISMATCH",
++                       "MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION",
++                       "MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION",
++                       "MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH",
++                       "MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION",
++                       "MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH",
++                       "MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED",
++                       "MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN",
+                        "YDB_PARAMETER_INVALID_UUID",
+                        "YDB_PARAMETER_INVALID_DATE",
+                        "YDB_PARAMETER_INVALID_TIMESTAMP",
+diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
+index aa816b5..d053f9f 100644
+--- a/scripts/invoke-yandex-initial-bootstrap.mjs
++++ b/scripts/invoke-yandex-initial-bootstrap.mjs
+@@ -156,6 +156,13 @@ const METADATA_FAILURE_CODES = new Set([
+   'BOOTSTRAP_PERSISTENCE_SNAPSHOT_RUN_DIGEST_MISMATCH',
+   'BOOTSTRAP_PERSISTENCE_SNAPSHOT_ROW_COUNT_MISMATCH',
+   'BOOTSTRAP_PERSISTENCE_RUN_COUNTERS_MISMATCH',
++  'MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION',
++  'MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION',
++  'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
++  'MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION',
++  'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
++  'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
++  'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
+   'YDB_PARAMETER_INVALID_UUID',
+   'YDB_PARAMETER_INVALID_DATE',
+   'YDB_PARAMETER_INVALID_TIMESTAMP',
+diff --git a/src/runtime/initialBootstrapReferenceAwareJob.ts b/src/runtime/initialBootstrapReferenceAwareJob.ts
+index fb81a37..dbaad31 100644
+--- a/src/runtime/initialBootstrapReferenceAwareJob.ts
++++ b/src/runtime/initialBootstrapReferenceAwareJob.ts
+@@ -75,8 +75,14 @@ import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googl
+ import {
+   InitialSnapshotProjectionStructuralError,
+ } from '../migration/initialSnapshotProjection.js';
+-import { MigrationRunLifecycleExecutorError } from '../migration/migrationRunLifecycleExecutor.js';
+-import { MigrationRunPersistenceError } from '../migration/migrationRunPersistence.js';
++import {
++  MigrationRunLifecycleExecutorError,
++  type MigrationRunLifecycleExecutorErrorCode,
++} from '../migration/migrationRunLifecycleExecutor.js';
++import {
++  MigrationRunPersistenceError,
++  type MigrationRunPersistenceErrorCode,
++} from '../migration/migrationRunPersistence.js';
+ import { MigrationRunStateError } from '../migration/migrationRunState.js';
+ import {
+   readScheduledSyncAdmissionEvidence,
+@@ -147,6 +153,8 @@ export type InitialBootstrapMetadataFailureCode =
+   | `METADATA_EXECUTOR_${InitialBootstrapMetadataExecutorErrorCode}`
+   | `IDENTITY_MANIFEST_${InitialBootstrapIdentityManifestErrorCode}`
+   | `BOOTSTRAP_PERSISTENCE_${InitialBootstrapPersistenceErrorCode}`
++  | `MIGRATION_RUN_LIFECYCLE_${MigrationRunLifecycleExecutorErrorCode}`
++  | `MIGRATION_RUN_PERSISTENCE_${MigrationRunPersistenceErrorCode}`
+   | `YDB_PARAMETER_${YdbParameterErrorCode}`;
+ 
+ export type InitialBootstrapYdbDataFailureCode =
+@@ -175,7 +183,9 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
+   }
+ }
+ 
+-function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFailureCode | null {
++export function classifyInitialBootstrapMetadataFailureCode(
++  error: unknown,
++): InitialBootstrapMetadataFailureCode | null {
+   if (error instanceof InitialBootstrapMetadataExecutorError) {
+     return `METADATA_EXECUTOR_${error.code}`;
+   }
+@@ -185,13 +195,21 @@ function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFa
+   if (error instanceof InitialBootstrapPersistenceError) {
+     return `BOOTSTRAP_PERSISTENCE_${error.code}`;
+   }
++  if (error instanceof MigrationRunLifecycleExecutorError) {
++    return `MIGRATION_RUN_LIFECYCLE_${error.code}`;
++  }
++  if (error instanceof MigrationRunPersistenceError) {
++    return `MIGRATION_RUN_PERSISTENCE_${error.code}`;
++  }
+   if (error instanceof YdbParameterError) {
+     return `YDB_PARAMETER_${error.code}`;
+   }
+   return null;
+ }
+ 
+-function classifyYdbDataFailureCode(error: unknown): InitialBootstrapYdbDataFailureCode | null {
++export function classifyInitialBootstrapYdbDataFailureCode(
++  error: unknown,
++): InitialBootstrapYdbDataFailureCode | null {
+   if (error instanceof YdbJsV6DataTransportError) {
+     return `YDB_TRANSPORT_${error.code}`;
+   }
+@@ -307,8 +325,8 @@ async function runApplicationSafely(
+     throw new InitialBootstrapReferenceAwareRuntimeError(
+       classifyApplicationRuntimeError(error, phase),
+       phase,
+-      classifyMetadataFailureCode(error),
+-      classifyYdbDataFailureCode(error),
++      classifyInitialBootstrapMetadataFailureCode(error),
++      classifyInitialBootstrapYdbDataFailureCode(error),
+     );
+   }
+ }
+diff --git a/src/runtime/yandexCloudInitialBootstrapFunction.ts b/src/runtime/yandexCloudInitialBootstrapFunction.ts
+index a107c5e..290ed66 100644
+--- a/src/runtime/yandexCloudInitialBootstrapFunction.ts
++++ b/src/runtime/yandexCloudInitialBootstrapFunction.ts
+@@ -11,6 +11,8 @@ import {
+   type InitialValidationBlockerCode,
+ } from '../migration/initialValidationGate.js';
+ import {
++  classifyInitialBootstrapMetadataFailureCode,
++  classifyInitialBootstrapYdbDataFailureCode,
+   InitialBootstrapReferenceAwareRuntimeError,
+   runInitialBootstrapReferenceAwareJobFromEnvironment,
+   type InitialBootstrapMetadataFailureCode,
+@@ -258,10 +260,12 @@ export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
+ 
+     try {
+       await retireStaleStaging(environment);
+-    } catch {
++    } catch (retirementError) {
+       throw new InitialBootstrapReferenceAwareRuntimeError(
+         'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+         'RESUME_CONTEXT_READ',
++        classifyInitialBootstrapMetadataFailureCode(retirementError),
++        classifyInitialBootstrapYdbDataFailureCode(retirementError),
+       );
+     }
+ 
+ diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+index b18c741..718fcaf 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+@@ -180,6 +180,29 @@ test('all structural manifest parser diagnostics are accepted only as enum-only
+   }
+ });
+ 
++test('stale-retirement lifecycle diagnostics are accepted as enum-only metadata failures', async () => {
++  for (const metadataFailureCode of [
++    'MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION',
++    'MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION',
++    'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
++    'MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION',
++    'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
++    'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
++    'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
++  ]) {
++    const value = {
++      status: 'FAIL',
++      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++      runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
++      applicationPhase: 'RESUME_CONTEXT_READ',
++      metadataFailureCode,
++    };
++    const result = await runInvoker({ body: JSON.stringify(value) });
++    assert.equal(result.exitCode, 2);
++    assertSafeOutput(result, value);
++  }
++});
++
+ test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
+   const ordinaryCodes = [
+     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
+diff --git a/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs b/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
+index 3649891..e9a9ac3 100644
+--- a/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
+@@ -1,6 +1,10 @@
+ import assert from 'node:assert/strict';
+ import test from 'node:test';
+ 
++import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
++import {
++  MigrationRunLifecycleExecutorError,
++} from '../../dist/migration/migrationRunLifecycleExecutor.js';
+ import {
+   executeInitialBootstrapStaleStagingRetirementJob,
+ } from '../../dist/runtime/initialBootstrapStaleStagingRetirementJob.js';
+@@ -74,6 +78,53 @@ test('retirement refusal exposes one safe failure code and never retries bootstr
+   assert.equal(retirements, 1);
+ });
+ 
++test('retirement lifecycle failure preserves bounded metadata cause without exposing raw error text', async () => {
++  const result = await executeYandexInitialBootstrapFunction(
++    {},
++    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
++      environment,
++      async () => {
++        throw staleResumeFailure();
++      },
++      async () => {
++        throw new MigrationRunLifecycleExecutorError('RUN_TRANSITION_EVIDENCE_MISMATCH');
++      },
++    ),
++  );
++
++  assert.deepEqual(result, {
++    status: 'FAIL',
++    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
++    applicationPhase: 'RESUME_CONTEXT_READ',
++    metadataFailureCode: 'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
++  });
++});
++
++test('retirement YDB failure preserves bounded transport cause for the existing invoker sanitizer', async () => {
++  const result = await executeYandexInitialBootstrapFunction(
++    {},
++    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
++      environment,
++      async () => {
++        throw staleResumeFailure();
++      },
++      async () => {
++        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_OVERLOADED');
++      },
++    ),
++  );
++
++  assert.deepEqual(result, {
++    status: 'FAIL',
++    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
++    applicationPhase: 'RESUME_CONTEXT_READ',
++    metadataFailureCode: null,
++    ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_YDB_OVERLOADED',
++  });
++});
++
+ test('unrelated bootstrap failures never cross the retirement authority boundary', async () => {
+   const unrelated = new InitialBootstrapReferenceAwareRuntimeError(
+     'REFERENCE_APPLICATION_YDB_DATA_FAILED',
+diff --git a/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs b/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
+index 5d07686..3ec22d6 100644
+--- a/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
++++ b/tests/tooling/r1-initial-bootstrap-enum-diagnostics.test.mjs
+@@ -12,9 +12,11 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
+   assert.match(invoker, /APPLICATION_PHASES\.has\(result\.applicationPhase\)/);
+   assert.match(invoker, /METADATA_FAILURE_CODES\.has\(result\.metadataFailureCode\)/);
+   assert.match(invoker, /YDB_DATA_FAILURE_CODES\.has\(result\.ydbDataFailureCode\)/);
+-  assert.match(runtime, /classifyYdbDataFailureCode\(error\)/);
+-  assert.match(runtime, /classifyMetadataFailureCode\(error: unknown\)/);
++  assert.match(runtime, /classifyInitialBootstrapYdbDataFailureCode\(error\)/);
++  assert.match(runtime, /classifyInitialBootstrapMetadataFailureCode/);
+   assert.match(runtime, /METADATA_EXECUTOR_\$\{error\.code\}/);
++  assert.match(runtime, /MIGRATION_RUN_LIFECYCLE_\$\{error\.code\}/);
++  assert.match(runtime, /MIGRATION_RUN_PERSISTENCE_\$\{error\.code\}/);
+   assert.doesNotMatch(invoker, /runtimeMessage|exceptionText|errorDetail/);
+ });
+ 
+@@ -56,6 +58,18 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
+   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_MANIFEST_ROW/);
+   assert.doesNotMatch(workflow, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
+   assert.doesNotMatch(invoker, /IDENTITY_MANIFEST_MALFORMED_BINDINGS_PAYLOAD/);
++  for (const code of [
++    'MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION',
++    'MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION',
++    'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
++    'MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION',
++    'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
++    'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
++    'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
++  ]) {
++    assert.match(workflow, new RegExp(code));
++    assert.match(invoker, new RegExp(code));
++  }
+   for (const code of [
+     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
+     'YDB_TRANSPORT_PARAMETER_VALUE_INVALID',
