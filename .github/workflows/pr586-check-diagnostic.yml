@@ -1,0 +1,43 @@
+name: PR586 check diagnostic
+
+on:
+  push:
+    branches:
+      - transport/local-mirror-pr586-20260917-0705
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Privacy
+        run: npm run privacy
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Test from build
+        run: npm run test:from-build
+      - name: Package function
+        run: npm run package:function:from-build
+      - name: Package schema bootstrap
+        run: npm run package:schema-bootstrap:from-build
+      - name: Package schema upgrade 003
+        run: npm run package:schema-upgrade-003:from-build
+      - name: Package initial bootstrap
+        run: npm run package:initial-bootstrap:from-build
+      - name: Package initial bootstrap recovery
+        run: npm run package:initial-bootstrap-recovery:from-build
