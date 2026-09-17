@@ -60,6 +60,8 @@ formulaValue / boolValue / errorValue → fail-closed
 
 Private full-source probe текущего authoritative sheet подтвердил безопасный bootstrap predicate без публикации payload: у всех распознанных `Расход`/`Доход` source date и **operation-active** amount имеют numeric cell type; formula в A–K не обнаружены. Неприменимый к operation type второй amount column не используется для финансового decode и может содержать legacy non-active values.
 
+Read-only recovery evidence 2026-09-17 дополнительно доказало наличие provider-typed `NUMBER` в physical `note`. Поскольку `note` — free context, а не financial numeric/vocabulary field, semantic decode **только для `note`** принимает canonical provider `NUMBER` как его уже сохранённый plain-decimal text. Это не locale coercion и не преобразование numeric-looking `STRING`: typed provenance остаётся `NUMBER`, а account/category/operation type/Vika/description сохраняют прежний fail-closed `STRING` contract до отдельного доказанного изменения. Реальное значение note в public evidence не публикуется.
+
 Google Sheets date/datetime хранится как serial number spreadsheet civil time. Для текущего source timezone — `Europe/Moscow`; importer сохраняет raw serial с fractional component, а canonical `occurred_on` получает calendar day из whole serial day. Он не превращает source serial во guessed `captured_at`.
 
 ## 3. Operation type recognition
