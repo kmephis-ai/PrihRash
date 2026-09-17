@@ -59,10 +59,13 @@ export function deriveBootstrapEvidenceSignature(input) {
     const applicationPhase = optionalEnumSegment(evidence.applicationPhase);
     const metadataFailureCode = optionalEnumSegment(evidence.metadataFailureCode);
     const ydbDataFailureCode = optionalEnumSegment(evidence.ydbDataFailureCode);
-    if (metadataFailureCode !== null && ydbDataFailureCode !== null) {
+    const staleRetirementFailureCode = optionalEnumSegment(evidence.staleRetirementFailureCode);
+    const details = [metadataFailureCode, ydbDataFailureCode, staleRetirementFailureCode]
+      .filter((value) => value !== null);
+    if (details.length > 1) {
       fail('R1_BOOTSTRAP_AUTOCONTINUE_EVIDENCE_AMBIGUOUS');
     }
-    const detail = metadataFailureCode ?? ydbDataFailureCode;
+    const detail = details[0] ?? null;
     return applicationPhase === null
       ? signature([code, runtimeCode, ...(detail === null ? [] : [detail])])
       : signature([runtimeCode, applicationPhase, ...(detail === null ? [] : [detail])]);

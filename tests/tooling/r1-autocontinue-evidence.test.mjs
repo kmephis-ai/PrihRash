@@ -27,6 +27,18 @@ test('bootstrap runtime evidence becomes the exact bounded observed signature', 
   }), 'REFERENCE_APPLICATION_YDB_DATA_FAILED/REVISION_EVIDENCE_WRITE/YDB_TRANSPORT_QUERY_EXECUTION_FAILED');
 });
 
+
+test('stale-retirement semantic evidence becomes an exact bounded observed signature', () => {
+  assert.equal(deriveBootstrapEvidenceSignature({
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+    applicationPhase: 'RESUME_CONTEXT_READ',
+    metadataFailureCode: null,
+    staleRetirementFailureCode: 'STALE_SNAPSHOT_NOT_PROVEN',
+  }), 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED/RESUME_CONTEXT_READ/STALE_SNAPSHOT_NOT_PROVEN');
+});
+
 test('bootstrap signature derivation is fail-closed for success and ambiguous runtime detail', () => {
   assert.throws(
     () => deriveBootstrapEvidenceSignature({ status: 'PASS', code: 'INITIAL_BOOTSTRAP_COMMITTED' }),
@@ -40,6 +52,7 @@ test('bootstrap signature derivation is fail-closed for success and ambiguous ru
       applicationPhase: 'REVISION_EVIDENCE_WRITE',
       metadataFailureCode: 'METADATA_EXECUTOR_RUN_READBACK_MISMATCH',
       ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+      staleRetirementFailureCode: 'STALE_SNAPSHOT_NOT_PROVEN',
     }),
     (error) => code(error, 'R1_BOOTSTRAP_AUTOCONTINUE_EVIDENCE_AMBIGUOUS'),
   );
