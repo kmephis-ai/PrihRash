@@ -56,8 +56,8 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /artifact_id="\$\(jq -r --arg name/);
   assert.doesNotMatch(workflow, /\] \\\n\s*\| sort_by/);
   assert.doesNotMatch(workflow, /\] \\\n\s*\| if length/);
-  assert.doesNotMatch(workflow, /<<<"\$existing" \||| true/);
-  assert.doesNotMatch(workflow, /<<<"\$artifacts" \||| true/);
+  assert.doesNotMatch(workflow, /<<<"\$existing" \|\| true/);
+  assert.doesNotMatch(workflow, /<<<"\$artifacts" \|\| true/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_NON_SUCCESS/);
   assert.match(workflow, /bootstrapInvokeStep == "skipped"/);
   assert.match(workflow, /postRecoveryVerdict == null/);
@@ -78,28 +78,6 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
-});
-
-test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery states distinct', async () => {
-  const workflow = await workflowText();
-
-  assert.match(workflow, /Recovery-State: STAGING_RESUMABLE/);
-  assert.match(workflow, /Recovery-State: STAGING_STALE_RETIREABLE/);
-  assert.match(workflow, /Recovery-State: STALE_STAGING_RETIRED/);
-  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_RESUMABLE' \]/);
-  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_STALE_RETIREABLE' \]/);
-  assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
-});
-
-test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery states distinct', async () => {
-  const workflow = await workflowText();
-
-  assert.match(workflow, /Recovery-State: STAGING_RESUMABLE/);
-  assert.match(workflow, /Recovery-State: STAGING_STALE_RETIREABLE/);
-  assert.match(workflow, /Recovery-State: STALE_STAGING_RETIRED/);
-  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_RESUMABLE' \]/);
-  assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_STALE_RETIREABLE' \]/);
-  assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
 });
 
 test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery states distinct', async () => {
