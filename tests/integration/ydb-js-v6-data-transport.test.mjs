@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { StatusIds_StatusCode } from '@ydbjs/api/operation';
+import { List } from '@ydbjs/value/list';
+import { Optional, OptionalType } from '@ydbjs/value/optional';
+import * as primitive from '@ydbjs/value/primitive';
+import { Struct, StructType } from '@ydbjs/value/struct';
 
 import {
   YdbAdapter,
@@ -11,8 +15,10 @@ import {
 } from '../../dist/integration/ydb/adapter.js';
 import {
   int64Parameter,
+  listStructParameter,
   stringParameter,
   timestampParameter,
+  uint64Parameter,
   utf8Parameter,
   uuidParameter,
 } from '../../dist/integration/ydb/parameters.js';
@@ -48,6 +54,32 @@ function fakeSdk() {
         this.kind = 'Optional';
         this.item = item;
         this.itemType = itemType;
+      }
+    },
+    OptionalType: class {
+      constructor(itemType) {
+        this.kind = 'OptionalType';
+        this.itemType = itemType;
+      }
+    },
+    StructType: class {
+      constructor(names, types) {
+        this.kind = 'StructType';
+        this.names = names;
+        this.types = types;
+      }
+    },
+    Struct: class {
+      constructor(fields, type) {
+        this.kind = 'Struct';
+        this.fields = fields;
+        this.type = type;
+      }
+    },
+    List: class {
+      constructor(...items) {
+        this.kind = 'List';
+        this.items = items;
       }
     },
   };
@@ -139,6 +171,60 @@ test('parameter mapper preserves typed values, null target type and byte String 
   assert.equal(nullString.kind, 'Optional');
   assert.equal(nullString.item, null);
   assert.equal(nullString.itemType.kind, 'BytesType');
+});
+
+test('parameter mapper builds a List<Struct> table parameter with exact nullability', () => {
+  const map = createYdbJsV6ParameterMapper(fakeSdk());
+  const rows = listStructParameter([
+    { name: 'id', type: 'Uuid', nullable: false },
+    { name: 'note', type: 'Utf8', nullable: true },
+  ], [
+    {
+      id: uuidParameter('123e4567-e89b-42d3-a456-426614174000'),
+      note: utf8Parameter(null),
+    },
+    {
+      id: uuidParameter('123e4567-e89b-42d3-a456-426614174001'),
+      note: utf8Parameter('synthetic'),
+    },
+  ]);
+
+  const mapped = map(rows);
+  assert.equal(mapped.kind, 'List');
+  assert.equal(mapped.items.length, 2);
+  assert.equal(mapped.items[0].kind, 'Struct');
+  assert.equal(mapped.items[0].fields.id.kind, 'Uuid');
+  assert.equal(mapped.items[0].fields.note.kind, 'Optional');
+  assert.equal(mapped.items[0].fields.note.item, null);
+  assert.equal(mapped.items[1].fields.note.kind, 'Optional');
+  assert.equal(mapped.items[1].fields.note.item.kind, 'Utf8');
+  assert.deepEqual(mapped.items[0].type.names, ['id', 'note']);
+  assert.equal(mapped.items[0].type.types[0].kind, 'UuidType');
+  assert.equal(mapped.items[0].type.types[1].kind, 'OptionalType');
+});
+
+test('pinned @ydbjs/value 6.0.8 encodes the List<Struct> table parameter shape', () => {
+  const map = createYdbJsV6ParameterMapper(Object.freeze({
+    ...primitive,
+    Optional,
+    OptionalType,
+    List,
+    Struct,
+    StructType,
+  }));
+  const mapped = map(listStructParameter([
+    { name: 'source_record_id', type: 'Uuid', nullable: false },
+    { name: 'revision', type: 'Uint64', nullable: false },
+    { name: 'change_class', type: 'Utf8', nullable: true },
+  ], [{
+    source_record_id: uuidParameter('123e4567-e89b-42d3-a456-426614174000'),
+    revision: uint64Parameter(1n),
+    change_class: utf8Parameter(null),
+  }]));
+
+  assert.equal(mapped instanceof List, true);
+  assert.doesNotThrow(() => mapped.type.encode());
+  assert.doesNotThrow(() => mapped.encode());
 });
 
 test('parameter mapper rejects timestamp precision that JS Date would silently lose', () => {
