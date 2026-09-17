@@ -1,0 +1,20 @@
+diff --git a/.github/workflows/r1-initial-shadow-bootstrap.yml b/.github/workflows/r1-initial-shadow-bootstrap.yml
+index aa0712f..54d5b4e 100644
+--- a/.github/workflows/r1-initial-shadow-bootstrap.yml
++++ b/.github/workflows/r1-initial-shadow-bootstrap.yml
+@@ -599,7 +599,14 @@ jobs:
+                        "COMMITTED_BASELINE_EXISTS",
+                        "STAGING_RUN_NOT_UNIQUE",
+                        "STALE_SNAPSHOT_NOT_PROVEN",
+-                       "VERIFIED_CURRENT_STATE_NOT_EMPTY"
++                       "VERIFIED_CURRENT_STATE_NOT_EMPTY",
++                       "JOB_CONFIG_INVALID",
++                       "JOB_SOURCE_READ_FAILED",
++                       "JOB_YDB_CLIENT_CREATE_FAILED",
++                       "JOB_YDB_CLIENT_CLOSE_FAILED",
++                       "ADMISSION_MALFORMED_RUN_EVIDENCE",
++                       "ADMISSION_DUPLICATE_RUN_EVIDENCE",
++                       "MIGRATION_RUN_STATE_ILLEGAL_MIGRATION_RUN_TRANSITION"
+                      ))
+                   then .staleRetirementFailureCode
+                   else null
