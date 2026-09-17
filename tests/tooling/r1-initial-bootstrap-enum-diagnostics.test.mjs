@@ -12,8 +12,10 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
   assert.match(invoker, /APPLICATION_PHASES\.has\(result\.applicationPhase\)/);
   assert.match(invoker, /METADATA_FAILURE_CODES\.has\(result\.metadataFailureCode\)/);
   assert.match(invoker, /YDB_DATA_FAILURE_CODES\.has\(result\.ydbDataFailureCode\)/);
+  assert.match(invoker, /STALE_RETIREMENT_FAILURE_CODES\.has\(result\.staleRetirementFailureCode\)/);
   assert.match(runtime, /classifyInitialBootstrapYdbDataFailureCode\(error\)/);
   assert.match(runtime, /classifyInitialBootstrapMetadataFailureCode/);
+  assert.match(runtime, /classifyInitialBootstrapStaleRetirementFailureCode/);
   assert.match(runtime, /METADATA_EXECUTOR_\$\{error\.code\}/);
   assert.match(runtime, /MIGRATION_RUN_LIFECYCLE_\$\{error\.code\}/);
   assert.match(runtime, /MIGRATION_RUN_PERSISTENCE_\$\{error\.code\}/);
@@ -24,6 +26,7 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
   assert.match(workflow, /applicationPhase:/);
   assert.match(workflow, /metadataFailureCode:/);
   assert.match(workflow, /ydbDataFailureCode:/);
+  assert.match(workflow, /staleRetirementFailureCode:/);
   assert.match(workflow, /FRESH_CLAIM_WRITE/);
   assert.match(workflow, /METADATA_EXECUTOR_RUN_READBACK_MISMATCH/);
   assert.match(workflow, /METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED/);
@@ -66,6 +69,17 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
     'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
     'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
     'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
+  ]) {
+    assert.match(workflow, new RegExp(code));
+    assert.match(invoker, new RegExp(code));
+  }
+  for (const code of [
+    'INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST',
+    'INVALID_FINISHED_AT',
+    'COMMITTED_BASELINE_EXISTS',
+    'STAGING_RUN_NOT_UNIQUE',
+    'STALE_SNAPSHOT_NOT_PROVEN',
+    'VERIFIED_CURRENT_STATE_NOT_EMPTY',
   ]) {
     assert.match(workflow, new RegExp(code));
     assert.match(invoker, new RegExp(code));
