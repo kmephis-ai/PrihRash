@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   materialize:
+    if: github.event.head_commit.message != 'chore: materialize R1 #453 600s patch blobs'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -90,7 +91,11 @@ jobs:
 
           git restore --source="$source_sha" -- "${paths[@]}"
           git diff --check
-          test "$(git status --short | grep '^?? .transport/materialized/' | wc -l)" -eq 4
+          test "$(find .transport/materialized -maxdepth 1 -type f | wc -l)" -eq 4
+          test -f .transport/materialized/r1-initial-shadow-bootstrap.yml
+          test -f .transport/materialized/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+          test -f .transport/materialized/invoke-yandex-initial-bootstrap.mjs
+          test -f .transport/materialized/r1-initial-shadow-bootstrap-workflow.test.mjs
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
