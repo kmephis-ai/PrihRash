@@ -1,4 +1,4 @@
-import { readStatement, YdbAdapter } from '../integration/ydb/adapter.js';
+import { readStatement, YdbAdapter, type YdbTransaction } from '../integration/ydb/adapter.js';
 import { uuidParameter } from '../integration/ydb/parameters.js';
 import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import type { MigrationRun } from './migrationRunState.js';
@@ -55,8 +55,8 @@ function rowMatches(row: MigrationRunLifecycleReadRow, expected: MigrationRun): 
   );
 }
 
-export async function executeMigrationRunLifecycleWrite(
-  adapter: YdbAdapter,
+export async function executeMigrationRunLifecycleWriteInTransaction(
+  transaction: YdbTransaction,
   prepared: PreparedMigrationRunLifecycleWrite,
   expectedRun: MigrationRun,
 ): Promise<Readonly<MigrationRun>> {
@@ -66,20 +66,27 @@ export async function executeMigrationRunLifecycleWrite(
     { id: uuidParameter(expectedRun.id) },
   );
 
-  await adapter.serializableReadWrite(async (transaction) => {
-    await transaction.execute(prepared.statement);
-    const result = await transaction.execute<MigrationRunLifecycleReadRow>(readBack);
-    if (result.rows.length === 0) {
-      throw new MigrationRunLifecycleExecutorError('RUN_NOT_FOUND_AFTER_TRANSITION');
-    }
-    if (result.rows.length !== 1) {
-      throw new MigrationRunLifecycleExecutorError('RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION');
-    }
-    const row = result.rows[0];
-    if (row === undefined || !rowMatches(row, expectedRun)) {
-      throw new MigrationRunLifecycleExecutorError('RUN_TRANSITION_EVIDENCE_MISMATCH');
-    }
-  });
+  await transaction.execute(prepared.statement);
+  const result = await transaction.execute<MigrationRunLifecycleReadRow>(readBack);
+  if (result.rows.length === 0) {
+    throw new MigrationRunLifecycleExecutorError('RUN_NOT_FOUND_AFTER_TRANSITION');
+  }
+  if (result.rows.length !== 1) {
+    throw new MigrationRunLifecycleExecutorError('RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION');
+  }
+  const row = result.rows[0];
+  if (row === undefined || !rowMatches(row, expectedRun)) {
+    throw new MigrationRunLifecycleExecutorError('RUN_TRANSITION_EVIDENCE_MISMATCH');
+  }
 
   return Object.freeze({ ...expectedRun });
+}
+
+export async function executeMigrationRunLifecycleWrite(
+  adapter: YdbAdapter,
+  prepared: PreparedMigrationRunLifecycleWrite,
+  expectedRun: MigrationRun,
+): Promise<Readonly<MigrationRun>> {
+  return adapter.serializableReadWrite((transaction) =>
+    executeMigrationRunLifecycleWriteInTransaction(transaction, prepared, expectedRun));
 }
