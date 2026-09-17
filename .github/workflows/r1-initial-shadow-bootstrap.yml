@@ -490,6 +490,22 @@ jobs:
                   else null
                   end
                 ),
+                recoveryReason: (
+                  if $code == "INITIAL_BOOTSTRAP_RECOVERY_REQUIRED"
+                     and (.recoveryReason | type) == "string"
+                     and (.recoveryReason | IN(
+                       "CLAIM_OUTCOME_UNKNOWN",
+                       "REVISION_EVIDENCE_OUTCOME_UNKNOWN",
+                       "REVISION_EVIDENCE_RUNTIME_BUDGET_EXHAUSTED",
+                       "COUNTER_REFINEMENT_OUTCOME_UNKNOWN",
+                       "VALIDATION_TRANSITION_OUTCOME_UNKNOWN",
+                       "PROMOTION_OUTCOME_UNKNOWN",
+                       "VALIDATED_RUN_REQUIRES_RECOVERY"
+                     ))
+                  then .recoveryReason
+                  else null
+                  end
+                ),
                 applicationPhase: (
                   if $code == "INITIAL_BOOTSTRAP_RUNTIME_FAILED"
                      and (.applicationPhase | type) == "string"
