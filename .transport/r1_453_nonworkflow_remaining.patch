@@ -1,0 +1,191 @@
+diff --git a/scripts/invoke-yandex-initial-bootstrap.mjs b/scripts/invoke-yandex-initial-bootstrap.mjs
+index d053f9f..04020bf 100644
+--- a/scripts/invoke-yandex-initial-bootstrap.mjs
++++ b/scripts/invoke-yandex-initial-bootstrap.mjs
+@@ -173,6 +173,15 @@ const METADATA_FAILURE_CODES = new Set([
+   'YDB_PARAMETER_INVALID_JSON_DOCUMENT',
+ ]);
+ 
++const STALE_RETIREMENT_FAILURE_CODES = new Set([
++  'INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST',
++  'INVALID_FINISHED_AT',
++  'COMMITTED_BASELINE_EXISTS',
++  'STAGING_RUN_NOT_UNIQUE',
++  'STALE_SNAPSHOT_NOT_PROVEN',
++  'VERIFIED_CURRENT_STATE_NOT_EMPTY',
++]);
++
+ const YDB_QUERY_STATUS_CODES = new Set([
+   'YDB_TRANSPORT_QUERY_EXECUTION_YDB_BAD_REQUEST',
+   'YDB_TRANSPORT_QUERY_EXECUTION_YDB_UNAUTHORIZED',
+@@ -314,6 +323,7 @@ function parseExactFunctionResult(stdout) {
+     && (
+       exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode'])
+       || exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'ydbDataFailureCode'])
++      || exactKeys(result, ['status', 'code', 'runtimeCode', 'applicationPhase', 'metadataFailureCode', 'staleRetirementFailureCode'])
+     )
+     && typeof result.runtimeCode === 'string'
+     && REFERENCE_AWARE_RUNTIME_CODES.has(result.runtimeCode)
+@@ -325,6 +335,12 @@ function parseExactFunctionResult(stdout) {
+       || (typeof result.ydbDataFailureCode === 'string'
+         && (YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)
+           || YDB_QUERY_STATUS_CODES.has(result.ydbDataFailureCode))))
++    && (result.staleRetirementFailureCode === undefined
++      || (result.runtimeCode === 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED'
++        && result.metadataFailureCode === null
++        && result.ydbDataFailureCode === undefined
++        && typeof result.staleRetirementFailureCode === 'string'
++        && STALE_RETIREMENT_FAILURE_CODES.has(result.staleRetirementFailureCode)))
+   ) {
+     return Object.freeze({
+       status: 'FAIL',
+@@ -333,6 +349,9 @@ function parseExactFunctionResult(stdout) {
+       applicationPhase: result.applicationPhase,
+       metadataFailureCode: result.metadataFailureCode,
+       ...(result.ydbDataFailureCode === undefined ? {} : { ydbDataFailureCode: result.ydbDataFailureCode }),
++      ...(result.staleRetirementFailureCode === undefined
++        ? {}
++        : { staleRetirementFailureCode: result.staleRetirementFailureCode }),
+     });
+   }
+   if (
+diff --git a/src/runtime/initialBootstrapReferenceAwareJob.ts b/src/runtime/initialBootstrapReferenceAwareJob.ts
+index dbaad31..48cc1df 100644
+--- a/src/runtime/initialBootstrapReferenceAwareJob.ts
++++ b/src/runtime/initialBootstrapReferenceAwareJob.ts
+@@ -71,6 +71,10 @@ import {
+   type InitialBootstrapRuntimePrimitives,
+ } from '../migration/initialBootstrapRuntimePrimitives.js';
+ import { InitialBootstrapError } from '../migration/initialSnapshot.js';
++import {
++  InitialBootstrapStaleStagingRetirementError,
++  type InitialBootstrapStaleStagingRetirementErrorCode,
++} from '../migration/initialBootstrapStaleStagingRetirement.js';
+ import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+ import {
+   InitialSnapshotProjectionStructuralError,
+@@ -162,17 +166,22 @@ export type InitialBootstrapYdbDataFailureCode =
+   | 'YDB_ADAPTER_WRITE_REQUIRES_TRANSACTION'
+   | 'YDB_COMMIT_OUTCOME_UNKNOWN';
+ 
++export type InitialBootstrapStaleRetirementFailureCode =
++  InitialBootstrapStaleStagingRetirementErrorCode;
++
+ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
+   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
+   readonly applicationPhase: InitialBootstrapApplicationPhase | null;
+   readonly metadataFailureCode: InitialBootstrapMetadataFailureCode | null;
+   readonly ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null;
++  readonly staleRetirementFailureCode: InitialBootstrapStaleRetirementFailureCode | null;
+ 
+   constructor(
+     code: InitialBootstrapReferenceAwareRuntimeErrorCode,
+     applicationPhase: InitialBootstrapApplicationPhase | null = null,
+     metadataFailureCode: InitialBootstrapMetadataFailureCode | null = null,
+     ydbDataFailureCode: InitialBootstrapYdbDataFailureCode | null = null,
++    staleRetirementFailureCode: InitialBootstrapStaleRetirementFailureCode | null = null,
+   ) {
+     super(code);
+     this.name = 'InitialBootstrapReferenceAwareRuntimeError';
+@@ -180,6 +189,7 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
+     this.applicationPhase = applicationPhase;
+     this.metadataFailureCode = metadataFailureCode;
+     this.ydbDataFailureCode = ydbDataFailureCode;
++    this.staleRetirementFailureCode = staleRetirementFailureCode;
+   }
+ }
+ 
+@@ -207,6 +217,12 @@ export function classifyInitialBootstrapMetadataFailureCode(
+   return null;
+ }
+ 
++export function classifyInitialBootstrapStaleRetirementFailureCode(
++  error: unknown,
++): InitialBootstrapStaleRetirementFailureCode | null {
++  return error instanceof InitialBootstrapStaleStagingRetirementError ? error.code : null;
++}
++
+ export function classifyInitialBootstrapYdbDataFailureCode(
+   error: unknown,
+ ): InitialBootstrapYdbDataFailureCode | null {
+diff --git a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+index 718fcaf..2237ad1 100644
+--- a/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+@@ -203,6 +203,30 @@ test('stale-retirement lifecycle diagnostics are accepted as enum-only metadata
+   }
+ });
+ 
++
++test('stale-retirement semantic diagnostics are accepted only as bounded enum-only failures', async () => {
++  for (const staleRetirementFailureCode of [
++    'INVALID_AUTHORITATIVE_SNAPSHOT_DIGEST',
++    'INVALID_FINISHED_AT',
++    'COMMITTED_BASELINE_EXISTS',
++    'STAGING_RUN_NOT_UNIQUE',
++    'STALE_SNAPSHOT_NOT_PROVEN',
++    'VERIFIED_CURRENT_STATE_NOT_EMPTY',
++  ]) {
++    const value = {
++      status: 'FAIL',
++      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++      runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
++      applicationPhase: 'RESUME_CONTEXT_READ',
++      metadataFailureCode: null,
++      staleRetirementFailureCode,
++    };
++    const result = await runInvoker({ body: JSON.stringify(value) });
++    assert.equal(result.exitCode, 2);
++    assertSafeOutput(result, value);
++  }
++});
++
+ test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
+   const ordinaryCodes = [
+     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
+diff --git a/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs b/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
+index e9a9ac3..210bb33 100644
+--- a/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
++++ b/tests/integration/yandex-initial-bootstrap-stale-retirement.test.mjs
+@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
+ import test from 'node:test';
+ 
+ import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
++import {
++  InitialBootstrapStaleStagingRetirementError,
++} from '../../dist/migration/initialBootstrapStaleStagingRetirement.js';
+ import {
+   MigrationRunLifecycleExecutorError,
+ } from '../../dist/migration/migrationRunLifecycleExecutor.js';
+@@ -78,6 +81,31 @@ test('retirement refusal exposes one safe failure code and never retries bootstr
+   assert.equal(retirements, 1);
+ });
+ 
++
++test('retirement semantic refusal preserves its exact bounded stale-retirement cause', async () => {
++  const result = await executeYandexInitialBootstrapFunction(
++    {},
++    (environment) => runInitialBootstrapJobWithOneStaleStagingRetirement(
++      environment,
++      async () => {
++        throw staleResumeFailure();
++      },
++      async () => {
++        throw new InitialBootstrapStaleStagingRetirementError('STALE_SNAPSHOT_NOT_PROVEN');
++      },
++    ),
++  );
++
++  assert.deepEqual(result, {
++    status: 'FAIL',
++    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
++    runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
++    applicationPhase: 'RESUME_CONTEXT_READ',
++    metadataFailureCode: null,
++    staleRetirementFailureCode: 'STALE_SNAPSHOT_NOT_PROVEN',
++  });
++});
++
+ test('retirement lifecycle failure preserves bounded metadata cause without exposing raw error text', async () => {
+   const result = await executeYandexInitialBootstrapFunction(
+     {},
