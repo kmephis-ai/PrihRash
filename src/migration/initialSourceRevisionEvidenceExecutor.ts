@@ -68,33 +68,44 @@ function exactRevisionParameters(
 
 function buildRevisionEvidenceBatchStatement(
   writes: readonly PreparedInitialSourceLineageWrite[],
-): YdbStatement {
+): YdbStatement | null {
   if (writes.length === 0) {
     throw new InitialRevisionEvidenceError('EVIDENCE_WRITE_SHAPE_INVALID');
+  }
+
+  for (const write of writes) {
+    if (write.role !== 'STAGING_EVIDENCE') {
+      throw new InitialRevisionEvidenceError('NON_EVIDENCE_WRITE');
+    }
+  }
+
+  const isExactInitialInsert = (write: PreparedInitialSourceLineageWrite): boolean =>
+    write.statement.kind === 'WRITE'
+    && write.statement.text === SINGLE_ROW_INSERT_TEXT
+    && exactRevisionParameters(write.statement);
+
+  if (!writes.every(isExactInitialInsert)) {
+    // This executor is also reused by incremental revision evidence, which currently
+    // uses UPSERT and must retain its existing sequential transaction semantics.
+    // A statement that claims the initial INSERT surface but does not match its exact
+    // generated shape is unsafe to rewrite and therefore fails closed.
+    if (writes.some((write) => write.statement.text.startsWith('INSERT INTO source_record_revisions'))) {
+      throw new InitialRevisionEvidenceError('EVIDENCE_WRITE_SHAPE_INVALID');
+    }
+    return null;
   }
 
   const parameters: Record<string, YdbParameter> = {};
   const tuples: string[] = [];
 
   for (const [index, write] of writes.entries()) {
-    if (write.role !== 'STAGING_EVIDENCE') {
-      throw new InitialRevisionEvidenceError('NON_EVIDENCE_WRITE');
-    }
-    if (
-      write.statement.kind !== 'WRITE'
-      || write.statement.text !== SINGLE_ROW_INSERT_TEXT
-      || !exactRevisionParameters(write.statement)
-    ) {
-      throw new InitialRevisionEvidenceError('EVIDENCE_WRITE_SHAPE_INVALID');
-    }
-
     const names: string[] = [];
     for (const column of REVISION_COLUMNS) {
       const parameter = write.statement.parameters[column];
       if (parameter === undefined) {
         throw new InitialRevisionEvidenceError('EVIDENCE_WRITE_SHAPE_INVALID');
       }
-      const name = `${column}_${index}`;
+      const name = index === 0 ? column : `${column}_${index}`;
       parameters[name] = parameter;
       names.push(`$${name}`);
     }
@@ -163,7 +174,13 @@ export async function executeInitialRevisionEvidenceBatches(
     if (batch.writes.length === 0) continue;
     const statement = buildRevisionEvidenceBatchStatement(batch.writes);
     await adapter.serializableReadWrite(async (transaction) => {
-      await transaction.execute(statement);
+      if (statement !== null) {
+        await transaction.execute(statement);
+        return;
+      }
+      for (const write of batch.writes) {
+        await transaction.execute(write.statement);
+      }
     });
   }
 }

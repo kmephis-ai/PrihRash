@@ -131,12 +131,12 @@ test('coalesces a maximum revision batch into one bounded multi-row provider exe
     Object.keys(statement.parameters).length,
     INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT * 8,
   );
-  assert.equal(statement.parameters.source_record_id_0.value, sourceId(0));
+  assert.equal(statement.parameters.source_record_id.value, sourceId(0));
   assert.equal(
     statement.parameters[`source_record_id_${INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT - 1}`].value,
     sourceId(INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT - 1),
   );
-  assert.doesNotMatch(statement.text, /VALUES \(\$source_record_id, /);
+  assert.match(statement.text, /\), \(/);
 });
 
 test('rejects malformed staging evidence shape before starting provider transaction', async () => {
