@@ -62,6 +62,7 @@ function failedReadbackRow() {
 function fixture({ admissionRows, manifestRows, currentSourceCount = 0n, currentTransactionCount = 0n } = {}) {
   const readStatements = [];
   const transactionStatements = [];
+  let transactionCount = 0;
   const transport = {
     async executeRead(statement) {
       readStatements.push(statement);
@@ -74,6 +75,7 @@ function fixture({ admissionRows, manifestRows, currentSourceCount = 0n, current
       throw new Error(`unexpected read: ${statement.text}`);
     },
     async serializableReadWrite(callback) {
+      transactionCount += 1;
       return callback({
         async execute(statement) {
           transactionStatements.push(statement);
@@ -99,6 +101,7 @@ function fixture({ admissionRows, manifestRows, currentSourceCount = 0n, current
     adapter: new YdbAdapter(transport),
     readStatements,
     transactionStatements,
+    transactionCount: () => transactionCount,
   };
 }
 
@@ -131,6 +134,7 @@ test('stale STAGING retirement marks only the exact run FAILED and preserves all
     f.transactionStatements.filter((statement) => statement.text.startsWith('SELECT COUNT(*) AS row_count')).length,
     2,
   );
+  assert.equal(f.transactionCount(), 1);
   assert.equal(f.transactionStatements.some((statement) => /GROUP BY|WHERE type =/.test(statement.text)), false);
 });
 
