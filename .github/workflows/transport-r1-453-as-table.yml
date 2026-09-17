@@ -1,0 +1,78 @@
+name: Transport R1 453 AS_TABLE materializer
+
+on:
+  push:
+    branches: [fix/r1-453-as-table-revision-evidence]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: transport-r1-453-as-table
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Materialize exact bounded patch
+        shell: bash
+        env:
+          BASE_SHA: a2420e9dc36df298d083d4de3a46ba089a05eb26
+          PATCH_SHA256: da7cb080e1d8eff8355ed9b270d14183dcd01b8021fd3e39f6ac81e1c55b4d76
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/fix/r1-453-as-table-revision-evidence'
+          git fetch origin main --no-tags
+          test "$(git rev-parse origin/main)" = "$BASE_SHA" || { echo R1_TRANSPORT_MAIN_MOVED; exit 1; }
+          test "$(git merge-base HEAD origin/main)" = "$BASE_SHA" || { echo R1_TRANSPORT_BASE_MISMATCH; exit 1; }
+
+          printf '%s  %s\n' \
+            cfce82f9a79f4c5cb2f0be4e8861c58e6439ccc8b5ba3a6fecdd105dedf233a8 .transport/r1-453-as-table/patch.b64.00 \
+            001987f3655dd38fe79049c83d113ed9b8306f3aa6416be380a60c79d1f2b0d3 .transport/r1-453-as-table/patch.b64.01 \
+            7c874dc34de14e4cfe50ff42bbff8766f05d42995604b605698f2b6f012c7513 .transport/r1-453-as-table/patch.b64.02 \
+            fc69f17e8dd4e3c0a5b394a4bacdeef3c25a1bd14dc58eb59a1de467c204ebc3 .transport/r1-453-as-table/patch.b64.03 \
+            ca4e16b5ab32e395456c8ef12e6813e338c097d1c10eabcc7dc874daf0b11b54 .transport/r1-453-as-table/patch.b64.04 \
+            c8533a3997446bcb78a142c68c65e3045b922841ae2091b7fd1ee10f47ddabf5 .transport/r1-453-as-table/patch.b64.05 | sha256sum -c -
+
+          cat .transport/r1-453-as-table/patch.b64.* > "$RUNNER_TEMP/patch.b64"
+          base64 --decode "$RUNNER_TEMP/patch.b64" > "$RUNNER_TEMP/patch.diff"
+          test "$(sha256sum "$RUNNER_TEMP/patch.diff" | cut -d' ' -f1)" = "$PATCH_SHA256"
+          git apply --check "$RUNNER_TEMP/patch.diff"
+          git apply "$RUNNER_TEMP/patch.diff"
+
+          test "$(git hash-object docs/MIGRATION_CONTRACT.md)" = 1055ea61b0d0ad3003b10822f4b9387f86453768
+          test "$(git hash-object docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md)" = 1268cacd7f04d47b30694d5e1ab3d8823370ac2c
+          test "$(git hash-object src/integration/ydb/parameters.ts)" = 1ac7466826045f1a5a93ea914125899b88768f11
+          test "$(git hash-object src/integration/ydb/ydbJsV6DataTransport.ts)" = e28044ab31bd577c905fd69a71946d30085f47be
+          test "$(git hash-object src/migration/initialSourceRevisionEvidenceExecutor.ts)" = efe9f3657e1004689fed88d88c89d0b6475b40d3
+          test "$(git hash-object tests/integration/ydb-adapter.test.mjs)" = c561b182d60025637d562b3b37200021e84c2a75
+          test "$(git hash-object tests/integration/ydb-js-v6-data-transport.test.mjs)" = 2590fc531af53e651b54f3fc5a7a38661ebee3f4
+          test "$(git hash-object tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs)" = 257b1f9b265228e3f6ba66f63407032339d995a0
+
+          rm -rf .transport/r1-453-as-table
+          rm -f .github/workflows/transport-r1-453-as-table.yml
+          git diff --check "$BASE_SHA"
+          actual="$(git diff --name-only "$BASE_SHA" | sort)"
+          expected="$(printf '%s\n' \
+            docs/MIGRATION_CONTRACT.md \
+            docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md \
+            src/integration/ydb/parameters.ts \
+            src/integration/ydb/ydbJsV6DataTransport.ts \
+            src/migration/initialSourceRevisionEvidenceExecutor.ts \
+            tests/integration/ydb-adapter.test.mjs \
+            tests/integration/ydb-js-v6-data-transport.test.mjs \
+            tests/migration-simulation/initial-source-revision-evidence-executor.test.mjs | sort)"
+          test "$actual" = "$expected" || { echo R1_TRANSPORT_FILESET_MISMATCH; printf '%s\n' "$actual"; exit 1; }
+
+          git add -A
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'R1 #453: сократить round-trips initial revision evidence'
+          git push origin HEAD:fix/r1-453-as-table-revision-evidence
