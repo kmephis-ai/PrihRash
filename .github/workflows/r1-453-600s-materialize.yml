@@ -1,0 +1,54 @@
+name: R1 453 600s materializer
+
+on:
+  push:
+    branches:
+      - transport/r1-453-600s-materialize-20260917
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+          persist-credentials: true
+
+      - name: Materialize exact four-file patch as ordinary blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha='6728b1ffacdc1c9ef692b56d80edf4653aa6e476'
+          paths=(
+            '.github/workflows/r1-initial-shadow-bootstrap.yml'
+            'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md'
+            'scripts/invoke-yandex-initial-bootstrap.mjs'
+            'tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs'
+          )
+
+          for path in "${paths[@]}"; do
+            test "$(git rev-parse "${source_sha}:${path}")" = "$(git rev-parse "HEAD:${path}")"
+          done
+          git apply --check .transport/r1-453-600s.patch
+          git apply .transport/r1-453-600s.patch
+
+          mkdir -p .transport/materialized
+          cp .github/workflows/r1-initial-shadow-bootstrap.yml .transport/materialized/r1-initial-shadow-bootstrap.yml
+          cp docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md .transport/materialized/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+          cp scripts/invoke-yandex-initial-bootstrap.mjs .transport/materialized/invoke-yandex-initial-bootstrap.mjs
+          cp tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs .transport/materialized/r1-initial-shadow-bootstrap-workflow.test.mjs
+
+          git restore --source="$source_sha" -- "${paths[@]}"
+          git diff --check
+          git status --short
+          test "$(git status --short | grep '^?? .transport/materialized/' | wc -l)" -eq 4
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .transport/materialized
+          git commit -m 'chore: materialize R1 #453 600s patch blobs'
+          git push origin HEAD:transport/r1-453-600s-materialize-20260917
