@@ -5,6 +5,7 @@ import {
   InitialSourceRevisionEvidenceRecoveryError,
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
+import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
 import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initialSourceLineagePersistence.js';
 import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
@@ -166,8 +167,8 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('revision primary-key reads keep one run scan and bound remaining source ids to 50 per query', async () => {
-  const expected = Array.from({ length: 51 }, (_, index) => revision(
+test('revision primary-key reads keep one run scan and batch up to 300 source ids per query', async () => {
+  const expected = Array.from({ length: 301 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
     `synthetic-row-${index + 1}`,
@@ -179,7 +180,11 @@ test('revision primary-key reads keep one run scan and bound remaining source id
     expected,
   );
   assert.equal(statements.length, 2);
-  assert.equal(Object.keys(statements[0].parameters).length, 52);
+  assert.equal(Object.keys(statements[0].parameters).length, 302);
+  assert.equal(
+    new TextEncoder().encode(statements[0].text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
+    true,
+  );
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
   assert.match(statements[0].text, /migration_run_id = \$migration_run_id OR source_record_id IN/);
   assert.equal(Object.keys(statements[1].parameters).length, 2);
