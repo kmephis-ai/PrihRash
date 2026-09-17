@@ -1,0 +1,248 @@
+name: R1 Lockbox metadata diagnostic
+
+# Stage-specific one-shot read-only diagnostic for R1 #453.
+# Retirement condition: delete this workflow immediately after enum-only Lockbox metadata evidence is captured.
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: r1-lockbox-metadata-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  diagnose-lockbox-metadata:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      EXPECTED_DIAGNOSTIC_BASE_SHA: 805aa07a3f37f62969f4bfa1accf4ad055b46dc4
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Verify exact one-shot diagnostic source
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test -n "$YC_LOCKBOX_SECRET_ID"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          accept_header='Accept: application/vnd.github+json'
+
+          main_sha="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$main_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_MAIN_MOVED'
+            exit 0
+          fi
+
+          associated_prs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/commits/$SOURCE_SHA/pulls")"
+          source_pr="$(jq -cer --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            [.[] | select(
+              .merged_at != null
+              and .merge_commit_sha == $sha
+              and .base.ref == "main"
+              and .head.repo.full_name == $repo
+              and .title == "R1 #453: классифицировать Lockbox metadata boundary"
+            )] | if length == 1 then .[0] else empty end
+          ' <<<"$associated_prs" || true)"
+          if [ -z "$source_pr" ]; then
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_SOURCE_PR_INVALID'
+            exit 0
+          fi
+          if [ "$(jq -r '.base.sha' <<<"$source_pr")" != "$EXPECTED_DIAGNOSTIC_BASE_SHA" ]; then
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_BASE_SHA_MISMATCH'
+            exit 0
+          fi
+
+          source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+          source_pr_body="$(jq -r '.body // ""' <<<"$source_pr")"
+          marker_count="$(jq -Rn --arg body "$source_pr_body" '
+            [$body | split("\n")[] | select(. == "Recovery-Diagnostic: LOCKBOX_METADATA_BOUNDARY_V1")] | length
+          ')"
+          if [ "$marker_count" != '1' ]; then
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_MARKER_INVALID'
+            exit 0
+          fi
+
+          source_files="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/pulls/$source_pr_number/files?per_page=100")"
+          if ! jq -e '
+            length == 2
+            and any(.filename == ".github/workflows/r1-lockbox-metadata-diagnostic.yml" and .status == "added")
+            and any(.filename == "tests/tooling/r1-lockbox-metadata-diagnostic-workflow.test.mjs" and .status == "added")
+          ' <<<"$source_files" >/dev/null; then
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_CHANGESET_INVALID'
+            exit 0
+          fi
+
+          printf 'R1_LOCKBOX_DIAGNOSTIC_SOURCE_VERIFIED=true\n' >> "$GITHUB_ENV"
+
+      - name: Install Yandex Cloud CLI
+        if: env.R1_LOCKBOX_DIAGNOSTIC_SOURCE_VERIFIED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange exact-main OIDC token for short-lived Yandex IAM token
+        if: env.R1_LOCKBOX_DIAGNOSTIC_SOURCE_VERIFIED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-lockbox-metadata-diagnostic-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+
+          oidc_status="$(curl --silent --show-error \
+            --output "$tmp/oidc.json" \
+            --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" \
+            2>"$tmp/oidc.err")" || {
+              echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_REQUEST_FAILED'
+              exit 1
+            }
+          case "$oidc_status" in 2??) ;; *) echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_REQUEST_FAILED'; exit 1 ;; esac
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
+          echo "::add-mask::${oidc_token}"
+
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *) echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>"$tmp/claims.err" || {
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_CLAIMS_INVALID'
+            exit 1
+          }
+          jq -e --arg expected "$OIDC_ISSUER" '.iss == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_ISSUER_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_AUDIENCE" '(.aud == $expected) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $expected)' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_AUDIENCE_MISMATCH'; exit 1;
+          }
+          jq -e --arg expected "$OIDC_SUBJECT" '.sub == $expected' "$tmp/claims.json" >/dev/null 2>&1 || {
+            echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_OIDC_SUBJECT_MISMATCH'; exit 1;
+          }
+
+          iam_status="$(curl --silent --show-error \
+            --output "$tmp/iam.json" \
+            --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            2>"$tmp/iam.err")" || {
+              echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_WIF_EXCHANGE_FAILED'
+              exit 1
+            }
+          case "$iam_status" in 2??) ;; *) echo 'R1_LOCKBOX_METADATA_DIAGNOSTIC_WIF_EXCHANGE_FAILED'; exit 1 ;; esac
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Read and classify dedicated Lockbox metadata once
+        if: env.R1_LOCKBOX_DIAGNOSTIC_SOURCE_VERIFIED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-lockbox-metadata-diagnostic"
+          evidence_dir="$RUNNER_TEMP/r1-lockbox-metadata-diagnostic-evidence"
+          mkdir -p "$tmp" "$evidence_dir"
+          echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+
+          classify_transport() {
+            local file="$1"
+            if [ ! -s "$file" ]; then printf 'EMPTY'; return; fi
+            if grep -Eqi 'permission([ _]?denied)|unauthenticated|unauthorized|authentication failed|access denied' "$file"; then printf 'AUTH'; return; fi
+            if grep -Eqi 'not([ _]?found)|does not exist' "$file"; then printf 'NOT_FOUND'; return; fi
+            if grep -Eqi 'resource([ _]?exhausted)|too many requests|rate limit|(^|[^0-9])429([^0-9]|$)' "$file"; then printf 'RATE_LIMIT'; return; fi
+            if grep -Eqi 'deadline([ _]?exceeded)|context deadline|timed out|timeout|(^|[^0-9])504([^0-9]|$)' "$file"; then printf 'DEADLINE'; return; fi
+            if grep -Eqi 'unavailable|service unavailable|connection refused|connection reset|network is unreachable|temporary failure|(^|[^0-9])503([^0-9]|$)' "$file"; then printf 'UNAVAILABLE'; return; fi
+            if grep -Eqi 'invalid([ _]?argument)|unknown flag|usage:' "$file"; then printf 'INVALID_REQUEST'; return; fi
+            if grep -Eqi 'failed([ _]?precondition)' "$file"; then printf 'FAILED_PRECONDITION'; return; fi
+            if grep -Eqi 'internal error|(^|[^a-z])internal([^a-z]|$)' "$file"; then printf 'INTERNAL'; return; fi
+            printf 'OTHER'
+          }
+
+          status='PASS'
+          code='LOCKBOX_METADATA_READY'
+          transport_class='EMPTY'
+          if ! yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/secret.json" 2>"$tmp/secret.err"; then
+            status='FAIL'
+            code='LOCKBOX_METADATA_READ_FAILED'
+            transport_class="$(classify_transport "$tmp/secret.err")"
+          elif ! jq -e \
+            --arg expected_id "$YC_LOCKBOX_SECRET_ID" \
+            --arg expected_name "$LOCKBOX_SECRET_NAME" \
+            --arg expected_folder_id "$YC_FOLDER_ID" \
+            '(.id == $expected_id) and (.name == $expected_name) and ((.folder_id // .folderId) == $expected_folder_id)' \
+            "$tmp/secret.json" >/dev/null 2>&1; then
+            status='FAIL'
+            code='LOCKBOX_METADATA_MISMATCH'
+          elif ! jq -e '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | type == "string" and length > 0' \
+            "$tmp/secret.json" >/dev/null 2>&1; then
+            status='FAIL'
+            code='LOCKBOX_CURRENT_VERSION_MISSING'
+          fi
+
+          jq -cn \
+            --arg status "$status" \
+            --arg code "$code" \
+            --arg transportClass "$transport_class" \
+            '{status: $status, code: $code, transportClass: $transportClass}' \
+            > "$evidence_dir/classification.json"
+          printf 'R1_LOCKBOX_METADATA_DIAGNOSTIC=%s/%s\n' "$code" "$transport_class"
+          rm -f "$tmp/secret.json" "$tmp/secret.err"
+
+      - name: Publish enum-only Lockbox metadata evidence
+        if: env.R1_LOCKBOX_DIAGNOSTIC_SOURCE_VERIFIED == 'true' && always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-lockbox-metadata-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-lockbox-metadata-diagnostic-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 7
