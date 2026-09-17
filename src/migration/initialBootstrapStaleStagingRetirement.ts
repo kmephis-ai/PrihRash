@@ -9,7 +9,7 @@ import {
 import {
   prepareMigrationRunFailedWrite,
 } from './migrationRunPersistence.js';
-import { executeMigrationRunLifecycleWrite } from './migrationRunLifecycleExecutor.js';
+import { executeMigrationRunLifecycleWriteInTransaction } from './migrationRunLifecycleExecutor.js';
 import {
   markMigrationRunFailed,
   type MigrationRun,
@@ -52,14 +52,6 @@ function requiredExactText(
   return value;
 }
 
-async function assertVerifiedCurrentStateEmpty(adapter: YdbAdapter): Promise<void> {
-  const diagnostic = await adapter.serializableReadWrite((transaction) =>
-    diagnoseInitialBootstrapStaleStagingRetirementCurrentState(transaction));
-  if (diagnostic !== 'STALE_STAGING_CURRENT_STATE_EMPTY') {
-    throw new InitialBootstrapStaleStagingRetirementError('VERIFIED_CURRENT_STATE_NOT_EMPTY');
-  }
-}
-
 export async function retireInitialBootstrapStaleStagingRun(
   adapter: YdbAdapter,
   authoritativeSnapshotDigest: string,
@@ -91,13 +83,18 @@ export async function retireInitialBootstrapStaleStagingRun(
     throw new InitialBootstrapStaleStagingRetirementError('STALE_SNAPSHOT_NOT_PROVEN', diagnostic);
   }
 
-  await assertVerifiedCurrentStateEmpty(adapter);
-
   const failedRun = markMigrationRunFailed(
     stagingRun,
     failureAt,
     INITIAL_BOOTSTRAP_STALE_STAGING_FAILURE_CODE,
   );
   const prepared = prepareMigrationRunFailedWrite(stagingRun, failedRun);
-  return executeMigrationRunLifecycleWrite(adapter, prepared, failedRun);
+
+  return adapter.serializableReadWrite(async (transaction) => {
+    const currentStateDiagnostic = await diagnoseInitialBootstrapStaleStagingRetirementCurrentState(transaction);
+    if (currentStateDiagnostic !== 'STALE_STAGING_CURRENT_STATE_EMPTY') {
+      throw new InitialBootstrapStaleStagingRetirementError('VERIFIED_CURRENT_STATE_NOT_EMPTY');
+    }
+    return executeMigrationRunLifecycleWriteInTransaction(transaction, prepared, failedRun);
+  });
 }
