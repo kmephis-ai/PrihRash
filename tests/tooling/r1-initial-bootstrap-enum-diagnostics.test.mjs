@@ -16,6 +16,9 @@ test('bootstrap metadata diagnostics stay enum-only from runtime through invoker
   assert.match(runtime, /classifyInitialBootstrapYdbDataFailureCode\(error\)/);
   assert.match(runtime, /classifyInitialBootstrapMetadataFailureCode/);
   assert.match(runtime, /classifyInitialBootstrapStaleRetirementFailureCode/);
+  assert.match(runtime, /JOB_\$\{error\.code\}/);
+  assert.match(runtime, /ADMISSION_\$\{error\.code\}/);
+  assert.match(runtime, /MIGRATION_RUN_STATE_\$\{error\.code\}/);
   assert.match(runtime, /METADATA_EXECUTOR_\$\{error\.code\}/);
   assert.match(runtime, /MIGRATION_RUN_LIFECYCLE_\$\{error\.code\}/);
   assert.match(runtime, /MIGRATION_RUN_PERSISTENCE_\$\{error\.code\}/);
@@ -80,6 +83,13 @@ test('bootstrap workflow projects only allowlisted phase and metadata failure en
     'STAGING_RUN_NOT_UNIQUE',
     'STALE_SNAPSHOT_NOT_PROVEN',
     'VERIFIED_CURRENT_STATE_NOT_EMPTY',
+    'JOB_CONFIG_INVALID',
+    'JOB_SOURCE_READ_FAILED',
+    'JOB_YDB_CLIENT_CREATE_FAILED',
+    'JOB_YDB_CLIENT_CLOSE_FAILED',
+    'ADMISSION_MALFORMED_RUN_EVIDENCE',
+    'ADMISSION_DUPLICATE_RUN_EVIDENCE',
+    'MIGRATION_RUN_STATE_ILLEGAL_MIGRATION_RUN_TRANSITION',
   ]) {
     assert.match(workflow, new RegExp(code));
     assert.match(invoker, new RegExp(code));

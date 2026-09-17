@@ -87,10 +87,14 @@ import {
   MigrationRunPersistenceError,
   type MigrationRunPersistenceErrorCode,
 } from '../migration/migrationRunPersistence.js';
-import { MigrationRunStateError } from '../migration/migrationRunState.js';
+import {
+  MigrationRunStateError,
+  type MigrationRunStateErrorCode,
+} from '../migration/migrationRunState.js';
 import {
   readScheduledSyncAdmissionEvidence,
   ScheduledSyncAdmissionEvidenceError,
+  type ScheduledSyncAdmissionEvidenceErrorCode,
 } from '../migration/scheduledSyncAdmissionEvidence.js';
 import {
   SourceSnapshotSemanticProjectionStructuralError,
@@ -102,6 +106,10 @@ import {
 import type {
   InitialReferenceBootstrapObservationRow,
 } from '../reference/initialBootstrapReferenceVocabulary.js';
+import {
+  InitialBootstrapStaleStagingRetirementJobError,
+  type InitialBootstrapStaleStagingRetirementJobErrorCode,
+} from './initialBootstrapStaleStagingRetirementJob.js';
 import { createInitialBootstrapReferenceClaimAdapter } from './initialBootstrapReferenceClaimAdapter.js';
 import {
   executeInitialBootstrapJob,
@@ -167,7 +175,10 @@ export type InitialBootstrapYdbDataFailureCode =
   | 'YDB_COMMIT_OUTCOME_UNKNOWN';
 
 export type InitialBootstrapStaleRetirementFailureCode =
-  InitialBootstrapStaleStagingRetirementErrorCode;
+  | InitialBootstrapStaleStagingRetirementErrorCode
+  | `JOB_${InitialBootstrapStaleStagingRetirementJobErrorCode}`
+  | `ADMISSION_${ScheduledSyncAdmissionEvidenceErrorCode}`
+  | `MIGRATION_RUN_STATE_${MigrationRunStateErrorCode}`;
 
 export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   readonly code: InitialBootstrapReferenceAwareRuntimeErrorCode;
@@ -220,7 +231,17 @@ export function classifyInitialBootstrapMetadataFailureCode(
 export function classifyInitialBootstrapStaleRetirementFailureCode(
   error: unknown,
 ): InitialBootstrapStaleRetirementFailureCode | null {
-  return error instanceof InitialBootstrapStaleStagingRetirementError ? error.code : null;
+  if (error instanceof InitialBootstrapStaleStagingRetirementError) return error.code;
+  if (error instanceof InitialBootstrapStaleStagingRetirementJobError) {
+    return `JOB_${error.code}`;
+  }
+  if (error instanceof ScheduledSyncAdmissionEvidenceError) {
+    return `ADMISSION_${error.code}`;
+  }
+  if (error instanceof MigrationRunStateError) {
+    return `MIGRATION_RUN_STATE_${error.code}`;
+  }
+  return null;
 }
 
 export function classifyInitialBootstrapYdbDataFailureCode(
