@@ -110,6 +110,10 @@ test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks d
   assert.match(workflow, /\.recovery == 1/);
   assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
   assert.match(workflow, /bootstrapInvokeStep \| IN\("success", "failure"\)/);
+  assert.match(workflow, /r1-initial-bootstrap-evidence-\$historical_bootstrap_run_id/);
+  assert.match(workflow, /signature-bootstrap "\$historical_bootstrap"/);
+  assert.match(workflow, /historical_signature.*observed_signature/s);
+  assert.match(workflow, /if \[ "\$historical_signature" != "\$observed_signature" \]; then\s+continue/s);
   assert.match(workflow, /prior_root_cause_attempts=\$\(\(prior_root_cause_attempts \+ 1\)\)/);
   assert.match(workflow, /BLOCKED_NEEDS_ROOT_CAUSE/);
   assert.match(workflow, /scripts\/r1-autocontinue-evidence\.mjs decision/);
