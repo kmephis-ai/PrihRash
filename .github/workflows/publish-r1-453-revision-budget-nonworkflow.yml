@@ -1,0 +1,43 @@
+name: Publish R1 Revision Budget Non-Workflow Patch
+
+on:
+  push:
+    branches:
+      - transport/r1-453-mirror-6728-20260917
+
+permissions:
+  contents: write
+
+env:
+  BASE_SHA: 6728b1ffacdc1c9ef692b56d80edf4653aa6e476
+  TARGET_BRANCH: fix/r1-453-revision-runtime-budget
+  TRANSPORT_BRANCH: transport/r1-453-mirror-6728-20260917
+  EXPECTED_TREE: e5894b5f025a487a3deb762e262ce87c98b12428
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Apply exact patch without workflow mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          PATCH_B64="$(git show "origin/${TRANSPORT_BRANCH}:.github/workflows/publish-r1-453-revision-budget.yml" | sed -n 's/^          PATCH_B64: //p')"
+          test -n "$PATCH_B64"
+          printf '%s' "$PATCH_B64" | base64 -d | gunzip > "$RUNNER_TEMP/r1.patch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git am "$RUNNER_TEMP/r1.patch"
+          git restore --source="$BASE_SHA" --staged --worktree .github/workflows/r1-initial-shadow-bootstrap.yml
+          git commit --amend --no-edit
+          git diff HEAD^ --check
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
