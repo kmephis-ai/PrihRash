@@ -75,8 +75,14 @@ import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googl
 import {
   InitialSnapshotProjectionStructuralError,
 } from '../migration/initialSnapshotProjection.js';
-import { MigrationRunLifecycleExecutorError } from '../migration/migrationRunLifecycleExecutor.js';
-import { MigrationRunPersistenceError } from '../migration/migrationRunPersistence.js';
+import {
+  MigrationRunLifecycleExecutorError,
+  type MigrationRunLifecycleExecutorErrorCode,
+} from '../migration/migrationRunLifecycleExecutor.js';
+import {
+  MigrationRunPersistenceError,
+  type MigrationRunPersistenceErrorCode,
+} from '../migration/migrationRunPersistence.js';
 import { MigrationRunStateError } from '../migration/migrationRunState.js';
 import {
   readScheduledSyncAdmissionEvidence,
@@ -147,6 +153,8 @@ export type InitialBootstrapMetadataFailureCode =
   | `METADATA_EXECUTOR_${InitialBootstrapMetadataExecutorErrorCode}`
   | `IDENTITY_MANIFEST_${InitialBootstrapIdentityManifestErrorCode}`
   | `BOOTSTRAP_PERSISTENCE_${InitialBootstrapPersistenceErrorCode}`
+  | `MIGRATION_RUN_LIFECYCLE_${MigrationRunLifecycleExecutorErrorCode}`
+  | `MIGRATION_RUN_PERSISTENCE_${MigrationRunPersistenceErrorCode}`
   | `YDB_PARAMETER_${YdbParameterErrorCode}`;
 
 export type InitialBootstrapYdbDataFailureCode =
@@ -175,7 +183,9 @@ export class InitialBootstrapReferenceAwareRuntimeError extends Error {
   }
 }
 
-function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFailureCode | null {
+export function classifyInitialBootstrapMetadataFailureCode(
+  error: unknown,
+): InitialBootstrapMetadataFailureCode | null {
   if (error instanceof InitialBootstrapMetadataExecutorError) {
     return `METADATA_EXECUTOR_${error.code}`;
   }
@@ -185,13 +195,21 @@ function classifyMetadataFailureCode(error: unknown): InitialBootstrapMetadataFa
   if (error instanceof InitialBootstrapPersistenceError) {
     return `BOOTSTRAP_PERSISTENCE_${error.code}`;
   }
+  if (error instanceof MigrationRunLifecycleExecutorError) {
+    return `MIGRATION_RUN_LIFECYCLE_${error.code}`;
+  }
+  if (error instanceof MigrationRunPersistenceError) {
+    return `MIGRATION_RUN_PERSISTENCE_${error.code}`;
+  }
   if (error instanceof YdbParameterError) {
     return `YDB_PARAMETER_${error.code}`;
   }
   return null;
 }
 
-function classifyYdbDataFailureCode(error: unknown): InitialBootstrapYdbDataFailureCode | null {
+export function classifyInitialBootstrapYdbDataFailureCode(
+  error: unknown,
+): InitialBootstrapYdbDataFailureCode | null {
   if (error instanceof YdbJsV6DataTransportError) {
     return `YDB_TRANSPORT_${error.code}`;
   }
@@ -307,8 +325,8 @@ async function runApplicationSafely(
     throw new InitialBootstrapReferenceAwareRuntimeError(
       classifyApplicationRuntimeError(error, phase),
       phase,
-      classifyMetadataFailureCode(error),
-      classifyYdbDataFailureCode(error),
+      classifyInitialBootstrapMetadataFailureCode(error),
+      classifyInitialBootstrapYdbDataFailureCode(error),
     );
   }
 }

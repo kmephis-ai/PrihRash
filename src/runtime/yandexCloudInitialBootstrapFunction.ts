@@ -11,6 +11,8 @@ import {
   type InitialValidationBlockerCode,
 } from '../migration/initialValidationGate.js';
 import {
+  classifyInitialBootstrapMetadataFailureCode,
+  classifyInitialBootstrapYdbDataFailureCode,
   InitialBootstrapReferenceAwareRuntimeError,
   runInitialBootstrapReferenceAwareJobFromEnvironment,
   type InitialBootstrapMetadataFailureCode,
@@ -258,10 +260,12 @@ export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
 
     try {
       await retireStaleStaging(environment);
-    } catch {
+    } catch (retirementError) {
       throw new InitialBootstrapReferenceAwareRuntimeError(
         'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
         'RESUME_CONTEXT_READ',
+        classifyInitialBootstrapMetadataFailureCode(retirementError),
+        classifyInitialBootstrapYdbDataFailureCode(retirementError),
       );
     }
 

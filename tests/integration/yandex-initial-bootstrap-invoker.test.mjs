@@ -180,6 +180,29 @@ test('all structural manifest parser diagnostics are accepted only as enum-only 
   }
 });
 
+test('stale-retirement lifecycle diagnostics are accepted as enum-only metadata failures', async () => {
+  for (const metadataFailureCode of [
+    'MIGRATION_RUN_LIFECYCLE_RUN_NOT_FOUND_AFTER_TRANSITION',
+    'MIGRATION_RUN_LIFECYCLE_RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION',
+    'MIGRATION_RUN_LIFECYCLE_RUN_TRANSITION_EVIDENCE_MISMATCH',
+    'MIGRATION_RUN_PERSISTENCE_INVALID_LIFECYCLE_TRANSITION',
+    'MIGRATION_RUN_PERSISTENCE_RUN_IDENTITY_MISMATCH',
+    'MIGRATION_RUN_PERSISTENCE_RUN_IMMUTABLE_FIELDS_CHANGED',
+    'MIGRATION_RUN_PERSISTENCE_INVALID_FAILED_RUN',
+  ]) {
+    const value = {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
+      applicationPhase: 'RESUME_CONTEXT_READ',
+      metadataFailureCode,
+    };
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, value);
+  }
+});
+
 test('all YDB data diagnostics are accepted only as bounded enum-only runtime failures', async () => {
   const ordinaryCodes = [
     'YDB_TRANSPORT_SDK_SHAPE_INVALID',
