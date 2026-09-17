@@ -1,0 +1,51 @@
+name: R1 history workflow materializer
+
+on:
+  push:
+    branches:
+      - transport/r1-453-history-mirror-20260917
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize exact-main workflow blob
+        shell: bash
+        env:
+          SOURCE_SHA: c3e232909b04840d46eae6850ac6190a51d21f3a
+          EXPECTED_BLOB_SHA: 90d6b4f6136bf6427cf89c418e5d5173ebf2a18c
+        run: |
+          set -euo pipefail
+          if [ "$(git log -1 --format=%s)" = 'transport: materialize R1 history workflow' ]; then
+            echo 'TRANSPORT_ALREADY_MATERIALIZED'
+            exit 0
+          fi
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          worktree="$RUNNER_TEMP/r1-history-source"
+          git worktree add --detach "$worktree" "$SOURCE_SHA"
+          git -C "$worktree" apply "$GITHUB_WORKSPACE/.transport/r1-history-workflow.patch"
+          actual_blob="$(git -C "$worktree" hash-object .github/workflows/r1-initial-bootstrap-autocontinue.yml)"
+          if [ "$actual_blob" != "$EXPECTED_BLOB_SHA" ]; then
+            echo 'TRANSPORT_BLOB_SHA_MISMATCH'
+            exit 1
+          fi
+          mkdir -p .transport/materialized
+          cp "$worktree/.github/workflows/r1-initial-bootstrap-autocontinue.yml" \
+            .transport/materialized/r1-initial-bootstrap-autocontinue.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .transport/materialized/r1-initial-bootstrap-autocontinue.yml
+          if git diff --cached --quiet; then
+            echo 'TRANSPORT_ALREADY_CURRENT'
+            exit 0
+          fi
+          git commit -m 'transport: materialize R1 history workflow'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
