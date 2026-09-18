@@ -73,6 +73,7 @@ jobs:
           fi
           source_is_r1="$(jq -r '.title | startswith("R1 #453:")' <<<"$source_pr")"
           allow_staging_resume='false'
+          allow_stale_staging_retirement='false'
 
           if [ "$source_is_r1" = 'true' ]; then
             source_pr_number="$(jq -er '.number' <<<"$source_pr")"
@@ -136,9 +137,10 @@ jobs:
               exit 0
             fi
             recovery_state="$(jq -r '.recovery' <<<"$marker")"
-            if [ "$recovery_state" = 'STAGING_RESUMABLE' ] \
-              || [ "$recovery_state" = 'STAGING_STALE_RETIREABLE' ]; then
+            if [ "$recovery_state" = 'STAGING_RESUMABLE' ]; then
               allow_staging_resume='true'
+            elif [ "$recovery_state" = 'STAGING_STALE_RETIREABLE' ]; then
+              allow_stale_staging_retirement='true'
             fi
           fi
 
@@ -455,7 +457,8 @@ jobs:
 
           dispatch_payload="$(jq -cn \
             --arg resume "$allow_staging_resume" \
-            '{ref:"main", inputs:{allow_staging_resume:$resume}}')"
+            --arg stale "$allow_stale_staging_retirement" \
+            '{ref:"main", inputs:{allow_staging_resume:$resume, allow_stale_staging_retirement:$stale}}')"
           curl --fail --silent --show-error \
             --request POST \
             --header "$auth_header" \
