@@ -12,7 +12,9 @@ import {
   createYdbJsV6ParameterMapper,
 } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
+  initialBootstrapIdentityManifestClaimReadStatement,
   initialBootstrapIdentityManifestReadStatement,
+  parseInitialBootstrapIdentityManifestClaimRows,
   parseInitialBootstrapIdentityManifestRows,
 } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 
@@ -30,6 +32,13 @@ const EXPECTED_COLUMNS = Object.freeze([
   'run_snapshot_digest',
   'snapshot_digest',
   'snapshot_row_count',
+]);
+
+const CLAIM_EXPECTED_COLUMNS = Object.freeze([
+  'source_snapshot_id',
+  'source_snapshot_digest',
+  'binding_count',
+  'bindings',
 ]);
 
 function resultSetFixture() {
@@ -55,6 +64,31 @@ function resultSetFixture() {
 
   return create(ResultSetSchema, {
     columns: EXPECTED_COLUMNS.map((name, index) => ({
+      name,
+      type: values[index].type.encode(),
+    })),
+    rows: [{ items: values.map((value) => value.encode()) }],
+  });
+}
+
+function claimResultSetFixture() {
+  const values = [
+    new primitive.Uuid(SNAPSHOT_ID),
+    new primitive.Utf8(SNAPSHOT_DIGEST),
+    new primitive.Uint64(1n),
+    new primitive.JsonDocument(JSON.stringify({
+      schema_version: 1,
+      bindings: [{
+        source_ordinal: 0,
+        row_hint: 2,
+        row_digest: 'fixture-row-digest',
+        source_record_id: SOURCE_RECORD_ID,
+        transaction_id: null,
+      }],
+    })),
+  ];
+  return create(ResultSetSchema, {
+    columns: CLAIM_EXPECTED_COLUMNS.map((name, index) => ({
       name,
       type: values[index].type.encode(),
     })),
@@ -109,6 +143,32 @@ function fixtureDriver(resultSet) {
     },
   };
 }
+
+test('fresh-claim identity-manifest readback uses the pinned SDK decoder without cross-table joins', async () => {
+  const statement = initialBootstrapIdentityManifestClaimReadStatement(MIGRATION_RUN_ID);
+  assert.doesNotMatch(statement.text, /\bJOIN\b|migration_runs|source_snapshots/);
+  for (const column of CLAIM_EXPECTED_COLUMNS) {
+    assert.match(statement.text, new RegExp(`\\b${column}\\b`));
+  }
+
+  const rawSql = query(fixtureDriver(claimResultSetFixture()), { poolOptions: { maxSize: 1 } });
+  const mapper = createYdbJsV6ParameterMapper(Object.freeze({ ...primitive, Optional }));
+  const transport = createYdbJsV6DataTransport(rawSql, mapper);
+
+  try {
+    const result = await transport.executeRead(statement);
+    assert.equal(result.rows.length, 1);
+    assert.deepEqual(Object.keys(result.rows[0]), CLAIM_EXPECTED_COLUMNS);
+    const manifest = parseInitialBootstrapIdentityManifestClaimRows(MIGRATION_RUN_ID, result.rows);
+    assert.equal(manifest.migrationRunId, MIGRATION_RUN_ID);
+    assert.equal(manifest.sourceSnapshotId, SNAPSHOT_ID);
+    assert.equal(manifest.sourceSnapshotDigest, SNAPSHOT_DIGEST);
+    assert.equal(manifest.bindings.length, 1);
+    assert.equal(manifest.bindings[0].sourceRecordId, SOURCE_RECORD_ID);
+  } finally {
+    await rawSql[Symbol.asyncDispose]();
+  }
+});
 
 test('pinned YDB SDK ResultSet preserves every identity-manifest alias through the real decoder seam', async () => {
   const statement = initialBootstrapIdentityManifestReadStatement(MIGRATION_RUN_ID);
