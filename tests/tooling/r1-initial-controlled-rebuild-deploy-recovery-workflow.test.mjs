@@ -27,7 +27,7 @@ test('deploy recovery binds the exact failed pre-invoke run and WU7 authority', 
   assert.match(workflow, /Blind-Replay: FORBIDDEN/);
   assert.match(workflow, /Deploy initial-controlled-rebuild-only Function version/);
   assert.match(workflow, /conclusion == "failure"/);
-  assert.match(workflow, /Invoke exact controlled rebuild tag once/);
+  assert.match(workflow, /Start exact controlled rebuild tag asynchronously once/);
   assert.match(workflow, /conclusion == "skipped"/);
   assert.match(workflow, /FAILED_RUN_SHA: \$\{\{ inputs\.failed_run_sha \}\}/);
   assert.match(workflow, /\.head_sha == \$failed_sha/);
