@@ -474,7 +474,7 @@ function exactRunPayloadRevisionEvidenceStatement(
   const predicates = expected.map((revision, index) => {
     const parameterName = `source_record_id_${index}`;
     parameters[parameterName] = uuidParameter(revision.binding.sourceRecordId);
-    return `source_record_id = ${parameterName}`;
+    return `source_record_id = $${parameterName}`;
   });
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
