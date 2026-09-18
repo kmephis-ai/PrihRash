@@ -204,7 +204,7 @@ function exactPayloadReadStatement(
   const predicates = revisions.map((revision, index) => {
     const parameterName = `source_record_id_${index}`;
     parameters[parameterName] = uuidParameter(revision.sourceRecordId);
-    return `source_record_id = ${parameterName}`;
+    return `source_record_id = $${parameterName}`;
   });
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
