@@ -278,6 +278,20 @@ FAIL / INITIAL_BOOTSTRAP_INVOKE_OUTPUT_INVALID
 
 Live orchestrator `35305575877` на exact `b278522948cd286f1d455c810291719890c84c8e` доказал новую границу: fresh readiness завершился `READINESS_READY`, единственный bootstrap child достиг invoke и остановился privacy-safe как `INITIAL_BOOTSTRAP_INVOKE_FAILED`, после чего встроенная read-only recovery достигла собственного execution envelope и вернула `INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`. One-shot write authority на этом SHA считается consumed; никакой replay этим evidence не разрешён. Для восстановления диагностической наблюдаемости staging revision diagnostic больше не читает manifest bindings placeholder-пачками по 50 keys: после manifest read выполняется один exact run-scoped revision read и максимум один typed `List<Struct>` / `AS_TABLE($source_keys)` collision read. Это read-only performance correction, не расширение provider/write authority.
 
+Следующий authorized resume orchestrator `35311546126` на exact
+`13c2dea8ee7a7ad63f89570aa5f65bf0ec2511fd` повторно доказал до invoke
+`STAGING_RUN_PRESENT / COMPLETE_CURRENT_RUN_ONLY / STALE_STAGING_CURRENT_STATE_EMPTY` и
+`READINESS_READY`, но единственный bootstrap child `35311729347` завершился новой safe
+provider signature `INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED / HTTP_502 / PRESENT`. Post-invoke
+read-only recovery снова доказал тот же complete resumable STAGING без verified current writes.
+Поскольку raw HTTPS invocation при нормальном handler return должна завершаться HTTP 200, а package
+wrapper уже sanitizes module-load/handler exceptions, этот evidence локализует следующий риск в
+process/runtime-level failure до `VALIDATION_TRANSITION_WRITE`. Resume path поэтому освобождает
+no-longer-needed Google lease, projected reference rows и reference plan сразу после доказанного
+zero-reference-write gate и до application resume. Это memory-lifetime correction: financial
+semantics, write set, caps, retries и provider authority не меняются.
+
+
 `VALIDATION_BLOCKED` может вернуть только allowlisted blocker taxonomy и optional allowlisted reconciliation check. `RECOVERY_REQUIRED` возвращает только allowlisted recovery reason. Run IDs, source IDs, row counts, amounts, raw payload, descriptions, provider exception text и credentials наружу не возвращаются.
 
 `BASELINE_EXISTS` — безопасный NOOP, но **не** доказательство, что этот workflow выполнил первый bootstrap; invoker завершает его non-zero.
