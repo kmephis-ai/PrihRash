@@ -94,7 +94,8 @@ Function должна быть:
 - logging disabled;
 - runtime `nodejs22`;
 - memory `256m`;
-- execution timeout `150s`;
+- write-capable bootstrap version: execution timeout `600s`;
+- read-only recovery version: execution timeout `150s`;
 - write-capable entrypoint `index.initialBootstrapHandler` только в bootstrap version;
 - read-only entrypoint `index.initialBootstrapRecoveryHandler` только в recovery version.
 
