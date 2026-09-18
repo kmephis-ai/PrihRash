@@ -239,6 +239,14 @@ function statementRows(statement, state) {
     const snapshot = state.sourceSnapshots.get(parameter(statement, 'id'));
     return snapshot === undefined ? [] : [{ ...snapshot }];
   }
+  if (text.includes('INNER JOIN AS_TABLE($source_keys) AS k')) {
+    const sourceKeys = statement.parameters.source_keys;
+    if (sourceKeys?.type !== 'ListStruct') throw new Error('synthetic source_keys shape invalid');
+    const ids = new Set(sourceKeys.value.rows.map((row) => row.source_record_id.value));
+    return [...state.revisions.values()].filter(
+      (revision) => revision.revision === 1n && ids.has(revision.source_record_id),
+    );
+  }
   if (text.includes('FROM source_record_revisions') && text.includes('migration_run_id = $migration_run_id')) {
     const runId = parameter(statement, 'migration_run_id');
     return [...state.revisions.values()].filter((revision) => revision.migration_run_id === runId);
