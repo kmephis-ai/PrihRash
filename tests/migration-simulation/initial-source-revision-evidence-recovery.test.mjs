@@ -5,7 +5,6 @@ import {
   InitialSourceRevisionEvidenceRecoveryError,
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
-import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
 import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initialSourceLineagePersistence.js';
 import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
@@ -105,10 +104,12 @@ test('restart after partial revision evidence separates run-scoped payload verif
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
 
   assert.match(statements[1].text, /raw_payload/);
+  assert.match(statements[1].text, /source_record_id >= \$source_record_id_from/);
+  assert.match(statements[1].text, /source_record_id <= \$source_record_id_to/);
   assert.match(statements[1].text, /migration_run_id = \$migration_run_id/);
-  assert.match(statements[1].text, /source_record_id = \$source_record_id_0/);
-  assert.doesNotMatch(statements[1].text, /AS_TABLE/);
-  assert.equal(statements[1].parameters.source_record_id_0.value, SOURCE_ID_1);
+  assert.doesNotMatch(statements[1].text, /AS_TABLE|source_record_id_\d+/);
+  assert.equal(statements[1].parameters.source_record_id_from.value, SOURCE_ID_1);
+  assert.equal(statements[1].parameters.source_record_id_to.value, SOURCE_ID_1);
 
   assert.match(statements[2].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
   assert.doesNotMatch(statements[2].text, /raw_payload/);
@@ -192,23 +193,22 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('large current-run payload verification is bounded by response and query bytes without AS_TABLE', async () => {
+test('large current-run payload verification uses constant-size PK ranges bounded by response bytes', async () => {
   const expected = Array.from({ length: 1_000 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
     `synthetic-row-${index + 1}`,
     `Synthetic ${index + 1} ${'x'.repeat(1024)}`,
   ));
-  const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
   const statements = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
       if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
-      const ids = Object.entries(statement.parameters)
-        .filter(([name]) => name.startsWith('source_record_id_'))
-        .sort(([left], [right]) => Number(left.split('_').at(-1)) - Number(right.split('_').at(-1)))
-        .map(([, parameter]) => parameter.value);
-      return ids.map((id) => providerRow(byId.get(id)));
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      return expected
+        .filter((item) => item.sourceRecordId >= from && item.sourceRecordId <= to)
+        .map(providerRow);
     }, (statement) => statements.push(statement)),
     expected,
   );
@@ -219,20 +219,21 @@ test('large current-run payload verification is bounded by response and query by
 
   const payloadReads = statements.slice(1);
   assert.equal(payloadReads.length > 1, true);
+  assert.equal(payloadReads.length < 10, true);
+  assert.equal(new Set(payloadReads.map((statement) => statement.text)).size, 1);
   assert.equal(payloadReads.every((statement) => (
     statement.parameters.migration_run_id.value === RUN_ID
     && /raw_payload/.test(statement.text)
-    && !/AS_TABLE/.test(statement.text)
-    && /source_record_id = \$source_record_id_0/.test(statement.text)
-    && new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
+    && /source_record_id >= \$source_record_id_from/.test(statement.text)
+    && /source_record_id <= \$source_record_id_to/.test(statement.text)
+    && !/AS_TABLE|source_record_id_\d+/.test(statement.text)
+    && Object.keys(statement.parameters).sort().join(',') ===
+      'migration_run_id,revision,source_record_id_from,source_record_id_to'
   )), true);
+  assert.equal(payloadReads[0].parameters.source_record_id_from.value, expected[0].sourceRecordId);
   assert.equal(
-    payloadReads.reduce(
-      (total, statement) => total + Object.keys(statement.parameters)
-        .filter((name) => name.startsWith('source_record_id_')).length,
-      0,
-    ),
-    expected.length,
+    payloadReads.at(-1).parameters.source_record_id_to.value,
+    expected.at(-1).sourceRecordId,
   );
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId).sort());
   assert.deepEqual(resume.missingRevisions, []);

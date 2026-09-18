@@ -240,6 +240,30 @@ only that one STAGING run is durably present; it does not prove whether that run
 stale-retireable. The next bounded action is therefore one full read-only recovery on a successor
 exact SHA using the `STAGING_PRESENT_UNCLASSIFIED` marker above.
 
+### Full recovery timeout after surface-only STAGING classification on `7579f2cc795327b7b3a1efa554fa681ff8e4c23d`
+
+Surface-only recovery `35345833061` had already proved
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. Successor #624 then dispatched the normal full
+read-only recovery `35351802811` on exact current main. All repository, OIDC, provider-boundary,
+private trigger-free deployment and exact-main checks passed, but the single recovery invoke ended
+after the existing bounded recovery window with
+`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`. No write-capable workflow was armed or invoked.
+
+The remaining timeout is localized to the Google-aware/per-revision diagnostic path. After #619,
+both exact recovery and application resume verified current-run `raw_payload` with scalar
+`source_record_id = ... OR ...` predicates. The 8 KiB query-text envelope therefore forced a
+large current run into many sequential YDB reads even though each response remained far below the
+existing 512 KiB payload-memory envelope.
+
+The bounded correction keeps exact payload/metadata equality and the existing 512 KiB response
+envelope, but replaces per-id OR predicates in both recovery and application resume with constant-size
+primary-key range reads over canonical `source_record_revisions(source_record_id, revision)`.
+Expected source IDs are sorted and split only by estimated response bytes. The query retains exact
+`revision=1` and `migration_run_id` predicates; unexpected, missing, duplicate or mismatched
+evidence remains fail-closed. No timeout, memory, cap, financial semantics, cleanup or write
+authority is widened. The successor remains diagnostic-only until a fresh full recovery returns
+enum-only staging evidence.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

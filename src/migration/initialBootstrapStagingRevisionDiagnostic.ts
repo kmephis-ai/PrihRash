@@ -5,7 +5,6 @@ import {
   uint64Parameter,
   uuidParameter,
   type YdbListStructColumn,
-  type YdbParameter,
 } from '../integration/ydb/parameters.js';
 import type { RawPayload } from './rawPayloadDecoder.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
@@ -122,7 +121,6 @@ const SOURCE_KEY_COLUMNS = Object.freeze([
 
 const TEXT_ENCODER = new TextEncoder();
 const EXACT_REVISION_READ_BATCH_BYTES_LIMIT = 512 * 1024;
-const EXACT_REVISION_READ_QUERY_BYTES_LIMIT = 8 * 1024;
 const EXACT_REVISION_READ_FIXED_ROW_BYTES = 256;
 
 function normalizedUuid(value: unknown): string | null {
@@ -463,55 +461,53 @@ function estimatedExactRevisionReadBytes(expected: Readonly<ExactExpectedRevisio
     + TEXT_ENCODER.encode(expected.rawPayload).byteLength;
 }
 
-function exactRunPayloadRevisionEvidenceStatement(
+function exactRunPayloadRevisionRangeStatement(
   migrationRunId: string,
   expected: readonly Readonly<ExactExpectedRevision>[],
 ) {
-  const parameters: Record<string, YdbParameter> = {
-    revision: uint64Parameter(1),
-    migration_run_id: uuidParameter(migrationRunId),
-  };
-  const predicates = expected.map((revision, index) => {
-    const parameterName = `source_record_id_${index}`;
-    parameters[parameterName] = uuidParameter(revision.binding.sourceRecordId);
-    return `source_record_id = $${parameterName}`;
-  });
+  const first = expected[0];
+  const last = expected.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new Error('EMPTY_EXACT_REVISION_RANGE');
+  }
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions '
-      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
-      + `AND (${predicates.join(' OR ')})`,
-    parameters,
+      + 'WHERE source_record_id >= $source_record_id_from '
+      + 'AND source_record_id <= $source_record_id_to '
+      + 'AND revision = $revision AND migration_run_id = $migration_run_id',
+    {
+      source_record_id_from: uuidParameter(first.binding.sourceRecordId),
+      source_record_id_to: uuidParameter(last.binding.sourceRecordId),
+      revision: uint64Parameter(1),
+      migration_run_id: uuidParameter(migrationRunId),
+    },
   );
 }
 
 function planExactRevisionReadBatches(
-  migrationRunId: string,
   expected: readonly Readonly<ExactExpectedRevision>[],
 ): readonly (readonly Readonly<ExactExpectedRevision>[])[] {
+  const sorted = [...expected].sort((left, right) => {
+    const leftId = left.binding.sourceRecordId;
+    const rightId = right.binding.sourceRecordId;
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
   const batches: Readonly<ExactExpectedRevision>[][] = [];
   let current: Readonly<ExactExpectedRevision>[] = [];
   let currentBytes = 0;
-  for (const revision of expected) {
+  for (const revision of sorted) {
     const estimatedBytes = estimatedExactRevisionReadBytes(revision);
-    const candidate = [...current, revision];
-    const candidateQueryBytes = TEXT_ENCODER.encode(
-      exactRunPayloadRevisionEvidenceStatement(migrationRunId, candidate).text,
-    ).byteLength;
     if (
       current.length > 0
-      && (
-        currentBytes + estimatedBytes > EXACT_REVISION_READ_BATCH_BYTES_LIMIT
-        || candidateQueryBytes > EXACT_REVISION_READ_QUERY_BYTES_LIMIT
-      )
+      && currentBytes + estimatedBytes > EXACT_REVISION_READ_BATCH_BYTES_LIMIT
     ) {
       batches.push(current);
-      current = [revision];
-      currentBytes = estimatedBytes;
-      continue;
+      current = [];
+      currentBytes = 0;
     }
-    current = candidate;
+    current.push(revision);
     currentBytes += estimatedBytes;
   }
   if (current.length > 0) batches.push(current);
@@ -631,9 +627,9 @@ export async function diagnoseInitialBootstrapStagingExactRevisionEvidence(
     expectedRevisions.map((revision) => [revision.binding.sourceRecordId, revision]),
   );
   const seen = new Set<string>();
-  for (const batch of planExactRevisionReadBatches(parsed.manifest.migrationRunId, expectedRevisions)) {
+  for (const batch of planExactRevisionReadBatches(expectedRevisions)) {
     const result = await reader.read<ExistingRevisionEvidenceRow>(
-      exactRunPayloadRevisionEvidenceStatement(parsed.manifest.migrationRunId, batch),
+      exactRunPayloadRevisionRangeStatement(parsed.manifest.migrationRunId, batch),
     );
     const finding = inspectExactRevisionRows(result.rows, parsed.manifest, expected, seen);
     if (finding !== null) return finding;
