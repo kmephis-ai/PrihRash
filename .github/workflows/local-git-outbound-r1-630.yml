@@ -1,4 +1,4 @@
-name: R1 WU7 Readiness Control
+name: R1 WU7 Controlled Rebuild Control
 
 on:
   push:
@@ -13,20 +13,21 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-readiness-control
+  group: r1-wu7-controlled-rebuild-control
   cancel-in-progress: false
 
 jobs:
-  dispatch-readiness:
+  dispatch-controlled-rebuild:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch fresh exact-main readiness
+      - name: Dispatch exactly one authorized controlled rebuild
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: 002639d0d1365588aefb913a6faaf581153b9084
-          RECOVERY_RUN_ID: "35378945869"
           TRACKING_ISSUE: "630"
+          RECOVERY_RUN_ID: "35378945869"
+          READINESS_RUN_ID: "35380903652"
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
@@ -43,6 +44,7 @@ jobs:
             .state == "open"
             and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
             and (.body | contains("Google-Authority: PRESERVED"))
             and (.body | contains("Cap-Increase: FORBIDDEN"))
             and (.body | contains("Timer-Cutover: FORBIDDEN"))
@@ -59,6 +61,16 @@ jobs:
             and .conclusion == "success"
           ' /tmp/recovery.json >/dev/null
 
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$READINESS_RUN_ID" -o /tmp/readiness.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            .name == "R1 Yandex readiness"
+            and .head_sha == $sha
+            and .head_branch == "main"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "success"
+          ' /tmp/readiness.json >/dev/null
+
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
             [.workflow_runs[]
@@ -72,6 +84,8 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-yandex-readiness.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main"}')"
+          payload="$(jq -n             --arg ref "main"             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg recovery "$RECOVERY_RUN_ID"             --arg readiness "$READINESS_RUN_ID"             '{ref:$ref,inputs:{tracking_issue:$issue,expected_main_sha:$sha,recovery_run_id:$recovery,readiness_run_id:$readiness}}')"
+
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
-          echo "R1_WU7_READINESS_DISPATCHED"
+          echo "R1_WU7_CONTROLLED_REBUILD_DISPATCHED"
