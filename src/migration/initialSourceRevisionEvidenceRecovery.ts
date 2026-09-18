@@ -5,12 +5,8 @@ import {
   uint64Parameter,
   uuidParameter,
   type YdbListStructColumn,
-  type YdbParameter,
 } from '../integration/ydb/parameters.js';
-import {
-  PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT,
-  PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
-} from './atomicPromotion.js';
+import { PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT } from './atomicPromotion.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
 
@@ -193,56 +189,52 @@ function estimatedRevisionReadBytes(
     + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
 }
 
-function exactPayloadReadStatement(
+function exactPayloadRangeReadStatement(
   runId: string,
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ) {
-  const parameters: Record<string, YdbParameter> = {
-    revision: uint64Parameter(1),
-    migration_run_id: uuidParameter(runId),
-  };
-  const predicates = revisions.map((revision, index) => {
-    const parameterName = `source_record_id_${index}`;
-    parameters[parameterName] = uuidParameter(revision.sourceRecordId);
-    return `source_record_id = $${parameterName}`;
-  });
+  const first = revisions[0];
+  const last = revisions.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
+  }
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions '
-      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
-      + `AND (${predicates.join(' OR ')})`,
-    parameters,
+      + 'WHERE source_record_id >= $source_record_id_from '
+      + 'AND source_record_id <= $source_record_id_to '
+      + 'AND revision = $revision AND migration_run_id = $migration_run_id',
+    {
+      source_record_id_from: uuidParameter(first.sourceRecordId),
+      source_record_id_to: uuidParameter(last.sourceRecordId),
+      revision: uint64Parameter(1),
+      migration_run_id: uuidParameter(runId),
+    },
   );
 }
 
 function planRevisionReadBatches(
-  runId: string,
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
+  const sorted = [...revisions].sort((left, right) => (
+    left.sourceRecordId.toLowerCase().localeCompare(right.sourceRecordId.toLowerCase())
+  ));
   const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
   let current: Readonly<InitialSourceRecordRevisionProjection>[] = [];
   let currentBytes = 0;
 
-  for (const revision of revisions) {
+  for (const revision of sorted) {
     const estimatedBytes = estimatedRevisionReadBytes(revision);
-    const candidate = [...current, revision];
-    const candidateQueryBytes = TEXT_ENCODER.encode(
-      exactPayloadReadStatement(runId, candidate).text,
-    ).byteLength;
     if (
       current.length > 0
-      && (
-        currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
-        || candidateQueryBytes > PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
-      )
+      && currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
     ) {
       batches.push(current);
-      current = [revision];
-      currentBytes = estimatedBytes;
-      continue;
+      current = [];
+      currentBytes = 0;
     }
-    current = candidate;
+    current.push(revision);
     currentBytes += estimatedBytes;
   }
   if (current.length > 0) batches.push(current);
@@ -299,16 +291,16 @@ export async function planInitialSourceRevisionEvidenceResume(
   );
   validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
 
-  // Exact payload equality remains mandatory, but current-run rows are verified
-  // through scalar run-scoped predicates instead of the AS_TABLE join seam. Batches are
-  // bounded by both the calibrated response-memory envelope and the query-text envelope.
+  // Exact payload equality remains mandatory. Current-run rows are verified through
+  // constant-size primary-key range reads instead of AS_TABLE or per-id OR predicates.
+  // Batches remain bounded by the calibrated response-memory envelope.
   const existingRevisions = expectedRevisions.filter(
     (revision) => existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
   );
   const payloadVerifiedSourceIds = new Set<string>();
-  for (const batch of planRevisionReadBatches(expected.runId, existingRevisions)) {
+  for (const batch of planRevisionReadBatches(existingRevisions)) {
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
-      exactPayloadReadStatement(expected.runId, batch),
+      exactPayloadRangeReadStatement(expected.runId, batch),
     );
     validateRevisionRows(payloadResult.rows, expected, payloadVerifiedSourceIds, true);
   }
