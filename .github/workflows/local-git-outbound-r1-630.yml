@@ -1,4 +1,4 @@
-name: R1 WU7 Deploy Outcome Diagnostic
+name: R1 WU7 Deploy Recovery Control
 
 on:
   push:
@@ -9,51 +9,42 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   issues: read
-  id-token: write
 
 concurrency:
-  group: r1-wu7-deploy-outcome-diagnostic
+  group: r1-wu7-deploy-recovery-control
   cancel-in-progress: false
 
 jobs:
-  classify:
+  dispatch:
     runs-on: ubuntu-latest
-    env:
-      FUNCTION_NAME: prihrash-r1-initial-bootstrap
-      EXPECTED_MAIN_SHA: 002639d0d1365588aefb913a6faaf581153b9084
-      FAILED_RUN_ID: "35381112689"
-      TARGET_TAG: r1-initial-controlled-rebuild
-      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
-      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
-      OIDC_AUDIENCE: https://github.com/kmephis-ai
-      OIDC_ISSUER: https://token.actions.githubusercontent.com
-      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
     steps:
-      - name: Verify exact read-only recovery boundary
+      - name: Dispatch exact-main read-only deploy recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: b5fdd9b28e212245f635fc3547366289ba0893f9
+          TRACKING_ISSUE: "630"
+          FAILED_RUN_ID: "35381112689"
         run: |
           set -euo pipefail
-          test -n "$YC_FOLDER_ID"
-          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
           auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 
           curl --fail --silent --show-error "${auth[@]}" "$api/branches/main" -o /tmp/main.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha' /tmp/main.json >/dev/null
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' /tmp/main.json >/dev/null
 
-          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$FAILED_RUN_ID" -o /tmp/failed.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
-            .name == "R1 initial controlled rebuild"
-            and .head_sha == $sha
-            and .head_branch == "main"
-            and .event == "workflow_dispatch"
-            and .status == "completed"
-            and .conclusion == "failure"
-          ' /tmp/failed.json >/dev/null
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o /tmp/ci.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.workflow_runs | any(.head_sha == $sha and .conclusion == "success")' /tmp/ci.json >/dev/null
+
+          curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
+          jq -e '
+            .state == "open"
+            and (.title | startswith("R1 WU7:"))
+            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Blind-Replay: FORBIDDEN"))
+          ' /tmp/issue.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -68,80 +59,7 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-      - name: Install Yandex Cloud CLI
-        shell: bash
-        run: |
-          set -euo pipefail
-          install_dir="$RUNNER_TEMP/yc"
-          mkdir -p "$install_dir"
-          curl --fail --silent --show-error --location             https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz             --output "$RUNNER_TEMP/yc.tar.gz"
-          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
-          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
-          test -n "$yc_bin"
-          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
-          "$yc_bin" version >/dev/null
-
-      - name: Exchange OIDC for short-lived read-only Yandex token
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp="$RUNNER_TEMP/r1-wu7-deploy-diagnostic-auth"
-          mkdir -p "$tmp"
-          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
-
-          oidc_status="$(curl --silent --show-error --output "$tmp/oidc.json" --write-out '%{http_code}'             --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}"             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}")"
-          case "$oidc_status" in 2??) ;; *) echo 'WU7_DEPLOY_DIAGNOSTIC_OIDC_FAILED'; exit 1;; esac
-          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
-          echo "::add-mask::${oidc_token}"
-
-          token_payload="${oidc_token#*.}"; token_payload="${token_payload%%.*}"
-          token_payload="${token_payload//-/+}"; token_payload="${token_payload//_/\/}"
-          case "$((${#token_payload} % 4))" in 0) ;; 2) token_payload="${token_payload}==" ;; 3) token_payload="${token_payload}=" ;; *) exit 1;; esac
-          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json"
-          jq -e --arg iss "$OIDC_ISSUER" --arg aud "$OIDC_AUDIENCE" --arg sub "$OIDC_SUBJECT" '
-            .iss == $iss and ((.aud == $aud) or ((.aud|type)=="array" and (.aud|length)==1 and .aud[0]==$aud)) and .sub == $sub
-          ' "$tmp/claims.json" >/dev/null
-
-          iam_status="$(curl --silent --show-error --output "$tmp/iam.json" --write-out '%{http_code}'             --request POST https://auth.yandex.cloud/oauth/token             --header 'Content-Type: application/x-www-form-urlencoded'             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange'             --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token'             --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}"             --data-urlencode "subject_token=${oidc_token}"             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token')"
-          case "$iam_status" in 2??) ;; *) echo 'WU7_DEPLOY_DIAGNOSTIC_WIF_FAILED'; exit 1;; esac
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
-          echo "::add-mask::${iam_token}"
-          echo "YC_IAM_TOKEN=$iam_token" >> "$GITHUB_ENV"
-
-      - name: Classify controlled rebuild Function-version create outcome read-only
-        shell: bash
-        run: |
-          set -euo pipefail
-          tmp="$RUNNER_TEMP/r1-wu7-deploy-outcome"
-          mkdir -p "$tmp"
-
-          if ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID"             --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
-            echo 'WU7_DEPLOY_OUTCOME=RECOVERY_REQUIRED'
-            echo 'WU7_DEPLOY_REASON=FUNCTION_READ_FAILED'
-            exit 1
-          fi
-          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
-          echo "::add-mask::${function_id}"
-
-          if ! yc serverless function version list --function-id "$function_id"             --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err"; then
-            echo 'WU7_DEPLOY_OUTCOME=RECOVERY_REQUIRED'
-            echo 'WU7_DEPLOY_REASON=VERSION_LIST_FAILED'
-            exit 1
-          fi
-
-          matching="$(jq --arg tag "$TARGET_TAG" '
-            [.[]? | select(([.. | strings] | index($tag)) != null)] | length
-          ' "$tmp/versions.json")"
-          case "$matching" in
-            0)
-              echo 'WU7_DEPLOY_OUTCOME=NOT_APPLIED'
-              ;;
-            1)
-              echo 'WU7_DEPLOY_OUTCOME=APPLIED'
-              ;;
-            *)
-              echo 'WU7_DEPLOY_OUTCOME=RECOVERY_REQUIRED'
-              echo 'WU7_DEPLOY_REASON=TAG_MATCH_AMBIGUOUS'
-              exit 1
-              ;;
-          esac
+          payload="$(jq -n             --arg ref "main"             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg failed "$FAILED_RUN_ID"             '{ref:$ref,inputs:{tracking_issue:$issue,expected_main_sha:$sha,failed_run_id:$failed}}')"
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
+          test "$code" = "204"
+          echo "R1_WU7_DEPLOY_RECOVERY_DISPATCHED"
