@@ -41,6 +41,9 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /--source-path \.artifacts\/yandex-initial-controlled-rebuild-function/);
   assert.match(workflow, /--tags r1-initial-controlled-rebuild/);
   assert.match(workflow, /--execution-timeout 600s/);
+  assert.match(workflow, /--async-max-retries 0/);
+  assert.match(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_PUBLIC/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_TRIGGER_PRESENT/);
