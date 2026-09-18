@@ -16,6 +16,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /allow_staging_resume:/);
+  assert.match(workflow, /allow_stale_staging_retirement:/);
   assert.match(workflow, /default: 'false'/);
   assert.doesNotMatch(workflow, /\n\s+(push|pull_request|schedule|repository_dispatch|workflow_run):/);
   assert.match(workflow, /github\.repository == 'kmephis-ai\/PrihRash'/);
@@ -55,7 +56,12 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STALE_RETIREMENT_FRESH_BOOTSTRAP_ARMED/);
   assert.match(workflow, /STAGING_RUN_PRESENT/);
   assert.match(workflow, /inputs\.allow_staging_resume/);
+  assert.match(workflow, /inputs\.allow_stale_staging_retirement/);
+  assert.match(workflow, /COMPLETE_CURRENT_RUN_ONLY/);
+  assert.match(workflow, /AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STALE_STAGING_RETIREMENT_ARMED/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_AUTHORITY_AMBIGUOUS/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED/);
   assert.match(workflow, /r1-bootstrap-orchestrator-child-workflow\.mjs readiness/);
   assert.match(workflow, /\.code == "READINESS_READY"/);
@@ -104,6 +110,7 @@ test('orchestrator publishes one retained privacy-safe evidence artifact includi
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED/);
   assert.match(workflow, /stagingResumeAuthorized/);
+  assert.match(workflow, /staleStagingRetirementAuthorized/);
   assert.match(workflow, /retention-days: 30/);
   assert.doesNotMatch(workflow, /rawPayload|row_count|amount|notes/i);
 });
