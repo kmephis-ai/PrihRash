@@ -36,6 +36,8 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /head\.repo\.full_name == \$repo/);
   assert.match(workflow, /startswith\("R1 #453:"\)/);
   assert.match(workflow, /Provider-Attempt: READY/);
+  assert.match(workflow, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(workflow, /Recovery-Probe: READY/);
   assert.match(workflow, /Observed-Signature:/);
   assert.match(workflow, /Expected-Transition:/);
   assert.match(workflow, /Recovery-State:/);
@@ -75,11 +77,16 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /any\(\.head_sha == \$sha\)/);
   assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
+  assert.match(workflow, /r1-initial-bootstrap-recovery\.yml\/dispatches/);
+  assert.match(workflow, /allow_diagnostic_probe/);
+  assert.match(workflow, /RECOVERY_PROBE_ALREADY_DISPATCHED/);
+  assert.match(workflow, /RECOVERY_PROBE_DISPATCHED/);
   assert.match(workflow, /allow_staging_resume/);
   assert.match(workflow, /allow_stale_staging_retirement/);
   assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
+  assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
 });
 
 test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery states distinct', async () => {
