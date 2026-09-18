@@ -152,6 +152,7 @@ function safeTransportClass(stderr) {
     [/(resource(?:[_ ]?exhausted)|too many requests|rate limit|\b429\b)/, 'RATE_LIMIT'],
     [/(deadline(?:[_ ]?exceeded)|context deadline|timed out|timeout|\b504\b)/, 'DEADLINE'],
     [/(unavailable|service unavailable|connection refused|connection reset|network is unreachable|temporary failure|\b503\b)/, 'UNAVAILABLE'],
+    [/(bad gateway|x-function-error|\b502\b)/, 'FUNCTION_ERROR'],
     [/(invalid(?:[_ ]?argument)|unknown flag|usage:)/, 'INVALID_REQUEST'],
     [/(failed(?:[_ ]?precondition))/, 'FAILED_PRECONDITION'],
     [/(internal error|\binternal\b)/, 'INTERNAL'],

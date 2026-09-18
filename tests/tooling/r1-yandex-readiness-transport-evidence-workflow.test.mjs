@@ -18,7 +18,7 @@ test('readiness artifact allows only enum-only transport classification for uncl
   assert.match(workflow, /\.transportClass \| type\) == "string"/);
   assert.match(
     workflow,
-    /\^\(EMPTY\|AUTH\|NOT_FOUND\|RATE_LIMIT\|DEADLINE\|UNAVAILABLE\|INVALID_REQUEST\|FAILED_PRECONDITION\|INTERNAL\|OTHER\)\$/,
+    /\^\(EMPTY\|AUTH\|NOT_FOUND\|RATE_LIMIT\|DEADLINE\|UNAVAILABLE\|FUNCTION_ERROR\|INVALID_REQUEST\|FAILED_PRECONDITION\|INTERNAL\|OTHER\)\$/,
   );
   assert.match(workflow, /then \{status, code, outputShape, transportClass\}/);
   assert.doesNotMatch(workflow, /then \{status, code, outputShape, transportClass, stderr\}/);

@@ -89,6 +89,15 @@ process.exit(17);
   assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'AUTH');
 });
 
+test('GitHub Actions evidence classifies function 502 stderr without publishing text', async () => {
+  const result = await runInvoker(`
+process.stderr.write('HTTP 502 Bad Gateway X-Function-Error: true details=${PRIVATE_LOOKING}');
+process.exit(17);
+`);
+
+  assertSafeShape(result, 'STDOUT_EMPTY__STDERR_TEXT', 'FUNCTION_ERROR');
+});
+
 test('GitHub Actions evidence classifies deadline transport stderr without publishing text', async () => {
   const result = await runInvoker(`
 process.stderr.write('rpc error: code = DeadlineExceeded details=${PRIVATE_LOOKING}');
