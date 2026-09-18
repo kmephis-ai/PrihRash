@@ -219,6 +219,7 @@ test('recovery job sanitizes stale retirement current-state diagnostic failure',
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
     stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH',
   });
 });
 
