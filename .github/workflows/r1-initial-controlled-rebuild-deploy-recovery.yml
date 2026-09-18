@@ -1,0 +1,274 @@
+name: R1 initial controlled rebuild deploy recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      tracking_issue:
+        description: Open R1 WU7 authority Issue number
+        required: true
+        type: string
+      expected_main_sha:
+        description: Exact main SHA of the failed controlled rebuild attempt
+        required: true
+        type: string
+      failed_run_id:
+        description: Exact failed R1 initial controlled rebuild run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: r1-initial-controlled-rebuild-deploy-recovery
+  cancel-in-progress: false
+
+jobs:
+  deploy-recovery:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      TARGET_TAG: r1-initial-controlled-rebuild
+      TARGET_RUNTIME: nodejs22
+      TARGET_ENTRYPOINT: index.initialControlledRebuildHandler
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify immutable read-only recovery boundary
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          TRACKING_ISSUE: ${{ inputs.tracking_issue }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA"
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_AUTHORITY_ISSUE_INVALID'; exit 1; }
+          [[ "$FAILED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_ID_INVALID'; exit 1; }
+
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-gates"
+          mkdir -p "$tmp"
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/branches/main" --output "$tmp/main.json"
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha == $sha and .protected == true' "$tmp/main.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_MAIN_GATE_NOT_READY'
+            exit 1
+          }
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" --output "$tmp/authority.json"
+          jq -e '
+            .state == "open"
+            and (.title | startswith("R1 WU7:"))
+            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
+            and (.body | contains("Google-Authority: PRESERVED"))
+            and (.body | contains("Cap-Increase: FORBIDDEN"))
+            and (.body | contains("Timer-Cutover: FORBIDDEN"))
+            and (.body | contains("Blind-Replay: FORBIDDEN"))
+          ' "$tmp/authority.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_AUTHORITY_MISSING'
+            exit 1
+          }
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" --output "$tmp/ci.json"
+          jq -e --arg sha "$GITHUB_SHA" '.workflow_runs | any(.head_sha == $sha and .conclusion == "success")' "$tmp/ci.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_EXACT_SHA_CI_MISSING'
+            exit 1
+          }
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/runs/${FAILED_RUN_ID}" --output "$tmp/failed-run.json"
+          jq -e --argjson id "$FAILED_RUN_ID" --arg sha "$GITHUB_SHA" '
+            .id == $id
+            and .name == "R1 initial controlled rebuild"
+            and .head_sha == $sha
+            and .head_branch == "main"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' "$tmp/failed-run.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILED_RUN_NOT_EXACT'
+            exit 1
+          }
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/runs/${FAILED_RUN_ID}/jobs?filter=latest&per_page=100" --output "$tmp/failed-jobs.json"
+          jq -e '
+            [.jobs[] | select(.name == "initial-controlled-rebuild")] as $jobs
+            | ($jobs | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Deploy initial-controlled-rebuild-only Function version" and .conclusion == "failure")] | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Invoke exact controlled rebuild tag once" and .conclusion == "skipped")] | length) == 1
+          ' "$tmp/failed-jobs.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILURE_PHASE_NOT_PROVEN'
+            exit 1
+          }
+
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/runs?per_page=100" --output "$tmp/runs.json"
+          jq -e --argjson self "$GITHUB_RUN_ID" '
+            [.workflow_runs[]
+              | select(.id != $self)
+              | select(.status == "queued" or .status == "in_progress")
+              | select(
+                  .name == "R1 initial shadow bootstrap"
+                  or .name == "R1 initial bootstrap orchestrator"
+                  or .name == "R1 initial controlled rebuild"
+                )
+            ] | length == 0
+          ' "$tmp/runs.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_WRITER_CONFLICT'
+            exit 1
+          }
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange GitHub OIDC token for short-lived Yandex IAM token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+
+          if ! oidc_status="$(curl --silent --show-error --output "$tmp/oidc.json" --write-out '%{http_code}' --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" 2>"$tmp/oidc.err")"; then
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_OIDC_REQUEST_FAILED'
+            exit 1
+          fi
+          case "$oidc_status" in 2??) ;; *) echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_OIDC_REQUEST_FAILED'; exit 1 ;; esac
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
+          echo "::add-mask::${oidc_token}"
+
+          token_payload="${oidc_token#*.}"
+          token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"
+          token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *) echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json"
+          jq -e --arg iss "$OIDC_ISSUER" --arg aud "$OIDC_AUDIENCE" --arg sub "$OIDC_SUBJECT" '
+            .iss == $iss
+            and ((.aud == $aud) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $aud))
+            and .sub == $sub
+          ' "$tmp/claims.json" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_OIDC_CLAIMS_INVALID'
+            exit 1
+          }
+
+          if ! iam_status="$(curl --silent --show-error --output "$tmp/iam.json" --write-out '%{http_code}' --request POST https://auth.yandex.cloud/oauth/token --header 'Content-Type: application/x-www-form-urlencoded' --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" --data-urlencode "subject_token=${oidc_token}" --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' 2>"$tmp/iam.err")"; then
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_WIF_EXCHANGE_FAILED'
+            exit 1
+          fi
+          case "$iam_status" in 2??) ;; *) echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_WIF_EXCHANGE_FAILED'; exit 1 ;; esac
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
+          echo "::add-mask::${iam_token}"
+          echo "YC_IAM_TOKEN=${iam_token}" >> "$GITHUB_ENV"
+
+      - name: Classify Function-version create outcome read-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-evidence"
+          candidate="$evidence_dir/classification.tmp"
+          evidence="$evidence_dir/classification.json"
+          tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-provider"
+          mkdir -p "$evidence_dir" "$tmp"
+
+          if ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
+            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"FUNCTION_READ_FAILED"}' >"$candidate"
+          else
+            function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+            echo "::add-mask::${function_id}"
+            if ! yc serverless function version list --function-id "$function_id" --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err"; then
+              jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"VERSION_LIST_FAILED"}' >"$candidate"
+            else
+              matching="$(jq --arg tag "$TARGET_TAG" '[.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)] | length' "$tmp/versions.json")"
+              case "$matching" in
+                0)
+                  jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"NOT_APPLIED",reason:"TAG_ABSENT"}' >"$candidate"
+                  ;;
+                1)
+                  exact="$(jq --arg tag "$TARGET_TAG" --arg runtime "$TARGET_RUNTIME" --arg entrypoint "$TARGET_ENTRYPOINT" '
+                    [.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)][0]
+                    | (.runtime == $runtime and .entrypoint == $entrypoint and .status == "ACTIVE")
+                  ' "$tmp/versions.json")"
+                  if [ "$exact" = "true" ]; then
+                    jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"APPLIED",reason:"EXACT_ACTIVE_TAG"}' >"$candidate"
+                  else
+                    jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_METADATA_NOT_EXACT_ACTIVE"}' >"$candidate"
+                  fi
+                  ;;
+                *)
+                  jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_MATCH_AMBIGUOUS"}' >"$candidate"
+                  ;;
+              esac
+            fi
+          fi
+
+          jq -e '
+            type == "object"
+            and (keys | sort) == ["code","reason","status","verdict"]
+            and .status == "PASS"
+            and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
+            and (.verdict | IN("APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"))
+            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_MATCH_AMBIGUOUS"))
+          ' "$candidate" >/dev/null
+          mv "$candidate" "$evidence"
+          cat "$evidence"
+
+      - name: Publish enum-only deploy recovery evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-controlled-rebuild-deploy-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-controlled-rebuild-deploy-recovery-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Require bounded classification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-evidence/classification.json"
+          jq -e '
+            type == "object"
+            and (keys | sort) == ["code","reason","status","verdict"]
+            and .status == "PASS"
+            and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
+            and (.verdict | IN("APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"))
+          ' "$evidence" >/dev/null || {
+            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_EVIDENCE_INVALID'
+            exit 1
+          }
