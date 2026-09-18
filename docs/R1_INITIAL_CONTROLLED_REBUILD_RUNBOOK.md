@@ -29,6 +29,22 @@ Before the one write-capable WU7 dispatch, all of the following must be proven o
 
 If any prerequisite changes or becomes ambiguous, stop before deployment/invocation.
 
+## Function-version deployment recovery
+
+A failed `yc serverless function version create` is itself an unknown provider-write outcome. A nonzero CLI exit does not prove that the Function version was not created. After such a failure, the controlled rebuild invocation must stay stopped; do not rerun version creation and do not invoke the tag blindly.
+
+The only allowed next action is the manual read-only `R1 initial controlled rebuild deploy recovery` workflow on exact current `main`. It must bind the exact failed controlled-rebuild run, prove that the deploy step failed and the controlled invoke step was skipped, re-check the open WU7 authority boundary and verify that no competing R1 writer is active.
+
+Recovery reads Function/version metadata only. The exact tag `r1-initial-controlled-rebuild` is the discriminator:
+
+- no matching tag → `NOT_APPLIED / TAG_ABSENT`;
+- exactly one matching `ACTIVE` version with runtime `nodejs22` and entrypoint `index.initialControlledRebuildHandler` → `APPLIED / EXACT_ACTIVE_TAG`;
+- Function/version read failure, non-active or mismatched metadata, or ambiguous matching evidence → `RECOVERY_REQUIRED`.
+
+`APPLIED` proves only the Function-version deployment layer. It does not prove that the controlled rebuild handler ran, that YDB staging/swap/marker mutations occurred, or that a verified baseline exists. `NOT_APPLIED` permits a later separately gated deploy retry only after its cause is understood and the exact-main/recovery/readiness gates are refreshed as required. `RECOVERY_REQUIRED` forbids replay.
+
+The deploy-recovery workflow has no Function-version create/invoke command and no Google/YDB mutation authority. Its published artifact is bounded enum-only evidence.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:
