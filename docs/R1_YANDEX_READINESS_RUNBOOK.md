@@ -178,7 +178,7 @@ logging: disabled
 runtime service account: prihrash-backend
 ```
 
-Operational timeout layering для readiness: application deadline: 20s, bounded YDB close timeout: 2s, Function execution timeout: 45s, invoker transport timeout: 60s. Внешние 45s/60s — только provider/transport headroom; они не расширяют read-only application budget и не разрешают retries/writes.
+Operational timeout layering для readiness: application deadline: 20s, bounded YDB close timeout: 2s, Function execution timeout: 45s, invoker transport timeout: 60s. Внешние 45s/60s — только provider/transport headroom и не расширяют read-only application budget. Invoker отключает встроенные CLI retries через `--retry 0`, но после privacy-safe classification `READINESS_INVOKE_NONZERO_UNCLASSIFIED` либо `READINESS_INVOKE_FUNCTION_TIMEOUT` допускает ровно один собственный bounded повтор того же read-only readiness invoke с короткой задержкой. Второй non-success является terminal FAIL; никаких writes, authority expansion или неограниченных retries это не разрешает.
 
 Secret injection:
 
@@ -189,7 +189,7 @@ Secret injection:
 
 ## One-shot safe invocation
 
-`npm run readiness:invoke` вызывает только tag `r1-readiness`, отключает CLI retries и захватывает provider stdout/stderr без echo.
+`npm run readiness:invoke` вызывает только tag `r1-readiness`, отключает встроенные CLI retries (`--retry 0`) и захватывает provider stdout/stderr без echo. Для `READINESS_INVOKE_NONZERO_UNCLASSIFIED` и `READINESS_INVOKE_FUNCTION_TIMEOUT` wrapper выполняет максимум один собственный bounded повтор; все остальные outcomes завершаются без повтора.
 
 Допустимый PASS:
 
