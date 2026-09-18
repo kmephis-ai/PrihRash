@@ -102,12 +102,21 @@ jobs:
                       "Recovery-State: STAGING_STALE_RETIREABLE",
                       "Recovery-State: STALE_STAGING_RETIRED"
                     ))
-                    and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                    and (
+                      $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                      or (
+                        $rearm == ["Circuit-Rearm: SOURCE_DRIFT_REBASE"]
+                        and $observed == ["Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
+                        and $recovery == ["Recovery-State: STAGING_STALE_RETIREABLE"]
+                        and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"]
+                      )
+                    )
                     and ($test | length) == 1
                     and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
                   ),
                   observedSignature: (if ($observed | length) == 1 then ($observed[0] | sub("^Observed-Signature: "; "")) else null end),
                   recovery: (if ($recovery | length) == 1 then ($recovery[0] | sub("^Recovery-State: "; "")) else null end),
+                  rearm: (if ($rearm | length) == 1 then ($rearm[0] | sub("^Circuit-Rearm: "; "")) else null end),
                   regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
                 }
             ')"
@@ -125,7 +134,19 @@ jobs:
               exit 0
             fi
             regression_test="$(jq -r '.regressionTest' <<<"$marker")"
-            if ! jq -e --arg test "$regression_test" '
+            rearm_mode="$(jq -r '.rearm' <<<"$marker")"
+            if [ "$rearm_mode" = 'SOURCE_DRIFT_REBASE' ]; then
+              if ! jq -e --arg test "$regression_test" '
+                $test == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"
+                and any(
+                  .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                  and .status != "removed"
+                )
+              ' <<<"$source_files" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_SOURCE_DRIFT_EVIDENCE_MISSING'
+                exit 0
+              fi
+            elif ! jq -e --arg test "$regression_test" '
               any(.filename == $test and .status != "removed")
               and any(
                 (.filename | startswith("src/"))
