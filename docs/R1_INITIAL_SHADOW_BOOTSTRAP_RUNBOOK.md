@@ -105,6 +105,24 @@ The correction removes only the accidental escape and adds a tooling regression 
 `^${prefix}=` expansion while rejecting `\${prefix}`. No provider/runtime/financial semantics,
 authority, timeout, memory or caps change.
 
+### HTTP 502 after complete revision evidence on `e676019027719808345f4a2800d1e765fe3a6703`
+
+Orchestrator `35332679516` successfully proved stale retirement authority, readiness
+`35332806306` returned `READINESS_READY`, and bootstrap child `35332935207`
+reached the single provider invoke. The invoke ended with
+`INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED / HTTP_502 / PRESENT`. Built-in post-recovery then proved
+`STAGING_RUN_PRESENT / COMPLETE_CURRENT_RUN_ONLY / COMPLETE_CURRENT_RUN_ONLY /
+STALE_STAGING_CURRENT_STATE_EMPTY / NONE`: stale retirement had advanced to a fresh resumable
+STAGING run, verified current remained empty, and all revision-1 evidence for the current run was
+durably complete.
+
+The next bounded root-cause hypothesis is peak memory during `RECONCILIATION_READ`: the application
+already retains observation/projection/lineage while revision resume verification historically
+materialized every persisted `raw_payload` for the run in one YDB read. Exact payload verification
+must remain fail-closed, but it is now split into a metadata-only run scan plus calibrated byte-bounded
+key batches for raw-payload equality. This changes neither financial semantics nor durable evidence
+requirements and does not increase Function memory/timeout/caps.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
