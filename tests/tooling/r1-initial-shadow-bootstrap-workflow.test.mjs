@@ -9,6 +9,7 @@ const RUNBOOK = resolve(ROOT, 'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md');
 const PACKAGE_SCRIPT = resolve(ROOT, 'scripts/package-yandex-initial-bootstrap-function.mjs');
 const PACKAGE_VERIFY = resolve(ROOT, 'scripts/verify-yandex-initial-bootstrap-package.mjs');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-initial-bootstrap.mjs');
+const REFERENCE_AWARE_RUNTIME = resolve(ROOT, 'src/runtime/initialBootstrapReferenceAwareJob.ts');
 
 async function text(path) {
   return readFile(path, 'utf8');
@@ -192,4 +193,22 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
   assert.match(runbook, /Timer остаётся выключен|timer всё ещё выключен/);
   assert.match(runbook, /YDB остаётся shadow/);
   assert.doesNotMatch(runbook, /auto-rebuild.*разреш/u);
+});
+
+
+test('STAGING resume releases no-longer-needed reference planning state before application work', async () => {
+  const runtime = await text(REFERENCE_AWARE_RUNTIME);
+
+  assert.match(
+    runtime,
+    /function releaseReferencePlanningState\(\): void \{\s*lease = null;\s*digest = null;\s*primitives = null;\s*referenceRows = null;\s*referencePlan = null;\s*\}/s,
+  );
+  assert.match(
+    runtime,
+    /if \(referencePlan\.writes\.length === 0\) \{\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies\);\s*\}/s,
+  );
+  assert.match(
+    runtime,
+    /isInitialBootstrapResidualReferenceRecoveryAuthorized\([\s\S]*?\)\) \{\s*throw new InitialBootstrapReferenceAwareRuntimeError\('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE'\);\s*\}\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies\);/s,
+  );
 });
