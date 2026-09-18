@@ -60,6 +60,8 @@ jobs:
           test "$(wc -c < /tmp/r1-630.workflow.b64)" = "36180"
 
           git checkout -B "$TARGET_BRANCH" "$TARGET_PARENT"
+          git reset --hard "$TARGET_PARENT"
+          test ! -e .github/workflows/r1-initial-controlled-rebuild.yml
           mkdir -p tools/local-git-mirror/outbound
           cp /tmp/r1-630.workflow.b64 tools/local-git-mirror/outbound/r1-630.workflow.b64
           git add tools/local-git-mirror/outbound/r1-630.workflow.b64
