@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  publish-object:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout transport branch
@@ -23,17 +23,26 @@ jobs:
         with:
           ref: transport/r1-630-publish-16c2948
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Verify exact base and reconstruct immutable patch
+      - name: Reconstruct and prove exact immutable patch
         shell: bash
         env:
           BASE_SHA: 16c2948cbdac8f2210722f2050425127101940d6
           PATCH_GZ_SHA256: e5e929fd665cfd4db785629f0a9013374a1ad90e4c9f4028b0b3318dfbe29c39
           PATCH_SHA256: 9deeacbc88e5ddecbf99553993846bc6db6a4d01624de6532f0a649967b79cae
+          EXPECTED_TREE: 629e8247d3f24922e6bebea65e73239cb4b530ff
+          TARGET_PARENT: f6f32fe24f6dacfe31f0e398c4b92fc32b7995e7
+          TARGET_PARTIAL_TREE: cca5251c4793e9efdef4f16bc7388c4c802e586e
         run: |
           set -euo pipefail
-          git fetch origin main
-          test "$(git rev-parse origin/main)" = "$BASE_SHA"
+          git fetch https://github.com/${GITHUB_REPOSITORY}.git main fix/r1-630-controlled-rebuild-runtime
+          test "$(git rev-parse FETCH_HEAD)" = "$BASE_SHA" || {
+            current="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/main | cut -f1)"
+            test "$current" = "$BASE_SHA"
+          }
+          target="$(git ls-remote https://github.com/${GITHUB_REPOSITORY}.git refs/heads/fix/r1-630-controlled-rebuild-runtime | cut -f1)"
+          test "$target" = "$TARGET_PARENT"
 
           cat \
             tools/local-git-mirror/outbound/r1-630.00.b64 \
@@ -42,38 +51,57 @@ jobs:
             tools/local-git-mirror/outbound/r1-630.03.b64 \
             tools/local-git-mirror/outbound/r1-630.04.b64 \
             > /tmp/r1-630.patch.gz.b64
-
           base64 --decode /tmp/r1-630.patch.gz.b64 > /tmp/r1-630.patch.gz
           echo "$PATCH_GZ_SHA256  /tmp/r1-630.patch.gz" | sha256sum --check -
           gzip -dc /tmp/r1-630.patch.gz > /tmp/r1-630.patch
           echo "$PATCH_SHA256  /tmp/r1-630.patch" | sha256sum --check -
 
-      - name: Publish exact tree except workflow file
-        shell: bash
-        env:
-          BASE_SHA: 16c2948cbdac8f2210722f2050425127101940d6
-          EXPECTED_STAGE_TREE: cca5251c4793e9efdef4f16bc7388c4c802e586e
-          TARGET_BRANCH: fix/r1-630-controlled-rebuild-runtime
-        run: |
-          set -euo pipefail
-          if git ls-remote --exit-code --heads origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
-            echo "TARGET_BRANCH_ALREADY_EXISTS"
-            exit 1
-          fi
-
           git checkout --detach "$BASE_SHA"
-          git checkout -b "$TARGET_BRANCH"
           git apply --index --whitespace=error-all /tmp/r1-630.patch
+          test "$(git write-tree)" = "$EXPECTED_TREE"
 
           git update-index --force-remove .github/workflows/r1-initial-controlled-rebuild.yml
           rm .github/workflows/r1-initial-controlled-rebuild.yml
+          test "$(git write-tree)" = "$TARGET_PARTIAL_TREE"
 
-          tree="$(git write-tree)"
-          test "$tree" = "$EXPECTED_STAGE_TREE"
+          git reset --hard "$BASE_SHA"
+          git apply --index --whitespace=error-all /tmp/r1-630.patch
+          test "$(git write-tree)" = "$EXPECTED_TREE"
 
-          git config user.name "PrihRash AI Transport"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "R1 #630: stage bounded controlled rebuild runtime"
+      - name: Create immutable Git objects without moving refs
+        id: objects
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TREE: 629e8247d3f24922e6bebea65e73239cb4b530ff
+          TARGET_PARENT: f6f32fe24f6dacfe31f0e398c4b92fc32b7995e7
+          TARGET_PARTIAL_TREE: cca5251c4793e9efdef4f16bc7388c4c802e586e
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_STAGE_TREE"
-          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          workflow_b64="$(base64 -w 0 .github/workflows/r1-initial-controlled-rebuild.yml)"
+          jq -n --arg content "$workflow_b64" '{content:$content,encoding:"base64"}' > /tmp/blob.json
+          curl --fail --silent --show-error -X POST "${auth[@]}" "$api/git/blobs" -d @/tmp/blob.json > /tmp/blob-response.json
+          blob_sha="$(jq -er '.sha' /tmp/blob-response.json)"
+
+          jq -n \
+            --arg base "$TARGET_PARTIAL_TREE" \
+            --arg blob "$blob_sha" \
+            '{base_tree:$base,tree:[{path:".github/workflows/r1-initial-controlled-rebuild.yml",mode:"100644",type:"blob",sha:$blob}]}' \
+            > /tmp/tree.json
+          curl --fail --silent --show-error -X POST "${auth[@]}" "$api/git/trees" -d @/tmp/tree.json > /tmp/tree-response.json
+          tree_sha="$(jq -er '.sha' /tmp/tree-response.json)"
+          test "$tree_sha" = "$EXPECTED_TREE"
+
+          jq -n \
+            --arg message "R1 #630: add controlled rebuild workflow" \
+            --arg tree "$tree_sha" \
+            --arg parent "$TARGET_PARENT" \
+            '{message:$message,tree:$tree,parents:[$parent]}' > /tmp/commit.json
+          curl --fail --silent --show-error -X POST "${auth[@]}" "$api/git/commits" -d @/tmp/commit.json > /tmp/commit-response.json
+          commit_sha="$(jq -er '.sha' /tmp/commit-response.json)"
+
+          echo "REMOTE_TREE_SHA=$tree_sha"
+          echo "REMOTE_COMMIT_SHA=$commit_sha"
