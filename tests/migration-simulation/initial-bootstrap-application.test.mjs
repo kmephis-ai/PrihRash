@@ -4,13 +4,16 @@ import {
   YdbAdapter,
   YdbTransportCommitOutcomeUnknownError,
 } from '../../dist/integration/ydb/adapter.js';
+import { YdbSchemeAdapter, YdbSchemeTransportOutcomeUnknownError } from '../../dist/integration/ydb/scheme.js';
 import {
   InitialBootstrapApplicationError,
+  prepareInitialControlledRebuildContinuation,
   runInitialBootstrapApplication,
 } from '../../dist/migration/initialBootstrapApplication.js';
 import { InitialBootstrapIdentityManifestError } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapError } from '../../dist/migration/initialSnapshot.js';
 import { INITIAL_RECONCILIATION_CHECKS } from '../../dist/migration/initialValidationGate.js';
+import { runInitialControlledRebuildApplication } from '../../dist/migration/initialControlledRebuildApplication.js';
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const SNAPSHOT_ID = id(451001);
@@ -151,6 +154,8 @@ function createState(seed = {}) {
     revisions: new Map(),
     sourceRecords: new Map(),
     transactions: new Map(),
+    stagingSourceRecords: new Map(),
+    stagingTransactions: new Map(),
   };
   for (const [name, entries] of Object.entries(seed)) {
     const target = state[name];
@@ -271,8 +276,22 @@ function statementRows(statement, state) {
   if (text === 'SELECT COUNT(*) AS row_count FROM transactions') {
     return [{ row_count: BigInt(state.transactions.size) }];
   }
+  if (text.includes('FROM `rebuild/') && text.includes('/source_records` GROUP BY classification, state')) {
+    return sourceAggregateRows({ sourceRecords: state.stagingSourceRecords });
+  }
+  if (text.includes('FROM `rebuild/') && text.includes('category_id AS dimension_id')) {
+    return dimensionRows({ transactions: state.stagingTransactions }, 'category_id');
+  }
+  if (text.includes('FROM `rebuild/') && text.includes("from_account_id AS dimension_id") && text.includes("WHERE type = 'EXPENSE'")) {
+    return dimensionRows({ transactions: state.stagingTransactions }, 'from_account_id', 'EXPENSE');
+  }
+  if (text.includes('FROM `rebuild/') && text.includes("to_account_id AS dimension_id") && text.includes("WHERE type = 'INCOME'")) {
+    return dimensionRows({ transactions: state.stagingTransactions }, 'to_account_id', 'INCOME');
+  }
+  if (text.includes('FROM `rebuild/') && text.includes('/transactions` GROUP BY type')) {
+    return typeAggregateRows({ transactions: state.stagingTransactions });
+  }
   if (text.includes('FROM `source_records` GROUP BY classification, state')) return sourceAggregateRows(state);
-  if (text.includes('FROM `transactions` GROUP BY type')) return typeAggregateRows(state);
   if (text.includes('category_id AS dimension_id')) return dimensionRows(state, 'category_id');
   if (text.includes("from_account_id AS dimension_id") && text.includes("WHERE type = 'EXPENSE'")) {
     return dimensionRows(state, 'from_account_id', 'EXPENSE');
@@ -280,6 +299,7 @@ function statementRows(statement, state) {
   if (text.includes("to_account_id AS dimension_id") && text.includes("WHERE type = 'INCOME'")) {
     return dimensionRows(state, 'to_account_id', 'INCOME');
   }
+  if (text.includes('FROM `transactions` GROUP BY type')) return typeAggregateRows(state);
   throw new Error(`unexpected read: ${text}`);
 }
 
@@ -361,6 +381,16 @@ function applyWrite(statement, state) {
     run.finished_at = parameter(statement, 'finished_at');
     run.error_code = parameter(statement, 'error_code');
     return text.includes('RETURNING id') ? [{ id: run.id }] : [];
+  }
+  if (text.startsWith('UPSERT INTO `rebuild/') && text.includes('/transactions`')) {
+    const values = Object.fromEntries(Object.entries(statement.parameters).map(([key, value]) => [key, value.value]));
+    state.stagingTransactions.set(values.id, values);
+    return [];
+  }
+  if (text.startsWith('UPSERT INTO `rebuild/') && text.includes('/source_records`')) {
+    const values = Object.fromEntries(Object.entries(statement.parameters).map(([key, value]) => [key, value.value]));
+    state.stagingSourceRecords.set(values.id, values);
+    return [];
   }
   if (text.startsWith('UPSERT INTO transactions')) {
     const values = Object.fromEntries(Object.entries(statement.parameters).map(([key, value]) => [key, value.value]));
@@ -756,6 +786,186 @@ test('oversized ordinary promotion is surfaced as CONTROLLED_REBUILD_REQUIRED wi
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
   assert.equal(db.state.sourceRecords.size, 0);
   assert.equal(db.state.transactions.size, 0);
+});
+
+test('controlled continuation reconstructs one deterministic candidate across STAGING and VALIDATED recovery', async () => {
+  const db = fakeDatabase();
+  const ids = allocator();
+  const largeDescription = 'x'.repeat(300_000);
+  const largeObservation = observation([
+    { rowHint: 2, digest: 'synthetic-large-row-1', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
+    { rowHint: 3, digest: 'synthetic-large-row-2', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
+  ]);
+
+  const first = await runInitialBootstrapApplication(
+    largeObservation,
+    dependencies(db, ids, clock(STARTED_AT, PROMOTED_AT)),
+  );
+  assert.equal(first.status, 'CONTROLLED_REBUILD_REQUIRED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
+
+  const resumeIds = allocator({ forbid: true });
+  const staging = await prepareInitialControlledRebuildContinuation(
+    largeObservation,
+    dependencies(db, resumeIds, clock()),
+  );
+  assert.equal(staging.status, 'READY');
+  assert.equal(staging.durableRun.state, 'STAGING');
+  assert.equal(staging.validatedRun.state, 'VALIDATED');
+  assert.equal(staging.currentWrites.length > 0, true);
+  const stagingCreatedAt = staging.currentWrites
+    .filter((write) => write.role === 'TRANSACTION')
+    .map((write) => write.statement.parameters.created_at?.value);
+  assert.deepEqual(stagingCreatedAt, [STARTED_AT, STARTED_AT]);
+  assert.deepEqual(resumeIds.calls, []);
+
+  db.state.migrationRuns.get(RUN_ID).state = 'VALIDATED';
+  const validated = await prepareInitialControlledRebuildContinuation(
+    largeObservation,
+    dependencies(db, resumeIds, clock()),
+  );
+  assert.equal(validated.status, 'READY');
+  assert.equal(validated.durableRun.state, 'VALIDATED');
+  assert.equal(validated.validatedRun.state, 'VALIDATED');
+  const validatedCreatedAt = validated.currentWrites
+    .filter((write) => write.role === 'TRANSACTION')
+    .map((write) => write.statement.parameters.created_at?.value);
+  assert.deepEqual(validatedCreatedAt, stagingCreatedAt);
+  assert.deepEqual(resumeIds.calls, []);
+});
+
+
+function controlledScheme(db, { unknownRenameAfterApply = false } = {}) {
+  const compact = RUN_ID.replaceAll('-', '').toLowerCase();
+  const runLeaf = `r_${compact}`;
+  const runDirectory = `rebuild/${runLeaf}`;
+  const state = { rebuild: false, run: false, pair: false, copyCalls: 0, renameCalls: 0 };
+  const transport = {
+    async ensureDirectory(path) {
+      if (path === 'rebuild') { state.rebuild = true; return; }
+      if (path === runDirectory && state.rebuild) { state.run = true; return; }
+      throw new Error(`unexpected synthetic directory ${path}`);
+    },
+    async copyTables(items) {
+      state.copyCalls += 1;
+      assert.equal(state.run, true);
+      assert.deepEqual(items.map(({ source, destination, omitIndexes }) => ({ source, destination, omitIndexes })), [
+        { source: 'transactions', destination: `${runDirectory}/transactions`, omitIndexes: false },
+        { source: 'source_records', destination: `${runDirectory}/source_records`, omitIndexes: false },
+      ]);
+      db.state.stagingTransactions = structuredClone(db.state.transactions);
+      db.state.stagingSourceRecords = structuredClone(db.state.sourceRecords);
+      state.pair = true;
+    },
+    async renameTables(items) {
+      state.renameCalls += 1;
+      assert.equal(state.pair, true);
+      assert.deepEqual(items.map(({ source, destination, replace }) => ({ source, destination, replace })), [
+        { source: `${runDirectory}/transactions`, destination: 'transactions', replace: true },
+        { source: `${runDirectory}/source_records`, destination: 'source_records', replace: true },
+      ]);
+      db.state.transactions = structuredClone(db.state.stagingTransactions);
+      db.state.sourceRecords = structuredClone(db.state.stagingSourceRecords);
+      db.state.stagingTransactions = new Map();
+      db.state.stagingSourceRecords = new Map();
+      state.pair = false;
+      if (unknownRenameAfterApply) {
+        throw new YdbSchemeTransportOutcomeUnknownError(new Error('synthetic unknown after applied rename'));
+      }
+    },
+    async listDirectory(path) {
+      if (path === '') {
+        return {
+          selfKind: 'DATABASE',
+          children: [
+            { name: 'transactions', kind: 'TABLE' },
+            { name: 'source_records', kind: 'TABLE' },
+            ...(state.rebuild ? [{ name: 'rebuild', kind: 'DIRECTORY' }] : []),
+          ],
+        };
+      }
+      if (path === 'rebuild') {
+        if (!state.rebuild) throw new Error('synthetic rebuild directory absent');
+        return { selfKind: 'DIRECTORY', children: state.run ? [{ name: runLeaf, kind: 'DIRECTORY' }] : [] };
+      }
+      if (path === runDirectory) {
+        if (!state.run) throw new Error('synthetic run directory absent');
+        return {
+          selfKind: 'DIRECTORY',
+          children: state.pair ? [
+            { name: 'transactions', kind: 'TABLE' },
+            { name: 'source_records', kind: 'TABLE' },
+          ] : [],
+        };
+      }
+      throw new Error(`unexpected synthetic listing ${path}`);
+    },
+  };
+  return { state, adapter: new YdbSchemeAdapter(transport) };
+}
+
+async function seedControlledRebuild(db) {
+  const largeDescription = 'x'.repeat(300_000);
+  const largeObservation = observation([
+    { rowHint: 2, digest: 'synthetic-large-row-1', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
+    { rowHint: 3, digest: 'synthetic-large-row-2', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
+  ]);
+  const initialIds = allocator();
+  const initial = await runInitialBootstrapApplication(
+    largeObservation,
+    dependencies(db, initialIds, clock(STARTED_AT, PROMOTED_AT)),
+  );
+  assert.equal(initial.status, 'CONTROLLED_REBUILD_REQUIRED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
+  return largeObservation;
+}
+
+test('controlled rebuild continuation materializes staging, swaps once and commits exact verified current', async () => {
+  const db = fakeDatabase();
+  const largeObservation = await seedControlledRebuild(db);
+  const scheme = controlledScheme(db);
+  const resumeIds = allocator({ forbid: true });
+
+  const result = await runInitialControlledRebuildApplication(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(result.run.state, 'COMMITTED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'COMMITTED');
+  assert.equal(db.state.sourceRecords.size, 2);
+  assert.equal(db.state.transactions.size, 2);
+  assert.equal(db.state.stagingSourceRecords.size, 0);
+  assert.equal(db.state.stagingTransactions.size, 0);
+  assert.equal(scheme.state.copyCalls, 1);
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.deepEqual(resumeIds.calls, []);
+});
+
+test('unknown-after-applied controlled swap is recovered read-only and never renamed twice', async () => {
+  const db = fakeDatabase();
+  const largeObservation = await seedControlledRebuild(db);
+  const scheme = controlledScheme(db, { unknownRenameAfterApply: true });
+  const resumeIds = allocator({ forbid: true });
+
+  const result = await runInitialControlledRebuildApplication(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'COMMITTED');
+  assert.equal(db.state.sourceRecords.size, 2);
+  assert.equal(db.state.transactions.size, 2);
+  assert.deepEqual(resumeIds.calls, []);
 });
 
 test('unknown claim commit returns explicit recovery-required without touching verified current', async () => {

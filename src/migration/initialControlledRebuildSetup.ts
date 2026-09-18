@@ -3,6 +3,7 @@ import type { ControlledInitialRebuildPlan } from './initialControlledRebuild.js
 export interface InitialControlledRebuildSetupEvidence {
   readonly currentTransactionCount: number;
   readonly currentSourceRecordCount: number;
+  readonly rebuildDirectoryExists: boolean;
   readonly stagingDirectoryExists: boolean;
   readonly stagingTransactionsExists: boolean;
   readonly stagingSourceRecordsExists: boolean;
@@ -14,6 +15,8 @@ export interface ControlledRebuildCopyItem {
 }
 
 export interface InitialControlledRebuildSetupPlan {
+  readonly rebuildDirectory: 'rebuild';
+  readonly createRebuildDirectory: boolean;
   readonly stagingDirectory: string;
   readonly createDirectory: boolean;
   readonly copyItems: readonly Readonly<ControlledRebuildCopyItem>[];
@@ -72,6 +75,8 @@ export function planInitialControlledRebuildSetup(
 
   const directory = runDirectory(controlled);
   return Object.freeze({
+    rebuildDirectory: 'rebuild' as const,
+    createRebuildDirectory: !evidence.rebuildDirectoryExists,
     stagingDirectory: directory,
     createDirectory: !evidence.stagingDirectoryExists,
     copyItems: Object.freeze([

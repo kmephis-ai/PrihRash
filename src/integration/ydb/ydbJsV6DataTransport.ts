@@ -6,6 +6,7 @@ import {
   type YdbStatement,
   type YdbTransport,
 } from './adapter.js';
+import type { YdbSchemeTransport } from './scheme.js';
 import type {
   YdbListStructParameter,
   YdbParameter,
@@ -110,6 +111,7 @@ export interface YdbJsMetadataDataClientConfig extends YdbJsCommonDataClientConf
 
 export interface YdbJsDataClient {
   readonly transport: YdbTransport;
+  createSchemeTransport(): Promise<YdbSchemeTransport>;
   close(): Promise<void>;
 }
 
@@ -492,6 +494,10 @@ async function createDataClientWithCredentials(
 
   return Object.freeze({
     transport,
+    async createSchemeTransport(): Promise<YdbSchemeTransport> {
+      const { YdbJsV6SchemeTransport } = await import('./ydbJsV6SchemeTransport.js');
+      return new YdbJsV6SchemeTransport(driver);
+    },
     async close() {
       const asyncDispose = (Symbol as unknown as Readonly<{ asyncDispose: symbol }>).asyncDispose;
       const dispose = Reflect.get(rawSql, asyncDispose);

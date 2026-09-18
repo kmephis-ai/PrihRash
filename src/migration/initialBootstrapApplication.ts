@@ -25,6 +25,7 @@ import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
+  evaluateInitialControlledRebuildContinuationValidation,
   evaluateInitialValidation,
   type InitialReconciliationEvidence,
   type InitialValidationBlocker,
@@ -56,7 +57,10 @@ import {
   type InitialTransactionIdentityAssignment,
   type InitialVerifiedCurrentPlan,
 } from './initialVerifiedCurrentPlan.js';
-import { prepareInitialVerifiedCurrentWrites } from './initialVerifiedCurrentPersistence.js';
+import {
+  prepareInitialVerifiedCurrentWrites,
+  type PreparedInitialVerifiedCurrentWrite,
+} from './initialVerifiedCurrentPersistence.js';
 
 export interface InitialBootstrapObservationRow {
   readonly rowHint: number;
@@ -150,6 +154,25 @@ export type InitialBootstrapRecoveryReason =
   | 'PROMOTION_OUTCOME_UNKNOWN'
   | 'VALIDATED_RUN_REQUIRES_RECOVERY';
 
+export type InitialControlledRebuildPreparationResult =
+  | Readonly<{
+      status: 'BASELINE_EXISTS';
+      run: Readonly<MigrationRun>;
+    }>
+  | Readonly<{
+      status: 'VALIDATION_BLOCKED';
+      run: Readonly<MigrationRun>;
+      blockers: readonly Readonly<InitialValidationBlocker>[];
+    }>
+  | Readonly<{
+      status: 'READY';
+      durableRun: Readonly<MigrationRun>;
+      validatedRun: Readonly<MigrationRun>;
+      verifiedPlan: Readonly<InitialVerifiedCurrentPlan>;
+      currentWrites: readonly Readonly<PreparedInitialVerifiedCurrentWrite>[];
+      preflight: ReturnType<typeof planInitialBootstrapPromotion>['preflight'];
+    }>;
+
 export type InitialBootstrapApplicationResult =
   | Readonly<{
       status: 'BASELINE_EXISTS';
@@ -184,7 +207,10 @@ export type InitialBootstrapApplicationErrorCode =
   | 'SNAPSHOT_EVIDENCE_AMBIGUOUS'
   | 'SNAPSHOT_EVIDENCE_MISMATCH'
   | 'CURRENT_STATE_NOT_EMPTY'
-  | 'PROMOTION_PREFLIGHT_DRIFT';
+  | 'PROMOTION_PREFLIGHT_DRIFT'
+  | 'CONTROLLED_CONTINUATION_RUN_MISSING'
+  | 'CONTROLLED_CONTINUATION_RUN_STATE_INVALID'
+  | 'CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED';
 
 export class InitialBootstrapApplicationError extends Error {
   readonly code: InitialBootstrapApplicationErrorCode;
@@ -449,8 +475,14 @@ async function prepareResumeContext(
     projectionRows(candidate, observation),
     dependencies.projectionContext,
   );
-  // Rebuilding the manifest is a pure semantic consistency check. No manifest write occurs on resume.
-  buildInitialBootstrapIdentityManifest(candidate, projection, recovered.transactionAssignments);
+  // The identity manifest is claimed while the durable run is STAGING. Controlled rebuild may
+  // legitimately resume after the lifecycle has advanced to VALIDATED, so reconstruct the same
+  // immutable manifest against a STAGING view for this pure consistency check only. The returned
+  // candidate keeps the actual durable lifecycle state and no manifest write occurs on resume.
+  const manifestCandidate = run.state === 'VALIDATED'
+    ? envelopeWithRun(baseCandidate, Object.freeze({ ...run, state: 'STAGING' as const }))
+    : candidate;
+  buildInitialBootstrapIdentityManifest(manifestCandidate, projection, recovered.transactionAssignments);
   return Object.freeze({
     candidate,
     projection,
@@ -507,6 +539,99 @@ async function refineDurableRun(
     }
     throw error;
   }
+}
+
+export async function prepareInitialControlledRebuildContinuation(
+  observation: Readonly<InitialBootstrapObservation>,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+): Promise<InitialControlledRebuildPreparationResult> {
+  markApplicationPhase(dependencies, 'ADMISSION_READ');
+  const admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
+  if (admission.committedBaselineRun !== null) {
+    return Object.freeze({
+      status: 'BASELINE_EXISTS' as const,
+      run: admission.committedBaselineRun,
+    });
+  }
+  if (admission.incompleteRuns.length > 1) {
+    throw new InitialBootstrapApplicationError('MULTIPLE_INCOMPLETE_RUNS');
+  }
+  const durableRun = admission.incompleteRuns[0];
+  if (durableRun === undefined) {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_RUN_MISSING');
+  }
+  if (
+    (durableRun.state !== 'STAGING' && durableRun.state !== 'VALIDATED')
+    || durableRun.finishedAt !== null
+    || durableRun.errorCode !== null
+  ) {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_RUN_STATE_INVALID');
+  }
+
+  const prepared = await prepareResumeContext(observation, durableRun, dependencies);
+  if (durableRun.rowsAmbiguous !== prepared.projection.counters.ambiguous) {
+    throw new InitialBootstrapApplicationError('RESUME_COUNTER_REFINEMENT_CONFLICT');
+  }
+
+  markApplicationPhase(dependencies, 'LINEAGE_PREPARATION');
+  // Initial lineage was created while the run was STAGING. A VALIDATED controlled-rebuild
+  // continuation replays only that immutable projection contract; lifecycle authority remains on
+  // the actual durable run used below for reconciliation and commit decisions.
+  const lineageCandidate = durableRun.state === 'VALIDATED'
+    ? envelopeWithRun(prepared.candidate, Object.freeze({ ...durableRun, state: 'STAGING' as const }))
+    : prepared.candidate;
+  const lineage = buildInitialSourceLineageProjection(
+    lineageCandidate,
+    lineageObservations(lineageCandidate, observation),
+  );
+  markApplicationPhase(dependencies, 'RECONCILIATION_READ');
+  const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
+    run: durableRun,
+    projection: prepared.projection,
+    lineage,
+  }));
+  markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
+  const validation = evaluateInitialControlledRebuildContinuationValidation(
+    durableRun,
+    prepared.projection,
+    reconciliation,
+  );
+  if (!validation.ok) {
+    return Object.freeze({
+      status: 'VALIDATION_BLOCKED' as const,
+      run: durableRun,
+      blockers: validation.blockers,
+    });
+  }
+
+  markApplicationPhase(dependencies, 'CURRENT_PLAN_PREPARATION');
+  const verifiedPlan = buildInitialVerifiedCurrentPlan(
+    validation.validatedRun,
+    lineage,
+    prepared.projection,
+    prepared.assignments,
+  );
+  markApplicationPhase(dependencies, 'CURRENT_WRITE_PREPARATION');
+  // Controlled rebuild must be deterministic across recovery attempts. The durable run start time
+  // is immutable and therefore becomes the initial transaction created/updated timestamp.
+  const currentWrites = prepareInitialVerifiedCurrentWrites(
+    validation.validatedRun,
+    verifiedPlan,
+    durableRun.startedAt,
+  );
+  const promotionPlan = planInitialBootstrapPromotion(currentWrites);
+  if (promotionPlan.route !== 'CONTROLLED_REBUILD_REQUIRED') {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED');
+  }
+
+  return Object.freeze({
+    status: 'READY' as const,
+    durableRun,
+    validatedRun: validation.validatedRun,
+    verifiedPlan,
+    currentWrites,
+    preflight: promotionPlan.preflight,
+  });
 }
 
 function isApplicationResult(

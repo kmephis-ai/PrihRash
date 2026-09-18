@@ -69,14 +69,19 @@ function allProjectionCountersAreNonNegativeSafeIntegers(
   );
 }
 
-export function evaluateInitialValidation(
+function evaluateInitialValidationForLifecycle(
   run: MigrationRun,
   projection: Readonly<InitialSnapshotProjection>,
   reconciliation: Readonly<InitialReconciliationEvidence>,
+  allowAlreadyValidated: boolean,
 ): InitialValidationResult {
   const blockers: Readonly<InitialValidationBlocker>[] = [];
 
-  if (run.state !== 'STAGING' || run.finishedAt !== null || run.errorCode !== null) {
+  if (
+    (run.state !== 'STAGING' && !(allowAlreadyValidated && run.state === 'VALIDATED'))
+    || run.finishedAt !== null
+    || run.errorCode !== null
+  ) {
     blockers.push(blocker('RUN_NOT_STAGING'));
   }
 
@@ -134,6 +139,22 @@ export function evaluateInitialValidation(
 
   return Object.freeze({
     ok: true as const,
-    validatedRun: markMigrationRunValidated(run),
+    validatedRun: run.state === 'VALIDATED' ? Object.freeze({ ...run }) : markMigrationRunValidated(run),
   });
+}
+
+export function evaluateInitialValidation(
+  run: MigrationRun,
+  projection: Readonly<InitialSnapshotProjection>,
+  reconciliation: Readonly<InitialReconciliationEvidence>,
+): InitialValidationResult {
+  return evaluateInitialValidationForLifecycle(run, projection, reconciliation, false);
+}
+
+export function evaluateInitialControlledRebuildContinuationValidation(
+  run: MigrationRun,
+  projection: Readonly<InitialSnapshotProjection>,
+  reconciliation: Readonly<InitialReconciliationEvidence>,
+): InitialValidationResult {
+  return evaluateInitialValidationForLifecycle(run, projection, reconciliation, true);
 }

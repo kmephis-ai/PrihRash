@@ -21,6 +21,7 @@ function evidence(overrides = {}) {
   return Object.freeze({
     currentTransactionCount: 0,
     currentSourceRecordCount: 0,
+    rebuildDirectoryExists: false,
     stagingDirectoryExists: false,
     stagingTransactionsExists: false,
     stagingSourceRecordsExists: false,
@@ -32,6 +33,8 @@ test('plans parent mkdir and atomic two-table copy only from proven empty canoni
   const plan = planInitialControlledRebuildSetup(controlled, evidence());
 
   assert.deepEqual(plan, {
+    rebuildDirectory: 'rebuild',
+    createRebuildDirectory: true,
     stagingDirectory: 'rebuild/r_00000000000000000000000000006001',
     createDirectory: true,
     copyItems: [
@@ -43,11 +46,12 @@ test('plans parent mkdir and atomic two-table copy only from proven empty canoni
   assert.equal(Object.isFrozen(plan.copyItems), true);
 });
 
-test('existing empty parent directory is a safe retry point before atomic copy', () => {
+test('existing rebuild and empty run directory are safe retry points before atomic copy', () => {
   const plan = planInitialControlledRebuildSetup(
     controlled,
-    evidence({ stagingDirectoryExists: true }),
+    evidence({ rebuildDirectoryExists: true, stagingDirectoryExists: true }),
   );
+  assert.equal(plan.createRebuildDirectory, false);
   assert.equal(plan.createDirectory, false);
   assert.equal(plan.copyItems.length, 2);
 });

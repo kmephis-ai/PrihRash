@@ -151,7 +151,7 @@ export function readInitialBootstrapJobConfig(
   });
 }
 
-function buildObservation(
+export function buildInitialBootstrapObservation(
   lease: Readonly<GoogleSheetsFullSnapshotLease>,
   digest: Readonly<CanonicalSourceDigest>,
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
@@ -227,7 +227,7 @@ export async function executeInitialBootstrapJob(
 
   try {
     const lease = await source.readFullSnapshotObservation();
-    const observation = buildObservation(
+    const observation = buildInitialBootstrapObservation(
       lease,
       digest,
       historicalEvidence,
