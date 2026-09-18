@@ -111,9 +111,11 @@ function fakeTransport({
   failPostAdmissionRead = false,
 }) {
   const events = [];
+  const readStatements = [];
   let admissionReads = 0;
   return {
     events,
+    readStatements,
     transport: {
       async executeRead() { throw new Error('standalone read not expected'); },
       async serializableReadWrite(work) {
@@ -134,8 +136,9 @@ function fakeTransport({
               return { rows };
             }
             events.push('readback');
+            readStatements.push(statement.text);
             if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: snapshot };
-            if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
+            if (statement.text.includes('FROM initial_bootstrap_identity_manifests')) {
               if (failManifestRead) throw new Error('synthetic manifest read failure');
               return { rows: manifest };
             }
@@ -306,7 +309,7 @@ test('malformed identity manifest binding count preserves the exact privacy-safe
   assert.equal(fake.events.at(-1), 'rollback');
 });
 
-test('identity manifest joined context mismatch is distinct from manifest content mismatch', async () => {
+test('fresh claim reads identity manifest directly by primary key without repeating joined context', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
   const manifestWrite = identityWrite(input);
@@ -315,18 +318,18 @@ test('identity manifest joined context mismatch is distinct from manifest conten
     admissionBefore: [],
     snapshot: [expected.snapshot],
     run: [expected.run],
-    manifest: [{ ...expected.manifest, run_state: 'VALIDATED' }],
+    manifest: [expected.manifest],
     admissionAfter: [expected.admission],
   });
 
-  await expectExecutorError(
-    'IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH',
-    () => executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite),
-  );
-  assert.equal(fake.events.at(-1), 'rollback');
+  await executeInitialBootstrapMetadataWrites(new YdbAdapter(fake.transport), input, writes, manifestWrite);
+  const manifestReads = fake.readStatements.filter((statement) => statement.includes('initial_bootstrap_identity_manifests'));
+  assert.equal(manifestReads.length, 1);
+  assert.match(manifestReads[0], /FROM initial_bootstrap_identity_manifests WHERE migration_run_id = \$migration_run_id/);
+  assert.doesNotMatch(manifestReads[0], /\bJOIN\b| AS m\b|migration_runs|source_snapshots/);
 });
 
-test('identity manifest content mismatch is distinct after valid joined context', async () => {
+test('identity manifest content mismatch remains fail-closed after direct primary-key readback', async () => {
   const input = candidate();
   const writes = prepareInitialBootstrapMetadataWrites(input);
   const manifestWrite = identityWrite(input);

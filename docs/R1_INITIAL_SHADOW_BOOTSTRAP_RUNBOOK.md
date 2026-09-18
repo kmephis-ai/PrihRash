@@ -288,6 +288,29 @@ boundaries remain unchanged.
 The successor remains diagnostic-only until a fresh full recovery returns enum-only exact revision
 evidence.
 
+### Fresh claim manifest read failure on `d47fcdb0a4f1f428b31cb798d9c53a3deed82545`
+
+Exact-main recovery `35354805304` completed after #627 and still classified the previous run as stale
+against the authoritative snapshot. Bounded orchestrator `35359627971` then armed only guarded stale
+retirement, obtained fresh `READINESS_READY` from child `35359776773`, and dispatched exactly one
+bootstrap child `35359914772`. The bootstrap entered the fresh metadata claim and returned the
+privacy-safe signature:
+
+`INITIAL_BOOTSTRAP_RUNTIME_FAILED / REFERENCE_APPLICATION_METADATA_FAILED / FRESH_CLAIM_WRITE / METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED`.
+
+Mandatory post-invoke read-only recovery returned `RECOVERY_REQUIRED / STALE_STAGING_RETIRED`. No
+verified `COMMITTED` baseline exists, and same-SHA replay remains prohibited. Snapshot and
+`migration_runs` direct readbacks had already succeeded inside the fresh serializable transaction;
+the failing seam was the subsequent identity-manifest readback query, which redundantly rejoined
+those already verified rows.
+
+The bounded correction keeps recovery/resume's joined durable-context query unchanged but gives
+fresh claim a separate primary-key manifest-content read. Fresh claim still exact-readback verifies
+`source_snapshots`, `migration_runs`, manifest content and final admission evidence inside the same
+serializable transaction; it simply does not repeat the already-proven snapshot/run context through
+a provider JOIN. Write set/order, optimistic guards, retries, timeout/memory/caps, IAM, financial
+semantics and authority are unchanged.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

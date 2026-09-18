@@ -4,10 +4,11 @@ import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestam
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import {
   InitialBootstrapIdentityManifestError,
-  initialBootstrapIdentityManifestReadStatement,
+  initialBootstrapIdentityManifestContentReadStatement,
   initialBootstrapIdentityManifestsEqual,
-  parseInitialBootstrapIdentityManifestRows,
-  type InitialBootstrapIdentityManifestReadback,
+  parseInitialBootstrapIdentityManifestContentRows,
+  type InitialBootstrapIdentityManifest,
+  type InitialBootstrapIdentityManifestContentReadRow,
   type PreparedInitialBootstrapIdentityManifestWrite,
 } from './initialBootstrapIdentityManifest.js';
 import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
@@ -36,17 +37,6 @@ interface RunReadRow {
   readonly rows_missing?: unknown;
   readonly rows_ambiguous?: unknown;
   readonly error_code?: unknown;
-}
-
-interface IdentityManifestReadRow {
-  readonly source_snapshot_id?: unknown;
-  readonly source_snapshot_digest?: unknown;
-  readonly binding_count?: unknown;
-  readonly bindings?: unknown;
-  readonly run_state?: unknown;
-  readonly run_snapshot_digest?: unknown;
-  readonly snapshot_digest?: unknown;
-  readonly snapshot_row_count?: unknown;
 }
 
 export type InitialBootstrapMetadataExecutorErrorCode =
@@ -176,7 +166,9 @@ export async function executeInitialBootstrapMetadataWrites(
       + 'FROM migration_runs WHERE id = $id',
     { id: uuidParameter(candidate.run.id) },
   );
-  const identityManifestRead = initialBootstrapIdentityManifestReadStatement(candidate.run.id);
+  // Snapshot and run context are already exact-readback verified in this transaction.
+  // Read the manifest itself by primary key instead of repeating that context via a provider JOIN.
+  const identityManifestRead = initialBootstrapIdentityManifestContentReadStatement(candidate.run.id);
 
   await adapter.serializableReadWrite(async (transaction) => {
     const preAdmission = parseScheduledSyncAdmissionEvidence(
@@ -209,28 +201,22 @@ export async function executeInitialBootstrapMetadataWrites(
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
     }
 
-    let identityRows: readonly Readonly<IdentityManifestReadRow>[];
+    let identityRows: readonly Readonly<InitialBootstrapIdentityManifestContentReadRow>[];
     try {
-      identityRows = (await transaction.execute<IdentityManifestReadRow>(identityManifestRead)).rows;
+      identityRows = (await transaction.execute<InitialBootstrapIdentityManifestContentReadRow>(
+        identityManifestRead,
+      )).rows;
     } catch {
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READ_FAILED');
     }
-    let identityReadback: Readonly<InitialBootstrapIdentityManifestReadback>;
+    let identityReadback: Readonly<InitialBootstrapIdentityManifest>;
     try {
-      identityReadback = parseInitialBootstrapIdentityManifestRows(candidate.run.id, identityRows);
+      identityReadback = parseInitialBootstrapIdentityManifestContentRows(candidate.run.id, identityRows);
     } catch (error) {
       if (error instanceof InitialBootstrapIdentityManifestError) throw error;
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READ_FAILED');
     }
-    if (
-      identityReadback.runState !== 'STAGING'
-      || identityReadback.runSnapshotDigest !== candidate.run.sourceSnapshotDigest
-      || identityReadback.snapshotDigest !== candidate.snapshot.snapshotDigest
-      || identityReadback.snapshotRowCount !== candidate.snapshot.rowCount
-    ) {
-      throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH');
-    }
-    if (!initialBootstrapIdentityManifestsEqual(identityReadback.manifest, identityManifestWrite.manifest)) {
+    if (!initialBootstrapIdentityManifestsEqual(identityReadback, identityManifestWrite.manifest)) {
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH');
     }
 

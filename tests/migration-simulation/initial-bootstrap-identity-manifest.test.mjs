@@ -6,6 +6,7 @@ import {
   InitialBootstrapIdentityManifestError,
   buildInitialBootstrapIdentityManifest,
   prepareInitialBootstrapIdentityManifestWrite,
+  initialBootstrapIdentityManifestContentReadStatement,
   initialBootstrapIdentityManifestReadStatement,
   parseInitialBootstrapIdentityManifestRows,
   recoverInitialBootstrapIdentities,
@@ -150,6 +151,13 @@ test('prepares only a non-overwriting INSERT manifest write with versioned canon
     ],
   });
   assert.equal(write.estimatedParameterBytes > 0, true);
+});
+
+test('fresh-claim manifest content read is a direct primary-key query without joined context', () => {
+  const statement = initialBootstrapIdentityManifestContentReadStatement(RUN_ID);
+  assert.match(statement.text, /FROM initial_bootstrap_identity_manifests WHERE migration_run_id = \$migration_run_id/);
+  assert.match(statement.text, /CAST\(source_snapshot_digest AS Utf8\) AS source_snapshot_digest/);
+  assert.doesNotMatch(statement.text, /\bJOIN\b| AS m\b|migration_runs|source_snapshots/);
 });
 
 test('manifest readback query aliases every qualified manifest column to the parser contract key', () => {
