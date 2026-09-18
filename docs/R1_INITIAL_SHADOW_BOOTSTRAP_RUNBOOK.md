@@ -123,6 +123,28 @@ must remain fail-closed, but it is now split into a metadata-only run scan plus 
 key batches for raw-payload equality. This changes neither financial semantics nor durable evidence
 requirements and does not increase Function memory/timeout/caps.
 
+### Exact revision recovery preflight after `ac3518333d4d3df3904f1b8f12200e4b59ce6e4f`
+
+Bootstrap child `35334490048` no longer failed at the previous process-level
+`HTTP_502 / X-Function-Error` boundary. The sanitized runtime result was instead
+`REFERENCE_APPLICATION_SEMANTIC_FAILED / REVISION_EVIDENCE_PREPARATION`.
+The orchestrator's built-in post-recovery again proved a resumable STAGING surface:
+current authoritative source matched the durable manifest, durable revision-1 evidence
+was complete for the current run, verified current remained empty, and source decoding
+had no blocker.
+
+Because the remaining semantic failure occurs inside exact revision-resume preparation,
+the next diagnostic boundary is read-only. Recovery now additionally compares the
+persisted revision evidence against the authoritative STAGING expectation for
+`observed_at`, row metadata, `change_class`, and canonical `raw_payload`, using
+byte-bounded key batches. It emits only an enum
+`R1_STAGING_EXACT_REVISION_EVIDENCE`; no row values, amounts, descriptions, notes,
+identifiers, or reconciliation totals are exposed.
+
+A normal `allow_staging_resume=true` orchestrator may arm only when this additional
+diagnostic is `EXACT_CURRENT_RUN_MATCH`. Any other enum remains a recovery/root-cause
+boundary and must not trigger a bootstrap invoke.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

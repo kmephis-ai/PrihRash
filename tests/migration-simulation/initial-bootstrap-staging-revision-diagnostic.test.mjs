@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
 } from '../../dist/migration/initialBootstrapStagingRevisionDiagnostic.js';
 import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
@@ -10,6 +11,24 @@ import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomic
 const RUN_ID = '00000000-0000-0000-0000-000000000901';
 const OTHER_RUN_ID = '00000000-0000-0000-0000-000000000902';
 const SNAPSHOT_DIGEST = 'synthetic-snapshot-digest';
+const SNAPSHOT_CAPTURED_AT = '2026-09-18T08:00:00.000Z';
+
+function rawPayload(description = 'Synthetic') {
+  return Object.freeze({
+    adapter_schema_version: 3,
+    date: Object.freeze({ kind: 'NUMBER', value: '45292' }),
+    operation_type: Object.freeze({ kind: 'STRING', value: 'Расход' }),
+    expense_account: Object.freeze({ kind: 'STRING', value: 'Карта Visa' }),
+    expense_category: Object.freeze({ kind: 'STRING', value: 'Synthetic Food' }),
+    description: Object.freeze({ kind: 'STRING', value: description }),
+    expense_amount: Object.freeze({ kind: 'NUMBER', value: '10' }),
+    income_account: null,
+    income_category: null,
+    income_amount: null,
+    vika_flag: null,
+    note: null,
+  });
+}
 
 function sourceId(index) {
   return `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`;
@@ -47,17 +66,29 @@ function manifestRow(sourceObservations) {
     }),
     snapshot_digest: SNAPSHOT_DIGEST,
     snapshot_row_count: BigInt(sourceObservations.length),
+    snapshot_captured_at: SNAPSHOT_CAPTURED_AT,
   });
 }
 
-function revisionRow(observation, index, migrationRunId = RUN_ID) {
+function revisionRow(observation, index, migrationRunId = RUN_ID, overrides = {}) {
   return Object.freeze({
     source_record_id: sourceId(index),
     revision: 1n,
     migration_run_id: migrationRunId,
+    observed_at: SNAPSHOT_CAPTURED_AT,
     row_hint: BigInt(observation.rowHint),
     row_digest: observation.digest,
+    change_class: null,
+    raw_payload: rawPayload(`Synthetic ${index}`),
+    ...overrides,
   });
+}
+
+function exactObservations(count) {
+  return Object.freeze(observations(count).map((observation, index) => Object.freeze({
+    ...observation,
+    rawPayload: rawPayload(`Synthetic ${index}`),
+  })));
 }
 
 function reader(sourceObservations, revisionResponder) {
@@ -339,6 +370,67 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
     await diagnoseInitialBootstrapStagingRevisionEvidence(mismatchReader, SNAPSHOT_DIGEST, sourceObservations),
     'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH',
   );
+});
+
+test('exact staging revision diagnostic proves full persisted revision equality read-only', async () => {
+  const sourceObservations = exactObservations(2);
+  const evidenceReader = reader(sourceObservations, async (statement) => {
+    assert.match(statement.text, /r\.raw_payload/);
+    return sourceObservations.map((item, index) => revisionRow(item, index));
+  });
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      evidenceReader,
+      SNAPSHOT_DIGEST,
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_MATCH',
+  );
+  assert.equal(evidenceReader.calls.every((statement) => statement.kind === 'READ'), true);
+});
+
+test('exact staging revision diagnostic isolates timestamp and raw-payload mismatch enums', async () => {
+  const sourceObservations = exactObservations(1);
+  const timestampReader = reader(sourceObservations, async () => [
+    revisionRow(sourceObservations[0], 0, RUN_ID, { observed_at: '2026-09-18T08:00:01.000Z' }),
+  ]);
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      timestampReader,
+      SNAPSHOT_DIGEST,
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_OBSERVED_AT_MISMATCH',
+  );
+
+  const payloadReader = reader(sourceObservations, async () => [
+    revisionRow(sourceObservations[0], 0, RUN_ID, { raw_payload: rawPayload('Different') }),
+  ]);
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      payloadReader,
+      SNAPSHOT_DIGEST,
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
+  );
+});
+
+test('exact staging revision diagnostic refuses authoritative drift before payload reads', async () => {
+  const sourceObservations = exactObservations(1);
+  const driftReader = reader(sourceObservations, async () => {
+    throw new Error('exact revision read must not occur after source drift');
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      driftReader,
+      'different-digest',
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
+  );
+  assert.equal(driftReader.calls.length, 1);
 });
 
 test('staging revision diagnostic uses one run scan plus one table-parameter collision read at large cardinality', async () => {

@@ -13,6 +13,7 @@ test('Yandex recovery transport accepts insertion-only source diagnostic enum', 
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
     stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
   }));
 
   assert.deepEqual(result, {
@@ -24,5 +25,6 @@ test('Yandex recovery transport accepts insertion-only source diagnostic enum', 
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
     stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
   });
 });

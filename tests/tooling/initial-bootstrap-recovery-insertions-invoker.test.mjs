@@ -26,6 +26,7 @@ test('recovery invoker accepts only enum-safe insertion-only evidence', async ()
     stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
     stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
     stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -52,5 +53,6 @@ test('recovery invoker accepts only enum-safe insertion-only evidence', async ()
     'R1_STAGING_DURABLE_REVISION_EVIDENCE=PARTIAL_CURRENT_RUN_ONLY',
     'R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY',
     'R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE',
+    'R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
   ]);
 });
