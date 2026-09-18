@@ -6,11 +6,16 @@ import {
 } from '../integration/google/googleSheetsFullSnapshotReader.js';
 import { createGoogleServiceAccountSheetsAccessTokenProvider } from '../integration/google/googleServiceAccountTokenProvider.js';
 import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
+import { YdbSchemeAdapter, type YdbSchemeTransport } from '../integration/ydb/scheme.js';
 import {
   createYdbJsV6MetadataDataClient,
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+import {
+  diagnoseValidatedControlledRebuildState,
+  type InitialValidatedControlledRebuildRecoveryReason,
+} from '../migration/initialControlledRebuildValidatedRecoveryDiagnostic.js';
 import { decodeRawPayloadForSourceClassification } from '../migration/rawPayloadClassificationAdapter.js';
 import type { RawPayload, RawPayloadDecodeErrorCode } from '../migration/rawPayloadDecoder.js';
 import {
@@ -52,6 +57,7 @@ export {
 
 export interface InitialBootstrapRecoveryJobYdbClient {
   readonly transport: YdbTransport;
+  createSchemeTransport(): Promise<YdbSchemeTransport>;
   close(): Promise<void>;
 }
 
@@ -104,6 +110,10 @@ export interface InitialBootstrapRecoveryJobRuntime {
   diagnoseStaleStagingRetirementCurrentState(
     adapter: YdbAdapter,
   ): Promise<InitialBootstrapStaleStagingRetirementDiagnostic>;
+  diagnoseValidatedControlledRebuildState(
+    adapter: YdbAdapter,
+    scheme: YdbSchemeAdapter,
+  ): Promise<InitialValidatedControlledRebuildRecoveryReason>;
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -135,6 +145,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseStagingExactRevisionEvidence: diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
+  diagnoseValidatedControlledRebuildState,
 });
 
 export function diagnoseInitialBootstrapSourceDecodeEvidence(
@@ -177,6 +188,21 @@ export async function executeInitialBootstrapRecoveryJob(
   try {
     const before = await runtime.diagnoseSurface(adapter);
     if (surfaceOnly) return before;
+    if (before.reason === 'VALIDATED_RUN_PRESENT') {
+      try {
+        const schemeTransport = await ydbClient.createSchemeTransport();
+        const reason = await runtime.diagnoseValidatedControlledRebuildState(
+          adapter,
+          new YdbSchemeAdapter(schemeTransport),
+        );
+        return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason });
+      } catch {
+        return Object.freeze({
+          verdict: 'RECOVERY_REQUIRED' as const,
+          reason: 'VALIDATED_CONTROLLED_DIAGNOSTIC_FAILED' as const,
+        });
+      }
+    }
     if (before.reason === 'STAGING_RUN_PRESENT') {
       let stagingDurableRevisionEvidence: InitialBootstrapStagingDurableRevisionDiagnostic;
       try {

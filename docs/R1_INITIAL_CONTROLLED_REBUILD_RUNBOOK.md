@@ -45,6 +45,21 @@ Recovery reads Function/version metadata only. The exact tag `r1-initial-control
 
 The deploy-recovery workflow has no Function-version create/invoke command and no Google/YDB mutation authority. Its published artifact is bounded enum-only evidence.
 
+## Unknown invocation recovery
+
+If the controlled Function invocation itself ends with a transport failure/timeout after the handler may have started, its YDB write outcome is unknown. Do not replay the handler. First run the existing read-only initial-bootstrap recovery on the exact current `main`.
+
+When durable recovery reports `VALIDATED_RUN_PRESENT`, the recovery-only handler refines that state using YDB scheme/current/staging reads only and emits one of these enum reasons without counts, amounts or row content:
+
+- `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT` — validation transition is durable; run-scoped staging tables are absent.
+- `VALIDATED_CURRENT_EMPTY_STAGING_EMPTY` — the staging table pair exists but remains empty.
+- `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` — staging contains data; completeness is not assumed.
+- `VALIDATED_CURRENT_NONEMPTY_STAGING_ABSENT` — canonical current is non-empty and staging is absent; swap may have applied, but exact post-swap reconciliation is still required.
+- `VALIDATED_CURRENT_NONEMPTY_STAGING_PRESENT` — current and staging are both present; stop for explicit recovery.
+- `VALIDATED_CONTROLLED_STRUCTURE_AMBIGUOUS` or `VALIDATED_CONTROLLED_DIAGNOSTIC_FAILED` — stop; no replay.
+
+These enums are structural evidence only. They do not declare staging completeness, swap success or a verified baseline. Any later continuation remains separately gated and must use the existing exact staging/swap/marker discrimination before its next mutation.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:

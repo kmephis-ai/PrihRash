@@ -1,4 +1,5 @@
 import type { YdbAdapter } from '../integration/ydb/adapter.js';
+import type { InitialValidatedControlledRebuildRecoveryReason } from './initialControlledRebuildValidatedRecoveryDiagnostic.js';
 import {
   diagnoseInitialBootstrapRecoveryEvidence,
   readInitialBootstrapRecoveryEvidence,
@@ -9,6 +10,7 @@ import {
 
 export type InitialBootstrapRecoverySurfaceReason =
   | InitialBootstrapRecoveryReason
+  | InitialValidatedControlledRebuildRecoveryReason
   | 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN'
   | 'RESIDUAL_METADATA_STATE_WITHOUT_RUN'
   | 'RESIDUAL_CURRENT_OR_LINEAGE_STATE_WITHOUT_RUN'
