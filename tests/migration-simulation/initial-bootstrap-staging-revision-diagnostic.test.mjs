@@ -375,7 +375,10 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
 test('exact staging revision diagnostic proves full persisted revision equality read-only', async () => {
   const sourceObservations = exactObservations(2);
   const evidenceReader = reader(sourceObservations, async (statement) => {
-    assert.match(statement.text, /r\.raw_payload/);
+    assert.match(statement.text, /raw_payload/);
+    assert.match(statement.text, /migration_run_id = \$migration_run_id/);
+    assert.match(statement.text, /source_record_id = \$source_record_id_0/);
+    assert.doesNotMatch(statement.text, /AS_TABLE/);
     return sourceObservations.map((item, index) => revisionRow(item, index));
   });
 
@@ -415,6 +418,47 @@ test('exact staging revision diagnostic isolates timestamp and raw-payload misma
     ),
     'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   );
+});
+
+test('exact staging revision diagnostic batches current-run payload reads without AS_TABLE joins', async () => {
+  const sourceObservations = Object.freeze(Array.from({ length: 1_000 }, (_, index) => Object.freeze({
+    ...observations(1)[0],
+    sourceOrdinal: index,
+    rowHint: index + 2,
+    digest: `synthetic-digest-${index}`,
+    rawPayload: rawPayload(`Synthetic ${index} ${'x'.repeat(1024)}`),
+  })));
+  const calls = [];
+  const byId = new Map(sourceObservations.map((item, index) => [sourceId(index), { item, index }]));
+  const evidenceReader = reader(sourceObservations, async (statement) => {
+    calls.push(statement);
+    const ids = Object.entries(statement.parameters)
+      .filter(([name]) => name.startsWith('source_record_id_'))
+      .sort(([left], [right]) => Number(left.split('_').at(-1)) - Number(right.split('_').at(-1)))
+      .map(([, parameter]) => parameter.value);
+    return ids.map((id) => {
+      const found = byId.get(id);
+      return revisionRow(found.item, found.index, RUN_ID, {
+        raw_payload: found.item.rawPayload,
+      });
+    });
+  });
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      evidenceReader,
+      SNAPSHOT_DIGEST,
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_MATCH',
+  );
+  const payloadReads = calls.filter((statement) => /raw_payload/.test(statement.text));
+  assert.equal(payloadReads.length > 1, true);
+  assert.equal(payloadReads.every((statement) => (
+    statement.parameters.migration_run_id.value === RUN_ID
+    && !/AS_TABLE/.test(statement.text)
+    && new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
+  )), true);
 });
 
 test('exact staging revision diagnostic refuses authoritative drift before payload reads', async () => {
