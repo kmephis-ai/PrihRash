@@ -78,7 +78,7 @@ function expectRecoveryError(code, work) {
   );
 }
 
-test('restart after partial revision evidence uses metadata run scan plus exact bounded payload verification', async () => {
+test('restart after partial revision evidence separates run-scoped payload verification from missing-key collision read', async () => {
   const expected = [
     revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A'),
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
@@ -86,24 +86,36 @@ test('restart after partial revision evidence uses metadata run scan plus exact 
   const statements = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader(
-      (statement) => statement.parameters.migration_run_id === undefined
-        ? [providerRow(expected[0])]
-        : [providerRow(expected[0])],
+      (statement) => {
+        if (statement.parameters.migration_run_id !== undefined && /raw_payload/.test(statement.text)) {
+          return [providerRow(expected[0])];
+        }
+        if (statement.parameters.migration_run_id !== undefined) return [providerRow(expected[0])];
+        return [];
+      },
       (statement) => statements.push(statement),
     ),
     expected,
   );
 
-  assert.equal(statements.length, 2);
+  assert.equal(statements.length, 3);
   assert.match(statements[0].text, /migration_run_id = \$migration_run_id$/);
-  assert.doesNotMatch(statements[0].text, /raw_payload/);
+  assert.doesNotMatch(statements[0].text, /raw_payload|AS_TABLE/);
   assert.equal(statements[0].parameters.revision.value, 1n);
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
-  assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
-  assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
+
+  assert.match(statements[1].text, /raw_payload/);
+  assert.match(statements[1].text, /migration_run_id = \$migration_run_id/);
+  assert.match(statements[1].text, /source_record_id = \$source_record_id_0/);
+  assert.doesNotMatch(statements[1].text, /AS_TABLE/);
+  assert.equal(statements[1].parameters.source_record_id_0.value, SOURCE_ID_1);
+
+  assert.match(statements[2].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
+  assert.doesNotMatch(statements[2].text, /raw_payload/);
+  assert.equal(statements[2].parameters.source_keys.type, 'ListStruct');
   assert.deepEqual(
-    statements[1].parameters.source_keys.value.rows.map((row) => row.source_record_id.value),
-    [SOURCE_ID_1, SOURCE_ID_2],
+    statements[2].parameters.source_keys.value.rows.map((row) => row.source_record_id.value),
+    [SOURCE_ID_2],
   );
 
   assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
@@ -180,41 +192,50 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('large revision evidence preflight bounds raw-payload materialization by calibrated byte batches', async () => {
+test('large current-run payload verification is bounded by response and query bytes without AS_TABLE', async () => {
   const expected = Array.from({ length: 1_000 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
     `synthetic-row-${index + 1}`,
     `Synthetic ${index + 1} ${'x'.repeat(1024)}`,
   ));
+  const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
   const statements = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
-    reader([], (statement) => statements.push(statement)),
+    reader((statement) => {
+      if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
+      const ids = Object.entries(statement.parameters)
+        .filter(([name]) => name.startsWith('source_record_id_'))
+        .sort(([left], [right]) => Number(left.split('_').at(-1)) - Number(right.split('_').at(-1)))
+        .map(([, parameter]) => parameter.value);
+      return ids.map((id) => providerRow(byId.get(id)));
+    }, (statement) => statements.push(statement)),
     expected,
   );
 
   assert.equal(statements.length > 2, true);
   assert.deepEqual(Object.keys(statements[0].parameters).sort(), ['migration_run_id', 'revision']);
-  assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
   assert.doesNotMatch(statements[0].text, /AS_TABLE|raw_payload/);
 
   const payloadReads = statements.slice(1);
+  assert.equal(payloadReads.length > 1, true);
   assert.equal(payloadReads.every((statement) => (
-    Object.keys(statement.parameters).sort().join(',') === 'revision,source_keys'
-    && statement.parameters.source_keys.type === 'ListStruct'
-    && /INNER JOIN AS_TABLE\(\$source_keys\) AS k/.test(statement.text)
+    statement.parameters.migration_run_id.value === RUN_ID
     && /raw_payload/.test(statement.text)
+    && !/AS_TABLE/.test(statement.text)
+    && /source_record_id = \$source_record_id_0/.test(statement.text)
     && new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
   )), true);
   assert.equal(
-    payloadReads.reduce((total, statement) => total + statement.parameters.source_keys.value.rows.length, 0),
+    payloadReads.reduce(
+      (total, statement) => total + Object.keys(statement.parameters)
+        .filter((name) => name.startsWith('source_record_id_')).length,
+      0,
+    ),
     expected.length,
   );
-  assert.equal(
-    payloadReads.every((statement) => statement.parameters.source_keys.value.rows.length < expected.length),
-    true,
-  );
-  assert.deepEqual(resume.missingRevisions, expected);
+  assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId).sort());
+  assert.deepEqual(resume.missingRevisions, []);
 });
 
 test('malformed raw payload is not accepted as equivalent revision evidence', async () => {

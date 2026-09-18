@@ -160,6 +160,22 @@ bootstrap. This workflow exists only to remove the current control-surface gap w
 GitHub client cannot create a fresh `workflow_dispatch`; it retires together with the R1
 autocontinue/provider surface after #453.
 
+### Exact revision AS_TABLE readback seam on `83b3e201d47780007a0013fe2d643039d8e5344a`
+
+Autonomous read-only recovery `35338326938` on exact current main proved the durable surface still
+`STAGING_RUN_PRESENT / COMPLETE_CURRENT_RUN_ONLY / COMPLETE_CURRENT_RUN_ONLY /
+STALE_STAGING_CURRENT_STATE_EMPTY / NONE`, while the new exact preflight returned
+`EXACT_CURRENT_RUN_REVISION_MALFORMED`. Because the ordinary run-scoped durable read successfully
+validated the same revision identity/metadata fields, the malformed result is localized to the
+`AS_TABLE($source_keys)` exact-payload join path also used by application resume.
+
+Exact current-run payload verification therefore no longer joins all expected keys through
+`AS_TABLE`. It uses scalar source-id predicates together with exact `migration_run_id`, batching
+dynamically by both the existing 512 KiB response-memory envelope and 8 KiB query-text envelope.
+The `AS_TABLE` key join remains only as a metadata-only collision probe for source IDs that are
+actually missing from the current run. No row cap, retry, timeout, memory, financial semantics, or
+authority is widened.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
