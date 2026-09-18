@@ -78,23 +78,31 @@ function expectRecoveryError(code, work) {
   );
 }
 
-test('restart after partial revision evidence preserves run scan and checks the same query by primary key', async () => {
+test('restart after partial revision evidence uses one run scan plus one table-parameter collision read', async () => {
   const expected = [
     revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A'),
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
   ];
+  const statements = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
-    reader([providerRow(expected[0])], (statement) => {
-      assert.match(
-        statement.text,
-        /WHERE revision = \$revision AND \(migration_run_id = \$migration_run_id OR source_record_id IN \(\$source_record_id_0, \$source_record_id_1\)\)/,
-      );
-      assert.equal(statement.parameters.revision.value, 1n);
-      assert.equal(statement.parameters.migration_run_id.value, RUN_ID);
-      assert.equal(statement.parameters.source_record_id_0.value, SOURCE_ID_1);
-      assert.equal(statement.parameters.source_record_id_1.value, SOURCE_ID_2);
-    }),
+    reader(
+      (statement) => statement.parameters.migration_run_id === undefined
+        ? []
+        : [providerRow(expected[0])],
+      (statement) => statements.push(statement),
+    ),
     expected,
+  );
+
+  assert.equal(statements.length, 2);
+  assert.match(statements[0].text, /migration_run_id = \$migration_run_id$/);
+  assert.equal(statements[0].parameters.revision.value, 1n);
+  assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
+  assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
+  assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
+  assert.deepEqual(
+    statements[1].parameters.source_keys.value.rows.map((row) => row.source_record_id.value),
+    [SOURCE_ID_2],
   );
 
   assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
@@ -110,7 +118,11 @@ test('primary-key collision from another migration run fails closed instead of p
   await expectRecoveryError(
     'EXISTING_REVISION_MISMATCH',
     () => planInitialSourceRevisionEvidenceResume(
-      reader([providerRow(expected[0], { migration_run_id: OTHER_RUN_ID })]),
+      reader((statement) => (
+        statement.parameters.migration_run_id === undefined
+          ? [providerRow(expected[0], { migration_run_id: OTHER_RUN_ID })]
+          : []
+      )),
       expected,
     ),
   );
@@ -167,8 +179,8 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('revision primary-key reads keep one run scan and batch up to 300 source ids per query', async () => {
-  const expected = Array.from({ length: 301 }, (_, index) => revision(
+test('fresh revision evidence preflight stays at two provider reads with a constant-size AS_TABLE query', async () => {
+  const expected = Array.from({ length: 1_000 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
     `synthetic-row-${index + 1}`,
@@ -179,17 +191,20 @@ test('revision primary-key reads keep one run scan and batch up to 300 source id
     reader([], (statement) => statements.push(statement)),
     expected,
   );
+
   assert.equal(statements.length, 2);
-  assert.equal(Object.keys(statements[0].parameters).length, 302);
+  assert.deepEqual(Object.keys(statements[0].parameters).sort(), ['migration_run_id', 'revision']);
+  assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
+  assert.doesNotMatch(statements[0].text, /AS_TABLE/);
+
+  assert.deepEqual(Object.keys(statements[1].parameters).sort(), ['revision', 'source_keys']);
+  assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
+  assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
+  assert.equal(statements[1].parameters.source_keys.value.rows.length, expected.length);
   assert.equal(
-    new TextEncoder().encode(statements[0].text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
+    new TextEncoder().encode(statements[1].text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
     true,
   );
-  assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
-  assert.match(statements[0].text, /migration_run_id = \$migration_run_id OR source_record_id IN/);
-  assert.equal(Object.keys(statements[1].parameters).length, 2);
-  assert.equal(statements[1].parameters.migration_run_id, undefined);
-  assert.doesNotMatch(statements[1].text, /migration_run_id =/);
   assert.deepEqual(resume.missingRevisions, expected);
 });
 

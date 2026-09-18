@@ -1,6 +1,11 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
 import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
-import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import {
+  listStructParameter,
+  uint64Parameter,
+  uuidParameter,
+  type YdbListStructColumn,
+} from '../integration/ydb/parameters.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
 
@@ -39,9 +44,9 @@ export class InitialSourceRevisionEvidenceRecoveryError extends Error {
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-// 300 UUID placeholders keep the generated read below the existing 8 KiB pre-live
-// query safety margin while cutting recovery/resume provider round-trips sixfold.
-const INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT = 300;
+const SOURCE_KEY_COLUMNS = Object.freeze([
+  Object.freeze({ name: 'source_record_id', type: 'Uuid', nullable: false }),
+] satisfies readonly YdbListStructColumn[]);
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
@@ -154,29 +159,34 @@ function validateExistingRevisionRows(
   }
 }
 
-function primaryKeyReadStatement(
-  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
-  runId: string | null,
-) {
-  const sourceIdParameters = Object.fromEntries(
-    revisions.map((revision, index) => [
-      `source_record_id_${index}`,
-      uuidParameter(revision.sourceRecordId),
-    ]),
-  );
-  const sourceIdPlaceholders = revisions
-    .map((_, index) => `$source_record_id_${index}`)
-    .join(', ');
-  const runPredicate = runId === null ? '' : 'migration_run_id = $migration_run_id OR ';
+function runRevisionReadStatement(runId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions '
-      + `WHERE revision = $revision AND (${runPredicate}source_record_id IN (${sourceIdPlaceholders}))`,
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
     {
       revision: uint64Parameter(1),
-      ...(runId === null ? {} : { migration_run_id: uuidParameter(runId) }),
-      ...sourceIdParameters,
+      migration_run_id: uuidParameter(runId),
+    },
+  );
+}
+
+function sourceKeyReadStatement(
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+) {
+  const sourceKeys = revisions.map((revision) => Object.freeze({
+    source_record_id: uuidParameter(revision.sourceRecordId),
+  }));
+  return readStatement(
+    'SELECT r.source_record_id, r.revision, r.migration_run_id, r.observed_at, r.row_hint, '
+      + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class, r.raw_payload '
+      + 'FROM source_record_revisions AS r '
+      + 'INNER JOIN AS_TABLE($source_keys) AS k ON r.source_record_id = k.source_record_id '
+      + 'WHERE r.revision = $revision',
+    {
+      revision: uint64Parameter(1),
+      source_keys: listStructParameter(SOURCE_KEY_COLUMNS, sourceKeys),
     },
   );
 }
@@ -194,28 +204,19 @@ export async function planInitialSourceRevisionEvidenceResume(
   }
 
   const existingSourceIds = new Set<string>();
-  const firstBatch = expectedRevisions.slice(0, INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT);
-  const firstResult = await reader.read<ExistingInitialRevisionRow>(
-    primaryKeyReadStatement(firstBatch, expected.runId),
+  const runResult = await reader.read<ExistingInitialRevisionRow>(
+    runRevisionReadStatement(expected.runId),
   );
-  validateExistingRevisionRows(firstResult.rows, expected, existingSourceIds);
+  validateExistingRevisionRows(runResult.rows, expected, existingSourceIds);
 
-  const uncheckedMissing = expectedRevisions
-    .slice(INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT)
-    .filter((revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()));
-  for (
-    let start = 0;
-    start < uncheckedMissing.length;
-    start += INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT
-  ) {
-    const batch = uncheckedMissing.slice(
-      start,
-      start + INITIAL_REVISION_EVIDENCE_READ_KEYS_PER_QUERY_LIMIT,
+  const uncheckedMissing = expectedRevisions.filter(
+    (revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
+  );
+  if (uncheckedMissing.length > 0) {
+    const keyResult = await reader.read<ExistingInitialRevisionRow>(
+      sourceKeyReadStatement(uncheckedMissing),
     );
-    const result = await reader.read<ExistingInitialRevisionRow>(
-      primaryKeyReadStatement(batch, null),
-    );
-    validateExistingRevisionRows(result.rows, expected, existingSourceIds);
+    validateExistingRevisionRows(keyResult.rows, expected, existingSourceIds);
   }
 
   const missingRevisions = expectedRevisions.filter(
