@@ -475,8 +475,14 @@ async function prepareResumeContext(
     projectionRows(candidate, observation),
     dependencies.projectionContext,
   );
-  // Rebuilding the manifest is a pure semantic consistency check. No manifest write occurs on resume.
-  buildInitialBootstrapIdentityManifest(candidate, projection, recovered.transactionAssignments);
+  // The identity manifest is claimed while the durable run is STAGING. Controlled rebuild may
+  // legitimately resume after the lifecycle has advanced to VALIDATED, so reconstruct the same
+  // immutable manifest against a STAGING view for this pure consistency check only. The returned
+  // candidate keeps the actual durable lifecycle state and no manifest write occurs on resume.
+  const manifestCandidate = run.state === 'VALIDATED'
+    ? envelopeWithRun(baseCandidate, Object.freeze({ ...run, state: 'STAGING' as const }))
+    : candidate;
+  buildInitialBootstrapIdentityManifest(manifestCandidate, projection, recovered.transactionAssignments);
   return Object.freeze({
     candidate,
     projection,

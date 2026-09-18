@@ -18,6 +18,7 @@ async function runInvoker({ body = '', status = 200, mode = 'response', function
     HOME: process.env.HOME,
     NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
     PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
+    PRIHRASH_TEST_FUNCTION_TAG: 'r1-initial-controlled-rebuild',
     PRIHRASH_TEST_FETCH_BODY: body,
     PRIHRASH_TEST_FETCH_STATUS: String(status),
     PRIHRASH_TEST_FETCH_MODE: mode,
