@@ -11,6 +11,10 @@ on:
         description: Exact main SHA of the failed controlled rebuild attempt
         required: true
         type: string
+      failed_run_sha:
+        description: Exact main SHA on which the controlled rebuild deploy failed
+        required: true
+        type: string
       failed_run_id:
         description: Exact failed R1 initial controlled rebuild run ID
         required: true
@@ -54,6 +58,7 @@ jobs:
           GH_API_TOKEN: ${{ github.token }}
           TRACKING_ISSUE: ${{ inputs.tracking_issue }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          FAILED_RUN_SHA: ${{ inputs.failed_run_sha }}
           FAILED_RUN_ID: ${{ inputs.failed_run_id }}
         run: |
           set -euo pipefail
@@ -64,6 +69,7 @@ jobs:
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_AUTHORITY_ISSUE_INVALID'; exit 1; }
+          [[ "$FAILED_RUN_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_SHA_INVALID'; exit 1; }
           [[ "$FAILED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_ID_INVALID'; exit 1; }
 
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
@@ -99,10 +105,10 @@ jobs:
           }
 
           curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/runs/${FAILED_RUN_ID}" --output "$tmp/failed-run.json"
-          jq -e --argjson id "$FAILED_RUN_ID" --arg sha "$GITHUB_SHA" '
+          jq -e --argjson id "$FAILED_RUN_ID" --arg failed_sha "$FAILED_RUN_SHA" '
             .id == $id
             and .name == "R1 initial controlled rebuild"
-            and .head_sha == $sha
+            and .head_sha == $failed_sha
             and .head_branch == "main"
             and .event == "workflow_dispatch"
             and .status == "completed"
