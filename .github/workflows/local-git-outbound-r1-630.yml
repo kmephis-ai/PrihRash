@@ -1,4 +1,4 @@
-name: R1 WU7 370f Deploy Recovery Control
+name: R1 WU7 c412 Deploy Recovery Control
 
 on:
   push:
@@ -13,18 +13,19 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-370f-deploy-recovery-control
+  group: r1-wu7-c412-deploy-recovery-control
   cancel-in-progress: false
 
 jobs:
   dispatch-deploy-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch exact failed-run deploy recovery
+      - name: Dispatch exact failed-run deploy recovery on current main
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: 370f463c7094efe4f7740b3ad0da3174e68196ef
+          EXPECTED_MAIN_SHA: c4122acddc40c441e2379bd34e716892364b9406
+          FAILED_RUN_SHA: 370f463c7094efe4f7740b3ad0da3174e68196ef
           FAILED_RUN_ID: "35394210405"
           TRACKING_ISSUE: "630"
         run: |
@@ -44,7 +45,7 @@ jobs:
           ' /tmp/issue.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$FAILED_RUN_ID" -o /tmp/failed.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+          jq -e --arg sha "$FAILED_RUN_SHA" '
             .name == "R1 initial controlled rebuild"
             and .head_sha == $sha
             and .head_branch == "main"
@@ -66,8 +67,8 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg failed "$FAILED_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,failed_run_sha:$sha,failed_run_id:$failed}}')"
+          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg current "$EXPECTED_MAIN_SHA"             --arg failed_sha "$FAILED_RUN_SHA"             --arg failed_id "$FAILED_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$current,failed_run_sha:$failed_sha,failed_run_id:$failed_id}}')"
 
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
-          echo "R1_WU7_370F_DEPLOY_RECOVERY_DISPATCHED"
+          echo "R1_WU7_C412_DEPLOY_RECOVERY_DISPATCHED"
