@@ -65,6 +65,7 @@ const providerWorkflowPaths = [
   'r1-initial-shadow-bootstrap.yml',
   'r1-initial-bootstrap-recovery.yml',
   'r1-initial-bootstrap-orchestrator.yml',
+  'r1-initial-controlled-rebuild.yml',
   'r1-ydb-schema-bootstrap.yml',
   'r1-ydb-schema-upgrade-003.yml',
 ];
