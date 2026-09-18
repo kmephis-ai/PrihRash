@@ -12,19 +12,28 @@ const FETCH_MOCK = resolve(ROOT, 'tests/fixtures/mock-yandex-function-fetch.mjs'
 const FUNCTION_ID = 'synthetic-controlled-rebuild-function-id';
 const PRIVATE_LOOKING = 'private-sheet grpcs://private-ydb private-token 12345';
 
-async function runInvoker({ body = '', status = 200, mode = 'response', functionId = true, token = true } = {}) {
+async function runInvoker({
+  body = '',
+  status = 200,
+  mode = 'response',
+  functionId = true,
+  token = true,
+  invokeMode = 'sync',
+} = {}) {
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
     PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
     PRIHRASH_TEST_FUNCTION_TAG: 'r1-initial-controlled-rebuild',
+    PRIHRASH_TEST_FUNCTION_INTEGRATION: invokeMode === 'async' ? 'async' : 'raw',
     PRIHRASH_TEST_FETCH_BODY: body,
     PRIHRASH_TEST_FETCH_STATUS: String(status),
     PRIHRASH_TEST_FETCH_MODE: mode,
     PRIHRASH_TEST_FUNCTION_ERROR: 'false',
     ...(functionId ? { PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID: FUNCTION_ID } : {}),
     ...(token ? { YC_IAM_TOKEN: 'synthetic-short-lived-iam-token' } : {}),
+    PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE: invokeMode,
   };
   try {
     const result = await execFileAsync(process.execPath, [INVOKER], { cwd: ROOT, env, encoding: 'utf8' });
@@ -73,6 +82,31 @@ test('controlled rebuild invoker preserves bounded STOP and runtime enum results
     assert.equal(result.exitCode, 2);
     assertSafe(result, value);
   }
+});
+
+test('controlled rebuild invoker accepts async dispatch only on HTTP 202 and never treats it as COMMITTED', async () => {
+  const accepted = await runInvoker({
+    invokeMode: 'async',
+    status: 202,
+    body: PRIVATE_LOOKING,
+  });
+  assert.equal(accepted.exitCode, 0);
+  assertSafe(accepted, {
+    status: 'PASS',
+    code: 'INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED',
+  });
+
+  const wrongStatus = await runInvoker({
+    invokeMode: 'async',
+    status: 200,
+    body: JSON.stringify({ status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_COMMITTED' }),
+  });
+  assert.equal(wrongStatus.exitCode, 2);
+  assertSafe(wrongStatus, {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_HTTP_FAILED',
+    httpStatus: 'HTTP_OTHER',
+  });
 });
 
 test('controlled rebuild invoker rejects extra/private fields and unknown enums without echo', async () => {
