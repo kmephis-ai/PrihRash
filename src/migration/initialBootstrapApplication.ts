@@ -574,9 +574,15 @@ export async function prepareInitialControlledRebuildContinuation(
   }
 
   markApplicationPhase(dependencies, 'LINEAGE_PREPARATION');
+  // Initial lineage was created while the run was STAGING. A VALIDATED controlled-rebuild
+  // continuation replays only that immutable projection contract; lifecycle authority remains on
+  // the actual durable run used below for reconciliation and commit decisions.
+  const lineageCandidate = durableRun.state === 'VALIDATED'
+    ? envelopeWithRun(prepared.candidate, Object.freeze({ ...durableRun, state: 'STAGING' as const }))
+    : prepared.candidate;
   const lineage = buildInitialSourceLineageProjection(
-    prepared.candidate,
-    lineageObservations(prepared.candidate, observation),
+    lineageCandidate,
+    lineageObservations(lineageCandidate, observation),
   );
   markApplicationPhase(dependencies, 'RECONCILIATION_READ');
   const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
