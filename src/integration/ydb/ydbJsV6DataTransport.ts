@@ -6,7 +6,11 @@ import {
   type YdbStatement,
   type YdbTransport,
 } from './adapter.js';
-import type { YdbParameter } from './parameters.js';
+import type {
+  YdbListStructParameter,
+  YdbParameter,
+  YdbScalarParameter,
+} from './parameters.js';
 
 const TIMESTAMP_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?Z$/;
 const textEncoder = new TextEncoder();
@@ -157,7 +161,7 @@ function requireConstructor(sdk: SdkSurface, name: string): SdkConstructor {
   return value as SdkConstructor;
 }
 
-function itemTypeFor(sdk: SdkSurface, type: YdbParameter['type']): unknown {
+function itemTypeFor(sdk: SdkSurface, type: YdbScalarParameter['type']): unknown {
   const className = type === 'String' ? 'BytesType' : `${type}Type`;
   const TypeClass = requireConstructor(sdk, className);
   return new TypeClass();
@@ -186,7 +190,7 @@ export function createYdbJsV6ParameterMapper(
 ): (parameter: Readonly<YdbParameter>) => unknown {
   const Optional = requireConstructor(sdk, 'Optional');
 
-  return (parameter) => {
+  const mapScalar = (parameter: Readonly<YdbScalarParameter>): unknown => {
     const { type, value } = parameter;
     if (value === null) return new Optional(null, itemTypeFor(sdk, type));
 
@@ -228,6 +232,49 @@ export function createYdbJsV6ParameterMapper(
         return fail('PARAMETER_TYPE_UNSUPPORTED');
     }
   };
+
+  const mapListStruct = (parameter: Readonly<YdbListStructParameter>): unknown => {
+    const OptionalType = requireConstructor(sdk, 'OptionalType');
+    const List = requireConstructor(sdk, 'List');
+    const Struct = requireConstructor(sdk, 'Struct');
+    const StructType = requireConstructor(sdk, 'StructType');
+    const { columns, rows } = parameter.value;
+    if (columns.length === 0 || rows.length === 0) fail('PARAMETER_VALUE_INVALID');
+
+    const names = columns.map((column) => column.name);
+    const itemTypes = columns.map((column) => itemTypeFor(sdk, column.type));
+    const structTypes = columns.map((column, index) => (
+      column.nullable ? new OptionalType(itemTypes[index]) : itemTypes[index]
+    ));
+    const structType = new StructType(names, structTypes);
+
+    const values = rows.map((row) => {
+      const fields: Record<string, unknown> = {};
+      for (const column of columns) {
+        const cell = row[column.name];
+        if (
+          cell === undefined
+          || cell.type !== column.type
+          || (cell.value === null && !column.nullable)
+        ) {
+          fail('PARAMETER_VALUE_INVALID');
+        }
+        const mapped = mapScalar(cell);
+        fields[column.name] = column.nullable && cell.value !== null
+          ? new Optional(mapped)
+          : mapped;
+      }
+      return new Struct(fields, structType);
+    });
+
+    return new List(...values);
+  };
+
+  return (parameter) => (
+    parameter.type === 'ListStruct'
+      ? mapListStruct(parameter)
+      : mapScalar(parameter)
+  );
 }
 
 async function executeStatement<Row>(
@@ -388,18 +435,27 @@ async function createDataClientWithCredentials(
   config: Readonly<YdbJsCommonDataClientConfig>,
   credentialsProvider: CredentialsProvider,
 ): Promise<Readonly<YdbJsDataClient>> {
-  const [core, queryModule, primitive, optional] = await Promise.all([
+  const [core, queryModule, primitive, optional, list, struct] = await Promise.all([
     import('@ydbjs/core'),
     import('@ydbjs/query'),
     import('@ydbjs/value/primitive'),
     import('@ydbjs/value/optional'),
+    import('@ydbjs/value/list'),
+    import('@ydbjs/value/struct'),
   ]);
 
   const driver = new core.Driver(config.connectionString, { credentialsProvider });
   await driver.ready();
   const rawSql = queryModule.query(driver, { poolOptions: { maxSize: config.poolMaxSize ?? 4 } });
   const sql = rawSql as unknown as YdbSqlClient;
-  const sdk: SdkSurface = Object.freeze({ ...primitive, Optional: optional.Optional });
+  const sdk: SdkSurface = Object.freeze({
+    ...primitive,
+    Optional: optional.Optional,
+    OptionalType: optional.OptionalType,
+    List: list.List,
+    Struct: struct.Struct,
+    StructType: struct.StructType,
+  });
   const transport = createYdbJsV6DataTransport(
     sql,
     createYdbJsV6ParameterMapper(sdk),

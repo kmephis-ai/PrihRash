@@ -14,7 +14,6 @@ import {
   PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
 } from '../../dist/migration/atomicPromotion.js';
 import {
-  INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT,
   InitialRevisionEvidenceError,
   executeInitialRevisionEvidenceBatches,
   planInitialRevisionEvidenceBatches,
@@ -62,21 +61,13 @@ test('greedily chunks staging revision evidence under calibrated transaction cap
   assert.equal(batches.every((batch) => Object.isFrozen(batch) && Object.isFrozen(batch.writes)), true);
 });
 
-test('bounds revision rows in each committed evidence batch', () => {
-  const writes = Array.from(
-    { length: INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT + 1 },
-    (_, index) => evidenceWrite(128, index),
-  );
+test('uses the calibrated parameter-byte cap instead of an unrelated 50-row split', () => {
+  const writes = Array.from({ length: 120 }, (_, index) => evidenceWrite(128, index));
   const batches = planInitialRevisionEvidenceBatches(writes);
 
-  assert.deepEqual(
-    batches.map((batch) => batch.writes.length),
-    [INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT, 1],
-  );
+  assert.deepEqual(batches.map((batch) => batch.writes.length), [120]);
   assert.equal(
-    batches.every(
-      (batch) => batch.writes.length <= INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT,
-    ),
+    batches.every((batch) => batch.totalEstimatedParameterBytes <= PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT),
     true,
   );
 });
@@ -96,11 +87,9 @@ test('rejects a single evidence write that cannot fit one bounded transaction', 
   );
 });
 
-test('coalesces a maximum revision batch into one bounded multi-row provider execute', async () => {
-  const writes = Array.from(
-    { length: INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT },
-    (_, index) => evidenceWrite(128, index),
-  );
+test('coalesces a >50-row initial batch into one bounded AS_TABLE provider execute', async () => {
+  const rowCount = 120;
+  const writes = Array.from({ length: rowCount }, (_, index) => evidenceWrite(128, index));
   const batches = planInitialRevisionEvidenceBatches(writes);
   assert.equal(batches.length, 1);
 
@@ -123,20 +112,24 @@ test('coalesces a maximum revision batch into one bounded multi-row provider exe
   const [statement] = executed;
   assert.equal(statement.kind, 'WRITE');
   assert.match(statement.text, /^INSERT INTO source_record_revisions /);
+  assert.match(statement.text, /FROM AS_TABLE\(\$rows\)$/);
   assert.equal(
     new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
     true,
   );
+  assert.deepEqual(Object.keys(statement.parameters), ['rows']);
+  assert.equal(statement.parameters.rows.type, 'ListStruct');
+  assert.equal(statement.parameters.rows.value.rows.length, rowCount);
   assert.equal(
-    Object.keys(statement.parameters).length,
-    INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT * 8,
+    statement.parameters.rows.value.rows[0].source_record_id.value,
+    sourceId(0),
   );
-  assert.equal(statement.parameters.source_record_id.value, sourceId(0));
   assert.equal(
-    statement.parameters[`source_record_id_${INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT - 1}`].value,
-    sourceId(INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT - 1),
+    statement.parameters.rows.value.rows[rowCount - 1].source_record_id.value,
+    sourceId(rowCount - 1),
   );
-  assert.match(statement.text, /\), \(/);
+  assert.equal(statement.parameters.rows.value.columns[0].nullable, false);
+  assert.equal(statement.parameters.rows.value.columns[2].nullable, true);
 });
 
 test('rejects malformed staging evidence shape before starting provider transaction', async () => {

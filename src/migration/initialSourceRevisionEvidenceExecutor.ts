@@ -1,5 +1,9 @@
 import { YdbAdapter, writeStatement, type YdbStatement } from '../integration/ydb/adapter.js';
-import type { YdbParameter } from '../integration/ydb/parameters.js';
+import {
+  listStructParameter,
+  type YdbListStructColumn,
+  type YdbScalarParameter,
+} from '../integration/ydb/parameters.js';
 import {
   PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
   assessAtomicPromotionWrites,
@@ -7,22 +11,21 @@ import {
 } from './atomicPromotion.js';
 import type { PreparedInitialSourceLineageWrite } from './initialSourceLineagePersistence.js';
 
-// Keep the existing commit boundary: at most 50 revision rows per transaction.
-// Within that boundary, execute one multi-row YQL INSERT so live initial bootstrap
-// does not pay one provider round-trip per source row. A failed transaction still
-// rolls back the whole batch and earlier committed batches remain resumable.
-export const INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT = 50;
-
-const REVISION_COLUMNS = Object.freeze([
-  'source_record_id',
-  'revision',
-  'migration_run_id',
-  'observed_at',
-  'row_hint',
-  'row_digest',
-  'change_class',
-  'raw_payload',
-] as const);
+// Initial evidence keeps the calibrated 512 KiB transaction parameter boundary,
+// but no longer adds an unrelated 50-row cap. The exact initial INSERT is transported
+// as one List<Struct> table parameter, so YQL text stays constant while earlier committed
+// batches remain independently resumable after a later failure.
+const REVISION_TABLE_COLUMNS = Object.freeze([
+  Object.freeze({ name: 'source_record_id', type: 'Uuid', nullable: false }),
+  Object.freeze({ name: 'revision', type: 'Uint64', nullable: false }),
+  Object.freeze({ name: 'migration_run_id', type: 'Uuid', nullable: true }),
+  Object.freeze({ name: 'observed_at', type: 'Timestamp', nullable: true }),
+  Object.freeze({ name: 'row_hint', type: 'Uint64', nullable: true }),
+  Object.freeze({ name: 'row_digest', type: 'String', nullable: true }),
+  Object.freeze({ name: 'change_class', type: 'Utf8', nullable: true }),
+  Object.freeze({ name: 'raw_payload', type: 'JsonDocument', nullable: true }),
+] satisfies readonly YdbListStructColumn[]);
+const REVISION_COLUMNS = REVISION_TABLE_COLUMNS.map((column) => column.name);
 const REVISION_COLUMN_LIST = REVISION_COLUMNS.join(', ');
 const SINGLE_ROW_INSERT_TEXT = `INSERT INTO source_record_revisions (${REVISION_COLUMN_LIST}) VALUES (`
   + REVISION_COLUMNS.map((name) => `$${name}`).join(', ')
@@ -59,11 +62,21 @@ function asPromotionWrites(writes: readonly PreparedInitialSourceLineageWrite[])
 
 function exactRevisionParameters(
   statement: Readonly<YdbStatement>,
-): statement is Readonly<YdbStatement> & { readonly parameters: Readonly<Record<string, YdbParameter>> } {
+): statement is Readonly<YdbStatement> & { readonly parameters: Readonly<Record<string, YdbScalarParameter>> } {
   const actual = Object.keys(statement.parameters).sort();
   const expected = [...REVISION_COLUMNS].sort();
-  return actual.length === expected.length
-    && actual.every((name, index) => name === expected[index]);
+  if (
+    actual.length !== expected.length
+    || actual.some((name, index) => name !== expected[index])
+  ) {
+    return false;
+  }
+  return REVISION_TABLE_COLUMNS.every((column) => {
+    const parameter = statement.parameters[column.name];
+    return parameter !== undefined
+      && parameter.type !== 'ListStruct'
+      && parameter.type === column.type;
+  });
 }
 
 function buildRevisionEvidenceBatchStatement(
@@ -95,26 +108,22 @@ function buildRevisionEvidenceBatchStatement(
     return null;
   }
 
-  const parameters: Record<string, YdbParameter> = {};
-  const tuples: string[] = [];
-
-  for (const [index, write] of writes.entries()) {
-    const names: string[] = [];
-    for (const column of REVISION_COLUMNS) {
-      const parameter = write.statement.parameters[column];
-      if (parameter === undefined) {
+  const rows = writes.map((write) => {
+    const row: Record<string, YdbScalarParameter> = {};
+    for (const column of REVISION_TABLE_COLUMNS) {
+      const parameter = write.statement.parameters[column.name];
+      if (parameter === undefined || parameter.type === 'ListStruct') {
         throw new InitialRevisionEvidenceError('EVIDENCE_WRITE_SHAPE_INVALID');
       }
-      const name = index === 0 ? column : `${column}_${index}`;
-      parameters[name] = parameter;
-      names.push(`$${name}`);
+      row[column.name] = parameter;
     }
-    tuples.push(`(${names.join(', ')})`);
-  }
+    return Object.freeze(row);
+  });
 
   const statement = writeStatement(
-    `INSERT INTO source_record_revisions (${REVISION_COLUMN_LIST}) VALUES ${tuples.join(', ')}`,
-    parameters,
+    `INSERT INTO source_record_revisions (${REVISION_COLUMN_LIST}) `
+      + `SELECT ${REVISION_COLUMN_LIST} FROM AS_TABLE($rows)`,
+    { rows: listStructParameter(REVISION_TABLE_COLUMNS, rows) },
   );
   if (TEXT_ENCODER.encode(statement.text).byteLength > PRELIVE_PROMOTION_QUERY_BYTES_LIMIT) {
     throw new InitialRevisionEvidenceError('EVIDENCE_BATCH_QUERY_TOO_LARGE');
@@ -140,10 +149,7 @@ export function planInitialRevisionEvidenceBatches(
   for (const write of writes) {
     const candidate = [...current, write];
     const assessment = assessAtomicPromotionWrites(asPromotionWrites(candidate));
-    if (
-      candidate.length > INITIAL_REVISION_EVIDENCE_WRITES_PER_TRANSACTION_LIMIT
-      || !assessment.eligible
-    ) {
+    if (!assessment.eligible) {
       const currentAssessment = assessAtomicPromotionWrites(asPromotionWrites(current));
       batches.push(Object.freeze({
         writes: Object.freeze([...current]),

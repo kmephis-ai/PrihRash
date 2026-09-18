@@ -302,20 +302,31 @@ function applyWrite(statement, state) {
     return [];
   }
   if (text.startsWith('INSERT INTO source_record_revisions')) {
-    const sourceRecordId = parameter(statement, 'source_record_id');
-    const revision = Number(parameter(statement, 'revision'));
-    const key = `${sourceRecordId}|${revision}`;
-    if (state.revisions.has(key)) throw new Error('synthetic duplicate revision');
-    state.revisions.set(key, {
-      source_record_id: sourceRecordId,
-      revision: BigInt(revision),
-      migration_run_id: parameter(statement, 'migration_run_id'),
-      observed_at: parameter(statement, 'observed_at'),
-      row_hint: BigInt(parameter(statement, 'row_hint')),
-      row_digest: parameter(statement, 'row_digest'),
-      change_class: parameter(statement, 'change_class'),
-      raw_payload: parameter(statement, 'raw_payload'),
-    });
+    const tableParameter = statement.parameters.rows;
+    const rows = tableParameter?.type === 'ListStruct'
+      ? tableParameter.value.rows.map((row) => Object.fromEntries(
+        Object.entries(row).map(([name, value]) => [name, value.value]),
+      ))
+      : [Object.fromEntries(
+        Object.entries(statement.parameters).map(([name, value]) => [name, value.value]),
+      )];
+
+    for (const values of rows) {
+      const sourceRecordId = values.source_record_id;
+      const revision = Number(values.revision);
+      const key = `${sourceRecordId}|${revision}`;
+      if (state.revisions.has(key)) throw new Error('synthetic duplicate revision');
+      state.revisions.set(key, {
+        source_record_id: sourceRecordId,
+        revision: BigInt(revision),
+        migration_run_id: values.migration_run_id,
+        observed_at: values.observed_at,
+        row_hint: values.row_hint === null ? null : BigInt(values.row_hint),
+        row_digest: values.row_digest,
+        change_class: values.change_class,
+        raw_payload: values.raw_payload,
+      });
+    }
     return [];
   }
   if (text.startsWith('UPDATE migration_runs SET rows_ambiguous')) {
