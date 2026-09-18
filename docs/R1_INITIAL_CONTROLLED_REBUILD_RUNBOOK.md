@@ -33,7 +33,7 @@ If any prerequisite changes or becomes ambiguous, stop before deployment/invocat
 
 A failed `yc serverless function version create` is itself an unknown provider-write outcome. A nonzero CLI exit does not prove that the Function version was not created. After such a failure, the controlled rebuild invocation must stay stopped; do not rerun version creation and do not invoke the tag blindly.
 
-The only allowed next action is the manual read-only `R1 initial controlled rebuild deploy recovery` workflow on exact current `main`. It must bind the exact failed controlled-rebuild run, prove that the deploy step failed and the controlled invoke step was skipped, re-check the open WU7 authority boundary and verify that no competing R1 writer is active.
+The only allowed next action is the manual read-only `R1 initial controlled rebuild deploy recovery` workflow on exact current `main`. It must bind both the exact current recovery-code SHA and the separate immutable SHA of the failed controlled-rebuild run, prove that the deploy step failed and the controlled invoke step was skipped, re-check the open WU7 authority boundary and verify that no competing R1 writer is active. The failed-run SHA is intentionally separate because recovery tooling may be merged after the failed provider attempt.
 
 Recovery reads Function/version metadata only. The exact tag `r1-initial-controlled-rebuild` is the discriminator:
 

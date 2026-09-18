@@ -9,7 +9,7 @@ const read = (path) => readFile(resolve(ROOT, path), 'utf8');
 test('controlled rebuild deploy recovery is manual, exact-main and read-only', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml');
   assert.match(workflow, /name: R1 initial controlled rebuild deploy recovery/);
-  assert.match(workflow, /workflow_dispatch:[\s\S]*tracking_issue:[\s\S]*expected_main_sha:[\s\S]*failed_run_id:/);
+  assert.match(workflow, /workflow_dispatch:[\s\S]*tracking_issue:[\s\S]*expected_main_sha:[\s\S]*failed_run_sha:[\s\S]*failed_run_id:/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.doesNotMatch(workflow, /\bpush:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
@@ -29,6 +29,8 @@ test('deploy recovery binds the exact failed pre-invoke run and WU7 authority', 
   assert.match(workflow, /conclusion == "failure"/);
   assert.match(workflow, /Invoke exact controlled rebuild tag once/);
   assert.match(workflow, /conclusion == "skipped"/);
+  assert.match(workflow, /FAILED_RUN_SHA: \$\{\{ inputs\.failed_run_sha \}\}/);
+  assert.match(workflow, /\.head_sha == \$failed_sha/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_WRITER_CONFLICT/);
   assert.doesNotMatch(workflow, /issues\/630/);
 });
