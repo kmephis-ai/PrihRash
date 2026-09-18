@@ -9,7 +9,7 @@ const read = (path) => readFile(resolve(ROOT, path), 'utf8');
 test('R1 controlled rebuild workflow is manual exact-main and explicit-authority only', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   assert.match(workflow, /name: R1 initial controlled rebuild/);
-  assert.match(workflow, /workflow_dispatch:[\s\S]*tracking_issue:[\s\S]*expected_main_sha:[\s\S]*recovery_run_id:[\s\S]*readiness_run_id:/);
+  assert.match(workflow, /workflow_dispatch:[\s\S]*tracking_issue:[\s\S]*expected_main_sha:[\s\S]*recovery_run_id:[\s\S]*readiness_run_id:[\s\S]*deploy_recovery_run_id:/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.doesNotMatch(workflow, /\bpush:/);
   assert.match(workflow, /cancel-in-progress: false/);
@@ -49,6 +49,20 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_TRIGGER_PRESENT/);
   assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_PRIVATE_HISTORICAL_EVIDENCE/);
+});
+
+test('controlled rebuild may reuse only an exact APPLIED active tag without redeploying it', async () => {
+  const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
+  assert.match(workflow, /deploy_recovery_run_id:/);
+  assert.match(workflow, /r1-initial-controlled-rebuild-deploy-recovery-evidence-\$\{\{ inputs\.deploy_recovery_run_id \}\}/);
+  assert.match(workflow, /\.verdict == "APPLIED"/);
+  assert.match(workflow, /\.reason == "EXACT_ACTIVE_TAG"/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
+  assert.match(workflow, /if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}[\s\S]*Deploy initial-controlled-rebuild-only Function version|Deploy initial-controlled-rebuild-only Function version[\s\S]*if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}/);
+  assert.match(workflow, /serverless function version list --function-id/);
+  assert.match(workflow, /async_invocation_config\.retries_count/);
+  assert.match(workflow, /async_invocation_config\.service_account_id/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT/);
 });
 
 test('controlled rebuild invocation is async-accepted only and requires later recovery', async () => {

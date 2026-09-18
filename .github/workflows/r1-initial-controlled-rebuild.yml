@@ -19,6 +19,11 @@ on:
         description: Exact successful readiness run proving READINESS_READY
         required: true
         type: string
+      deploy_recovery_run_id:
+        description: Optional exact successful deploy-recovery run proving an existing controlled tag is reusable
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -60,6 +65,7 @@ jobs:
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
           RECOVERY_RUN_ID: ${{ inputs.recovery_run_id }}
           READINESS_RUN_ID: ${{ inputs.readiness_run_id }}
+          DEPLOY_RECOVERY_RUN_ID: ${{ inputs.deploy_recovery_run_id }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main'
@@ -72,6 +78,9 @@ jobs:
           [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_AUTHORITY_ISSUE_INVALID'; exit 1; }
           [[ "$RECOVERY_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_RECOVERY_RUN_INVALID'; exit 1; }
           [[ "$READINESS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_READINESS_RUN_INVALID'; exit 1; }
+          if [ -n "$DEPLOY_RECOVERY_RUN_ID" ]; then
+            [[ "$DEPLOY_RECOVERY_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_INVALID'; exit 1; }
+          fi
 
           tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-gates"
           mkdir -p "$tmp"
@@ -104,6 +113,15 @@ jobs:
               and .status == "completed" and .conclusion == "success" and .name == $name
             ' "$tmp/${kind}-run.json" >/dev/null               || { echo "INITIAL_CONTROLLED_REBUILD_${kind^^}_RUN_NOT_EXACT"; exit 1; }
           done
+
+          if [ -n "$DEPLOY_RECOVERY_RUN_ID" ]; then
+            curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json'               "$api/actions/runs/${DEPLOY_RECOVERY_RUN_ID}" --output "$tmp/deploy-recovery-run.json"
+            jq -e --arg sha "$GITHUB_SHA" '
+              .head_sha == $sha and .head_branch == "main" and .event == "workflow_dispatch"
+              and .status == "completed" and .conclusion == "success"
+              and .name == "R1 initial controlled rebuild deploy recovery"
+            ' "$tmp/deploy-recovery-run.json" >/dev/null               || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_NOT_EXACT'; exit 1; }
+          fi
 
           curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json'             "$api/actions/runs?per_page=100" --output "$tmp/runs.json"
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -152,8 +170,20 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.readiness_run_id }}
 
+      - name: Download exact deploy recovery evidence
+        if: ${{ inputs.deploy_recovery_run_id != '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: r1-initial-controlled-rebuild-deploy-recovery-evidence-${{ inputs.deploy_recovery_run_id }}
+          path: ${{ runner.temp }}/r1-wu7-prereq/deploy-recovery
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.deploy_recovery_run_id }}
+
       - name: Prove exact safe resumable recovery and READINESS_READY evidence
         shell: bash
+        env:
+          DEPLOY_RECOVERY_RUN_ID: ${{ inputs.deploy_recovery_run_id }}
         run: |
           set -euo pipefail
           recovery="$RUNNER_TEMP/r1-wu7-prereq/recovery/classification.json"
@@ -172,6 +202,22 @@ jobs:
             and .status == "PASS"
             and .code == "READINESS_READY"
           ' "$readiness" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_READINESS_EVIDENCE_NOT_READY'; exit 1; }
+
+          if [ -n "$DEPLOY_RECOVERY_RUN_ID" ]; then
+            jq -e '
+              .reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT"
+            ' "$recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE'; exit 1; }
+
+            deploy_recovery="$RUNNER_TEMP/r1-wu7-prereq/deploy-recovery/classification.json"
+            jq -e '
+              type == "object"
+              and (keys | sort) == ["code","reason","status","verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
+              and .verdict == "APPLIED"
+              and .reason == "EXACT_ACTIVE_TAG"
+            ' "$deploy_recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_EVIDENCE_NOT_APPLIED'; exit 1; }
+          fi
       - name: Install Yandex Cloud CLI
         shell: bash
         run: |
@@ -391,6 +437,7 @@ jobs:
           fi
 
       - name: Deploy initial-controlled-rebuild-only Function version
+        if: ${{ inputs.deploy_recovery_run_id == '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -421,6 +468,8 @@ jobs:
 
       - name: Re-verify private trigger-free boundary
         shell: bash
+        env:
+          DEPLOY_RECOVERY_RUN_ID: ${{ inputs.deploy_recovery_run_id }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-postflight"
@@ -445,6 +494,29 @@ jobs:
           if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
             echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_FUNCTION_TRIGGER_PRESENT'
             exit 1
+          fi
+
+          if [ -n "$DEPLOY_RECOVERY_RUN_ID" ]; then
+            if ! yc serverless function version list --function-id "$PRIHRASH_YC_FUNCTION_ID"               --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err"; then
+              echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_VERSION_LIST_FAILED'
+              exit 1
+            fi
+            matching="$(jq --arg tag 'r1-initial-controlled-rebuild' '[.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)] | length' "$tmp/versions.json")"
+            [ "$matching" = "1" ] || { echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_NOT_EXACT'; exit 1; }
+            jq -e --arg tag 'r1-initial-controlled-rebuild' --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+              [.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)][0] as $v
+              | ($v.runtime == "nodejs22")
+                and ($v.entrypoint == "index.initialControlledRebuildHandler")
+                and ($v.status == "ACTIVE")
+                and (($v.async_invocation_config | type) == "object")
+                and (($v.async_invocation_config.retries_count | tostring) == "0")
+                and ($v.async_invocation_config.service_account_id == $async_sa)
+                and (($v.async_invocation_config.success_target.ymq_target // null) == null)
+                and (($v.async_invocation_config.failure_target.ymq_target // null) == null)
+            ' "$tmp/versions.json" >/dev/null || {
+              echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT'
+              exit 1
+            }
           fi
 
       - name: Re-verify exact current main before controlled rebuild invocation
