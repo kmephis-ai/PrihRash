@@ -8,7 +8,6 @@ on:
       - completed
 
 permissions:
-  contents: read
   actions: write
   issues: read
   pull-requests: read
@@ -27,12 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout exact CI source for bounded recovery probe
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          persist-credentials: false
-
       - name: Dispatch guarded exact-main read-only recovery only
         shell: bash
         env:
