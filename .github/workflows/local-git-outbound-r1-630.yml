@@ -1,4 +1,4 @@
-name: R1 WU7 Validated Diagnostic Recovery Control
+name: R1 WU7 bb26 Recovery Control
 
 on:
   push:
@@ -13,20 +13,19 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-validated-diagnostic-recovery-control
+  group: r1-wu7-bb26-recovery-control
   cancel-in-progress: false
 
 jobs:
   dispatch-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch exact-main recovery-only validated diagnostic
+      - name: Dispatch fresh exact-main recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: 2674af6bb2d153d50f3d6dd85a48c041245f4e7f
+          EXPECTED_MAIN_SHA: bb26d02a5579754ee453ddd3a15af7eb35bc9062
           TRACKING_ISSUE: "630"
-          UNKNOWN_CONTROLLED_RUN_ID: "35388032148"
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
@@ -41,17 +40,11 @@ jobs:
           curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
           jq -e '
             .state == "open"
+            and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
             and (.body | contains("Google-Authority: PRESERVED"))
             and (.body | contains("Blind-Replay: FORBIDDEN"))
           ' /tmp/issue.json >/dev/null
-
-          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$UNKNOWN_CONTROLLED_RUN_ID" -o /tmp/unknown.json
-          jq -e '
-            .name == "R1 initial controlled rebuild"
-            and .status == "completed"
-            and .conclusion == "failure"
-          ' /tmp/unknown.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -68,4 +61,4 @@ jobs:
 
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main","inputs":{"surface_only":"false"}}')"
           test "$code" = "204"
-          echo "R1_WU7_VALIDATED_DIAGNOSTIC_RECOVERY_DISPATCHED"
+          echo "R1_WU7_BB26_RECOVERY_DISPATCHED"
