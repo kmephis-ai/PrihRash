@@ -2,6 +2,12 @@ name: R1 initial bootstrap recovery
 
 on:
   workflow_dispatch:
+    inputs:
+      surface_only:
+        description: Classify durable surface only, without staging diagnostics
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,6 +25,7 @@ jobs:
     timeout-minutes: 20
     env:
       FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RECOVERY_SURFACE_ONLY: ${{ inputs.surface_only && '1' || '0' }}
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -357,6 +364,7 @@ jobs:
             --entrypoint index.initialBootstrapRecoveryHandler \
             --memory 256m \
             --execution-timeout 150s \
+            --environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=${RECOVERY_SURFACE_ONLY}" \
             --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-bootstrap-recovery \

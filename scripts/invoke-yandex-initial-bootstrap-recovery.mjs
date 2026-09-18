@@ -183,7 +183,7 @@ function validPair(verdict, reason) {
     && reason !== 'EMPTY_DURABLE_STATE';
 }
 
-function parseExactResult(stdout) {
+function parseExactResult(stdout, surfaceOnly = false) {
   let value;
   try {
     value = JSON.parse(stdout.trim());
@@ -207,7 +207,9 @@ function parseExactResult(stdout) {
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
-    const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
+    const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
+      ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+      : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
           'code',
@@ -242,18 +244,18 @@ function parseExactResult(stdout) {
         verdict: result.verdict,
         reason: result.reason,
       }),
-      stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence : null,
+      stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence ?? null : null,
       stagingDurableRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
-        ? stagingDurableRevisionEvidence
+        ? stagingDurableRevisionEvidence ?? null
         : null,
       stagingRetirementEvidence: result.reason === 'STAGING_RUN_PRESENT'
-        ? stagingRetirementEvidence
+        ? stagingRetirementEvidence ?? null
         : null,
       stagingSourceDecodeEvidence: result.reason === 'STAGING_RUN_PRESENT'
-        ? stagingSourceDecodeEvidence
+        ? stagingSourceDecodeEvidence ?? null
         : null,
       stagingExactRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
-        ? stagingExactRevisionEvidence
+        ? stagingExactRevisionEvidence ?? null
         : null,
     });
   }
@@ -300,7 +302,7 @@ async function invokeRecovery(environment = process.env) {
         windowsHide: true,
       },
     );
-    return parseExactResult(stdout) ?? Object.freeze({
+    return parseExactResult(stdout, environment.RECOVERY_SURFACE_ONLY === '1') ?? Object.freeze({
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
       stagingDurableRevisionEvidence: null,

@@ -160,13 +160,16 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
 
-function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>): boolean {
+function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>, surfaceOnly = false): boolean {
   const diagnostic = value.stagingRevisionEvidence;
   const durableDiagnostic = value.stagingDurableRevisionEvidence;
   const retirementDiagnostic = value.stagingRetirementEvidence;
   const sourceDecodeDiagnostic = value.stagingSourceDecodeEvidence;
   const exactRevisionDiagnostic = value.stagingExactRevisionEvidence;
-  if (value.reason === 'STAGING_RUN_PRESENT') {
+  if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
+    if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
+      || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined) return false;
+  } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
     if (durableDiagnostic === undefined || !STAGING_DURABLE_REVISION_EVIDENCE.has(durableDiagnostic)) return false;
     if (retirementDiagnostic === undefined || !STAGING_RETIREMENT_EVIDENCE.has(retirementDiagnostic)) return false;
@@ -192,7 +195,7 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
 ): Promise<Readonly<YandexInitialBootstrapRecoveryFunctionResult>> {
   try {
     const classification = await runJob(environment);
-    if (!validClassification(classification)) {
+    if (!validClassification(classification, environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1')) {
       return Object.freeze({
         status: 'FAIL' as const,
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' as const,

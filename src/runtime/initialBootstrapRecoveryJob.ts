@@ -167,6 +167,7 @@ function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassif
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
+  surfaceOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
   const validated = validateInitialBootstrapRecoveryConfig(config);
   const ydbClient = await runtime.createYdbClient(validated);
@@ -175,6 +176,7 @@ export async function executeInitialBootstrapRecoveryJob(
 
   try {
     const before = await runtime.diagnoseSurface(adapter);
+    if (surfaceOnly) return before;
     if (before.reason === 'STAGING_RUN_PRESENT') {
       let stagingDurableRevisionEvidence: InitialBootstrapStagingDurableRevisionDiagnostic;
       try {
@@ -274,12 +276,16 @@ export async function executeInitialBootstrapRecoveryJob(
 
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
+  surfaceOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
-  return executeInitialBootstrapRecoveryJob(config, productionRuntime);
+  return executeInitialBootstrapRecoveryJob(config, productionRuntime, surfaceOnly);
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
   environment: InitialBootstrapRecoveryJobEnvironment = process.env,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
-  return runInitialBootstrapRecoveryJob(readInitialBootstrapRecoveryJobConfig(environment));
+  return runInitialBootstrapRecoveryJob(
+    readInitialBootstrapRecoveryJobConfig(environment),
+    environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
+  );
 }
