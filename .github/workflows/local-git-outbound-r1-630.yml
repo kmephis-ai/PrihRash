@@ -1,4 +1,4 @@
-name: R1 WU7 bb26 Readiness Control
+name: R1 WU7 bb26 Async Controlled Control
 
 on:
   push:
@@ -13,19 +13,20 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-bb26-readiness-control
+  group: r1-wu7-bb26-async-controlled-control
   cancel-in-progress: false
 
 jobs:
-  dispatch-readiness:
+  dispatch-controlled:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch fresh exact-main readiness
+      - name: Dispatch exact-main async controlled continuation once
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: bb26d02a5579754ee453ddd3a15af7eb35bc9062
           RECOVERY_RUN_ID: "35391437713"
+          READINESS_RUN_ID: "35391642061"
           TRACKING_ISSUE: "630"
         run: |
           set -euo pipefail
@@ -40,19 +41,21 @@ jobs:
             .state == "open"
             and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
             and (.body | contains("Google-Authority: PRESERVED"))
+            and (.body | contains("Cap-Increase: FORBIDDEN"))
+            and (.body | contains("Timer-Cutover: FORBIDDEN"))
             and (.body | contains("Blind-Replay: FORBIDDEN"))
           ' /tmp/issue.json >/dev/null
 
-          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$RECOVERY_RUN_ID" -o /tmp/recovery.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
-            .name == "R1 initial bootstrap recovery"
-            and .head_sha == $sha
-            and .head_branch == "main"
-            and .event == "workflow_dispatch"
-            and .status == "completed"
-            and .conclusion == "success"
-          ' /tmp/recovery.json >/dev/null
+          for tuple in "recovery:$RECOVERY_RUN_ID:R1 initial bootstrap recovery" "readiness:$READINESS_RUN_ID:R1 Yandex readiness"; do
+            IFS=: read -r kind run_id expected_name <<<"$tuple"
+            curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$run_id" -o "/tmp/$kind.json"
+            jq -e --arg sha "$EXPECTED_MAIN_SHA" --arg name "$expected_name" '
+              .head_sha == $sha and .head_branch == "main" and .event == "workflow_dispatch"
+              and .status == "completed" and .conclusion == "success" and .name == $name
+            ' "/tmp/$kind.json" >/dev/null
+          done
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -67,6 +70,7 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-yandex-readiness.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main"}')"
+          payload="$(jq -cn             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg recovery "$RECOVERY_RUN_ID"             --arg readiness "$READINESS_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,recovery_run_id:$recovery,readiness_run_id:$readiness}}')"
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
-          echo "R1_WU7_BB26_READINESS_DISPATCHED"
+          echo "R1_WU7_BB26_ASYNC_CONTROLLED_DISPATCHED"
