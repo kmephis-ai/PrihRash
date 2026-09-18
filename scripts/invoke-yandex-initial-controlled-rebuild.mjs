@@ -2,6 +2,7 @@ const CONTROLLED_REBUILD_TAG = 'r1-initial-controlled-rebuild';
 const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const INVOKE_TIMEOUT_MS = 630_000;
+const ASYNC_ACCEPT_TIMEOUT_MS = 60_000;
 
 const RECOVERY_REASONS = new Set([
   'VALIDATION_TRANSITION_OUTCOME_UNKNOWN',
@@ -74,6 +75,7 @@ const SAFE_CONFIG_FAILURE = Object.freeze({ status: 'FAIL', code: 'INITIAL_CONTR
 const SAFE_INVOKE_FAILURE = Object.freeze({ status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_INVOKE_FAILED' });
 const SAFE_INVOKE_TIMEOUT = Object.freeze({ status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_INVOKE_FUNCTION_TIMEOUT' });
 const SAFE_OUTPUT_INVALID = Object.freeze({ status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID' });
+const SAFE_ASYNC_ACCEPTED = Object.freeze({ status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED' });
 
 function nonBlank(value) { return typeof value === 'string' && value.length > 0 && value === value.trim(); }
 function record(value) { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : null; }
@@ -163,20 +165,32 @@ function safeHttpFailure(response) {
 async function invoke(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID;
   const iamToken = environment.YC_IAM_TOKEN;
-  if (!nonBlank(functionId) || !nonBlank(iamToken)) return SAFE_CONFIG_FAILURE;
+  const mode = environment.PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE ?? 'sync';
+  if (
+    !nonBlank(functionId)
+    || !nonBlank(iamToken)
+    || (mode !== 'sync' && mode !== 'async')
+  ) return SAFE_CONFIG_FAILURE;
+
   const url = new URL(`${FUNCTIONS_ORIGIN}/${encodeURIComponent(functionId)}`);
   url.searchParams.set('tag', CONTROLLED_REBUILD_TAG);
-  url.searchParams.set('integration', 'raw');
+  url.searchParams.set('integration', mode === 'async' ? 'async' : 'raw');
   let response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: Object.freeze({ Authorization: `Bearer ${iamToken}` }),
-      signal: AbortSignal.timeout(INVOKE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(mode === 'async' ? ASYNC_ACCEPT_TIMEOUT_MS : INVOKE_TIMEOUT_MS),
     });
   } catch (error) {
     return isTimeout(error) ? SAFE_INVOKE_TIMEOUT : SAFE_INVOKE_FAILURE;
   }
+
+  if (mode === 'async') {
+    if (response.body !== null) await response.body.cancel().catch(() => {});
+    return response.status === 202 ? SAFE_ASYNC_ACCEPTED : safeHttpFailure(response);
+  }
+
   if (response.status !== 200) {
     if (response.body !== null) await response.body.cancel().catch(() => {});
     return safeHttpFailure(response);
