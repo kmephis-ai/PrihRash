@@ -105,7 +105,7 @@ interface ManifestBinding {
 interface ParsedStagingManifest {
   readonly migrationRunId: string;
   readonly durableSnapshotDigest: string;
-  readonly durableSnapshotCapturedAt: string;
+  readonly durableSnapshotCapturedAt: string | null;
   readonly durableRowCount: number;
   readonly bindings: readonly Readonly<ManifestBinding>[];
 }
@@ -256,7 +256,6 @@ function parseStagingManifest(
     || rowsSeen === null
     || bindingCount === null
     || snapshotRowCount === null
-    || snapshotCapturedAt === null
     || bindings === null
   ) {
     return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_STRUCTURE_MISMATCH' as const });
@@ -529,6 +528,7 @@ function inspectExactRevisionRows(
     const expectedRevision = expected.get(sourceRecordId);
     if (expectedRevision === undefined) return 'EXACT_CURRENT_RUN_REVISION_UNEXPECTED_SOURCE';
     if (rowRunId !== manifest.migrationRunId) return 'EXACT_CURRENT_RUN_MIGRATION_RUN_MISMATCH';
+    if (manifest.durableSnapshotCapturedAt === null) return 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN';
     if (!ydbTimestampReadbackMatches(row.observed_at, manifest.durableSnapshotCapturedAt)) {
       return 'EXACT_CURRENT_RUN_OBSERVED_AT_MISMATCH';
     }
