@@ -114,6 +114,13 @@ interface IdentityManifestReadRow {
   readonly snapshot_row_count?: unknown;
 }
 
+interface IdentityManifestClaimReadRow {
+  readonly source_snapshot_id?: unknown;
+  readonly source_snapshot_digest?: unknown;
+  readonly binding_count?: unknown;
+  readonly bindings?: unknown;
+}
+
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const TEXT_ENCODER = new TextEncoder();
 const PARAMETER_VALUE_OVERHEAD_BYTES = 16;
@@ -358,6 +365,41 @@ function parseBindings(value: unknown): readonly Readonly<InitialBootstrapIdenti
     }
   }
   return Object.freeze(bindings);
+}
+
+export function initialBootstrapIdentityManifestClaimReadStatement(migrationRunId: string): YdbStatement {
+  return readStatement(
+    'SELECT source_snapshot_id, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
+      + 'binding_count, bindings '
+      + 'FROM initial_bootstrap_identity_manifests '
+      + 'WHERE migration_run_id = $migration_run_id',
+    { migration_run_id: uuidParameter(migrationRunId) },
+  );
+}
+
+export function parseInitialBootstrapIdentityManifestClaimRows(
+  migrationRunId: string,
+  rows: readonly Readonly<IdentityManifestClaimReadRow>[],
+): Readonly<InitialBootstrapIdentityManifest> {
+  if (rows.length === 0) throw new InitialBootstrapIdentityManifestError('MANIFEST_NOT_FOUND');
+  if (rows.length !== 1) malformed('MALFORMED_ROW_CARDINALITY');
+  const row = rows[0];
+  if (row === undefined) malformed('MALFORMED_ROW_CARDINALITY');
+  const bindings = parseBindings(row.bindings);
+  const bindingCount = safeInteger(row.binding_count, 0, 'MALFORMED_BINDING_COUNT');
+  if (bindingCount !== bindings.length) malformed('MALFORMED_BINDING_COUNT');
+  return Object.freeze({
+    migrationRunId: normalizedUuid(migrationRunId, 'MALFORMED_MIGRATION_RUN_ID'),
+    sourceSnapshotId: normalizedUuid(
+      canonicalString(row.source_snapshot_id, 'MALFORMED_SOURCE_SNAPSHOT_ID'),
+      'MALFORMED_SOURCE_SNAPSHOT_ID',
+    ),
+    sourceSnapshotDigest: digestString(
+      row.source_snapshot_digest,
+      'MALFORMED_SOURCE_SNAPSHOT_DIGEST',
+    ),
+    bindings,
+  });
 }
 
 export function initialBootstrapIdentityManifestReadStatement(migrationRunId: string): YdbStatement {
