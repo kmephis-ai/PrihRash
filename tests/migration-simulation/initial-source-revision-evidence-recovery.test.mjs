@@ -5,7 +5,6 @@ import {
   InitialSourceRevisionEvidenceRecoveryError,
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
-import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
 import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initialSourceLineagePersistence.js';
 import { serializeRawPayload } from '../../dist/migration/rawPayloadProvenance.js';
 
