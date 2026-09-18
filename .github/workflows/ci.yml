@@ -40,6 +40,7 @@ jobs:
             .artifacts/yandex-schema-upgrade-003-function/
             .artifacts/yandex-initial-bootstrap-function/
             .artifacts/yandex-initial-bootstrap-recovery-function/
+            .artifacts/yandex-initial-controlled-rebuild-function/
           if-no-files-found: error
           retention-days: 7
           compression-level: 0

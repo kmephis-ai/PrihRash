@@ -10,6 +10,7 @@ export const EXACT_SOURCE_PACKAGE_DIRECTORIES = Object.freeze([
   'yandex-schema-upgrade-003-function',
   'yandex-initial-bootstrap-function',
   'yandex-initial-bootstrap-recovery-function',
+  'yandex-initial-controlled-rebuild-function',
 ]);
 
 const SHA_RE = /^[0-9a-f]{40}$/;
