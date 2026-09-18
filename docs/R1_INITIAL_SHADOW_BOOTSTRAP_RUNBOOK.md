@@ -31,7 +31,7 @@ authoritative snapshot доказать exact manifest/source evidence, пере
 прочитать уже записанные revision evidence и записать только отсутствующее. Любое расхождение
 остаётся fail-closed до новых writes. Default input — `false`.
 
-Отдельный marker `Recovery-State: STAGING_STALE_RETIREABLE` допускает тот же gated input только
+Отдельный marker `Recovery-State: STAGING_STALE_RETIREABLE` требует отдельный explicit input `allow_stale_staging_retirement=true`; `allow_staging_resume=true` для него недостаточен. Этот stale-retirement input допускается только
 для доказанного несовпадения authoritative snapshot digest. Внутри **одного** bootstrap Function
 invoke первая application attempt обязана остановиться на `RESUME_CONTEXT_READ` до новых writes;
 тогда runtime повторно читает authoritative source и допускает retirement только при единственном
@@ -61,6 +61,22 @@ dispatch'нут, write-capable invoke не начинался, post-invoke recov
 financial state этим orchestrator run не менялся. Этот pre-write block не считается
 distinct-SHA root-cause bootstrap attempt, потому что bootstrap invoke не был достигнут, но
 повтор того же SHA остаётся запрещён общим Incident-M contract.
+
+### Authority split after authoritative snapshot drift on `ccd616b895bfcf9fcae81b5934be3bec2a479dae`
+
+Orchestrator `35328582211` read-only recovery впервые доказал
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` при
+`COMPLETE_CURRENT_RUN_ONLY` durable revision evidence и
+`STALE_STAGING_CURRENT_STATE_EMPTY`. Это означает, что прежний `STAGING_RESUMABLE`
+authority больше не соответствует fresh Google observation. Bootstrap child не был dispatch'нут:
+fresh readiness child `35328699566` завершился до bootstrap с
+`READINESS_INVOKE_NONZERO_UNCLASSIFIED / STDOUT_EMPTY__STDERR_TEXT / DEADLINE`.
+
+Orchestrator обязан fail-closed различать два authority mode: обычный resume разрешён только exact
+`COMPLETE_CURRENT_RUN_ONLY / COMPLETE_CURRENT_RUN_ONLY / STALE_STAGING_CURRENT_STATE_EMPTY / NONE`;
+stale retirement требует отдельного `allow_stale_staging_retirement=true`, exact
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`, empty verified current и непротиворечивое durable
+revision evidence. Одновременное включение обоих flags запрещено.
 
 ## Incident-M provider attempt contract
 
