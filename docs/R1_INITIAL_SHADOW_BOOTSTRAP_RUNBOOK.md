@@ -145,6 +145,21 @@ A normal `allow_staging_resume=true` orchestrator may arm only when this additio
 diagnostic is `EXACT_CURRENT_RUN_MATCH`. Any other enum remains a recovery/root-cause
 boundary and must not trigger a bootstrap invoke.
 
+### Temporary read-only recovery autocontinue
+
+While #453 is active, a merged `R1 #453:` PR may request exactly one fresh standalone
+read-only recovery on its exact merge SHA with the marker `Recovery-Probe: READY`.
+The marker is valid only together with `Provider-Attempt: NOT_AUTHORIZED` and
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`.
+
+The stage-specific `R1 initial bootstrap recovery autocontinue` workflow runs only after a
+successful push-CI on exact `main`, requires Issue #453 to remain open, refuses a concurrent
+orchestrator/bootstrap writer, refuses a same-SHA recovery replay, and can dispatch only the
+canonical `r1-initial-bootstrap-recovery.yml`. It cannot dispatch readiness, orchestrator, or
+bootstrap. This workflow exists only to remove the current control-surface gap where the connected
+GitHub client cannot create a fresh `workflow_dispatch`; it retires together with the R1
+autocontinue/provider surface after #453.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
