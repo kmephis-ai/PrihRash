@@ -28,6 +28,7 @@ import {
   createYdbJsV6DataClient,
   createYdbJsV6DataTransport,
   createYdbJsV6ParameterMapper,
+  waitForYdbJsDriverReady,
 } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 
 function valueClass(name) {
@@ -145,6 +146,49 @@ function makeSql(options = {}) {
   };
   return { events, sql };
 }
+
+test('bounded driver startup aborts and closes the driver instead of leaking a serverless lifecycle', async () => {
+  let closed = 0;
+  let observedSignal;
+  const driver = {
+    async ready(signal) {
+      observedSignal = signal;
+      await new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    },
+    close() {
+      closed += 1;
+    },
+  };
+
+  await assert.rejects(() => waitForYdbJsDriverReady(driver, 5));
+  assert.equal(observedSignal instanceof AbortSignal, true);
+  assert.equal(observedSignal.aborted, true);
+  assert.equal(closed, 1);
+});
+
+test('successful driver startup does not close the live driver', async () => {
+  let closed = 0;
+  let observedSignal;
+  const driver = {
+    async ready(signal) {
+      observedSignal = signal;
+    },
+    close() {
+      closed += 1;
+    },
+  };
+
+  await waitForYdbJsDriverReady(driver, 10_000);
+  assert.equal(observedSignal instanceof AbortSignal, true);
+  assert.equal(observedSignal.aborted, false);
+  assert.equal(closed, 0);
+});
 
 test('production data transport pins the reviewed calibration SDK versions in root package', async () => {
   const packageJson = JSON.parse(await readFile(
@@ -399,6 +443,14 @@ test('client config fails before dynamic SDK/client creation', async () => {
       connectionString: 'grpcs://synthetic.invalid:2135/?database=/synthetic',
       credentialFile: '/synthetic/key.json',
       poolMaxSize: 0,
+    }),
+    (error) => error instanceof YdbJsV6DataTransportError && error.code === 'CLIENT_CONFIG_INVALID',
+  );
+  await assert.rejects(
+    () => createYdbJsV6DataClient({
+      connectionString: 'grpcs://synthetic.invalid:2135/?database=/synthetic',
+      credentialFile: '/synthetic/key.json',
+      readyTimeoutMs: 0,
     }),
     (error) => error instanceof YdbJsV6DataTransportError && error.code === 'CLIENT_CONFIG_INVALID',
   );

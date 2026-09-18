@@ -29,4 +29,13 @@ test('metadata client config fails before SDK metadata/network access', async ()
     (error) => error instanceof YdbJsV6DataTransportError
       && error.code === 'CLIENT_CONFIG_INVALID',
   );
+
+  await assert.rejects(
+    () => createYdbJsV6MetadataDataClient({
+      connectionString: 'grpcs://synthetic.invalid:2135/?database=/synthetic',
+      readyTimeoutMs: 0,
+    }),
+    (error) => error instanceof YdbJsV6DataTransportError
+      && error.code === 'CLIENT_CONFIG_INVALID',
+  );
 });

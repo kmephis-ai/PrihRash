@@ -311,6 +311,28 @@ serializable transaction; it simply does not repeat the already-proven snapshot/
 a provider JOIN. Write set/order, optimistic guards, retries, timeout/memory/caps, IAM, financial
 semantics and authority are unchanged.
 
+### Readiness Driver lifecycle deadline on `98766ddb30dc4444f763d8b53d5ed6858aa88e20`
+
+After #628 merged, canonical CI/Browser/CodeQL passed and autocontinue dispatched orchestrator
+`35366479481`. Initial read-only recovery admitted the bounded path, but fresh readiness child
+`35366608053` stopped before any bootstrap child with privacy-safe evidence
+`READINESS_INVOKE_NONZERO_UNCLASSIFIED / STDOUT_EMPTY__STDERR_TEXT / DEADLINE`. The orchestrator
+published `STOP / R1_BOOTSTRAP_ORCHESTRATOR_READINESS_BLOCKED`, `bootstrapRunId=null`; therefore the
+new fresh-claim manifest path has not yet been provider-exercised and same-SHA replay remains
+forbidden.
+
+Pinned `@ydbjs/core@6.3.1` gives `Driver.ready(signal?: AbortSignal)` its own default 30s ready timeout,
+while PrihRash readiness has a 20s application deadline. The application deadline uses `Promise.race`:
+if YDB client creation is still inside `Driver.ready()`, the outer deadline can reject without owning
+the not-yet-returned client, so it cannot close that Driver. A surviving gRPC/event-loop lifecycle can
+then outlive the structured application failure until the 45s Function deadline; the one bounded
+read-only invoker retry makes the observed terminal transport deadline correspondingly longer.
+
+The successor bounds only readiness YDB client startup with a 10s AbortSignal passed to
+`Driver.ready()` and closes the Driver on failed startup. Ordinary scheduled sync/bootstrap clients
+keep their existing ready budget because `readyTimeoutMs` is opt-in. Read/write transaction semantics,
+Google/YDB authority, IAM, provider caps and the single write-capable child contract are unchanged.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
