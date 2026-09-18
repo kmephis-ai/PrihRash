@@ -69,15 +69,20 @@ jobs:
                 valid: (
                   $attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
                   and $probe == ["Recovery-Probe: READY"]
-                  and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
-                  and ($recovery | length) == 1
-                  and ($recovery[0] | IN(
-                    "Recovery-State: EMPTY_DURABLE_STATE",
-                    "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
-                    "Recovery-State: STAGING_RESUMABLE",
-                    "Recovery-State: STAGING_STALE_RETIREABLE",
-                    "Recovery-State: STALE_STAGING_RETIRED"
-                  ))
+                  and (
+                    ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
+                      and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"])
+                    or
+                    ($expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
+                      and ($recovery | length) == 1
+                      and ($recovery[0] | IN(
+                        "Recovery-State: EMPTY_DURABLE_STATE",
+                        "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
+                        "Recovery-State: STAGING_RESUMABLE",
+                        "Recovery-State: STAGING_STALE_RETIREABLE",
+                        "Recovery-State: STALE_STAGING_RETIRED"
+                      )))
+                  )
                   and ($test | length) == 1
                   and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
                 )
