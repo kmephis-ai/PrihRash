@@ -7,8 +7,10 @@ const packageScript = await readFile('scripts/package-yandex-initial-bootstrap-r
 const verifier = await readFile('scripts/verify-yandex-initial-bootstrap-recovery-package.mjs', 'utf8');
 const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap-recovery.mjs', 'utf8');
 
-test('initial bootstrap recovery workflow stays manual-only and exact-main guarded', () => {
+test('initial bootstrap recovery workflow stays workflow-dispatch-only and exact-main guarded', () => {
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /allow_diagnostic_probe:/);
+  assert.match(workflow, /default: 'false'/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);
@@ -23,8 +25,16 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /Invoke exact initial bootstrap tag once/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FAILED_ATTEMPT_MISSING/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_PROBE_ARMED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_DIAGNOSTIC_AUTHORITY_INVALID/);
+  assert.match(workflow, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(workflow, /Recovery-Probe: READY/);
+  assert.match(workflow, /issues\/453/);
+  assert.match(workflow, /pulls\/\$source_pr_number\/files\?per_page=100/);
   assert.match(workflow, /\.conclusion == "failure"/);
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-recovery-diagnostic/);
+  assert.match(workflow, /pull-requests:\s*read/);
+  assert.match(workflow, /issues:\s*read/);
 });
 
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
