@@ -5,6 +5,7 @@ import {
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
 } from '../../dist/migration/initialBootstrapStagingRevisionDiagnostic.js';
+import { PRELIVE_PROMOTION_QUERY_BYTES_LIMIT } from '../../dist/migration/atomicPromotion.js';
 
 const RUN_ID = '00000000-0000-0000-0000-000000000901';
 const OTHER_RUN_ID = '00000000-0000-0000-0000-000000000902';
@@ -94,7 +95,11 @@ test('staging revision diagnostic distinguishes no, partial, complete and cross-
     'COMPLETE_CURRENT_RUN_ONLY',
   );
 
-  const collision = reader(sourceObservations, async () => [revisionRow(sourceObservations[0], 0, OTHER_RUN_ID)]);
+  const collision = reader(sourceObservations, async (statement) => (
+    statement.parameters.migration_run_id === undefined
+      ? [revisionRow(sourceObservations[0], 0, OTHER_RUN_ID)]
+      : []
+  ));
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(collision, SNAPSHOT_DIGEST, sourceObservations),
     'CROSS_RUN_PK_COLLISION',
@@ -320,13 +325,16 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
   );
 });
 
-test('staging revision diagnostic bounds cross-run lookup batches to 50 source IDs', async () => {
-  const sourceObservations = observations(51);
+test('staging revision diagnostic uses one run scan plus one table-parameter collision read at large cardinality', async () => {
+  const sourceObservations = observations(1000);
   const evidenceReader = reader(sourceObservations, async (statement) => {
     if (statement.parameters.migration_run_id !== undefined) {
-      return sourceObservations.slice(0, 50).map((item, index) => revisionRow(item, index));
+      return sourceObservations.slice(0, 700).map((item, index) => revisionRow(item, index));
     }
-    assert.equal(Object.keys(statement.parameters).filter((key) => key.startsWith('source_record_id_')).length, 1);
+    assert.match(statement.text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
+    assert.equal(statement.parameters.source_keys.type, 'ListStruct');
+    assert.equal(statement.parameters.source_keys.value.rows.length, 300);
+    assert.ok(statement.text.length <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT);
     return [];
   });
 
@@ -336,4 +344,6 @@ test('staging revision diagnostic bounds cross-run lookup batches to 50 source I
   );
   assert.equal(evidenceReader.calls.length, 3);
   assert.equal(evidenceReader.calls.every((statement) => statement.kind === 'READ'), true);
+  assert.match(evidenceReader.calls[1].text, /migration_run_id = \$migration_run_id$/);
+  assert.doesNotMatch(evidenceReader.calls[2].text, /source_record_id_\d+/);
 });
