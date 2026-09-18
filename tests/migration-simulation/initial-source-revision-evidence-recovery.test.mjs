@@ -78,7 +78,7 @@ function expectRecoveryError(code, work) {
   );
 }
 
-test('restart after partial revision evidence uses one run scan plus one table-parameter collision read', async () => {
+test('restart after partial revision evidence uses metadata run scan plus exact bounded payload verification', async () => {
   const expected = [
     revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A'),
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
@@ -87,7 +87,7 @@ test('restart after partial revision evidence uses one run scan plus one table-p
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader(
       (statement) => statement.parameters.migration_run_id === undefined
-        ? []
+        ? [providerRow(expected[0])]
         : [providerRow(expected[0])],
       (statement) => statements.push(statement),
     ),
@@ -96,13 +96,14 @@ test('restart after partial revision evidence uses one run scan plus one table-p
 
   assert.equal(statements.length, 2);
   assert.match(statements[0].text, /migration_run_id = \$migration_run_id$/);
+  assert.doesNotMatch(statements[0].text, /raw_payload/);
   assert.equal(statements[0].parameters.revision.value, 1n);
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
   assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
   assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
   assert.deepEqual(
     statements[1].parameters.source_keys.value.rows.map((row) => row.source_record_id.value),
-    [SOURCE_ID_2],
+    [SOURCE_ID_1, SOURCE_ID_2],
   );
 
   assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
@@ -179,12 +180,12 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('fresh revision evidence preflight stays at two provider reads with a constant-size AS_TABLE query', async () => {
+test('large revision evidence preflight bounds raw-payload materialization by calibrated byte batches', async () => {
   const expected = Array.from({ length: 1_000 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
     `synthetic-row-${index + 1}`,
-    `Synthetic ${index + 1}`,
+    `Synthetic ${index + 1} ${'x'.repeat(1024)}`,
   ));
   const statements = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
@@ -192,17 +193,25 @@ test('fresh revision evidence preflight stays at two provider reads with a const
     expected,
   );
 
-  assert.equal(statements.length, 2);
+  assert.equal(statements.length > 2, true);
   assert.deepEqual(Object.keys(statements[0].parameters).sort(), ['migration_run_id', 'revision']);
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
-  assert.doesNotMatch(statements[0].text, /AS_TABLE/);
+  assert.doesNotMatch(statements[0].text, /AS_TABLE|raw_payload/);
 
-  assert.deepEqual(Object.keys(statements[1].parameters).sort(), ['revision', 'source_keys']);
-  assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
-  assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
-  assert.equal(statements[1].parameters.source_keys.value.rows.length, expected.length);
+  const payloadReads = statements.slice(1);
+  assert.equal(payloadReads.every((statement) => (
+    Object.keys(statement.parameters).sort().join(',') === 'revision,source_keys'
+    && statement.parameters.source_keys.type === 'ListStruct'
+    && /INNER JOIN AS_TABLE\(\$source_keys\) AS k/.test(statement.text)
+    && /raw_payload/.test(statement.text)
+    && new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
+  )), true);
   assert.equal(
-    new TextEncoder().encode(statements[1].text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
+    payloadReads.reduce((total, statement) => total + statement.parameters.source_keys.value.rows.length, 0),
+    expected.length,
+  );
+  assert.equal(
+    payloadReads.every((statement) => statement.parameters.source_keys.value.rows.length < expected.length),
     true,
   );
   assert.deepEqual(resume.missingRevisions, expected);

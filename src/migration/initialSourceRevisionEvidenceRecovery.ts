@@ -6,6 +6,7 @@ import {
   uuidParameter,
   type YdbListStructColumn,
 } from '../integration/ydb/parameters.js';
+import { PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT } from './atomicPromotion.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
 
@@ -47,6 +48,13 @@ const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 const SOURCE_KEY_COLUMNS = Object.freeze([
   Object.freeze({ name: 'source_record_id', type: 'Uuid', nullable: false }),
 ] satisfies readonly YdbListStructColumn[]);
+
+const TEXT_ENCODER = new TextEncoder();
+// Reuse the live-calibrated 512 KiB envelope as a conservative upper bound for
+// one exact revision-evidence verification response batch. This is not a row cap:
+// batching is derived from the expected payload bytes and preserves full raw-payload verification.
+const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT;
+const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
@@ -122,7 +130,7 @@ function expectedMap(
   return Object.freeze({ runId, bySourceId });
 }
 
-function existingMatches(
+function existingMetadataMatches(
   row: Readonly<ExistingInitialRevisionRow>,
   expected: Readonly<InitialSourceRecordRevisionProjection>,
 ): boolean {
@@ -131,38 +139,84 @@ function existingMatches(
     && ydbTimestampReadbackMatches(row.observed_at, expected.observedAt)
     && positiveInteger(row.row_hint) === expected.rowHint
     && digestString(row.row_digest) === expected.rowDigest
-    && row.change_class === null
+    && row.change_class === null;
+}
+
+function existingMatches(
+  row: Readonly<ExistingInitialRevisionRow>,
+  expected: Readonly<InitialSourceRecordRevisionProjection>,
+): boolean {
+  return existingMetadataMatches(row, expected)
     && canonicalRawPayload(row.raw_payload) === expected.rawPayload;
 }
 
-function validateExistingRevisionRows(
+function validateRevisionRows(
   rows: readonly Readonly<ExistingInitialRevisionRow>[],
   expected: Readonly<{
     runId: string | null;
     bySourceId: ReadonlyMap<string, Readonly<InitialSourceRecordRevisionProjection>>;
   }>,
-  existingSourceIds: Set<string>,
+  seenSourceIds: Set<string>,
+  exactPayload: boolean,
 ): void {
   for (const row of rows) {
     const sourceRecordId = uuid(row.source_record_id);
-    if (existingSourceIds.has(sourceRecordId)) {
+    if (seenSourceIds.has(sourceRecordId)) {
       throw new InitialSourceRevisionEvidenceRecoveryError('DUPLICATE_EXISTING_REVISION');
     }
-    existingSourceIds.add(sourceRecordId);
+    seenSourceIds.add(sourceRecordId);
     const expectedRevision = expected.bySourceId.get(sourceRecordId);
     if (expectedRevision === undefined) {
       throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
     }
-    if (!existingMatches(row, expectedRevision)) {
+    const matches = exactPayload
+      ? existingMatches(row, expectedRevision)
+      : existingMetadataMatches(row, expectedRevision);
+    if (!matches) {
       throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
     }
   }
 }
 
+function estimatedRevisionReadBytes(
+  revision: Readonly<InitialSourceRecordRevisionProjection>,
+): number {
+  return REVISION_EVIDENCE_READ_FIXED_ROW_BYTES
+    + TEXT_ENCODER.encode(revision.sourceRecordId).byteLength
+    + TEXT_ENCODER.encode(revision.migrationRunId).byteLength
+    + TEXT_ENCODER.encode(revision.observedAt).byteLength
+    + TEXT_ENCODER.encode(revision.rowDigest).byteLength
+    + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
+}
+
+function planRevisionReadBatches(
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
+  const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
+  let current: Readonly<InitialSourceRecordRevisionProjection>[] = [];
+  let currentBytes = 0;
+
+  for (const revision of revisions) {
+    const estimatedBytes = estimatedRevisionReadBytes(revision);
+    if (
+      current.length > 0
+      && currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+    ) {
+      batches.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(revision);
+    currentBytes += estimatedBytes;
+  }
+  if (current.length > 0) batches.push(current);
+  return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
+}
+
 function runRevisionReadStatement(runId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
       + 'FROM source_record_revisions '
       + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
     {
@@ -207,16 +261,22 @@ export async function planInitialSourceRevisionEvidenceResume(
   const runResult = await reader.read<ExistingInitialRevisionRow>(
     runRevisionReadStatement(expected.runId),
   );
-  validateExistingRevisionRows(runResult.rows, expected, existingSourceIds);
+  validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
 
-  const uncheckedMissing = expectedRevisions.filter(
-    (revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
-  );
-  if (uncheckedMissing.length > 0) {
+  // Exact payload equality remains mandatory, but large raw_payload materialization is
+  // bounded to one calibrated batch at a time. Reading all expected keys also preserves
+  // fail-closed cross-run primary-key collision detection for currently missing revisions.
+  const payloadVerifiedSourceIds = new Set<string>();
+  for (const batch of planRevisionReadBatches(expectedRevisions)) {
     const keyResult = await reader.read<ExistingInitialRevisionRow>(
-      sourceKeyReadStatement(uncheckedMissing),
+      sourceKeyReadStatement(batch),
     );
-    validateExistingRevisionRows(keyResult.rows, expected, existingSourceIds);
+    validateRevisionRows(keyResult.rows, expected, payloadVerifiedSourceIds, true);
+  }
+  for (const sourceRecordId of existingSourceIds) {
+    if (!payloadVerifiedSourceIds.has(sourceRecordId)) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
+    }
   }
 
   const missingRevisions = expectedRevisions.filter(
