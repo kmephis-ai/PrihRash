@@ -62,6 +62,12 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STALE_STAGING_RETIREMENT_ARMED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_STAGING_AUTHORITY_AMBIGUOUS/);
+  assert.match(workflow, /initial-bootstrap-recovery:invoke >"\$tmp" 2>"\$diag"/);
+  assert.match(workflow, /extract_single_diag 'R1_STAGING_REVISION_EVIDENCE'/);
+  assert.match(workflow, /extract_single_diag 'R1_STAGING_DURABLE_REVISION_EVIDENCE'/);
+  assert.match(workflow, /extract_single_diag 'R1_STAGING_RETIREMENT_EVIDENCE'/);
+  assert.match(workflow, /extract_single_diag 'R1_STAGING_SOURCE_DECODE_EVIDENCE'/);
+  assert.doesNotMatch(workflow, /R1_STAGING_REVISION_EVIDENCE=\/\/p' "\$tmp"/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED/);
   assert.match(workflow, /r1-bootstrap-orchestrator-child-workflow\.mjs readiness/);
   assert.match(workflow, /\.code == "READINESS_READY"/);
