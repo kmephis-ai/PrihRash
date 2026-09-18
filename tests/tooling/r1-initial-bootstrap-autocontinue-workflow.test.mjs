@@ -49,6 +49,7 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /STALE_STAGING_RETIRED/);
   assert.match(workflow, /recovery_state=/);
   assert.match(workflow, /allow_staging_resume='true'/);
+  assert.match(workflow, /allow_stale_staging_retirement='true'/);
   assert.match(workflow, /NOT_SINGLE_MERGED_MAIN_PR/);
   assert.match(workflow, /parents \| length\) == 1/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator-evidence-\$interrupted_run_id/);
@@ -75,6 +76,7 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
   assert.match(workflow, /allow_staging_resume/);
+  assert.match(workflow, /allow_stale_staging_retirement/);
   assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
@@ -88,6 +90,8 @@ test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery st
   assert.match(workflow, /Recovery-State: STALE_STAGING_RETIRED/);
   assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_RESUMABLE' \]/);
   assert.match(workflow, /\[ "\$recovery_state" = 'STAGING_STALE_RETIREABLE' \]/);
+  assert.match(workflow, /allow_staging_resume='true'/);
+  assert.match(workflow, /allow_stale_staging_retirement='true'/);
   assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
 });
 

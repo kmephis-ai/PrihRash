@@ -11,6 +11,14 @@ on:
         options:
           - 'false'
           - 'true'
+      allow_stale_staging_retirement:
+        description: Allow one guarded stale STAGING retirement only after authoritative digest drift proof
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
@@ -398,10 +406,20 @@ jobs:
             echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
             exit 1
           }
+          staging_revision="$(sed -n 's/^R1_STAGING_REVISION_EVIDENCE=//p' "$tmp")"
+          staging_durable_revision="$(sed -n 's/^R1_STAGING_DURABLE_REVISION_EVIDENCE=//p' "$tmp")"
+          staging_retirement="$(sed -n 's/^R1_STAGING_RETIREMENT_EVIDENCE=//p' "$tmp")"
+          staging_source_decode="$(sed -n 's/^R1_STAGING_SOURCE_DECODE_EVIDENCE=//p' "$tmp")"
           rm -f "$tmp"
           verdict="$(jq -r '.verdict' <<<"$classification")"
           reason="$(jq -r '.reason' <<<"$classification")"
           printf 'verdict=%s\nreason=%s\n' "$verdict" "$reason" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.allow_staging_resume }}" = 'true' ] \
+            && [ "${{ inputs.allow_stale_staging_retirement }}" = 'true' ]; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_AUTHORITY_AMBIGUOUS'
+            exit 1
+          fi
 
           if [ "$verdict" = 'NOT_APPLIED' ] && [ "$reason" = 'EMPTY_DURABLE_STATE' ]; then
             exit 0
@@ -413,11 +431,25 @@ jobs:
             echo 'R1_BOOTSTRAP_ORCHESTRATOR_STALE_RETIREMENT_FRESH_BOOTSTRAP_ARMED'
             exit 0
           fi
-          if [ "$verdict" = 'RECOVERY_REQUIRED' ] \
-            && [ "$reason" = 'STAGING_RUN_PRESENT' ] \
-            && [ "${{ inputs.allow_staging_resume }}" = 'true' ]; then
-            echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED'
-            exit 0
+          if [ "$verdict" = 'RECOVERY_REQUIRED' ] && [ "$reason" = 'STAGING_RUN_PRESENT' ]; then
+            if [ "${{ inputs.allow_staging_resume }}" = 'true' ] \
+              && [ "$staging_revision" = 'COMPLETE_CURRENT_RUN_ONLY' ] \
+              && [ "$staging_durable_revision" = 'COMPLETE_CURRENT_RUN_ONLY' ] \
+              && [ "$staging_retirement" = 'STALE_STAGING_CURRENT_STATE_EMPTY' ] \
+              && [ "$staging_source_decode" = 'NONE' ]; then
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_STAGING_RESUME_ARMED'
+              exit 0
+            fi
+            if [ "${{ inputs.allow_stale_staging_retirement }}" = 'true' ] \
+              && [ "$staging_revision" = 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH' ] \
+              && [ "$staging_retirement" = 'STALE_STAGING_CURRENT_STATE_EMPTY' ]; then
+              case "$staging_durable_revision" in
+                NO_REVISION_EVIDENCE|PARTIAL_CURRENT_RUN_ONLY|COMPLETE_CURRENT_RUN_ONLY)
+                  echo 'R1_BOOTSTRAP_ORCHESTRATOR_STALE_STAGING_RETIREMENT_ARMED'
+                  exit 0
+                  ;;
+              esac
+            fi
           fi
           echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED'
           exit 1
@@ -632,6 +664,7 @@ jobs:
             --arg postRecoveryVerdict "$POST_VERDICT" \
             --arg postRecoveryReason "$POST_REASON" \
             --arg stagingResumeAuthorized "${{ inputs.allow_staging_resume }}" \
+            --arg staleStagingRetirementAuthorized "${{ inputs.allow_stale_staging_retirement }}" \
             '{
               status: $status,
               code: $code,
@@ -645,7 +678,8 @@ jobs:
               bootstrapInvokeStep: ($bootstrapInvokeStep | select(length > 0) // null),
               postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
               postRecoveryReason: ($postRecoveryReason | select(length > 0) // null),
-              stagingResumeAuthorized: ($stagingResumeAuthorized == "true")
+              stagingResumeAuthorized: ($stagingResumeAuthorized == "true"),
+              staleStagingRetirementAuthorized: ($staleStagingRetirementAuthorized == "true")
             }' > "$evidence_dir/classification.json"
 
       - name: Upload orchestrator evidence
