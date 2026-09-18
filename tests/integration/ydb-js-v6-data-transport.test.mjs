@@ -158,7 +158,11 @@ test('bounded driver startup aborts and closes the driver instead of leaking a s
           reject(signal.reason);
           return;
         }
-        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+        const keepAlive = setTimeout(() => reject(new Error('synthetic ready timeout did not abort')), 100);
+        signal?.addEventListener('abort', () => {
+          clearTimeout(keepAlive);
+          reject(signal.reason);
+        }, { once: true });
       });
     },
     close() {
