@@ -31,6 +31,7 @@ const requiredFiles = [
   'dist/migration/initialBootstrapResidualSurface.js',
   'dist/migration/initialBootstrapStagingRevisionDiagnostic.js',
   'dist/migration/initialBootstrapReferenceReconciliation.js',
+  'dist/migration/initialControlledRebuildValidatedRecoveryDiagnostic.js',
   'dist/reference/initialBootstrapReferenceSemantics.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
@@ -89,6 +90,7 @@ for (const recoveryModule of [
   'initialBootstrapResidualSurface.js',
   'initialBootstrapStagingRevisionDiagnostic.js',
   'initialBootstrapReferenceReconciliation.js',
+  'initialControlledRebuildValidatedRecoveryDiagnostic.js',
 ]) {
   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
   if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
