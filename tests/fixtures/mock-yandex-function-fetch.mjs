@@ -14,7 +14,8 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.pathname !== `/${encodeURIComponent(expectedFunctionId)}`) fail('unexpected function path');
   const expectedTag = process.env.PRIHRASH_TEST_FUNCTION_TAG ?? DEFAULT_EXPECTED_TAG;
   if (url.searchParams.get('tag') !== expectedTag) fail('unexpected tag');
-  if (url.searchParams.get('integration') !== 'raw') fail('raw integration is required');
+  const expectedIntegration = process.env.PRIHRASH_TEST_FUNCTION_INTEGRATION ?? 'raw';
+  if (url.searchParams.get('integration') !== expectedIntegration) fail('unexpected integration mode');
   if (init.method !== 'POST') fail('POST is required');
   const headers = new Headers(init.headers);
   if (headers.get('authorization') !== `Bearer ${EXPECTED_TOKEN}`) fail('unexpected authorization');

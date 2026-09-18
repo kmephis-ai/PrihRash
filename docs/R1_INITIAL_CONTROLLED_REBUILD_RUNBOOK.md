@@ -60,6 +60,22 @@ When durable recovery reports `VALIDATED_RUN_PRESENT`, the recovery-only handler
 
 These enums are structural evidence only. They do not declare staging completeness, swap success or a verified baseline. Any later continuation remains separately gated and must use the existing exact staging/swap/marker discrimination before its next mutation.
 
+## Async continuation transport
+
+The live WU7 Function may legitimately need longer than a synchronous HTTPS client connection remains reliable. Controlled continuation therefore uses Yandex Cloud Functions asynchronous invocation (`integration=async`) after all exact-main/recovery/readiness/provider-boundary gates pass.
+
+An HTTP `202` is classified only as:
+
+```json
+{"status":"PASS","code":"INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED"}
+```
+
+This proves only that Yandex Cloud accepted the invocation request. It does **not** prove that the Function completed, that staging materialization or swap occurred, or that a verified baseline exists. The workflow must not emit `INITIAL_CONTROLLED_REBUILD_COMMITTED` from async acceptance.
+
+After async acceptance, no second controlled invocation is allowed until a fresh read-only recovery on the same exact-main lineage classifies the durable YDB state. The recovery evidence, not HTTP completion, selects the next action.
+
+A previously unknown synchronous invocation may be continued asynchronously only when read-only recovery has proven `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT`: durable validation is present, canonical current remains empty and the run-scoped staging pair is absent. This prevents replay across an ambiguous setup/staging/swap boundary.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:

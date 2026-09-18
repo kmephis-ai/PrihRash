@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       recovery_run_id:
-        description: Exact successful read-only recovery run proving resumable STAGING
+        description: Exact successful read-only recovery run proving safe STAGING or VALIDATED continuation
         required: true
         type: string
       readiness_run_id:
@@ -152,7 +152,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.readiness_run_id }}
 
-      - name: Prove exact resumable STAGING and READINESS_READY evidence
+      - name: Prove exact safe resumable recovery and READINESS_READY evidence
         shell: bash
         run: |
           set -euo pipefail
@@ -164,7 +164,7 @@ jobs:
             and .status == "PASS"
             and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
             and .verdict == "RECOVERY_REQUIRED"
-            and .reason == "STAGING_RUN_PRESENT"
+            and (.reason == "STAGING_RUN_PRESENT" or .reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT")
           ' "$recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_RECOVERY_EVIDENCE_NOT_RESUMABLE'; exit 1; }
           jq -e '
             type == "object"
@@ -461,13 +461,14 @@ jobs:
             exit 1
           fi
 
-      - name: Invoke exact controlled rebuild tag once
+      - name: Start exact controlled rebuild tag asynchronously once
         id: controlled-invoke
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           export PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+          export PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE=async
           tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-invoke.log"
           evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence"
           candidate="$evidence_dir/classification.tmp"
@@ -482,7 +483,8 @@ jobs:
             select(type == "object")
             | . as $r
             | select(
-                (($r.status == "PASS" and $r.code == "INITIAL_CONTROLLED_REBUILD_COMMITTED" and (keys | sort) == ["code","status"])
+                (($r.status == "PASS" and $r.code == "INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED" and (keys | sort) == ["code","status"])
+                or ($r.status == "PASS" and $r.code == "INITIAL_CONTROLLED_REBUILD_COMMITTED" and (keys | sort) == ["code","status"])
                 or ($r.status == "NOOP" and $r.code == "INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS" and (keys | sort) == ["code","status"])
                 or ($r.status == "STOP" and $r.code == "INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED"
                     and (keys | sort) == ["code","recoveryReason","status"]
@@ -515,11 +517,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Require exact COMMITTED result
+      - name: Require exact async acceptance only
         if: ${{ always() }}
         shell: bash
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence/classification.json"
           test -f "$evidence" || { echo 'INITIAL_CONTROLLED_REBUILD_EVIDENCE_MISSING'; exit 1; }
-          jq -e 'type == "object" and (keys | sort) == ["code","status"] and .status == "PASS" and .code == "INITIAL_CONTROLLED_REBUILD_COMMITTED"'             "$evidence" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_NON_SUCCESS'; exit 1; }
+          jq -e 'type == "object" and (keys | sort) == ["code","status"] and .status == "PASS" and .code == "INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED"'             "$evidence" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_NOT_ACCEPTED'; exit 1; }
+          echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED_RECOVERY_REQUIRED'
