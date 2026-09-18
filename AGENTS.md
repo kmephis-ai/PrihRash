@@ -139,6 +139,14 @@ SHA может использовать `Recovery-State: STAGING_STALE_RETIREABL
   `allow_staging_resume=false` и `allow_stale_staging_retirement=true`;
 - retires вместе с временным R1 autocontinue/provider surface.
 
+После неуспешного write-capable bootstrap invoke и неуспешной post-invoke recovery
+долговечное состояние остаётся неизвестным. Для такого случая successor PR может запросить
+только одну read-only recovery на новом exact SHA с
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION` и
+`Recovery-State: UNKNOWN_AFTER_NON_SUCCESS`. Этот marker не вооружает provider write;
+пока fresh recovery не классифицировала состояние, запрещены replay, cleanup и смена authority.
+
 
 ## 9. CI
 

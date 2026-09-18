@@ -150,7 +150,10 @@ boundary and must not trigger a bootstrap invoke.
 While #453 is active, a merged `R1 #453:` PR may request exactly one fresh standalone
 read-only recovery on its exact merge SHA with the marker `Recovery-Probe: READY`.
 The marker is valid only together with `Provider-Attempt: NOT_AUTHORIZED` and
-`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`.
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`. After a write-capable
+non-success whose post-invoke recovery also fails, the exact pair
+`Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION` and
+`Recovery-State: UNKNOWN_AFTER_NON_SUCCESS` is also valid for a read-only probe.
 
 The stage-specific `R1 initial bootstrap recovery autocontinue` workflow runs only after a
 successful push-CI on exact `main`, requires Issue #453 to remain open, refuses a concurrent
@@ -201,6 +204,16 @@ signature
 runbook is updated on the new SHA and dispatches the orchestrator with resume disabled and stale
 retirement enabled. Source-drift rebase is not included in the two-attempt Incident-M root-cause
 counter.
+
+### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
+
+Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
+evidence. Readiness child `35342816957` succeeded. Bootstrap child `35342931292` reached the
+write-capable invoke and failed; orchestrator post-invoke recovery then failed with
+`R1_BOOTSTRAP_ORCHESTRATOR_POST_RECOVERY_FAILED`. These signals do not establish whether the
+durable YDB state is committed, staged, or unchanged. Before any further provider write, run
+one standalone read-only recovery on a new exact main SHA and inspect its privacy-safe result.
+No replay, cleanup, or authority switch is authorized by this observation.
 
 ## Incident-M provider attempt contract
 
