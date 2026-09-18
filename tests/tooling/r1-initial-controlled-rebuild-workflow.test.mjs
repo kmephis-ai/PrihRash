@@ -22,15 +22,15 @@ test('R1 controlled rebuild workflow is manual exact-main and explicit-authority
 
 test('R1 controlled rebuild binds exact recovery and readiness artifacts before provider mutation', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
-  const recoveryGate = workflow.indexOf('Prove exact resumable STAGING and READINESS_READY evidence');
+  const recoveryGate = workflow.indexOf('Prove exact safe resumable recovery and READINESS_READY evidence');
   const providerBoundary = workflow.indexOf('Fail closed if dedicated provider boundary is unsafe');
   const deploy = workflow.indexOf('Deploy initial-controlled-rebuild-only Function version');
-  const invoke = workflow.indexOf('Invoke exact controlled rebuild tag once');
+  const invoke = workflow.indexOf('Start exact controlled rebuild tag asynchronously once');
   assert.equal(recoveryGate > 0 && recoveryGate < providerBoundary && providerBoundary < deploy && deploy < invoke, true);
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ inputs\.recovery_run_id \}\}/);
   assert.match(workflow, /r1-yandex-readiness-evidence-\$\{\{ inputs\.readiness_run_id \}\}/);
   assert.match(workflow, /\.verdict == "RECOVERY_REQUIRED"/);
-  assert.match(workflow, /\.reason == "STAGING_RUN_PRESENT"/);
+  assert.match(workflow, /\.reason == "STAGING_RUN_PRESENT" or \.reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT"/);
   assert.match(workflow, /\.code == "READINESS_READY"/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WRITER_CONFLICT/);
 });
@@ -46,6 +46,14 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_TRIGGER_PRESENT/);
   assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_PRIVATE_HISTORICAL_EVIDENCE/);
+});
+
+test('controlled rebuild invocation is async-accepted only and requires later recovery', async () => {
+  const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
+  assert.match(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE=async/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED_RECOVERY_REQUIRED/);
+  assert.doesNotMatch(workflow, /Require exact COMMITTED result/);
 });
 
 test('controlled rebuild runtime structurally reuses bounded WU7 recovery primitives', async () => {
