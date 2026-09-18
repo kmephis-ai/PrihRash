@@ -235,6 +235,16 @@ function statementRows(statement, state) {
       snapshot_row_count: snapshot.row_count,
     }];
   }
+  if (text.includes('FROM initial_bootstrap_identity_manifests WHERE migration_run_id = $migration_run_id')) {
+    const manifest = state.manifests.get(parameter(statement, 'migration_run_id'));
+    if (manifest === undefined) return [];
+    return [{
+      source_snapshot_id: manifest.source_snapshot_id,
+      source_snapshot_digest: manifest.source_snapshot_digest,
+      binding_count: manifest.binding_count,
+      bindings: manifest.bindings,
+    }];
+  }
   if (text.includes('FROM source_snapshots WHERE id = $id')) {
     const snapshot = state.sourceSnapshots.get(parameter(statement, 'id'));
     return snapshot === undefined ? [] : [{ ...snapshot }];

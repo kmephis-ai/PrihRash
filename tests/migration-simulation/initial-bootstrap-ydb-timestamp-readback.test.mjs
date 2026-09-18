@@ -88,16 +88,12 @@ test('fresh claim accepts native Date values returned for YDB Timestamp columns'
           if (statement.text.includes('FROM migration_runs WHERE id = $id')) {
             return { rows: [runRow(input)] };
           }
-          if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
+          if (statement.text.includes('FROM initial_bootstrap_identity_manifests')) {
             return { rows: [{
               source_snapshot_id: manifest.sourceSnapshotId,
               source_snapshot_digest: manifest.sourceSnapshotDigest,
               binding_count: BigInt(manifest.bindings.length),
               bindings: JSON.parse(manifestWrite.statement.parameters.bindings.value),
-              run_state: 'STAGING',
-              run_snapshot_digest: input.run.sourceSnapshotDigest,
-              snapshot_digest: input.snapshot.snapshotDigest,
-              snapshot_row_count: BigInt(input.snapshot.rowCount),
             }] };
           }
           throw new Error(`unexpected read: ${statement.text}`);
