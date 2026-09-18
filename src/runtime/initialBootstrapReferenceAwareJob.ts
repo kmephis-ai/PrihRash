@@ -375,6 +375,14 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
   let referenceRows: readonly Readonly<InitialReferenceBootstrapObservationRow>[] | null = null;
   let referencePlan: Readonly<InitialReferenceBootstrapPlan> | null = null;
 
+  function releaseReferencePlanningState(): void {
+    lease = null;
+    digest = null;
+    primitives = null;
+    referenceRows = null;
+    referencePlan = null;
+  }
+
   const runtime: InitialBootstrapJobRuntime = {
     createDigest(): Readonly<CanonicalSourceDigest> {
       digest = createCanonicalSourceDigest();
@@ -467,12 +475,14 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
         )) {
           throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
         }
+        releaseReferencePlanningState();
         return runApplicationSafely(observation, dependencies);
       }
       if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
       }
       if (referencePlan.writes.length === 0) {
+        releaseReferencePlanningState();
         return runApplicationSafely(observation, dependencies);
       }
 
