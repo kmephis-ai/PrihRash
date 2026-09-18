@@ -83,7 +83,11 @@ test('staging revision diagnostic distinguishes no, partial, complete and cross-
     'NO_REVISION_EVIDENCE',
   );
 
-  const partial = reader(sourceObservations, async () => [revisionRow(sourceObservations[0], 0)]);
+  const partial = reader(sourceObservations, async (statement) => (
+    statement.parameters.migration_run_id === undefined
+      ? []
+      : [revisionRow(sourceObservations[0], 0)]
+  ));
   assert.equal(
     await diagnoseInitialBootstrapStagingRevisionEvidence(partial, SNAPSHOT_DIGEST, sourceObservations),
     'PARTIAL_CURRENT_RUN_ONLY',
@@ -219,13 +223,17 @@ test('staging revision diagnostic proves only an exact preserved authoritative p
 
 test('durable staging revision diagnostic inspects immutable evidence despite authoritative source drift', async () => {
   const sourceObservations = observations(2);
-  const durableReader = reader(sourceObservations, async () => [revisionRow(sourceObservations[0], 0)]);
+  const durableReader = reader(sourceObservations, async (statement) => (
+    statement.parameters.migration_run_id === undefined
+      ? []
+      : [revisionRow(sourceObservations[0], 0)]
+  ));
 
   assert.equal(
     await diagnoseInitialBootstrapStagingDurableRevisionEvidence(durableReader),
     'PARTIAL_CURRENT_RUN_ONLY',
   );
-  assert.equal(durableReader.calls.length, 2);
+  assert.equal(durableReader.calls.length, 3);
   assert.equal(durableReader.calls.every((statement) => statement.kind === 'READ'), true);
 });
 
@@ -233,10 +241,14 @@ test('durable staging revision diagnostic rejects non-contiguous partial current
   const sourceObservations = observations(3);
   const durableReader = reader(
     sourceObservations,
-    async () => [
-      revisionRow(sourceObservations[0], 0),
-      revisionRow(sourceObservations[2], 2),
-    ],
+    async (statement) => (
+      statement.parameters.migration_run_id === undefined
+        ? []
+        : [
+          revisionRow(sourceObservations[0], 0),
+          revisionRow(sourceObservations[2], 2),
+        ]
+    ),
   );
 
   assert.equal(
@@ -249,7 +261,11 @@ test('durable staging revision diagnostic exposes cross-run primary-key collisio
   const sourceObservations = observations(1);
   const durableReader = reader(
     sourceObservations,
-    async () => [revisionRow(sourceObservations[0], 0, OTHER_RUN_ID)],
+    async (statement) => (
+      statement.parameters.migration_run_id === undefined
+        ? [revisionRow(sourceObservations[0], 0, OTHER_RUN_ID)]
+        : []
+    ),
   );
 
   assert.equal(
