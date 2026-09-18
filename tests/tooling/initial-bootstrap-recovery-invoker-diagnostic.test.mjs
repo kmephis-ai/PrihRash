@@ -156,6 +156,45 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
   }
 });
 
+test('recovery invoker accepts validated controlled structure reasons with the canonical four-key shape', async () => {
+  const reasons = [
+    'VALIDATED_CURRENT_EMPTY_STAGING_ABSENT',
+    'VALIDATED_CURRENT_EMPTY_STAGING_EMPTY',
+    'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+    'VALIDATED_CURRENT_NONEMPTY_STAGING_ABSENT',
+    'VALIDATED_CURRENT_NONEMPTY_STAGING_PRESENT',
+    'VALIDATED_CONTROLLED_STRUCTURE_AMBIGUOUS',
+    'VALIDATED_CONTROLLED_DIAGNOSTIC_FAILED',
+  ];
+  for (const reason of reasons) {
+    const yc = await fakeYc({
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason,
+    });
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+          PRIHRASH_YC_BIN: yc,
+        },
+      },
+    );
+    assert.deepEqual(JSON.parse(stdout), {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason,
+    });
+    assert.equal(stderr, '');
+  }
+});
+
 test('surface-only invoker accepts bare STAGING enum only when explicitly selected', async () => {
   const yc = await fakeYc({
     status: 'PASS',
