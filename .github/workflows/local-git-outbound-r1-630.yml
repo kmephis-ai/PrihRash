@@ -1,4 +1,4 @@
-name: Local Git Outbound R1 630
+name: R1 WU7 Read-only Gate Control
 
 on:
   push:
@@ -8,66 +8,58 @@ on:
       - .github/workflows/local-git-outbound-r1-630.yml
 
 permissions:
-  contents: write
+  contents: read
+  actions: write
+  issues: read
 
 concurrency:
-  group: local-git-outbound-r1-630
+  group: r1-wu7-read-only-gate-control
   cancel-in-progress: false
 
 jobs:
-  stage-helper:
+  dispatch-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout transport branch
-        uses: actions/checkout@v4
-        with:
-          ref: transport/r1-630-publish-16c2948
-          fetch-depth: 0
-
-      - name: Reconstruct and prove exact immutable patch
+      - name: Dispatch fresh exact-main recovery only
         shell: bash
         env:
-          BASE_SHA: 16c2948cbdac8f2210722f2050425127101940d6
-          PATCH_GZ_SHA256: e5e929fd665cfd4db785629f0a9013374a1ad90e4c9f4028b0b3318dfbe29c39
-          PATCH_SHA256: 9deeacbc88e5ddecbf99553993846bc6db6a4d01624de6532f0a649967b79cae
-          EXPECTED_TREE: 629e8247d3f24922e6bebea65e73239cb4b530ff
-          TARGET_PARENT: f6f32fe24f6dacfe31f0e398c4b92fc32b7995e7
-          TARGET_BRANCH: fix/r1-630-controlled-rebuild-runtime
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: 002639d0d1365588aefb913a6faaf581153b9084
+          TRACKING_ISSUE: "630"
         run: |
           set -euo pipefail
-          git fetch origin main "$TARGET_BRANCH"
-          current_main="$(git ls-remote origin refs/heads/main | cut -f1)"
-          test "$current_main" = "$BASE_SHA"
-          target="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | cut -f1)"
-          test "$target" = "$TARGET_PARENT"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 
-          cat \
-            tools/local-git-mirror/outbound/r1-630.00.b64 \
-            tools/local-git-mirror/outbound/r1-630.01.b64 \
-            tools/local-git-mirror/outbound/r1-630.02.b64 \
-            tools/local-git-mirror/outbound/r1-630.03.b64 \
-            tools/local-git-mirror/outbound/r1-630.04.b64 \
-            > /tmp/r1-630.patch.gz.b64
-          base64 --decode /tmp/r1-630.patch.gz.b64 > /tmp/r1-630.patch.gz
-          echo "$PATCH_GZ_SHA256  /tmp/r1-630.patch.gz" | sha256sum --check -
-          gzip -dc /tmp/r1-630.patch.gz > /tmp/r1-630.patch
-          echo "$PATCH_SHA256  /tmp/r1-630.patch" | sha256sum --check -
+          curl --fail --silent --show-error "${auth[@]}" "$api/branches/main" -o /tmp/main.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' /tmp/main.json >/dev/null
 
-          git checkout --detach "$BASE_SHA"
-          git apply --index --whitespace=error-all /tmp/r1-630.patch
-          test "$(git write-tree)" = "$EXPECTED_TREE"
-          base64 -w 0 .github/workflows/r1-initial-controlled-rebuild.yml > /tmp/r1-630.workflow.b64
-          test "$(wc -c < /tmp/r1-630.workflow.b64)" = "36180"
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o /tmp/ci.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.workflow_runs | any(.head_sha == $sha and .conclusion == "success")' /tmp/ci.json >/dev/null
 
-          git checkout -B "$TARGET_BRANCH" "$TARGET_PARENT"
-          git reset --hard "$TARGET_PARENT"
-          test ! -e .github/workflows/r1-initial-controlled-rebuild.yml
-          mkdir -p tools/local-git-mirror/outbound
-          cp /tmp/r1-630.workflow.b64 tools/local-git-mirror/outbound/r1-630.workflow.b64
-          git add tools/local-git-mirror/outbound/r1-630.workflow.b64
-          git config user.name "PrihRash AI Transport"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "transport: stage exact R1 #630 workflow payload"
-          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
+          jq -e '
+            .state == "open"
+            and (.title | startswith("R1 WU7:"))
+            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Google-Authority: PRESERVED"))
+            and (.body | contains("Blind-Replay: FORBIDDEN"))
+          ' /tmp/issue.json >/dev/null
 
-          echo "HELPER_COMMIT_SHA=$(git rev-parse HEAD)"
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
+          jq -e --argjson self "$GITHUB_RUN_ID" '
+            [.workflow_runs[]
+              | select(.id != $self)
+              | select(.status == "queued" or .status == "in_progress")
+              | select(
+                  .name == "R1 initial shadow bootstrap"
+                  or .name == "R1 initial bootstrap orchestrator"
+                  or .name == "R1 initial controlled rebuild"
+                )
+            ] | length == 0
+          ' /tmp/runs.json >/dev/null
+
+          payload='{"ref":"main","inputs":{"surface_only":"false"}}'
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
+          test "$code" = "204"
+          echo "R1_WU7_RECOVERY_DISPATCHED"
