@@ -217,16 +217,11 @@ function exactPayloadRangeReadStatement(
 function planRevisionReadBatches(
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
-  const sorted = [...revisions].sort((left, right) => {
-    const leftId = left.sourceRecordId.toLowerCase();
-    const rightId = right.sourceRecordId.toLowerCase();
-    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
-  });
   const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
   let current: Readonly<InitialSourceRecordRevisionProjection>[] = [];
   let currentBytes = 0;
 
-  for (const revision of sorted) {
+  for (const revision of revisions) {
     const estimatedBytes = estimatedRevisionReadBytes(revision);
     if (
       current.length > 0
@@ -248,7 +243,8 @@ function runRevisionReadStatement(runId: string) {
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
       + 'FROM source_record_revisions '
-      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
+      + 'ORDER BY source_record_id',
     {
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(runId),
@@ -293,12 +289,17 @@ export async function planInitialSourceRevisionEvidenceResume(
   );
   validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
 
-  // Exact payload equality remains mandatory. Current-run rows are verified through
-  // constant-size primary-key range reads instead of AS_TABLE or per-id OR predicates.
-  // Batches remain bounded by the calibrated response-memory envelope.
-  const existingRevisions = expectedRevisions.filter(
-    (revision) => existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
-  );
+  // Exact payload equality remains mandatory. The metadata-only run scan is
+  // explicitly ordered by YDB, so range boundaries use provider order rather than
+  // assuming that Node string ordering matches YDB Uuid ordering.
+  const existingRevisions = runResult.rows.map((row) => {
+    const sourceRecordId = uuid(row.source_record_id);
+    const revision = expected.bySourceId.get(sourceRecordId);
+    if (revision === undefined) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
+    }
+    return revision;
+  });
   const payloadVerifiedSourceIds = new Set<string>();
   for (const batch of planRevisionReadBatches(existingRevisions)) {
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(

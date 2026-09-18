@@ -358,7 +358,8 @@ function runRevisionEvidenceStatement(migrationRunId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest FROM source_record_revisions '
-      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
+      + 'ORDER BY source_record_id',
     {
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(migrationRunId),
@@ -489,15 +490,10 @@ function exactRunPayloadRevisionRangeStatement(
 function planExactRevisionReadBatches(
   expected: readonly Readonly<ExactExpectedRevision>[],
 ): readonly (readonly Readonly<ExactExpectedRevision>[])[] {
-  const sorted = [...expected].sort((left, right) => {
-    const leftId = left.binding.sourceRecordId;
-    const rightId = right.binding.sourceRecordId;
-    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
-  });
   const batches: Readonly<ExactExpectedRevision>[][] = [];
   let current: Readonly<ExactExpectedRevision>[] = [];
   let currentBytes = 0;
-  for (const revision of sorted) {
+  for (const revision of expected) {
     const estimatedBytes = estimatedExactRevisionReadBytes(revision);
     if (
       current.length > 0
@@ -626,8 +622,47 @@ export async function diagnoseInitialBootstrapStagingExactRevisionEvidence(
   const expected = new Map(
     expectedRevisions.map((revision) => [revision.binding.sourceRecordId, revision]),
   );
+
+  // Ask YDB for the current-run key order explicitly. Uuid is a primitive YDB type
+  // and range reads must follow provider ordering instead of client string ordering.
+  const orderedResult = await reader.read<ExistingRevisionEvidenceRow>(
+    runRevisionEvidenceStatement(parsed.manifest.migrationRunId),
+  );
+  const orderedSeen = new Set<string>();
+  const orderingFinding = inspectRevisionRows(
+    orderedResult.rows,
+    parsed.manifest.migrationRunId,
+    new Map(parsed.manifest.bindings.map((binding) => [binding.sourceRecordId, binding])),
+    orderedSeen,
+  );
+  if (orderingFinding !== null) {
+    if (orderingFinding === 'REVISION_ROW_DUPLICATE') return 'EXACT_CURRENT_RUN_REVISION_DUPLICATE';
+    if (orderingFinding === 'REVISION_ROW_UNEXPECTED_SOURCE') {
+      return 'EXACT_CURRENT_RUN_REVISION_UNEXPECTED_SOURCE';
+    }
+    if (orderingFinding === 'CROSS_RUN_PK_COLLISION') {
+      return 'EXACT_CURRENT_RUN_MIGRATION_RUN_MISMATCH';
+    }
+    if (orderingFinding === 'REVISION_ROW_MALFORMED') {
+      return 'EXACT_CURRENT_RUN_REVISION_MALFORMED';
+    }
+    return 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN';
+  }
+  if (orderedSeen.size !== expectedRevisions.length) {
+    return 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH';
+  }
+
+  const orderedExpectedRevisions: Readonly<ExactExpectedRevision>[] = [];
+  for (const row of orderedResult.rows) {
+    const sourceRecordId = normalizedUuid(row.source_record_id);
+    if (sourceRecordId === null) return 'EXACT_CURRENT_RUN_REVISION_MALFORMED';
+    const revision = expected.get(sourceRecordId);
+    if (revision === undefined) return 'EXACT_CURRENT_RUN_REVISION_UNEXPECTED_SOURCE';
+    orderedExpectedRevisions.push(revision);
+  }
+
   const seen = new Set<string>();
-  for (const batch of planExactRevisionReadBatches(expectedRevisions)) {
+  for (const batch of planExactRevisionReadBatches(orderedExpectedRevisions)) {
     const result = await reader.read<ExistingRevisionEvidenceRow>(
       exactRunPayloadRevisionRangeStatement(parsed.manifest.migrationRunId, batch),
     );

@@ -375,7 +375,10 @@ test('staging revision diagnostic fails closed on extra or mismatched same-run e
 test('exact staging revision diagnostic proves full persisted revision equality read-only', async () => {
   const sourceObservations = exactObservations(2);
   const evidenceReader = reader(sourceObservations, async (statement) => {
-    assert.match(statement.text, /raw_payload/);
+    if (!/raw_payload/.test(statement.text)) {
+      assert.match(statement.text, /ORDER BY source_record_id$/);
+      return sourceObservations.map((item, index) => revisionRow(item, index));
+    }
     assert.match(statement.text, /source_record_id >= \$source_record_id_from/);
     assert.match(statement.text, /source_record_id <= \$source_record_id_to/);
     assert.match(statement.text, /migration_run_id = \$migration_run_id/);
@@ -432,6 +435,10 @@ test('exact staging revision diagnostic batches current-run payload reads as con
   const calls = [];
   const evidenceReader = reader(sourceObservations, async (statement) => {
     calls.push(statement);
+    if (!/raw_payload/.test(statement.text)) {
+      assert.match(statement.text, /ORDER BY source_record_id$/);
+      return sourceObservations.map((item, index) => revisionRow(item, index));
+    }
     const from = statement.parameters.source_record_id_from.value;
     const to = statement.parameters.source_record_id_to.value;
     return sourceObservations
@@ -464,6 +471,49 @@ test('exact staging revision diagnostic batches current-run payload reads as con
   )), true);
   assert.equal(payloadReads[0].parameters.source_record_id_from.value, sourceId(0));
   assert.equal(payloadReads.at(-1).parameters.source_record_id_to.value, sourceId(999));
+});
+
+test('exact staging revision ranges follow YDB metadata order instead of Node UUID string order', async () => {
+  const sourceObservations = Object.freeze(Array.from({ length: 3 }, (_, index) => Object.freeze({
+    ...observations(1)[0],
+    sourceOrdinal: index,
+    rowHint: index + 2,
+    digest: `synthetic-provider-order-${index}`,
+    rawPayload: rawPayload(`Synthetic ${index} ${'x'.repeat(300_000)}`),
+  })));
+  const providerOrder = [2, 0, 1];
+  const calls = [];
+  const evidenceReader = reader(sourceObservations, async (statement) => {
+    calls.push(statement);
+    if (!/raw_payload/.test(statement.text)) {
+      assert.match(statement.text, /ORDER BY source_record_id$/);
+      return providerOrder.map((index) => revisionRow(sourceObservations[index], index, RUN_ID, {
+        raw_payload: sourceObservations[index].rawPayload,
+      }));
+    }
+    const from = statement.parameters.source_record_id_from.value;
+    const to = statement.parameters.source_record_id_to.value;
+    assert.equal(from, to);
+    const index = providerOrder.find((candidate) => sourceId(candidate) === from);
+    return index === undefined ? [] : [revisionRow(sourceObservations[index], index, RUN_ID, {
+      raw_payload: sourceObservations[index].rawPayload,
+    })];
+  });
+
+  assert.equal(
+    await diagnoseInitialBootstrapStagingExactRevisionEvidence(
+      evidenceReader,
+      SNAPSHOT_DIGEST,
+      sourceObservations,
+    ),
+    'EXACT_CURRENT_RUN_MATCH',
+  );
+
+  const payloadReads = calls.filter((statement) => /raw_payload/.test(statement.text));
+  assert.deepEqual(
+    payloadReads.map((statement) => statement.parameters.source_record_id_from.value),
+    providerOrder.map(sourceId),
+  );
 });
 
 test('exact staging revision diagnostic refuses authoritative drift before payload reads', async () => {
@@ -501,6 +551,6 @@ test('staging revision diagnostic uses one run scan plus one table-parameter col
   );
   assert.equal(evidenceReader.calls.length, 3);
   assert.equal(evidenceReader.calls.every((statement) => statement.kind === 'READ'), true);
-  assert.match(evidenceReader.calls[1].text, /migration_run_id = \$migration_run_id$/);
+  assert.match(evidenceReader.calls[1].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
   assert.doesNotMatch(evidenceReader.calls[2].text, /source_record_id_\d+/);
 });

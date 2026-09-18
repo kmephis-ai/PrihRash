@@ -264,6 +264,30 @@ evidence remains fail-closed. No timeout, memory, cap, financial semantics, clea
 authority is widened. The successor remains diagnostic-only until a fresh full recovery returns
 enum-only staging evidence.
 
+### Exact revision duplicate after PK-range optimization on `af5ed0a6a59da899b933920138efebbce2a855e7`
+
+Full read-only recovery `35353769622` completed successfully after #625 and removed the previous
+recovery timeout. Its enum-only evidence was:
+
+- `COMPLETE_CURRENT_RUN_ONLY`;
+- durable `COMPLETE_CURRENT_RUN_ONLY`;
+- `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- `EXACT_CURRENT_RUN_REVISION_DUPLICATE`.
+
+No write-capable workflow ran. The duplicate appeared only in the new exact payload range path while
+the metadata-only durable scan remained complete and internally consistent.
+
+The bounded root-cause correction removes the client assumption that lexicographic Node string order
+for UUID text is the same ordering YDB uses for `Uuid` range predicates. The metadata-only current-run
+read now uses `ORDER BY source_record_id`; raw-payload range batches preserve exactly that
+provider-returned order in both recovery diagnostics and application resume. Exact payload/metadata
+equality, missing/extra/duplicate checks, the 512 KiB response-memory envelope and all write/authority
+boundaries remain unchanged.
+
+The successor remains diagnostic-only until a fresh full recovery returns enum-only exact revision
+evidence.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
