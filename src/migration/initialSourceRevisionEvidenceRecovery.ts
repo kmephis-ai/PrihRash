@@ -217,9 +217,11 @@ function exactPayloadRangeReadStatement(
 function planRevisionReadBatches(
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
-  const sorted = [...revisions].sort((left, right) => (
-    left.sourceRecordId.toLowerCase().localeCompare(right.sourceRecordId.toLowerCase())
-  ));
+  const sorted = [...revisions].sort((left, right) => {
+    const leftId = left.sourceRecordId.toLowerCase();
+    const rightId = right.sourceRecordId.toLowerCase();
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
   const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
   let current: Readonly<InitialSourceRecordRevisionProjection>[] = [];
   let currentBytes = 0;
