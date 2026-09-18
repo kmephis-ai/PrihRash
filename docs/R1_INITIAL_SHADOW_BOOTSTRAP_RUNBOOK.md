@@ -145,6 +145,24 @@ A normal `allow_staging_resume=true` orchestrator may arm only when this additio
 diagnostic is `EXACT_CURRENT_RUN_MATCH`. Any other enum remains a recovery/root-cause
 boundary and must not trigger a bootstrap invoke.
 
+### Autonomous read-only recovery probe for diagnostic-only SHA
+
+While #453 is active, a merged `R1 #453:*` diagnostic PR may request exactly one
+fresh read-only recovery on its own exact main SHA without pretending that a bootstrap
+failed on that same SHA. The PR must contain exact markers
+`Provider-Attempt: NOT_AUTHORIZED` and `Recovery-Probe: READY` plus one
+`Regression-Test: tests/...test.mjs`. CI-triggered autocontinue rechecks exact protected
+main, active #453, bounded changed files, the regression-test path and absence of an
+existing same-SHA recovery before dispatching canonical `R1 initial bootstrap recovery`
+with `allow_diagnostic_probe=true`.
+
+The recovery workflow independently re-validates the same merged-PR authority before
+deploying its recovery-only package. It keeps no write-capable runtime modules and does
+not authorize readiness, bootstrap, stale retirement, cleanup or replay. Normal standalone
+recovery with `allow_diagnostic_probe=false` retains the historical failed-bootstrap
+proof gate. This stage-specific bridge exists only to remove manual dispatch friction
+during #453 and retires with the R1 bootstrap orchestration surface.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
