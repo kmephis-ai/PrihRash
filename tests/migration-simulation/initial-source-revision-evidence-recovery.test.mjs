@@ -98,7 +98,7 @@ test('restart after partial revision evidence separates run-scoped payload verif
   );
 
   assert.equal(statements.length, 3);
-  assert.match(statements[0].text, /migration_run_id = \$migration_run_id$/);
+  assert.match(statements[0].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
   assert.doesNotMatch(statements[0].text, /raw_payload|AS_TABLE/);
   assert.equal(statements[0].parameters.revision.value, 1n);
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
@@ -236,6 +236,46 @@ test('large current-run payload verification uses constant-size PK ranges bounde
     expected.at(-1).sourceRecordId,
   );
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId).sort());
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
+test('payload ranges follow YDB metadata order instead of Node UUID string order', async () => {
+  const ids = [
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000002',
+    '30000000-0000-0000-0000-000000000003',
+  ];
+  const expected = ids.map((id, index) => revision(
+    id,
+    index + 2,
+    `synthetic-provider-order-${index}`,
+    `Synthetic ${index} ${'x'.repeat(300_000)}`,
+  ));
+  const providerOrder = [expected[2], expected[0], expected[1]];
+  const statements = [];
+  const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
+
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader((statement) => {
+      if (!/raw_payload/.test(statement.text)) {
+        assert.match(statement.text, /ORDER BY source_record_id$/);
+        return providerOrder.map(providerRow);
+      }
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      assert.equal(from, to);
+      const found = byId.get(from);
+      return found === undefined ? [] : [providerRow(found)];
+    }, (statement) => statements.push(statement)),
+    expected,
+  );
+
+  const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
+  assert.deepEqual(
+    payloadReads.map((statement) => statement.parameters.source_record_id_from.value),
+    providerOrder.map((item) => item.sourceRecordId),
+  );
+  assert.deepEqual(resume.existingSourceRecordIds, [...ids].sort());
   assert.deepEqual(resume.missingRevisions, []);
 });
 
