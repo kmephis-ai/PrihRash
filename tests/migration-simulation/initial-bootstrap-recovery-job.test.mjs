@@ -77,6 +77,14 @@ function runtime(overrides = {}) {
             async executeRead() { return { rows: [] }; },
             async serializableReadWrite() { throw new Error('unexpected write transaction'); },
           }),
+          async createSchemeTransport() {
+            return Object.freeze({
+              async ensureDirectory() { throw new Error('unexpected scheme mutation'); },
+              async copyTables() { throw new Error('unexpected scheme mutation'); },
+              async renameTables() { throw new Error('unexpected scheme mutation'); },
+              async listDirectory() { throw new Error('unexpected direct scheme read'); },
+            });
+          },
           async close() { closes += 1; },
         });
       },
@@ -269,6 +277,27 @@ test('recovery job preserves durable STAGING evidence when the Google-aware diag
     stagingSourceDecodeEvidence: [],
     stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH',
   });
+});
+
+test('recovery job refines VALIDATED into enum-only controlled structure evidence without Google reads', async () => {
+  let controlledDiagnosticCalls = 0;
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' };
+    },
+    async diagnoseValidatedControlledRebuildState() {
+      controlledDiagnosticCalls += 1;
+      return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY';
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+  });
+  assert.equal(controlledDiagnosticCalls, 1);
+  assert.equal(fixture.counters().sourceReads, 0);
+  assert.equal(fixture.counters().reconcileCalls, 0);
+  assert.equal(fixture.counters().closes, 1);
 });
 
 test('recovery job preserves non-reference classification without touching Google', async () => {
