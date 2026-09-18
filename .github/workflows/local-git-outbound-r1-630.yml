@@ -78,8 +78,7 @@ jobs:
           tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
           yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
           test -n "$yc_bin"
-          printf '%s
-' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
           "$yc_bin" version >/dev/null
 
       - name: Exchange OIDC for short-lived read-only Yandex token
@@ -107,8 +106,7 @@ jobs:
           case "$iam_status" in 2??) ;; *) echo 'WU7_DEPLOY_DIAGNOSTIC_WIF_FAILED'; exit 1;; esac
           iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
           echo "::add-mask::${iam_token}"
-          printf 'YC_IAM_TOKEN=%s
-' "$iam_token" >> "$GITHUB_ENV"
+          echo "YC_IAM_TOKEN=$iam_token" >> "$GITHUB_ENV"
 
       - name: Classify controlled rebuild Function-version create outcome read-only
         shell: bash
