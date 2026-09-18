@@ -44,6 +44,24 @@ invoke, а не два provider invokes. Старое append-only evidence со�
 
 Для `PARTIAL_CURRENT_RUN_ONLY` durable evidence трактуется узко: contiguous prefix доказывает только место, где persisted evidence заканчивается. Exact original revision-evidence batch/query из identity manifest не реконструируется, потому что production planner зависит от private revision payload byte size (`estimatedParameterBytes`), которого manifest не содержит. Нельзя публиковать prefix length/ordinal, угадывать batch index/end или использовать manifest-only evidence как replay plan.
 
+
+### Pre-write readiness block на `2388247d28f7b8e8b5acfbeb2d26d5f50d7676c3`
+
+Orchestrator `35313402330` на exact main `2388247d28f7b8e8b5acfbeb2d26d5f50d7676c3`
+успешно выполнил initial read-only recovery и снова доказал
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`,
+`R1_STAGING_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY`,
+`R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY`,
+`R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY` и
+`R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE`. Fresh readiness child `35313516727`
+завершился до bootstrap с privacy-safe
+`READINESS_INVOKE_NONZERO_UNCLASSIFIED / STDOUT_EMPTY__STDERR_TEXT / DEADLINE`
+после исчерпания уже существующего одного bounded read-only retry. Bootstrap child не был
+dispatch'нут, write-capable invoke не начинался, post-invoke recovery не требовалась и durable
+financial state этим orchestrator run не менялся. Этот pre-write block не считается
+distinct-SHA root-cause bootstrap attempt, потому что bootstrap invoke не был достигнут, но
+повтор того же SHA остаётся запрещён общим Incident-M contract.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
