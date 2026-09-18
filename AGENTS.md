@@ -147,6 +147,15 @@ SHA может использовать `Recovery-State: STAGING_STALE_RETIREABL
 `Recovery-State: UNKNOWN_AFTER_NON_SUCCESS`. Этот marker не вооружает provider write;
 пока fresh recovery не классифицировала состояние, запрещены replay, cleanup и смена authority.
 
+Если такой surface-only probe вернул только `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, это ещё не
+`STAGING_RESUMABLE` и не `STAGING_STALE_RETIREABLE`. Successor PR на новом SHA может запросить
+ровно одну full read-only recovery с
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION` и
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. Этот marker не вооружает readiness/orchestrator/
+bootstrap и не разрешает cleanup; он существует только для fresh Google-aware + exact revision
+diagnostics после surface-only durable classification.
+
 
 ## 9. CI
 

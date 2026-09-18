@@ -78,6 +78,7 @@ jobs:
                       and ($recovery[0] | IN(
                         "Recovery-State: EMPTY_DURABLE_STATE",
                         "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
+                        "Recovery-State: STAGING_PRESENT_UNCLASSIFIED",
                         "Recovery-State: STAGING_RESUMABLE",
                         "Recovery-State: STAGING_STALE_RETIREABLE",
                         "Recovery-State: STALE_STAGING_RETIRED"

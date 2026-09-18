@@ -163,6 +163,14 @@ bootstrap. This workflow exists only to remove the current control-surface gap w
 GitHub client cannot create a fresh `workflow_dispatch`; it retires together with the R1
 autocontinue/provider surface after #453.
 
+If a surface-only unknown-outcome probe returns only
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, the durable surface is known but resume/retirement
+safety is still unclassified. A successor diagnostic-only PR on a new SHA may use
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION` with
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. Recovery autocontinue then dispatches the normal
+full read-only recovery (not `surface_only`) exactly once. No readiness, orchestrator, bootstrap,
+cleanup, or write authority follows from this marker.
+
 ### Exact revision AS_TABLE readback seam on `83b3e201d47780007a0013fe2d643039d8e5344a`
 
 Autonomous read-only recovery `35338326938` on exact current main proved the durable surface still
@@ -223,6 +231,14 @@ recovery workflow: classify the durable YDB surface without Google snapshot or p
 staging diagnostics. `STAGING_RUN_PRESENT` from this reduced probe does not establish resume,
 retirement, or cleanup safety; those still require their full fresh diagnostics. The function
 execution timeout and provider write permissions remain unchanged.
+
+Standalone surface-only recovery `35345833061` on
+`84952acc409b301184d3f43a6a782704e45d6125` returned
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`.
+Because surface-only mode intentionally omits fresh Google and per-revision diagnostics, this proves
+only that one STAGING run is durably present; it does not prove whether that run is resumable or
+stale-retireable. The next bounded action is therefore one full read-only recovery on a successor
+exact SHA using the `STAGING_PRESENT_UNCLASSIFIED` marker above.
 
 ## Incident-M provider attempt contract
 
