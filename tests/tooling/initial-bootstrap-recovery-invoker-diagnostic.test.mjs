@@ -29,6 +29,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
       { errorCode: 'INVALID_DATE_CELL', field: 'date' },
       { errorCode: 'INVALID_TEXT_CELL', field: 'description' },
     ],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   });
 
   const { stdout, stderr } = await execFileAsync(
@@ -55,6 +56,7 @@ test('recovery invoker keeps canonical stdout shape and emits only enum diagnost
     'R1_STAGING_DURABLE_REVISION_EVIDENCE=CROSS_RUN_PK_COLLISION',
     'R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_NOT_EMPTY',
     'R1_STAGING_SOURCE_DECODE_EVIDENCE=INVALID_DATE_CELL@date,INVALID_TEXT_CELL@description',
+    'R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   ]);
 });
 
@@ -68,6 +70,7 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
       stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
       stagingSourceDecodeEvidence: [],
+      stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_MATCH',
     },
     {
       status: 'PASS',
@@ -78,6 +81,7 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingDurableRevisionEvidence: 'SYNTHETIC_UNKNOWN_DIAGNOSTIC',
       stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
       stagingSourceDecodeEvidence: [],
+      stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_MATCH',
     },
     {
       status: 'PASS',
@@ -96,6 +100,7 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingDurableRevisionEvidence: 'PARTIAL_CURRENT_RUN_ONLY',
       stagingRetirementEvidence: 'SYNTHETIC_UNKNOWN_RETIREMENT_DIAGNOSTIC',
       stagingSourceDecodeEvidence: [],
+      stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_MATCH',
     },
     {
       status: 'PASS',
@@ -108,6 +113,18 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
       stagingSourceDecodeEvidence: [
         { errorCode: 'INVALID_TEXT_CELL', field: 'synthetic_private_field' },
       ],
+      stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_MATCH',
+    },
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionEvidence: 'COMPLETE_CURRENT_RUN_ONLY',
+      stagingDurableRevisionEvidence: 'COMPLETE_CURRENT_RUN_ONLY',
+      stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+      stagingSourceDecodeEvidence: [],
+      stagingExactRevisionEvidence: 'SYNTHETIC_UNKNOWN_EXACT_DIAGNOSTIC',
     },
   ];
 
