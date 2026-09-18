@@ -1,4 +1,4 @@
-name: R1 WU7 370f Async Controlled Control
+name: R1 WU7 370f Deploy Recovery Control
 
 on:
   push:
@@ -13,20 +13,19 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-370f-async-controlled-control
+  group: r1-wu7-370f-deploy-recovery-control
   cancel-in-progress: false
 
 jobs:
-  dispatch-controlled:
+  dispatch-deploy-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch one exact-main async controlled continuation
+      - name: Dispatch exact failed-run deploy recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: 370f463c7094efe4f7740b3ad0da3174e68196ef
-          RECOVERY_RUN_ID: "35393093126"
-          READINESS_RUN_ID: "35393333280"
+          FAILED_RUN_ID: "35394210405"
           TRACKING_ISSUE: "630"
         run: |
           set -euo pipefail
@@ -41,25 +40,18 @@ jobs:
             .state == "open"
             and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
-            and (.body | contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
-            and (.body | contains("Google-Authority: PRESERVED"))
-            and (.body | contains("Cap-Increase: FORBIDDEN"))
-            and (.body | contains("Timer-Cutover: FORBIDDEN"))
             and (.body | contains("Blind-Replay: FORBIDDEN"))
           ' /tmp/issue.json >/dev/null
 
-          for tuple in "recovery:$RECOVERY_RUN_ID:R1 initial bootstrap recovery" "readiness:$READINESS_RUN_ID:R1 Yandex readiness"; do
-            IFS=: read -r kind run_id expected_name <<<"$tuple"
-            curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$run_id" -o "/tmp/$kind.json"
-            jq -e --arg sha "$EXPECTED_MAIN_SHA" --arg name "$expected_name" '
-              .head_sha == $sha
-              and .head_branch == "main"
-              and .event == "workflow_dispatch"
-              and .status == "completed"
-              and .conclusion == "success"
-              and .name == $name
-            ' "/tmp/$kind.json" >/dev/null
-          done
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$FAILED_RUN_ID" -o /tmp/failed.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            .name == "R1 initial controlled rebuild"
+            and .head_sha == $sha
+            and .head_branch == "main"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' /tmp/failed.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -74,8 +66,8 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg recovery "$RECOVERY_RUN_ID"             --arg readiness "$READINESS_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,recovery_run_id:$recovery,readiness_run_id:$readiness}}')"
+          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg failed "$FAILED_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,failed_run_sha:$sha,failed_run_id:$failed}}')"
 
-          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
-          echo "R1_WU7_370F_ASYNC_CONTROLLED_DISPATCHED_ONCE"
+          echo "R1_WU7_370F_DEPLOY_RECOVERY_DISPATCHED"
