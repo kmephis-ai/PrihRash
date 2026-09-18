@@ -67,6 +67,8 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
   assert.match(workflow, /extract_single_diag 'R1_STAGING_DURABLE_REVISION_EVIDENCE'/);
   assert.match(workflow, /extract_single_diag 'R1_STAGING_RETIREMENT_EVIDENCE'/);
   assert.match(workflow, /extract_single_diag 'R1_STAGING_SOURCE_DECODE_EVIDENCE'/);
+  assert.match(workflow, /\^\$\{prefix\}=/);
+  assert.doesNotMatch(workflow, /\\\$\{prefix\}/);
   assert.doesNotMatch(workflow, /R1_STAGING_REVISION_EVIDENCE=\/\/p' "\$tmp"/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_BLOCKED/);
   assert.match(workflow, /r1-bootstrap-orchestrator-child-workflow\.mjs readiness/);

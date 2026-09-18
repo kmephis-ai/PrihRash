@@ -93,6 +93,18 @@ The correction captures stdout and stderr separately in ephemeral runner files, 
 required diagnostic line per enum, republishes only the same allowlisted enum values, and keeps raw
 provider output unpublished. No provider/runtime/financial semantics or write authority is widened.
 
+### Shell prefix expansion regression on `5018c18ba4f0ecc646f24c4296c20359ae44e4f8`
+
+Orchestrator `35332121430` stopped before readiness/bootstrap with
+`FAIL / R1_BOOTSTRAP_ORCHESTRATOR_FAILED`. The stderr capture fix was present, but the generated
+workflow contained `\${prefix}` inside double-quoted grep/sed patterns. Bash therefore searched for
+the literal text `${prefix}` instead of expanding the diagnostic prefix, so exact recovery
+diagnostics could not be admitted.
+
+The correction removes only the accidental escape and adds a tooling regression assertion requiring
+`^${prefix}=` expansion while rejecting `\${prefix}`. No provider/runtime/financial semantics,
+authority, timeout, memory or caps change.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

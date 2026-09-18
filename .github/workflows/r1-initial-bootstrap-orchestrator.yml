@@ -419,9 +419,9 @@ jobs:
               local prefix="$1"
               local value
               local count
-              count="$(grep -c "^\${prefix}=" "$diag" || true)"
+              count="$(grep -c "^${prefix}=" "$diag" || true)"
               [ "$count" -eq 1 ] || return 1
-              value="$(sed -n "s/^\${prefix}=//p" "$diag")"
+              value="$(sed -n "s/^${prefix}=//p" "$diag")"
               [ -n "$value" ] || return 1
               printf '%s' "$value"
             }
