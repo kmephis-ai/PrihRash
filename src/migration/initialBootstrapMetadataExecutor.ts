@@ -4,10 +4,10 @@ import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestam
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import {
   InitialBootstrapIdentityManifestError,
-  initialBootstrapIdentityManifestReadStatement,
+  initialBootstrapIdentityManifestClaimReadStatement,
   initialBootstrapIdentityManifestsEqual,
-  parseInitialBootstrapIdentityManifestRows,
-  type InitialBootstrapIdentityManifestReadback,
+  parseInitialBootstrapIdentityManifestClaimRows,
+  type InitialBootstrapIdentityManifest,
   type PreparedInitialBootstrapIdentityManifestWrite,
 } from './initialBootstrapIdentityManifest.js';
 import type { PreparedBootstrapMetadataWrite } from './initialBootstrapPersistence.js';
@@ -38,15 +38,11 @@ interface RunReadRow {
   readonly error_code?: unknown;
 }
 
-interface IdentityManifestReadRow {
+interface IdentityManifestClaimReadRow {
   readonly source_snapshot_id?: unknown;
   readonly source_snapshot_digest?: unknown;
   readonly binding_count?: unknown;
   readonly bindings?: unknown;
-  readonly run_state?: unknown;
-  readonly run_snapshot_digest?: unknown;
-  readonly snapshot_digest?: unknown;
-  readonly snapshot_row_count?: unknown;
 }
 
 export type InitialBootstrapMetadataExecutorErrorCode =
@@ -176,7 +172,7 @@ export async function executeInitialBootstrapMetadataWrites(
       + 'FROM migration_runs WHERE id = $id',
     { id: uuidParameter(candidate.run.id) },
   );
-  const identityManifestRead = initialBootstrapIdentityManifestReadStatement(candidate.run.id);
+  const identityManifestRead = initialBootstrapIdentityManifestClaimReadStatement(candidate.run.id);
 
   await adapter.serializableReadWrite(async (transaction) => {
     const preAdmission = parseScheduledSyncAdmissionEvidence(
@@ -209,28 +205,20 @@ export async function executeInitialBootstrapMetadataWrites(
       throw new InitialBootstrapMetadataExecutorError('RUN_READBACK_MISMATCH');
     }
 
-    let identityRows: readonly Readonly<IdentityManifestReadRow>[];
+    let identityRows: readonly Readonly<IdentityManifestClaimReadRow>[];
     try {
-      identityRows = (await transaction.execute<IdentityManifestReadRow>(identityManifestRead)).rows;
+      identityRows = (await transaction.execute<IdentityManifestClaimReadRow>(identityManifestRead)).rows;
     } catch {
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READ_FAILED');
     }
-    let identityReadback: Readonly<InitialBootstrapIdentityManifestReadback>;
+    let identityManifest: Readonly<InitialBootstrapIdentityManifest>;
     try {
-      identityReadback = parseInitialBootstrapIdentityManifestRows(candidate.run.id, identityRows);
+      identityManifest = parseInitialBootstrapIdentityManifestClaimRows(candidate.run.id, identityRows);
     } catch (error) {
       if (error instanceof InitialBootstrapIdentityManifestError) throw error;
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_READ_FAILED');
     }
-    if (
-      identityReadback.runState !== 'STAGING'
-      || identityReadback.runSnapshotDigest !== candidate.run.sourceSnapshotDigest
-      || identityReadback.snapshotDigest !== candidate.snapshot.snapshotDigest
-      || identityReadback.snapshotRowCount !== candidate.snapshot.rowCount
-    ) {
-      throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_CONTEXT_READBACK_MISMATCH');
-    }
-    if (!initialBootstrapIdentityManifestsEqual(identityReadback.manifest, identityManifestWrite.manifest)) {
+    if (!initialBootstrapIdentityManifestsEqual(identityManifest, identityManifestWrite.manifest)) {
       throw new InitialBootstrapMetadataExecutorError('IDENTITY_MANIFEST_CONTENT_READBACK_MISMATCH');
     }
 
