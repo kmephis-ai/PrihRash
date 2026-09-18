@@ -176,6 +176,32 @@ The `AS_TABLE` key join remains only as a metadata-only collision probe for sour
 actually missing from the current run. No row cap, retry, timeout, memory, financial semantics, or
 authority is widened.
 
+### Pre-write authoritative drift on `3fc089fbc4d33783dbeecc152383efbd030407f1`
+
+Root-cause fix #619 was armed correctly after its Incident-M signature metadata was normalized to
+`REFERENCE_APPLICATION_SEMANTIC_FAILED/REVISION_EVIDENCE_PREPARATION`. Autocontinue dispatched
+orchestrator `35341879483` on exact main. The orchestrator stopped during its initial read-only
+recovery, before readiness and before any bootstrap child/invoke. Fresh privacy-safe evidence was:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- exact revision source proof `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+This is not a failed test of #619 and must not count as a root-cause bootstrap attempt. The
+authoritative Google snapshot changed before the write boundary, so the proven state is again
+`STAGING_STALE_RETIREABLE`.
+
+To avoid fake code changes or same-SHA replay, a bounded successor may use the exact pre-write
+signature
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT`,
+`Recovery-State: STAGING_STALE_RETIREABLE`, and
+`Circuit-Rearm: SOURCE_DRIFT_REBASE`. Autocontinue accepts this rearm only when the canonical
+runbook is updated on the new SHA and dispatches the orchestrator with resume disabled and stale
+retirement enabled. Source-drift rebase is not included in the two-attempt Incident-M root-cause
+counter.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

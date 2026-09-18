@@ -121,6 +121,25 @@ orchestrator/bootstrap evidence; отсутствующее, неоднозна�
 такие root-cause attempts, следующий automatic cycle обязан завершиться точным
 `BLOCKED_NEEDS_ROOT_CAUSE` без provider workflow dispatch. Blind diagnostic replay запрещён.
 
+Отдельное stage-specific исключение для **pre-write authoritative source drift** не считается
+root-cause attempt. Если последний relevant orchestrator доказанно остановился до readiness/bootstrap
+с deterministic signature
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT`,
+а fresh privacy-safe diagnostics доказали
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH + STALE_STAGING_CURRENT_STATE_EMPTY`, successor PR на новом
+SHA может использовать `Recovery-State: STAGING_STALE_RETIREABLE` и
+`Circuit-Rearm: SOURCE_DRIFT_REBASE`. Такой rearm:
+
+- не разрешает same-SHA повтор;
+- не увеличивает `prior_root_cause_attempts`;
+- обязан обновить canonical `docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md` с privacy-safe evidence;
+- использует canonical regression guard
+  `tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs`;
+- разрешает только новый exact-SHA orchestrator с
+  `allow_staging_resume=false` и `allow_stale_staging_retirement=true`;
+- retires вместе с временным R1 autocontinue/provider surface.
+
+
 ## 9. CI
 
 На старте GitHub Actions должны проверять минимум:
