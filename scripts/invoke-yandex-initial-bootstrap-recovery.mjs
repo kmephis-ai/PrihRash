@@ -58,6 +58,23 @@ const STAGING_RETIREMENT_EVIDENCE = new Set([
   'STALE_STAGING_CURRENT_STATE_DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_EXACT_REVISION_EVIDENCE = new Set([
+  'EXACT_CURRENT_RUN_MATCH',
+  'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
+  'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH',
+  'EXACT_CURRENT_RUN_REVISION_MALFORMED',
+  'EXACT_CURRENT_RUN_REVISION_DUPLICATE',
+  'EXACT_CURRENT_RUN_REVISION_UNEXPECTED_SOURCE',
+  'EXACT_CURRENT_RUN_MIGRATION_RUN_MISMATCH',
+  'EXACT_CURRENT_RUN_OBSERVED_AT_MISMATCH',
+  'EXACT_CURRENT_RUN_ROW_HINT_MISMATCH',
+  'EXACT_CURRENT_RUN_ROW_DIGEST_MISMATCH',
+  'EXACT_CURRENT_RUN_CHANGE_CLASS_MISMATCH',
+  'EXACT_CURRENT_RUN_RAW_PAYLOAD_MALFORMED',
+  'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
+  'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -189,6 +206,7 @@ function parseExactResult(stdout) {
     const stagingDurableRevisionEvidence = result.stagingDurableRevisionEvidence;
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
+    const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
     const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -199,6 +217,7 @@ function parseExactResult(stdout) {
           'stagingDurableRevisionEvidence',
           'stagingRetirementEvidence',
           'stagingSourceDecodeEvidence',
+          'stagingExactRevisionEvidence',
         ])
         && typeof stagingRevisionEvidence === 'string'
         && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
@@ -207,11 +226,14 @@ function parseExactResult(stdout) {
         && typeof stagingRetirementEvidence === 'string'
         && STAGING_RETIREMENT_EVIDENCE.has(stagingRetirementEvidence)
         && validSourceDecodeEvidence(stagingSourceDecodeEvidence)
+        && typeof stagingExactRevisionEvidence === 'string'
+        && STAGING_EXACT_REVISION_EVIDENCE.has(stagingExactRevisionEvidence)
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && stagingRevisionEvidence === undefined
         && stagingDurableRevisionEvidence === undefined
         && stagingRetirementEvidence === undefined
-        && stagingSourceDecodeEvidence === undefined;
+        && stagingSourceDecodeEvidence === undefined
+        && stagingExactRevisionEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -230,6 +252,9 @@ function parseExactResult(stdout) {
       stagingSourceDecodeEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingSourceDecodeEvidence
         : null,
+      stagingExactRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingExactRevisionEvidence
+        : null,
     });
   }
   if (
@@ -243,6 +268,7 @@ function parseExactResult(stdout) {
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
+      stagingExactRevisionEvidence: null,
     });
   }
   return null;
@@ -258,6 +284,7 @@ async function invokeRecovery(environment = process.env) {
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
+      stagingExactRevisionEvidence: null,
     });
   }
 
@@ -279,6 +306,7 @@ async function invokeRecovery(environment = process.env) {
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
+      stagingExactRevisionEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -287,6 +315,7 @@ async function invokeRecovery(environment = process.env) {
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
+      stagingExactRevisionEvidence: null,
     });
   }
 }
@@ -306,6 +335,11 @@ if (invocation.stagingRetirementEvidence !== null) {
 if (invocation.stagingSourceDecodeEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_SOURCE_DECODE_EVIDENCE=${formatSourceDecodeEvidence(invocation.stagingSourceDecodeEvidence)}\n`,
+  );
+}
+if (invocation.stagingExactRevisionEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_EXACT_REVISION_EVIDENCE=${invocation.stagingExactRevisionEvidence}\n`,
   );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
