@@ -288,6 +288,23 @@ boundaries remain unchanged.
 The successor remains diagnostic-only until a fresh full recovery returns enum-only exact revision
 evidence.
 
+### Fresh-claim manifest readback failure on `d47fcdb0a4f1f428b31cb798d9c53a3deed82545`
+
+Bounded orchestrator `35359627971` passed fresh readiness `35359776773` and dispatched exactly one bootstrap child
+`35359914772`. The previous ~301-second generic invoke boundary did not recur: the child returned in about
+80 seconds with the exact privacy-safe runtime failure
+`REFERENCE_APPLICATION_METADATA_FAILED / FRESH_CLAIM_WRITE /
+METADATA_EXECUTOR_IDENTITY_MANIFEST_READ_FAILED`. Built-in post-recovery classified
+`RECOVERY_REQUIRED / STALE_STAGING_RETIRED`, so no verified COMMITTED state was accepted and the write outcome
+is no longer unknown.
+
+The fresh claim already exact-read-backs `source_snapshots` and `migration_runs(STAGING)` independently in
+the same serializable transaction. The failing identity-manifest readback additionally joined those same two
+tables even though their context had just been proven. For the fresh-claim path only, identity-manifest
+readback is therefore reduced to a direct primary-key read of its own immutable row. Exact manifest identity,
+snapshot id/digest, binding cardinality/content and all separate snapshot/run/post-admission guards remain
+fail-closed. Resume/recovery joined manifest evidence is unchanged.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
