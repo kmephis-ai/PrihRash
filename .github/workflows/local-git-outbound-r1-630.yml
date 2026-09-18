@@ -24,7 +24,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: b5fdd9b28e212245f635fc3547366289ba0893f9
+          EXPECTED_MAIN_SHA: f6a7a41a07ba394a401203a05b5078935b0c1f80
+          FAILED_RUN_SHA: 002639d0d1365588aefb913a6faaf581153b9084
           TRACKING_ISSUE: "630"
           FAILED_RUN_ID: "35381112689"
         run: |
@@ -59,7 +60,7 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          payload="$(jq -n             --arg ref "main"             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg failed "$FAILED_RUN_ID"             '{ref:$ref,inputs:{tracking_issue:$issue,expected_main_sha:$sha,failed_run_id:$failed}}')"
+          payload="$(jq -n             --arg ref "main"             --arg issue "$TRACKING_ISSUE"             --arg current "$EXPECTED_MAIN_SHA"             --arg failed_sha "$FAILED_RUN_SHA"             --arg failed_id "$FAILED_RUN_ID"             '{ref:$ref,inputs:{tracking_issue:$issue,expected_main_sha:$current,failed_run_sha:$failed_sha,failed_run_id:$failed_id}}')"
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
           echo "R1_WU7_DEPLOY_RECOVERY_DISPATCHED"
