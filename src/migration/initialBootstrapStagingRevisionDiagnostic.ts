@@ -1,5 +1,10 @@
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
-import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
+import {
+  listStructParameter,
+  uint64Parameter,
+  uuidParameter,
+  type YdbListStructColumn,
+} from '../integration/ydb/parameters.js';
 import { diffSequences } from './sequenceDiff.js';
 
 export type InitialBootstrapStagingRevisionDiagnostic =
@@ -82,7 +87,9 @@ type ManifestParseResult =
   | Readonly<{ readonly ok: false; readonly diagnostic: InitialBootstrapStagingManifestDiagnostic }>;
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const READ_KEYS_PER_QUERY_LIMIT = 50;
+const SOURCE_KEY_COLUMNS = Object.freeze([
+  Object.freeze({ name: 'source_record_id', type: 'Uuid', nullable: false }),
+] satisfies readonly YdbListStructColumn[]);
 
 function normalizedUuid(value: unknown): string | null {
   return typeof value === 'string' && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
@@ -312,24 +319,33 @@ function authoritativeBindingDiagnostic(
   return null;
 }
 
-function revisionEvidenceStatement(
-  bindings: readonly Readonly<ManifestBinding>[],
-  migrationRunId: string | null,
-) {
-  const sourceIdParameters = Object.fromEntries(bindings.map((binding, index) => [
-    `source_record_id_${index}`,
-    uuidParameter(binding.sourceRecordId),
-  ]));
-  const placeholders = bindings.map((_, index) => `$source_record_id_${index}`).join(', ');
-  const runPredicate = migrationRunId === null ? '' : 'migration_run_id = $migration_run_id OR ';
+function runRevisionEvidenceStatement(migrationRunId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest FROM source_record_revisions '
-      + `WHERE revision = $revision AND (${runPredicate}source_record_id IN (${placeholders}))`,
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
     {
       revision: uint64Parameter(1),
-      ...(migrationRunId === null ? {} : { migration_run_id: uuidParameter(migrationRunId) }),
-      ...sourceIdParameters,
+      migration_run_id: uuidParameter(migrationRunId),
+    },
+  );
+}
+
+function sourceKeyRevisionEvidenceStatement(
+  bindings: readonly Readonly<ManifestBinding>[],
+) {
+  const sourceKeys = bindings.map((binding) => Object.freeze({
+    source_record_id: uuidParameter(binding.sourceRecordId),
+  }));
+  return readStatement(
+    'SELECT r.source_record_id, r.revision, r.migration_run_id, r.row_hint, '
+      + 'CAST(r.row_digest AS Utf8) AS row_digest '
+      + 'FROM source_record_revisions AS r '
+      + 'INNER JOIN AS_TABLE($source_keys) AS k ON r.source_record_id = k.source_record_id '
+      + 'WHERE r.revision = $revision',
+    {
+      revision: uint64Parameter(1),
+      source_keys: listStructParameter(SOURCE_KEY_COLUMNS, sourceKeys),
     },
   );
 }
@@ -369,21 +385,19 @@ async function diagnoseDurableRevisionEvidenceFromManifest(
 
   const expected = new Map(manifest.bindings.map((binding) => [binding.sourceRecordId, binding]));
   const seen = new Set<string>();
-  const firstBatch = manifest.bindings.slice(0, READ_KEYS_PER_QUERY_LIMIT);
-  const firstResult = await reader.read<ExistingRevisionEvidenceRow>(
-    revisionEvidenceStatement(firstBatch, manifest.migrationRunId),
+  const runResult = await reader.read<ExistingRevisionEvidenceRow>(
+    runRevisionEvidenceStatement(manifest.migrationRunId),
   );
-  const firstFinding = inspectRevisionRows(firstResult.rows, manifest.migrationRunId, expected, seen);
-  if (firstFinding !== null) return firstFinding;
+  const runFinding = inspectRevisionRows(runResult.rows, manifest.migrationRunId, expected, seen);
+  if (runFinding !== null) return runFinding;
 
-  const unchecked = manifest.bindings
-    .slice(READ_KEYS_PER_QUERY_LIMIT)
-    .filter((binding) => !seen.has(binding.sourceRecordId));
-  for (let start = 0; start < unchecked.length; start += READ_KEYS_PER_QUERY_LIMIT) {
-    const batch = unchecked.slice(start, start + READ_KEYS_PER_QUERY_LIMIT);
-    const result = await reader.read<ExistingRevisionEvidenceRow>(revisionEvidenceStatement(batch, null));
-    const finding = inspectRevisionRows(result.rows, manifest.migrationRunId, expected, seen);
-    if (finding !== null) return finding;
+  const unchecked = manifest.bindings.filter((binding) => !seen.has(binding.sourceRecordId));
+  if (unchecked.length > 0) {
+    const keyResult = await reader.read<ExistingRevisionEvidenceRow>(
+      sourceKeyRevisionEvidenceStatement(unchecked),
+    );
+    const keyFinding = inspectRevisionRows(keyResult.rows, manifest.migrationRunId, expected, seen);
+    if (keyFinding !== null) return keyFinding;
   }
 
   if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
