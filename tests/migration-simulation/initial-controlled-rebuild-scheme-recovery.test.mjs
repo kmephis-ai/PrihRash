@@ -16,6 +16,8 @@ const TABLES = Object.freeze({
 
 function setupPlan() {
   return Object.freeze({
+    rebuildDirectory: 'rebuild',
+    createRebuildDirectory: false,
     stagingDirectory: DIRECTORY,
     createDirectory: false,
     copyItems: Object.freeze([

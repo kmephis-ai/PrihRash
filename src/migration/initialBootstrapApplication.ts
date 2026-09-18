@@ -25,6 +25,7 @@ import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
+  evaluateInitialControlledRebuildContinuationValidation,
   evaluateInitialValidation,
   type InitialReconciliationEvidence,
   type InitialValidationBlocker,
@@ -56,7 +57,10 @@ import {
   type InitialTransactionIdentityAssignment,
   type InitialVerifiedCurrentPlan,
 } from './initialVerifiedCurrentPlan.js';
-import { prepareInitialVerifiedCurrentWrites } from './initialVerifiedCurrentPersistence.js';
+import {
+  prepareInitialVerifiedCurrentWrites,
+  type PreparedInitialVerifiedCurrentWrite,
+} from './initialVerifiedCurrentPersistence.js';
 
 export interface InitialBootstrapObservationRow {
   readonly rowHint: number;
@@ -150,6 +154,25 @@ export type InitialBootstrapRecoveryReason =
   | 'PROMOTION_OUTCOME_UNKNOWN'
   | 'VALIDATED_RUN_REQUIRES_RECOVERY';
 
+export type InitialControlledRebuildPreparationResult =
+  | Readonly<{
+      status: 'BASELINE_EXISTS';
+      run: Readonly<MigrationRun>;
+    }>
+  | Readonly<{
+      status: 'VALIDATION_BLOCKED';
+      run: Readonly<MigrationRun>;
+      blockers: readonly Readonly<InitialValidationBlocker>[];
+    }>
+  | Readonly<{
+      status: 'READY';
+      durableRun: Readonly<MigrationRun>;
+      validatedRun: Readonly<MigrationRun>;
+      verifiedPlan: Readonly<InitialVerifiedCurrentPlan>;
+      currentWrites: readonly Readonly<PreparedInitialVerifiedCurrentWrite>[];
+      preflight: ReturnType<typeof planInitialBootstrapPromotion>['preflight'];
+    }>;
+
 export type InitialBootstrapApplicationResult =
   | Readonly<{
       status: 'BASELINE_EXISTS';
@@ -184,7 +207,10 @@ export type InitialBootstrapApplicationErrorCode =
   | 'SNAPSHOT_EVIDENCE_AMBIGUOUS'
   | 'SNAPSHOT_EVIDENCE_MISMATCH'
   | 'CURRENT_STATE_NOT_EMPTY'
-  | 'PROMOTION_PREFLIGHT_DRIFT';
+  | 'PROMOTION_PREFLIGHT_DRIFT'
+  | 'CONTROLLED_CONTINUATION_RUN_MISSING'
+  | 'CONTROLLED_CONTINUATION_RUN_STATE_INVALID'
+  | 'CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED';
 
 export class InitialBootstrapApplicationError extends Error {
   readonly code: InitialBootstrapApplicationErrorCode;
@@ -507,6 +533,93 @@ async function refineDurableRun(
     }
     throw error;
   }
+}
+
+export async function prepareInitialControlledRebuildContinuation(
+  observation: Readonly<InitialBootstrapObservation>,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+): Promise<InitialControlledRebuildPreparationResult> {
+  markApplicationPhase(dependencies, 'ADMISSION_READ');
+  const admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
+  if (admission.committedBaselineRun !== null) {
+    return Object.freeze({
+      status: 'BASELINE_EXISTS' as const,
+      run: admission.committedBaselineRun,
+    });
+  }
+  if (admission.incompleteRuns.length > 1) {
+    throw new InitialBootstrapApplicationError('MULTIPLE_INCOMPLETE_RUNS');
+  }
+  const durableRun = admission.incompleteRuns[0];
+  if (durableRun === undefined) {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_RUN_MISSING');
+  }
+  if (
+    (durableRun.state !== 'STAGING' && durableRun.state !== 'VALIDATED')
+    || durableRun.finishedAt !== null
+    || durableRun.errorCode !== null
+  ) {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_RUN_STATE_INVALID');
+  }
+
+  const prepared = await prepareResumeContext(observation, durableRun, dependencies);
+  if (durableRun.rowsAmbiguous !== prepared.projection.counters.ambiguous) {
+    throw new InitialBootstrapApplicationError('RESUME_COUNTER_REFINEMENT_CONFLICT');
+  }
+
+  markApplicationPhase(dependencies, 'LINEAGE_PREPARATION');
+  const lineage = buildInitialSourceLineageProjection(
+    prepared.candidate,
+    lineageObservations(prepared.candidate, observation),
+  );
+  markApplicationPhase(dependencies, 'RECONCILIATION_READ');
+  const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
+    run: durableRun,
+    projection: prepared.projection,
+    lineage,
+  }));
+  markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
+  const validation = evaluateInitialControlledRebuildContinuationValidation(
+    durableRun,
+    prepared.projection,
+    reconciliation,
+  );
+  if (!validation.ok) {
+    return Object.freeze({
+      status: 'VALIDATION_BLOCKED' as const,
+      run: durableRun,
+      blockers: validation.blockers,
+    });
+  }
+
+  markApplicationPhase(dependencies, 'CURRENT_PLAN_PREPARATION');
+  const verifiedPlan = buildInitialVerifiedCurrentPlan(
+    validation.validatedRun,
+    lineage,
+    prepared.projection,
+    prepared.assignments,
+  );
+  markApplicationPhase(dependencies, 'CURRENT_WRITE_PREPARATION');
+  // Controlled rebuild must be deterministic across recovery attempts. The durable run start time
+  // is immutable and therefore becomes the initial transaction created/updated timestamp.
+  const currentWrites = prepareInitialVerifiedCurrentWrites(
+    validation.validatedRun,
+    verifiedPlan,
+    durableRun.startedAt,
+  );
+  const promotionPlan = planInitialBootstrapPromotion(currentWrites);
+  if (promotionPlan.route !== 'CONTROLLED_REBUILD_REQUIRED') {
+    throw new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED');
+  }
+
+  return Object.freeze({
+    status: 'READY' as const,
+    durableRun,
+    validatedRun: validation.validatedRun,
+    verifiedPlan,
+    currentWrites,
+    preflight: promotionPlan.preflight,
+  });
 }
 
 function isApplicationResult(

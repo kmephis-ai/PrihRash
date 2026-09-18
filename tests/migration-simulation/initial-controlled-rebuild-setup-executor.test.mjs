@@ -12,8 +12,10 @@ import {
 
 const DIRECTORY = 'rebuild/r_00000000000000000000000000009101';
 
-function plan(createDirectory = true) {
+function plan(createDirectory = true, createRebuildDirectory = true) {
   return Object.freeze({
+    rebuildDirectory: 'rebuild',
+    createRebuildDirectory,
     stagingDirectory: DIRECTORY,
     createDirectory,
     copyItems: Object.freeze([
@@ -38,19 +40,19 @@ test('ensures run directory then copies both canonical tables in one atomic sche
   const fake = fakeScheme();
   const result = await executeInitialControlledRebuildSetup(fake.adapter, plan(true));
 
-  assert.deepEqual(fake.calls.map(([name]) => name), ['mkdir', 'copy']);
-  assert.equal(fake.calls[1][1].length, 2);
-  assert.deepEqual(fake.calls[1][1].map(({ source, destination, omitIndexes }) => ({ source, destination, omitIndexes })), [
+  assert.deepEqual(fake.calls.map(([name]) => name), ['mkdir', 'mkdir', 'copy']);
+  assert.equal(fake.calls[2][1].length, 2);
+  assert.deepEqual(fake.calls[2][1].map(({ source, destination, omitIndexes }) => ({ source, destination, omitIndexes })), [
     { source: 'transactions', destination: `${DIRECTORY}/transactions`, omitIndexes: false },
     { source: 'source_records', destination: `${DIRECTORY}/source_records`, omitIndexes: false },
   ]);
-  assert.deepEqual(result, { stagingDirectory: DIRECTORY, directoryEnsured: true, copiedTableCount: 2 });
+  assert.deepEqual(result, { stagingDirectory: DIRECTORY, rebuildDirectoryEnsured: true, directoryEnsured: true, copiedTableCount: 2 });
   assert.equal(Object.isFrozen(result), true);
 });
 
 test('skips mkdir at the proven safe retry point but still issues exactly one copy call', async () => {
   const fake = fakeScheme();
-  const result = await executeInitialControlledRebuildSetup(fake.adapter, plan(false));
+  const result = await executeInitialControlledRebuildSetup(fake.adapter, plan(false, false));
   assert.deepEqual(fake.calls.map(([name]) => name), ['copy']);
   assert.equal(result.directoryEnsured, false);
 });
@@ -59,7 +61,7 @@ test('definite mkdir failure stops before copy', async () => {
   const rejection = new Error('synthetic definite mkdir rejection');
   const fake = fakeScheme({ async ensureDirectory() { throw rejection; } });
   await assert.rejects(
-    () => executeInitialControlledRebuildSetup(fake.adapter, plan(true)),
+    () => executeInitialControlledRebuildSetup(fake.adapter, plan(true, true)),
     (error) => error === rejection,
   );
   assert.equal(fake.calls.length, 0);
@@ -74,7 +76,7 @@ test('unknown copy outcome stays recovery-required and is not automatically retr
     },
   });
   await assert.rejects(
-    () => executeInitialControlledRebuildSetup(fake.adapter, plan(false)),
+    () => executeInitialControlledRebuildSetup(fake.adapter, plan(false, false)),
     (error) => error instanceof YdbSchemeError && error.code === 'SCHEME_OPERATION_OUTCOME_UNKNOWN',
   );
   assert.equal(copyCalls, 1);
@@ -83,7 +85,7 @@ test('unknown copy outcome stays recovery-required and is not automatically retr
 test('rejects malformed copy role/order/path before scheme transport is called', async () => {
   const fake = fakeScheme();
   const malformed = Object.freeze({
-    ...plan(false),
+    ...plan(false, false),
     copyItems: Object.freeze([
       Object.freeze({ source: 'source_records', destination: `${DIRECTORY}/source_records` }),
       Object.freeze({ source: 'transactions', destination: `${DIRECTORY}/transactions` }),

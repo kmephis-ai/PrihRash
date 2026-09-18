@@ -3,6 +3,7 @@ import type { InitialControlledRebuildSetupPlan } from './initialControlledRebui
 
 export interface InitialControlledRebuildSetupExecutionResult {
   readonly stagingDirectory: string;
+  readonly rebuildDirectoryEnsured: boolean;
   readonly directoryEnsured: boolean;
   readonly copiedTableCount: 2;
 }
@@ -22,7 +23,11 @@ export class InitialControlledRebuildSetupExecutionError extends Error {
 const RUN_DIRECTORY_PATTERN = /^rebuild\/r_[0-9a-f]{32}$/;
 
 function validatePlan(plan: Readonly<InitialControlledRebuildSetupPlan>): void {
-  if (!RUN_DIRECTORY_PATTERN.test(plan.stagingDirectory) || plan.copyItems.length !== 2) {
+  if (
+    plan.rebuildDirectory !== 'rebuild'
+    || !RUN_DIRECTORY_PATTERN.test(plan.stagingDirectory)
+    || plan.copyItems.length !== 2
+  ) {
     throw new InitialControlledRebuildSetupExecutionError('INVALID_SETUP_PLAN');
   }
   const expected = [
@@ -42,6 +47,9 @@ export async function executeInitialControlledRebuildSetup(
   plan: Readonly<InitialControlledRebuildSetupPlan>,
 ): Promise<Readonly<InitialControlledRebuildSetupExecutionResult>> {
   validatePlan(plan);
+  if (plan.createRebuildDirectory) {
+    await adapter.ensureDirectory(plan.rebuildDirectory);
+  }
   if (plan.createDirectory) {
     await adapter.ensureDirectory(plan.stagingDirectory);
   }
@@ -52,6 +60,7 @@ export async function executeInitialControlledRebuildSetup(
   })));
   return Object.freeze({
     stagingDirectory: plan.stagingDirectory,
+    rebuildDirectoryEnsured: plan.createRebuildDirectory,
     directoryEnsured: plan.createDirectory,
     copiedTableCount: 2 as const,
   });
