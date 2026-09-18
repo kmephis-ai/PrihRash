@@ -78,6 +78,21 @@ stale retirement требует отдельного `allow_stale_staging_retire
 `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`, empty verified current и непротиворечивое durable
 revision evidence. Одновременное включение обоих flags запрещено.
 
+### Recovery diagnostic stderr capture regression on `e1a21e6fbbf19c2f761c2bbb8896db58b2743ffa`
+
+Autonomous orchestrator `35331443197` correctly received
+`allow_staging_resume=false` and `allow_stale_staging_retirement=true`, and fresh recovery again
+proved `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH / COMPLETE_CURRENT_RUN_ONLY /
+STALE_STAGING_CURRENT_STATE_EMPTY / NONE`. Nevertheless it stopped at
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED` before readiness/bootstrap.
+
+Root cause is repository-side: `invoke-yandex-initial-bootstrap-recovery.mjs` intentionally emits
+privacy-safe `R1_STAGING_*` diagnostics to stderr, while the new stale-authority guard from #613
+attempted to parse them from the stdout capture containing the sanitized classification JSON.
+The correction captures stdout and stderr separately in ephemeral runner files, validates exactly one
+required diagnostic line per enum, republishes only the same allowlisted enum values, and keeps raw
+provider output unpublished. No provider/runtime/financial semantics or write authority is widened.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
