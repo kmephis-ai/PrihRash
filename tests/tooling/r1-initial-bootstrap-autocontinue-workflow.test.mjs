@@ -40,6 +40,10 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /Expected-Transition:/);
   assert.match(workflow, /Recovery-State:/);
   assert.match(workflow, /Circuit-Rearm: ROOT_CAUSE_FIX/);
+  assert.match(workflow, /Circuit-Rearm: SOURCE_DRIFT_REBASE/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(workflow, /SOURCE_DRIFT_EVIDENCE_MISSING/);
+  assert.match(workflow, /docs\/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK\.md/);
   assert.match(workflow, /Regression-Test: tests\//);
   assert.match(workflow, /ATTEMPT_MARKER_INVALID/);
   assert.match(workflow, /pulls\/\$source_pr_number\/files\?per_page=100/);
@@ -122,6 +126,7 @@ test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks d
   assert.match(workflow, /historical_signature.*observed_signature/s);
   assert.match(workflow, /if \[ "\$historical_signature" != "\$observed_signature" \]; then\s+continue/s);
   assert.match(workflow, /prior_root_cause_attempts=\$\(\(prior_root_cause_attempts \+ 1\)\)/);
+  assert.match(workflow, /historical_matches[\s\S]*Circuit-Rearm: ROOT_CAUSE_FIX/);
   assert.match(workflow, /BLOCKED_NEEDS_ROOT_CAUSE/);
   assert.match(workflow, /scripts\/r1-autocontinue-evidence\.mjs decision/);
   assert.match(workflow, /HISTORY_EVIDENCE_MISSING/);
