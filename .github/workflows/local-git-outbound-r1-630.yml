@@ -1,4 +1,4 @@
-name: R1 WU7 Cancel Duplicate Recovery
+name: R1 WU7 Validated Diagnostic Recovery Control
 
 on:
   push:
@@ -10,30 +10,62 @@ on:
 permissions:
   contents: read
   actions: write
+  issues: read
+
+concurrency:
+  group: r1-wu7-validated-diagnostic-recovery-control
+  cancel-in-progress: false
 
 jobs:
-  cancel-duplicate:
+  dispatch-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel exact duplicate pending recovery
+      - name: Dispatch exact-main recovery-only validated diagnostic
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          DUPLICATE_RUN_ID: "35389111224"
-          EXPECTED_MAIN_SHA: eaa789c7cdd4ea07ac90d577726af431458d059d
+          EXPECTED_MAIN_SHA: 2674af6bb2d153d50f3d6dd85a48c041245f4e7f
+          TRACKING_ISSUE: "630"
+          UNKNOWN_CONTROLLED_RUN_ID: "35388032148"
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
           auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
 
-          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$DUPLICATE_RUN_ID" -o /tmp/run.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
-            .name == "R1 initial bootstrap recovery"
-            and .head_sha == $sha
-            and .event == "workflow_dispatch"
-            and (.status == "queued" or .status == "pending" or .status == "in_progress")
-          ' /tmp/run.json >/dev/null
+          curl --fail --silent --show-error "${auth[@]}" "$api/branches/main" -o /tmp/main.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' /tmp/main.json >/dev/null
 
-          code="$(curl --silent --show-error -o /tmp/cancel.out -w '%{http_code}' -X POST "${auth[@]}" "$api/actions/runs/$DUPLICATE_RUN_ID/cancel")"
-          test "$code" = "202"
-          echo "R1_WU7_DUPLICATE_RECOVERY_CANCEL_REQUESTED"
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o /tmp/ci.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.workflow_runs | any(.head_sha == $sha and .conclusion == "success")' /tmp/ci.json >/dev/null
+
+          curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
+          jq -e '
+            .state == "open"
+            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Google-Authority: PRESERVED"))
+            and (.body | contains("Blind-Replay: FORBIDDEN"))
+          ' /tmp/issue.json >/dev/null
+
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$UNKNOWN_CONTROLLED_RUN_ID" -o /tmp/unknown.json
+          jq -e '
+            .name == "R1 initial controlled rebuild"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' /tmp/unknown.json >/dev/null
+
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
+          jq -e --argjson self "$GITHUB_RUN_ID" '
+            [.workflow_runs[]
+              | select(.id != $self)
+              | select(.status == "queued" or .status == "in_progress")
+              | select(
+                  .name == "R1 initial shadow bootstrap"
+                  or .name == "R1 initial bootstrap orchestrator"
+                  or .name == "R1 initial controlled rebuild"
+                )
+            ] | length == 0
+          ' /tmp/runs.json >/dev/null
+
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main","inputs":{"surface_only":"false"}}')"
+          test "$code" = "204"
+          echo "R1_WU7_VALIDATED_DIAGNOSTIC_RECOVERY_DISPATCHED"
