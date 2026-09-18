@@ -1,4 +1,4 @@
-name: R1 WU7 bb26 Post-Async Recovery Control
+name: R1 WU7 370f Recovery Control
 
 on:
   push:
@@ -13,19 +13,18 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-bb26-post-async-recovery-control
+  group: r1-wu7-370f-recovery-control
   cancel-in-progress: false
 
 jobs:
   dispatch-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch read-only recovery after failed async attempt
+      - name: Dispatch fresh exact-main recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: bb26d02a5579754ee453ddd3a15af7eb35bc9062
-          FAILED_CONTROLLED_RUN_ID: "35391889782"
+          EXPECTED_MAIN_SHA: 370f463c7094efe4f7740b3ad0da3174e68196ef
           TRACKING_ISSUE: "630"
         run: |
           set -euo pipefail
@@ -35,16 +34,17 @@ jobs:
           curl --fail --silent --show-error "${auth[@]}" "$api/branches/main" -o /tmp/main.json
           jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' /tmp/main.json >/dev/null
 
-          curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
-          jq -e '.state == "open" and (.body | contains("Blind-Replay: FORBIDDEN"))' /tmp/issue.json >/dev/null
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o /tmp/ci.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.workflow_runs | any(.head_sha == $sha and .conclusion == "success")' /tmp/ci.json >/dev/null
 
-          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$FAILED_CONTROLLED_RUN_ID" -o /tmp/failed.json
-          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
-            .name == "R1 initial controlled rebuild"
-            and .head_sha == $sha
-            and .status == "completed"
-            and .conclusion == "failure"
-          ' /tmp/failed.json >/dev/null
+          curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
+          jq -e '
+            .state == "open"
+            and (.title | startswith("R1 WU7:"))
+            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Google-Authority: PRESERVED"))
+            and (.body | contains("Blind-Replay: FORBIDDEN"))
+          ' /tmp/issue.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -61,4 +61,4 @@ jobs:
 
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main","inputs":{"surface_only":"false"}}')"
           test "$code" = "204"
-          echo "R1_WU7_BB26_POST_ASYNC_RECOVERY_DISPATCHED"
+          echo "R1_WU7_370F_RECOVERY_DISPATCHED"
