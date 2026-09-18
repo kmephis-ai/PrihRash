@@ -15,8 +15,10 @@ import { decodeRawPayloadForSourceClassification } from '../migration/rawPayload
 import type { RawPayload, RawPayloadDecodeErrorCode } from '../migration/rawPayloadDecoder.js';
 import {
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
   type InitialBootstrapStagingDurableRevisionDiagnostic,
+  type InitialBootstrapStagingExactRevisionDiagnostic,
   type InitialBootstrapStagingRevisionDiagnostic,
   type InitialBootstrapStagingRevisionObservation,
 } from '../migration/initialBootstrapStagingRevisionDiagnostic.js';
@@ -71,6 +73,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
+  readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -93,6 +96,11 @@ export interface InitialBootstrapRecoveryJobRuntime {
   diagnoseStagingDurableRevisionEvidence(
     adapter: YdbAdapter,
   ): Promise<InitialBootstrapStagingDurableRevisionDiagnostic>;
+  diagnoseStagingExactRevisionEvidence(
+    adapter: YdbAdapter,
+    sourceSnapshotDigest: string,
+    observations: Parameters<typeof diagnoseInitialBootstrapStagingExactRevisionEvidence>[2],
+  ): Promise<InitialBootstrapStagingExactRevisionDiagnostic>;
   diagnoseStaleStagingRetirementCurrentState(
     adapter: YdbAdapter,
   ): Promise<InitialBootstrapStaleStagingRetirementDiagnostic>;
@@ -125,6 +133,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
   diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseStagingExactRevisionEvidence: diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
 });
 
@@ -181,6 +190,7 @@ export async function executeInitialBootstrapRecoveryJob(
       }
       let stagingRevisionEvidence: InitialBootstrapStagingRevisionDiagnostic;
       let stagingSourceDecodeEvidence: InitialBootstrapSourceDecodeDiagnostic;
+      let stagingExactRevisionEvidence: InitialBootstrapStagingExactRevisionDiagnostic;
       try {
         const digest = runtime.createDigest();
         const source = runtime.createSource(validated, digest);
@@ -200,9 +210,24 @@ export async function executeInitialBootstrapRecoveryJob(
         } catch {
           stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
         }
+        try {
+          stagingExactRevisionEvidence = await runtime.diagnoseStagingExactRevisionEvidence(
+            adapter,
+            lease.snapshotDigest,
+            projected.rows.map((row, sourceOrdinal) => Object.freeze({
+              sourceOrdinal,
+              rowHint: row.rowHint,
+              digest: row.digest,
+              rawPayload: row.rawPayload,
+            })),
+          );
+        } catch {
+          stagingExactRevisionEvidence = 'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED';
+        }
       } catch {
         stagingRevisionEvidence = 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
         stagingSourceDecodeEvidence = 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
+        stagingExactRevisionEvidence = 'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
@@ -210,6 +235,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingDurableRevisionEvidence,
         stagingRetirementEvidence,
         stagingSourceDecodeEvidence,
+        stagingExactRevisionEvidence,
       });
     }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;
