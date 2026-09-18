@@ -14,7 +14,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
   assert.match(workflow, /actions:\s*write/);
-  assert.match(workflow, /contents:\s*read/);
+  assert.doesNotMatch(workflow, /contents:\s*write/);
+  assert.doesNotMatch(workflow, /actions\/checkout/);
   assert.match(workflow, /Provider-Attempt: NOT_AUTHORIZED/);
   assert.match(workflow, /Recovery-Probe: READY/);
   assert.match(workflow, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
