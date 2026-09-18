@@ -145,6 +145,29 @@ A normal `allow_staging_resume=true` orchestrator may arm only when this additio
 diagnostic is `EXACT_CURRENT_RUN_MATCH`. Any other enum remains a recovery/root-cause
 boundary and must not trigger a bootstrap invoke.
 
+### Read-only recovery autocontinue for active R1 #453
+
+Для stage-specific устранения повторяющегося ручного `Run workflow` существует отдельный
+`r1-initial-bootstrap-recovery-autocontinue.yml`. Он не является новым финансовым writer и не
+расширяет provider authority.
+
+Workflow может dispatch только canonical `R1 initial bootstrap recovery` после successful
+push-CI exact current `main` и только когда единственный merged source PR имеет exact markers:
+
+- `Recovery-Attempt: READY`;
+- `Provider-Attempt: NOT_AUTHORIZED`;
+- `Expected-Recovery-Evidence: EXACT_CURRENT_RUN_CLASSIFICATION`;
+- `Recovery-State: STAGING_RESUMABLE`;
+- regression test exact path для recovery-autocontinue contract.
+
+Перед dispatch он повторно проверяет exact current `main`, active Issue #453, отсутствие уже
+существующего recovery run на этом SHA и отсутствие queued/in-progress orchestrator/bootstrap writer.
+Он не dispatch'ит readiness, bootstrap или orchestrator.
+
+Retirement condition: после закрытия Issue #453 workflow обязан operationally safe-stop на
+`R1_BOOTSTRAP_RECOVERY_AUTOCONTINUE_ISSUE_INACTIVE`; после natural R1 boundary его следует удалить
+вместе с остальным stage-specific R1 provider scaffolding, если он больше не нужен для диагностики.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно
