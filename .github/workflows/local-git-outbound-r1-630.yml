@@ -48,11 +48,11 @@ jobs:
           gzip -dc /tmp/r1-630.patch.gz > /tmp/r1-630.patch
           echo "$PATCH_SHA256  /tmp/r1-630.patch" | sha256sum --check -
 
-      - name: Apply patch and prove exact local tree
+      - name: Publish exact tree except workflow file
         shell: bash
         env:
           BASE_SHA: 16c2948cbdac8f2210722f2050425127101940d6
-          EXPECTED_TREE: 629e8247d3f24922e6bebea65e73239cb4b530ff
+          EXPECTED_STAGE_TREE: cca5251c4793e9efdef4f16bc7388c4c802e586e
           TARGET_BRANCH: fix/r1-630-controlled-rebuild-runtime
         run: |
           set -euo pipefail
@@ -65,12 +65,15 @@ jobs:
           git checkout -b "$TARGET_BRANCH"
           git apply --index --whitespace=error-all /tmp/r1-630.patch
 
+          git update-index --force-remove .github/workflows/r1-initial-controlled-rebuild.yml
+          rm .github/workflows/r1-initial-controlled-rebuild.yml
+
           tree="$(git write-tree)"
-          test "$tree" = "$EXPECTED_TREE"
+          test "$tree" = "$EXPECTED_STAGE_TREE"
 
           git config user.name "PrihRash AI Transport"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "R1 #630: add bounded controlled rebuild runtime"
+          git commit -m "R1 #630: stage bounded controlled rebuild runtime"
 
-          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_STAGE_TREE"
           git push origin "HEAD:refs/heads/$TARGET_BRANCH"
