@@ -5,8 +5,12 @@ import {
   uint64Parameter,
   uuidParameter,
   type YdbListStructColumn,
+  type YdbParameter,
 } from '../integration/ydb/parameters.js';
-import { PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT } from './atomicPromotion.js';
+import {
+  PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT,
+  PRELIVE_PROMOTION_QUERY_BYTES_LIMIT,
+} from './atomicPromotion.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
 
@@ -189,7 +193,31 @@ function estimatedRevisionReadBytes(
     + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
 }
 
+function exactPayloadReadStatement(
+  runId: string,
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+) {
+  const parameters: Record<string, YdbParameter> = {
+    revision: uint64Parameter(1),
+    migration_run_id: uuidParameter(runId),
+  };
+  const predicates = revisions.map((revision, index) => {
+    const parameterName = `source_record_id_${index}`;
+    parameters[parameterName] = uuidParameter(revision.sourceRecordId);
+    return `source_record_id = ${parameterName}`;
+  });
+  return readStatement(
+    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
+      + 'FROM source_record_revisions '
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
+      + `AND (${predicates.join(' OR ')})`,
+    parameters,
+  );
+}
+
 function planRevisionReadBatches(
+  runId: string,
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
   const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
@@ -198,15 +226,23 @@ function planRevisionReadBatches(
 
   for (const revision of revisions) {
     const estimatedBytes = estimatedRevisionReadBytes(revision);
+    const candidate = [...current, revision];
+    const candidateQueryBytes = TEXT_ENCODER.encode(
+      exactPayloadReadStatement(runId, candidate).text,
+    ).byteLength;
     if (
       current.length > 0
-      && currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+      && (
+        currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+        || candidateQueryBytes > PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
+      )
     ) {
       batches.push(current);
-      current = [];
-      currentBytes = 0;
+      current = [revision];
+      currentBytes = estimatedBytes;
+      continue;
     }
-    current.push(revision);
+    current = candidate;
     currentBytes += estimatedBytes;
   }
   if (current.length > 0) batches.push(current);
@@ -234,7 +270,7 @@ function sourceKeyReadStatement(
   }));
   return readStatement(
     'SELECT r.source_record_id, r.revision, r.migration_run_id, r.observed_at, r.row_hint, '
-      + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class, r.raw_payload '
+      + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class '
       + 'FROM source_record_revisions AS r '
       + 'INNER JOIN AS_TABLE($source_keys) AS k ON r.source_record_id = k.source_record_id '
       + 'WHERE r.revision = $revision',
@@ -263,15 +299,18 @@ export async function planInitialSourceRevisionEvidenceResume(
   );
   validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
 
-  // Exact payload equality remains mandatory, but large raw_payload materialization is
-  // bounded to one calibrated batch at a time. Reading all expected keys also preserves
-  // fail-closed cross-run primary-key collision detection for currently missing revisions.
+  // Exact payload equality remains mandatory, but current-run rows are verified
+  // through scalar run-scoped predicates instead of the AS_TABLE join seam. Batches are
+  // bounded by both the calibrated response-memory envelope and the query-text envelope.
+  const existingRevisions = expectedRevisions.filter(
+    (revision) => existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
+  );
   const payloadVerifiedSourceIds = new Set<string>();
-  for (const batch of planRevisionReadBatches(expectedRevisions)) {
-    const keyResult = await reader.read<ExistingInitialRevisionRow>(
-      sourceKeyReadStatement(batch),
+  for (const batch of planRevisionReadBatches(expected.runId, existingRevisions)) {
+    const payloadResult = await reader.read<ExistingInitialRevisionRow>(
+      exactPayloadReadStatement(expected.runId, batch),
     );
-    validateRevisionRows(keyResult.rows, expected, payloadVerifiedSourceIds, true);
+    validateRevisionRows(payloadResult.rows, expected, payloadVerifiedSourceIds, true);
   }
   for (const sourceRecordId of existingSourceIds) {
     if (!payloadVerifiedSourceIds.has(sourceRecordId)) {
@@ -282,6 +321,16 @@ export async function planInitialSourceRevisionEvidenceResume(
   const missingRevisions = expectedRevisions.filter(
     (revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
   );
+  if (missingRevisions.length > 0) {
+    const collisionResult = await reader.read<ExistingInitialRevisionRow>(
+      sourceKeyReadStatement(missingRevisions),
+    );
+    const collisionSourceIds = new Set<string>();
+    validateRevisionRows(collisionResult.rows, expected, collisionSourceIds, false);
+    if (collisionSourceIds.size > 0) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
+    }
+  }
   return Object.freeze({
     existingSourceRecordIds: Object.freeze([...existingSourceIds].sort()),
     missingRevisions: Object.freeze([...missingRevisions]),
