@@ -1,4 +1,4 @@
-name: R1 WU7 Deploy Recovery Control
+name: R1 WU7 Refresh Recovery Control
 
 on:
   push:
@@ -13,21 +13,19 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-deploy-recovery-control
+  group: r1-wu7-refresh-recovery-control
   cancel-in-progress: false
 
 jobs:
-  dispatch:
+  dispatch-recovery:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch exact-main read-only deploy recovery
+      - name: Dispatch fresh exact-main recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: f6a7a41a07ba394a401203a05b5078935b0c1f80
-          FAILED_RUN_SHA: 002639d0d1365588aefb913a6faaf581153b9084
+          EXPECTED_MAIN_SHA: d55abbaf7c194df6d482975cfaf71c88e4fa34ee
           TRACKING_ISSUE: "630"
-          FAILED_RUN_ID: "35381112689"
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
@@ -44,6 +42,7 @@ jobs:
             .state == "open"
             and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
+            and (.body | contains("Google-Authority: PRESERVED"))
             and (.body | contains("Blind-Replay: FORBIDDEN"))
           ' /tmp/issue.json >/dev/null
 
@@ -60,7 +59,6 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          payload="$(jq -n             --arg ref "main"             --arg issue "$TRACKING_ISSUE"             --arg current "$EXPECTED_MAIN_SHA"             --arg failed_sha "$FAILED_RUN_SHA"             --arg failed_id "$FAILED_RUN_ID"             '{ref:$ref,inputs:{tracking_issue:$issue,expected_main_sha:$current,failed_run_sha:$failed_sha,failed_run_id:$failed_id}}')"
-          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
+          code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main","inputs":{"surface_only":"false"}}')"
           test "$code" = "204"
-          echo "R1_WU7_DEPLOY_RECOVERY_DISPATCHED"
+          echo "R1_WU7_REFRESH_RECOVERY_DISPATCHED"
