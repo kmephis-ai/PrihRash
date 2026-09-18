@@ -489,9 +489,11 @@ function exactRunPayloadRevisionRangeStatement(
 function planExactRevisionReadBatches(
   expected: readonly Readonly<ExactExpectedRevision>[],
 ): readonly (readonly Readonly<ExactExpectedRevision>[])[] {
-  const sorted = [...expected].sort((left, right) => (
-    left.binding.sourceRecordId.localeCompare(right.binding.sourceRecordId)
-  ));
+  const sorted = [...expected].sort((left, right) => {
+    const leftId = left.binding.sourceRecordId;
+    const rightId = right.binding.sourceRecordId;
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+  });
   const batches: Readonly<ExactExpectedRevision>[][] = [];
   let current: Readonly<ExactExpectedRevision>[] = [];
   let currentBytes = 0;
