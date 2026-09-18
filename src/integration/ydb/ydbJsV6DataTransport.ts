@@ -97,6 +97,7 @@ export interface YdbSqlClient extends YdbSqlExecutor {
 interface YdbJsCommonDataClientConfig {
   readonly connectionString: string;
   readonly poolMaxSize?: number;
+  readonly readyTimeoutMs?: number;
   readonly readTimeoutMs?: number;
   readonly transactionTimeoutMs?: number;
 }
@@ -110,6 +111,29 @@ export interface YdbJsMetadataDataClientConfig extends YdbJsCommonDataClientConf
 export interface YdbJsDataClient {
   readonly transport: YdbTransport;
   close(): Promise<void>;
+}
+
+export interface YdbJsDriverReadyLifecycle {
+  ready(signal?: AbortSignal): Promise<void>;
+  close(): void;
+}
+
+export async function waitForYdbJsDriverReady(
+  driver: YdbJsDriverReadyLifecycle,
+  readyTimeoutMs?: number,
+): Promise<void> {
+  try {
+    await driver.ready(
+      readyTimeoutMs === undefined ? undefined : AbortSignal.timeout(readyTimeoutMs),
+    );
+  } catch (error) {
+    try {
+      driver.close();
+    } catch {
+      // Preserve the primary readiness failure; cleanup is best-effort on this failed creation path.
+    }
+    throw error;
+  }
 }
 
 function fail(code: YdbJsV6DataTransportErrorCode): never {
@@ -413,6 +437,7 @@ function validateCommonClientConfig(config: Readonly<YdbJsCommonDataClientConfig
     || config.connectionString.length === 0
     || config.connectionString !== config.connectionString.trim()
     || (config.poolMaxSize !== undefined && (!Number.isSafeInteger(config.poolMaxSize) || config.poolMaxSize <= 0))
+    || !positiveTimeout(config.readyTimeoutMs)
     || !positiveTimeout(config.readTimeoutMs)
     || !positiveTimeout(config.transactionTimeoutMs)
   ) {
@@ -445,7 +470,7 @@ async function createDataClientWithCredentials(
   ]);
 
   const driver = new core.Driver(config.connectionString, { credentialsProvider });
-  await driver.ready();
+  await waitForYdbJsDriverReady(driver, config.readyTimeoutMs);
   const rawSql = queryModule.query(driver, { poolOptions: { maxSize: config.poolMaxSize ?? 4 } });
   const sql = rawSql as unknown as YdbSqlClient;
   const sdk: SdkSurface = Object.freeze({

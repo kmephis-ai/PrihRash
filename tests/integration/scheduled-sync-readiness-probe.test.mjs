@@ -8,6 +8,8 @@ import { SourceValueCodecError } from '../../dist/integration/google/sourceValue
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import {
   REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION,
+  SCHEDULED_SYNC_READINESS_DEADLINE_MS,
+  SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS,
   ScheduledSyncReadinessError,
   executeScheduledSyncReadinessProbe,
   runScheduledSyncReadinessProbe,
@@ -48,6 +50,11 @@ const validMigrationRows = Object.freeze([
   Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: new Date('2026-09-02T00:00:00.000Z') }),
   Object.freeze({ version: 3n, checksum: 'checksum-003', applied_at: new Date('2026-09-03T00:00:00.000Z') }),
 ]);
+
+test('production readiness bounds YDB driver startup below the full application deadline', () => {
+  assert.equal(SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS, 10_000);
+  assert.equal(SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS < SCHEDULED_SYNC_READINESS_DEADLINE_MS, true);
+});
 
 test('readiness probe performs one Google read and six read-only YDB checks', async () => {
   const sourceCounter = { calls: 0 };

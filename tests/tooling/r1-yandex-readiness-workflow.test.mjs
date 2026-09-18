@@ -102,6 +102,8 @@ test('R1 readiness timeout envelopes preserve the bounded application deadline w
   ]);
 
   assert.match(probe, /SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const/);
+  assert.match(probe, /SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS = 10_000 as const/);
+  assert.match(probe, /readyTimeoutMs: SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS/);
   assert.match(probe, /SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS = 21_000 as const/);
   assert.match(probe, /readTimeoutMs: SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS/);
   assert.match(probe, /SCHEDULED_SYNC_READINESS_CLOSE_TIMEOUT_MS = 2_000 as const/);
@@ -110,7 +112,7 @@ test('R1 readiness timeout envelopes preserve the bounded application deadline w
   assert.match(workflow, /--execution-timeout 45s/);
   assert.match(invoker, /const INVOKE_TIMEOUT_MS = 60_000;/);
   assert.match(runbook, /execution timeout: 45s/);
-  assert.match(runbook, /application deadline: 20s/);
+  assert.match(runbook, /application deadline: 20s, YDB Driver ready cancellation: 10s/);
   assert.match(runbook, /invoker transport timeout: 60s/);
 });
 
