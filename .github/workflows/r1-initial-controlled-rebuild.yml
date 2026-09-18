@@ -404,6 +404,8 @@ jobs:
             --execution-timeout 600s \
             --source-path .artifacts/yandex-initial-controlled-rebuild-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --async-max-retries 0 \
+            --async-service-account-id "$YC_WIF_SERVICE_ACCOUNT_ID" \
             --tags r1-initial-controlled-rebuild \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
             --no-logging \
