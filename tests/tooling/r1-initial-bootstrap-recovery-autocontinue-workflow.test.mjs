@@ -21,6 +21,7 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /Recovery-Probe: READY/);
   assert.match(workflow, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
   assert.match(workflow, /Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION/);
+  assert.match(workflow, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(workflow, /"surface_only":"true"/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
@@ -55,6 +56,10 @@ test('unknown durable outcome accepts only the read-only classification marker p
   assert.equal(valid({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }).valid, false);
   assert.equal(valid({ 'Recovery-State': 'UNKNOWN_AFTER_NON_SUCCESS\nRecovery-State: UNKNOWN_AFTER_NON_SUCCESS' }).valid, false);
   assert.equal(valid({ 'Recovery-State': 'STAGING_RESUMABLE' }).valid, false);
+  assert.deepEqual(valid({
+    'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
+    'Recovery-State': 'STAGING_PRESENT_UNCLASSIFIED',
+  }), { valid: true, surfaceOnly: false });
   assert.deepEqual(valid({
     'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
     'Recovery-State': 'STAGING_RESUMABLE',
