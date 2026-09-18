@@ -45,6 +45,8 @@ Recovery reads Function/version metadata only. The exact tag `r1-initial-control
 
 The deploy-recovery workflow has no Function-version create/invoke command and no Google/YDB mutation authority. Its published artifact is bounded enum-only evidence.
 
+When deploy recovery proves `APPLIED / EXACT_ACTIVE_TAG` and the failed controlled run proves its invoke step was skipped, the already-created version may be reused only through the existing controlled workflow recovery mode. That mode requires a successful deploy-recovery run on the exact current `main`, fresh exact-main recovery `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT`, fresh `READINESS_READY`, and the open WU7 authority gate. It skips Function-version creation, re-reads live version metadata and requires exactly one active `r1-initial-controlled-rebuild` tag with runtime `nodejs22`, entrypoint `index.initialControlledRebuildHandler`, async retries `0`, the expected async service account and no YMQ targets. Only then may it submit one async invocation. HTTP 202 still requires a fresh read-only recovery before any later write.
+
 ## Unknown invocation recovery
 
 If the controlled Function invocation itself ends with a transport failure/timeout after the handler may have started, its YDB write outcome is unknown. Do not replay the handler. First run the existing read-only initial-bootstrap recovery on the exact current `main`.
