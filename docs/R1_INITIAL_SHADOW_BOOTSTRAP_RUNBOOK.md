@@ -215,6 +215,15 @@ durable YDB state is committed, staged, or unchanged. Before any further provide
 one standalone read-only recovery on a new exact main SHA and inspect its privacy-safe result.
 No replay, cleanup, or authority switch is authorized by this observation.
 
+Standalone recovery `35344633163` on successor `00baa2c80fd649f909b221a0d165f0702130fa57`
+passed its exact-main and provider read-only guards but the invoke ended after roughly 153 seconds
+with `INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`, before enum-only classification. Its durable
+outcome remains unknown. The bounded successor requests `surface_only=true` for the existing
+recovery workflow: classify the durable YDB surface without Google snapshot or per-revision
+staging diagnostics. `STAGING_RUN_PRESENT` from this reduced probe does not establish resume,
+retirement, or cleanup safety; those still require their full fresh diagnostics. The function
+execution timeout and provider write permissions remain unchanged.
+
 ## Incident-M provider attempt contract
 
 Заголовок `R1 #453:*` сам по себе не разрешает provider invoke. Merged PR обязан содержать ровно

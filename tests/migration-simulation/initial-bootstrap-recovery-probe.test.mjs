@@ -167,6 +167,17 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   });
 
+  const surfaceOnly = await executeYandexInitialBootstrapRecoveryFunction(
+    { PRIHRASH_R1_RECOVERY_SURFACE_ONLY: '1' },
+    async () => ({ verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' }),
+  );
+  assert.deepEqual(surfaceOnly, {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+
   const invalid = await executeYandexInitialBootstrapRecoveryFunction({}, async () => /** @type {any} */ ({
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',

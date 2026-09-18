@@ -9,6 +9,8 @@ const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap-recovery
 
 test('initial bootstrap recovery workflow stays manual-only and exact-main guarded', () => {
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /surface_only:/);
+  assert.match(workflow, /RECOVERY_SURFACE_ONLY: \$\{\{ inputs\.surface_only/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);
@@ -31,6 +33,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--memory 256m/);
   assert.match(workflow, /--execution-timeout 150s/);
+  assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);

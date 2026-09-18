@@ -21,6 +21,7 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /Recovery-Probe: READY/);
   assert.match(workflow, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
   assert.match(workflow, /Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION/);
+  assert.match(workflow, /"surface_only":"true"/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-recovery\.yml\/dispatches/);
@@ -46,16 +47,16 @@ test('unknown durable outcome accepts only the read-only classification marker p
     const body = Object.entries(lines).map(([key, value]) => `${key}: ${value}`).join('\n');
     const result = spawnSync('jq', ['-Rn', '--arg', 'body', body, filter], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout).valid;
+    return JSON.parse(result.stdout);
   };
 
-  assert.equal(valid(), true);
-  assert.equal(valid({ 'Provider-Attempt': 'READY' }), false);
-  assert.equal(valid({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }), false);
-  assert.equal(valid({ 'Recovery-State': 'UNKNOWN_AFTER_NON_SUCCESS\nRecovery-State: UNKNOWN_AFTER_NON_SUCCESS' }), false);
-  assert.equal(valid({ 'Recovery-State': 'STAGING_RESUMABLE' }), false);
-  assert.equal(valid({
+  assert.deepEqual(valid(), { valid: true, surfaceOnly: true });
+  assert.equal(valid({ 'Provider-Attempt': 'READY' }).valid, false);
+  assert.equal(valid({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }).valid, false);
+  assert.equal(valid({ 'Recovery-State': 'UNKNOWN_AFTER_NON_SUCCESS\nRecovery-State: UNKNOWN_AFTER_NON_SUCCESS' }).valid, false);
+  assert.equal(valid({ 'Recovery-State': 'STAGING_RESUMABLE' }).valid, false);
+  assert.deepEqual(valid({
     'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
     'Recovery-State': 'STAGING_RESUMABLE',
-  }), true);
+  }), { valid: true, surfaceOnly: false });
 });

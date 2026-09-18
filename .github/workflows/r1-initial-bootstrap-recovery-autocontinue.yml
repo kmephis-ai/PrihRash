@@ -85,7 +85,9 @@ jobs:
                   )
                   and ($test | length) == 1
                   and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
-                )
+                ),
+                surfaceOnly: ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
+                  and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"])
               }
           ')"
           if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
@@ -126,5 +128,8 @@ jobs:
           fi
 
           dispatch_payload='{"ref":"main"}'
+          if [ "$(jq -r '.surfaceOnly' <<<"$marker")" = 'true' ]; then
+            dispatch_payload='{"ref":"main","inputs":{"surface_only":"true"}}'
+          fi
           curl --fail --silent --show-error             --request POST             --header "$auth_header"             --header "$accept_header"             --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             --data "$dispatch_payload"
           echo 'R1_RECOVERY_AUTOCONTINUE_DISPATCHED'

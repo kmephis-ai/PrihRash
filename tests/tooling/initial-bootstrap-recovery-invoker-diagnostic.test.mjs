@@ -155,3 +155,40 @@ test('recovery invoker rejects missing or unknown STAGING diagnostics fail-close
     );
   }
 });
+
+test('surface-only invoker accepts bare STAGING enum only when explicitly selected', async () => {
+  const yc = await fakeYc({
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+  const env = {
+    ...process.env,
+    PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+    PRIHRASH_YC_BIN: yc,
+  };
+  const accepted = await execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+    cwd: process.cwd(),
+    env: { ...env, RECOVERY_SURFACE_ONLY: '1' },
+  });
+  assert.deepEqual(JSON.parse(accepted.stdout), {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+  assert.equal(accepted.stderr, '');
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+      cwd: process.cwd(),
+      env: { ...env, RECOVERY_SURFACE_ONLY: '0' },
+    }),
+    (error) => {
+      assert.equal(error.code, 2);
+      assert.equal(JSON.parse(error.stdout).code, 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID');
+      return true;
+    },
+  );
+});

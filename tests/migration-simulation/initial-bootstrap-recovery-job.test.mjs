@@ -179,6 +179,28 @@ test('recovery job adds enum-only revision and retirement evidence for a single 
   assert.equal(fixture.counters().closes, 1);
 });
 
+test('surface-only recovery classifies STAGING without Google or per-revision reads', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime, true), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+  assert.deepEqual(fixture.counters(), {
+    sourceReads: 0,
+    reconcileCalls: 0,
+    diagnoseCalls: 0,
+    stagingDiagnosticCalls: 0,
+    stagingDurableDiagnosticCalls: 0,
+    stagingRetirementDiagnosticCalls: 0,
+    stagingExactRevisionDiagnosticCalls: 0,
+    closes: 1,
+  });
+});
+
 test('recovery job keeps STAGING classification fail-closed when revision diagnostic cannot be proven', async () => {
   const fixture = runtime({
     async diagnoseSurface() {
