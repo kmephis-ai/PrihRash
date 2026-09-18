@@ -376,9 +376,10 @@ test('exact staging revision diagnostic proves full persisted revision equality 
   const sourceObservations = exactObservations(2);
   const evidenceReader = reader(sourceObservations, async (statement) => {
     assert.match(statement.text, /raw_payload/);
+    assert.match(statement.text, /source_record_id >= \$source_record_id_from/);
+    assert.match(statement.text, /source_record_id <= \$source_record_id_to/);
     assert.match(statement.text, /migration_run_id = \$migration_run_id/);
-    assert.match(statement.text, /source_record_id = \$source_record_id_0/);
-    assert.doesNotMatch(statement.text, /AS_TABLE/);
+    assert.doesNotMatch(statement.text, /AS_TABLE|source_record_id_\d+/);
     return sourceObservations.map((item, index) => revisionRow(item, index));
   });
 
@@ -420,7 +421,7 @@ test('exact staging revision diagnostic isolates timestamp and raw-payload misma
   );
 });
 
-test('exact staging revision diagnostic batches current-run payload reads without AS_TABLE joins', async () => {
+test('exact staging revision diagnostic batches current-run payload reads as constant-size PK ranges', async () => {
   const sourceObservations = Object.freeze(Array.from({ length: 1_000 }, (_, index) => Object.freeze({
     ...observations(1)[0],
     sourceOrdinal: index,
@@ -429,19 +430,16 @@ test('exact staging revision diagnostic batches current-run payload reads withou
     rawPayload: rawPayload(`Synthetic ${index} ${'x'.repeat(1024)}`),
   })));
   const calls = [];
-  const byId = new Map(sourceObservations.map((item, index) => [sourceId(index), { item, index }]));
   const evidenceReader = reader(sourceObservations, async (statement) => {
     calls.push(statement);
-    const ids = Object.entries(statement.parameters)
-      .filter(([name]) => name.startsWith('source_record_id_'))
-      .sort(([left], [right]) => Number(left.split('_').at(-1)) - Number(right.split('_').at(-1)))
-      .map(([, parameter]) => parameter.value);
-    return ids.map((id) => {
-      const found = byId.get(id);
-      return revisionRow(found.item, found.index, RUN_ID, {
-        raw_payload: found.item.rawPayload,
-      });
-    });
+    const from = statement.parameters.source_record_id_from.value;
+    const to = statement.parameters.source_record_id_to.value;
+    return sourceObservations
+      .map((item, index) => ({ item, index, id: sourceId(index) }))
+      .filter(({ id }) => id >= from && id <= to)
+      .map(({ item, index }) => revisionRow(item, index, RUN_ID, {
+        raw_payload: item.rawPayload,
+      }));
   });
 
   assert.equal(
@@ -454,11 +452,18 @@ test('exact staging revision diagnostic batches current-run payload reads withou
   );
   const payloadReads = calls.filter((statement) => /raw_payload/.test(statement.text));
   assert.equal(payloadReads.length > 1, true);
+  assert.equal(payloadReads.length < 10, true);
+  assert.equal(new Set(payloadReads.map((statement) => statement.text)).size, 1);
   assert.equal(payloadReads.every((statement) => (
     statement.parameters.migration_run_id.value === RUN_ID
-    && !/AS_TABLE/.test(statement.text)
-    && new TextEncoder().encode(statement.text).byteLength <= PRELIVE_PROMOTION_QUERY_BYTES_LIMIT
+    && /source_record_id >= \$source_record_id_from/.test(statement.text)
+    && /source_record_id <= \$source_record_id_to/.test(statement.text)
+    && !/AS_TABLE|source_record_id_\d+/.test(statement.text)
+    && Object.keys(statement.parameters).sort().join(',') ===
+      'migration_run_id,revision,source_record_id_from,source_record_id_to'
   )), true);
+  assert.equal(payloadReads[0].parameters.source_record_id_from.value, sourceId(0));
+  assert.equal(payloadReads.at(-1).parameters.source_record_id_to.value, sourceId(999));
 });
 
 test('exact staging revision diagnostic refuses authoritative drift before payload reads', async () => {
