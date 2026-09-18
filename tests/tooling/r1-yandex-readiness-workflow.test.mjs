@@ -73,7 +73,7 @@ test('R1 readiness persists only allowlisted enum-only evidence while preserving
   assert.match(workflow, /\.code == "READINESS_INVOKE_NONZERO_UNCLASSIFIED"/);
   assert.match(workflow, /\^STDOUT_\(EMPTY\|TEXT\|JSON_OBJECT\|JSON_ARRAY\|JSON_STRING\|JSON_NUMBER\|JSON_BOOLEAN\|JSON_NULL\)__STDERR_/);
   assert.match(workflow, /\.transportClass \| type\) == "string"/);
-  assert.match(workflow, /\^\(EMPTY\|AUTH\|NOT_FOUND\|RATE_LIMIT\|DEADLINE\|UNAVAILABLE\|INVALID_REQUEST\|FAILED_PRECONDITION\|INTERNAL\|OTHER\)\$/);
+  assert.match(workflow, /\^\(EMPTY\|AUTH\|NOT_FOUND\|RATE_LIMIT\|DEADLINE\|UNAVAILABLE\|FUNCTION_ERROR\|INVALID_REQUEST\|FAILED_PRECONDITION\|INTERNAL\|OTHER\)\$/);
   assert.match(workflow, /then \{status, code, outputShape, transportClass\}/);
   assert.match(workflow, /else \{status, code\}/);
   assert.match(workflow, /READINESS_READY/);

@@ -206,7 +206,7 @@ Secret injection:
 Safe invoke taxonomy различает только форму результата и количество allowlisted markers; raw stdout/stderr, provider IDs и payload не публикуются:
 
 - successful `yc invoke` с malformed/non-exact stdout → `READINESS_INVOKE_OUTPUT_INVALID`;
-- non-zero `yc invoke` без allowlisted runtime marker → `READINESS_INVOKE_NONZERO_UNCLASSIFIED`;
+- non-zero `yc invoke` без allowlisted runtime marker → `READINESS_INVOKE_NONZERO_UNCLASSIFIED`; public transport evidence additionally classifies documented provider 502/`BadGateway`/`X-Function-Error` as enum-only `FUNCTION_ERROR` without publishing captured stderr;
 - non-zero `yc invoke` с двумя или более allowlisted runtime markers → `READINESS_INVOKE_MARKER_AMBIGUOUS`;
 - spawn/timeout/buffer и прочий transport-level failure, для которого нельзя доказать numeric provider exit → `READINESS_INVOKE_FAILED`.
 

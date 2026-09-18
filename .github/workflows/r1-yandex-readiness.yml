@@ -363,7 +363,7 @@ jobs:
                   and (.outputShape | type) == "string"
                   and (.outputShape | test("^STDOUT_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)__STDERR_(EMPTY|TEXT|JSON_OBJECT|JSON_ARRAY|JSON_STRING|JSON_NUMBER|JSON_BOOLEAN|JSON_NULL)$"))
                   and (.transportClass | type) == "string"
-                  and (.transportClass | test("^(EMPTY|AUTH|NOT_FOUND|RATE_LIMIT|DEADLINE|UNAVAILABLE|INVALID_REQUEST|FAILED_PRECONDITION|INTERNAL|OTHER)$"))
+                  and (.transportClass | test("^(EMPTY|AUTH|NOT_FOUND|RATE_LIMIT|DEADLINE|UNAVAILABLE|FUNCTION_ERROR|INVALID_REQUEST|FAILED_PRECONDITION|INTERNAL|OTHER)$"))
                 )
               )
               and (.code as $code | ([
