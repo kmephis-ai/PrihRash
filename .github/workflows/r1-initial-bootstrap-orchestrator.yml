@@ -383,12 +383,13 @@ jobs:
           set -euo pipefail
           export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
           tmp="$RUNNER_TEMP/r1-bootstrap-orchestrator-initial-recovery.log"
+          diag="$RUNNER_TEMP/r1-bootstrap-orchestrator-initial-recovery-diag.log"
           set +e
-          npm run initial-bootstrap-recovery:invoke | tee "$tmp"
-          invoke_status="${PIPESTATUS[0]}"
+          npm run initial-bootstrap-recovery:invoke >"$tmp" 2>"$diag"
+          invoke_status="$?"
           set -e
           if [ "$invoke_status" -ne 0 ]; then
-            rm -f "$tmp"
+            rm -f "$tmp" "$diag"
             echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_FAILED'
             exit 1
           fi
@@ -402,17 +403,54 @@ jobs:
               and (.reason | type == "string")
             )
           ')" || {
-            rm -f "$tmp"
+            rm -f "$tmp" "$diag"
             echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
             exit 1
           }
-          staging_revision="$(sed -n 's/^R1_STAGING_REVISION_EVIDENCE=//p' "$tmp")"
-          staging_durable_revision="$(sed -n 's/^R1_STAGING_DURABLE_REVISION_EVIDENCE=//p' "$tmp")"
-          staging_retirement="$(sed -n 's/^R1_STAGING_RETIREMENT_EVIDENCE=//p' "$tmp")"
-          staging_source_decode="$(sed -n 's/^R1_STAGING_SOURCE_DECODE_EVIDENCE=//p' "$tmp")"
-          rm -f "$tmp"
           verdict="$(jq -r '.verdict' <<<"$classification")"
           reason="$(jq -r '.reason' <<<"$classification")"
+
+          staging_revision=''
+          staging_durable_revision=''
+          staging_retirement=''
+          staging_source_decode=''
+          if [ "$reason" = 'STAGING_RUN_PRESENT' ]; then
+            extract_single_diag() {
+              local prefix="$1"
+              local value
+              local count
+              count="$(grep -c "^\${prefix}=" "$diag" || true)"
+              [ "$count" -eq 1 ] || return 1
+              value="$(sed -n "s/^\${prefix}=//p" "$diag")"
+              [ -n "$value" ] || return 1
+              printf '%s' "$value"
+            }
+            staging_revision="$(extract_single_diag 'R1_STAGING_REVISION_EVIDENCE')" || {
+              rm -f "$tmp" "$diag"
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
+              exit 1
+            }
+            staging_durable_revision="$(extract_single_diag 'R1_STAGING_DURABLE_REVISION_EVIDENCE')" || {
+              rm -f "$tmp" "$diag"
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
+              exit 1
+            }
+            staging_retirement="$(extract_single_diag 'R1_STAGING_RETIREMENT_EVIDENCE')" || {
+              rm -f "$tmp" "$diag"
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
+              exit 1
+            }
+            staging_source_decode="$(extract_single_diag 'R1_STAGING_SOURCE_DECODE_EVIDENCE')" || {
+              rm -f "$tmp" "$diag"
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_INITIAL_RECOVERY_EVIDENCE_INVALID'
+              exit 1
+            }
+            printf 'R1_STAGING_REVISION_EVIDENCE=%s\n' "$staging_revision"
+            printf 'R1_STAGING_DURABLE_REVISION_EVIDENCE=%s\n' "$staging_durable_revision"
+            printf 'R1_STAGING_RETIREMENT_EVIDENCE=%s\n' "$staging_retirement"
+            printf 'R1_STAGING_SOURCE_DECODE_EVIDENCE=%s\n' "$staging_source_decode"
+          fi
+          rm -f "$tmp" "$diag"
           printf 'verdict=%s\nreason=%s\n' "$verdict" "$reason" >> "$GITHUB_OUTPUT"
 
           if [ "${{ inputs.allow_staging_resume }}" = 'true' ] \
