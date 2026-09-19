@@ -394,6 +394,19 @@ jobs:
             exit 1
           fi
 
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$runtime_sa_id" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           if ! secret_http="$(curl --silent --show-error \
             --output "$tmp/secret.json" \
@@ -433,6 +446,7 @@ jobs:
           {
             printf 'PRIHRASH_YC_FUNCTION_ID=%s\n' "$function_id"
             printf 'PRIHRASH_YC_FUNCTION_SA_ID=%s\n' "$runtime_sa_id"
+            printf 'PRIHRASH_ASYNC_INVOKER_SA_ID=%s\n' "$runtime_sa_id"
             printf 'PRIHRASH_LOCKBOX_SECRET_ID=%s\n' "$secret_id"
             printf 'PRIHRASH_LOCKBOX_VERSION_ID=%s\n' "$secret_version_id"
           } >> "$GITHUB_ENV"
@@ -472,7 +486,7 @@ jobs:
             --source-path .artifacts/yandex-initial-controlled-rebuild-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --async-max-retries 0 \
-            --async-service-account-id "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            --async-service-account-id "$PRIHRASH_ASYNC_INVOKER_SA_ID" \
             --tags r1-initial-controlled-rebuild \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
             --no-logging \
@@ -536,6 +550,19 @@ jobs:
             exit 1
           fi
 
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_WIF_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$PRIHRASH_ASYNC_INVOKER_SA_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+
           if ! yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
             --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err"; then
             echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TRIGGER_LIST_FAILED'
@@ -559,7 +586,7 @@ jobs:
               exit 1
             fi
 
-            jq -e --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+            jq -e --arg async_sa "$PRIHRASH_ASYNC_INVOKER_SA_ID" '
               (.runtime == "nodejs22")
               and (.entrypoint == "index.initialControlledRebuildHandler")
               and (.status == "ACTIVE")

@@ -42,7 +42,11 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /--tags r1-initial-controlled-rebuild/);
   assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--async-max-retries 0/);
-  assert.match(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.match(workflow, /--async-service-account-id "\$PRIHRASH_ASYNC_INVOKER_SA_ID"/);
+  assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_PUBLIC/);
@@ -139,4 +143,6 @@ test('controlled rebuild runbook preserves authority and forbids silent cap/repl
   assert.match(runbook, /MigrationRun\.startedAt/);
   assert.match(runbook, /APPLIED \| NOT_APPLIED \| RECOVERY_REQUIRED/);
   assert.match(runbook, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
+  assert.match(runbook, /runtime\/async account `prihrash-initial-bootstrap`/);
+  assert.match(runbook, /no longer requires a WIF self-binding/);
 });
