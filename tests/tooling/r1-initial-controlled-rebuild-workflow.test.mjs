@@ -41,6 +41,7 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /--source-path \.artifacts\/yandex-initial-controlled-rebuild-function/);
   assert.match(workflow, /--tags r1-initial-controlled-rebuild/);
   assert.match(workflow, /--execution-timeout 600s/);
+  assert.match(workflow, /--memory 1g/);
   assert.doesNotMatch(workflow, /--async-max-retries/);
   assert.doesNotMatch(workflow, /--async-service-account-id/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING/);
