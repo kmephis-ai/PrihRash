@@ -40,7 +40,7 @@ const HANDLER_UNCAUGHT_FAILURE = Object.freeze({
   phase: null,
 });
 
-export async function initialControlledRebuildHandler(event, context) {
+async function invokeRuntimeHandler(handlerName, event, context) {
   let runtimeModule;
   try {
     runtimeModule = await import('./dist/runtime/yandexCloudInitialControlledRebuildFunction.js');
@@ -48,15 +48,23 @@ export async function initialControlledRebuildHandler(event, context) {
     return MODULE_LOAD_FAILURE;
   }
 
-  if (typeof runtimeModule.initialControlledRebuildHandler !== 'function') {
+  if (typeof runtimeModule[handlerName] !== 'function') {
     return MODULE_LOAD_FAILURE;
   }
 
   try {
-    return await runtimeModule.initialControlledRebuildHandler(event, context);
+    return await runtimeModule[handlerName](event, context);
   } catch {
     return HANDLER_UNCAUGHT_FAILURE;
   }
+}
+
+export function initialControlledRebuildHandler(event, context) {
+  return invokeRuntimeHandler('initialControlledRebuildHandler', event, context);
+}
+
+export function initialControlledRebuildSwapRecoveryDiagnosticHandler(event, context) {
+  return invokeRuntimeHandler('initialControlledRebuildSwapRecoveryDiagnosticHandler', event, context);
 }
 `;
 

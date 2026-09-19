@@ -5,6 +5,7 @@ import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob
 import { InitialControlledRebuildJobError } from '../../dist/runtime/initialControlledRebuildJob.js';
 import {
   executeYandexInitialControlledRebuildFunction,
+  executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction,
   formatInitialControlledRebuildPhaseMarker,
 } from '../../dist/runtime/yandexCloudInitialControlledRebuildFunction.js';
 
@@ -23,6 +24,42 @@ async function execute(value) {
     return value;
   });
 }
+
+async function executeSwapDiagnostic(value) {
+  return executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction(ENV, async (environment) => {
+    assert.equal(environment, ENV);
+    if (value instanceof Error) throw value;
+    return value;
+  });
+}
+
+test('controlled swap recovery diagnostic exposes only bounded verdict', async () => {
+  assert.deepEqual(await executeSwapDiagnostic({
+    status: 'CLASSIFIED', verdict: 'NOT_APPLIED', run: { id: 'private' }, raw: 'private',
+  }), {
+    status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED', verdict: 'NOT_APPLIED',
+  });
+  assert.deepEqual(await executeSwapDiagnostic({
+    status: 'CLASSIFIED', verdict: 'APPLIED', run: { id: 'private' }, raw: 'private',
+  }), {
+    status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED', verdict: 'APPLIED',
+  });
+  assert.deepEqual(await executeSwapDiagnostic({
+    status: 'CLASSIFIED', verdict: 'RECOVERY_REQUIRED', run: { id: 'private' }, raw: 'private',
+  }), {
+    status: 'STOP', code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED', verdict: 'RECOVERY_REQUIRED',
+  });
+});
+
+test('controlled swap recovery diagnostic malformed result fails closed without echo', async () => {
+  const result = await executeSwapDiagnostic({
+    status: 'CLASSIFIED', verdict: 'PRIVATE', private: 'do-not-return',
+  });
+  assert.deepEqual(result, {
+    status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null,
+  });
+  assert.equal(JSON.stringify(result).includes('do-not-return'), false);
+});
 
 test('controlled rebuild committed result is reduced to exact PASS', async () => {
   const result = await execute({ status: 'COMMITTED', run: { id: 'private', rowsSeen: 999 }, raw: 'private' });
