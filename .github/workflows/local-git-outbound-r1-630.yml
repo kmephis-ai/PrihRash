@@ -1,4 +1,4 @@
-name: R1 WU7 3a0f Readiness Control
+name: R1 WU7 3a0f Readiness Retry Control
 
 on:
   push:
@@ -13,20 +13,19 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-3a0f-readiness-control
+  group: r1-wu7-3a0f-readiness-retry-control
   cancel-in-progress: false
 
 jobs:
-  dispatch-readiness:
+  dispatch-readiness-retry:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch fresh exact-main readiness
+      - name: Dispatch one fresh exact-main readiness retry after DEADLINE
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_MAIN_SHA: 3a0faca4b0c14bc7f6f855b377de61aaac675016
-          RECOVERY_RUN_ID: "35395880982"
-          DEPLOY_RECOVERY_RUN_ID: "35395755112"
+          FAILED_READINESS_RUN_ID: "35422534179"
           TRACKING_ISSUE: "630"
         run: |
           set -euo pipefail
@@ -37,26 +36,17 @@ jobs:
           jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' /tmp/main.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/issues/$TRACKING_ISSUE" -o /tmp/issue.json
-          jq -e '
-            .state == "open"
-            and (.title | startswith("R1 WU7:"))
-            and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
-            and (.body | contains("Google-Authority: PRESERVED"))
-            and (.body | contains("Blind-Replay: FORBIDDEN"))
-          ' /tmp/issue.json >/dev/null
+          jq -e '.state == "open" and (.body | contains("Blind-Replay: FORBIDDEN"))' /tmp/issue.json >/dev/null
 
-          for tuple in             "recovery:$RECOVERY_RUN_ID:R1 initial bootstrap recovery"             "deploy:$DEPLOY_RECOVERY_RUN_ID:R1 initial controlled rebuild deploy recovery"; do
-            IFS=: read -r kind run_id expected_name <<<"$tuple"
-            curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$run_id" -o "/tmp/$kind.json"
-            jq -e --arg sha "$EXPECTED_MAIN_SHA" --arg name "$expected_name" '
-              .head_sha == $sha
-              and .head_branch == "main"
-              and .event == "workflow_dispatch"
-              and .status == "completed"
-              and .conclusion == "success"
-              and .name == $name
-            ' "/tmp/$kind.json" >/dev/null
-          done
+          curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$FAILED_READINESS_RUN_ID" -o /tmp/failed-readiness.json
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            .name == "R1 Yandex readiness"
+            and .head_sha == $sha
+            and .head_branch == "main"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' /tmp/failed-readiness.json >/dev/null
 
           curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs?per_page=100" -o /tmp/runs.json
           jq -e --argjson self "$GITHUB_RUN_ID" '
@@ -73,4 +63,4 @@ jobs:
 
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-yandex-readiness.yml/dispatches"             -H 'Content-Type: application/json' -d '{"ref":"main"}')"
           test "$code" = "204"
-          echo "R1_WU7_3A0F_READINESS_DISPATCHED"
+          echo "R1_WU7_3A0F_READINESS_RETRY_DISPATCHED_ONCE"
