@@ -119,7 +119,45 @@ jobs:
           }
 
           curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' "$api/actions/runs/${FAILED_RUN_ID}/jobs?filter=latest&per_page=100" --output "$tmp/failed-jobs.json"
-          jq -e '
+
+          provider_deploy_failure_proven=false
+          failed_evidence_name="r1-initial-controlled-rebuild-evidence-${FAILED_RUN_ID}"
+          curl --fail --silent --show-error --header "$auth_header" --header 'Accept: application/vnd.github+json' \
+            "$api/actions/runs/${FAILED_RUN_ID}/artifacts?per_page=100" --output "$tmp/failed-artifacts.json"
+          evidence_matches="$(jq --arg name "$failed_evidence_name" '[.artifacts[]? | select(.name == $name and .expired == false)] | length' "$tmp/failed-artifacts.json")"
+          case "$evidence_matches" in
+            0) ;;
+            1)
+              archive_url="$(jq -er --arg name "$failed_evidence_name" '.artifacts[] | select(.name == $name and .expired == false) | .archive_download_url' "$tmp/failed-artifacts.json")"
+              curl --fail --silent --show-error --location --header "$auth_header" --header 'Accept: application/vnd.github+json' \
+                "$archive_url" --output "$tmp/failed-evidence.zip"
+              mkdir -p "$tmp/failed-evidence"
+              unzip -q "$tmp/failed-evidence.zip" -d "$tmp/failed-evidence"
+              mapfile -t evidence_files < <(find "$tmp/failed-evidence" -type f -name classification.json -print)
+              if [ "${#evidence_files[@]}" -ne 1 ]; then
+                echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILED_EVIDENCE_INVALID'
+                exit 1
+              fi
+              if jq -e '
+                type == "object"
+                and (keys | sort) == ["code","failureClass","status"]
+                and .status == "FAIL"
+                and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED"
+                and (.failureClass | IN("SERVICE_ACCOUNT_NOT_AVAILABLE","PERMISSION_DENIED","INVALID_ARGUMENT","FAILED_PRECONDITION","RESOURCE_EXHAUSTED","UNAUTHENTICATED","NOT_FOUND","ALREADY_EXISTS","INTERNAL","SOURCE_PACKAGE_FAILED","TRANSPORT_FAILED","OTHER"))
+              ' "${evidence_files[0]}" >/dev/null; then
+                provider_deploy_failure_proven=true
+              else
+                echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILED_EVIDENCE_INVALID'
+                exit 1
+              fi
+              ;;
+            *)
+              echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILED_EVIDENCE_AMBIGUOUS'
+              exit 1
+              ;;
+          esac
+
+          jq -e --argjson provider_deploy_failure_proven "$provider_deploy_failure_proven" '
             [.jobs[] | select(.name == "initial-controlled-rebuild")] as $jobs
             | ($jobs | length) == 1
             and (
@@ -130,6 +168,14 @@ jobs:
               (
                 ([$jobs[0].steps[]? | select(.name == "Deploy initial-controlled-rebuild-only Function version" and (.conclusion == "success" or .conclusion == "skipped"))] | length) == 1
                 and ([$jobs[0].steps[]? | select(.name == "Re-verify private trigger-free boundary" and .conclusion == "failure")] | length) == 1
+              )
+              or
+              (
+                $provider_deploy_failure_proven
+                and ([$jobs[0].steps[]? | select(.name == "Deploy initial-controlled-rebuild-only Function version" and .conclusion == "success")] | length) == 1
+                and ([$jobs[0].steps[]? | select(.name == "Re-verify private trigger-free boundary" and .conclusion == "skipped")] | length) == 1
+                and ([$jobs[0].steps[]? | select(.name == "Publish enum-only controlled rebuild evidence" and .conclusion == "success")] | length) == 1
+                and ([$jobs[0].steps[]? | select(.name == "Require exact bounded provider result" and .conclusion == "failure")] | length) == 1
               )
             )
             and ([$jobs[0].steps[]? | select(.name == "Start exact controlled rebuild tag asynchronously once" and .conclusion == "skipped")] | length) == 1
