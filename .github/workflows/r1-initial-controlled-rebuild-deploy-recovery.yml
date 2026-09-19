@@ -227,14 +227,31 @@ jobs:
                   jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"NOT_APPLIED",reason:"TAG_ABSENT"}' >"$candidate"
                   ;;
                 1)
-                  exact="$(jq --arg tag "$TARGET_TAG" --arg runtime "$TARGET_RUNTIME" --arg entrypoint "$TARGET_ENTRYPOINT" '
-                    [.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)][0]
-                    | (.runtime == $runtime and .entrypoint == $entrypoint and .status == "ACTIVE")
-                  ' "$tmp/versions.json")"
-                  if [ "$exact" = "true" ]; then
-                    jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"APPLIED",reason:"EXACT_ACTIVE_TAG"}' >"$candidate"
+                  if ! yc serverless function version get-by-tag --function-id "$function_id" --tag "$TARGET_TAG"                     --format json-rest --retry 0 --no-user-output >"$tmp/tag.json" 2>"$tmp/tag.err"; then
+                    jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_READ_FAILED"}' >"$candidate"
                   else
-                    jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_METADATA_NOT_EXACT_ACTIVE"}' >"$candidate"
+                    metadata_reason="$(jq -r                       --arg runtime "$TARGET_RUNTIME"                       --arg entrypoint "$TARGET_ENTRYPOINT"                       --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+                      if (.runtime != $runtime or .entrypoint != $entrypoint or .status != "ACTIVE") then
+                        "TAG_METADATA_NOT_EXACT_ACTIVE"
+                      elif ((.asyncInvocationConfig | type) != "object") then
+                        "TAG_ASYNC_CONFIG_MISSING"
+                      elif (((.asyncInvocationConfig.retriesCount // "") | tostring) != "0") then
+                        "TAG_ASYNC_RETRIES_NOT_ZERO"
+                      elif ((.asyncInvocationConfig.serviceAccountId // "") != $async_sa) then
+                        "TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT"
+                      elif ((.asyncInvocationConfig.successTarget.ymqTarget // null) != null) then
+                        "TAG_ASYNC_SUCCESS_TARGET_PRESENT"
+                      elif ((.asyncInvocationConfig.failureTarget.ymqTarget // null) != null) then
+                        "TAG_ASYNC_FAILURE_TARGET_PRESENT"
+                      else
+                        "EXACT_ACTIVE_TAG"
+                      end
+                    ' "$tmp/tag.json")"
+                    if [ "$metadata_reason" = "EXACT_ACTIVE_TAG" ]; then
+                      jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"APPLIED",reason:"EXACT_ACTIVE_TAG"}' >"$candidate"
+                    else
+                      jq -cn --arg reason "$metadata_reason" '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:$reason}' >"$candidate"
+                    fi
                   fi
                   ;;
                 *)
@@ -250,7 +267,7 @@ jobs:
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
             and (.verdict | IN("APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"))
-            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_MATCH_AMBIGUOUS"))
+            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_READ_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_ASYNC_CONFIG_MISSING","TAG_ASYNC_RETRIES_NOT_ZERO","TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT","TAG_ASYNC_SUCCESS_TARGET_PRESENT","TAG_ASYNC_FAILURE_TARGET_PRESENT","TAG_MATCH_AMBIGUOUS"))
           ' "$candidate" >/dev/null
           mv "$candidate" "$evidence"
           cat "$evidence"
