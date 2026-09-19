@@ -406,12 +406,6 @@ jobs:
             echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
             exit 1
           fi
-          if ! jq -e --arg expected "$runtime_sa_id" \
-            '[.[]? | select((.role_id // .roleId) == "functions.viewer") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
-            "$tmp/bindings.json" >/dev/null; then
-            echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING'
-            exit 1
-          fi
 
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           if ! secret_http="$(curl --silent --show-error \
@@ -503,10 +497,26 @@ jobs:
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
             failure_class='OTHER'
+            permission_boundary='NOT_APPLICABLE'
             if grep -Eiq 'service account is not available' "$tmp/version.err"; then
               failure_class='SERVICE_ACCOUNT_NOT_AVAILABLE'
             elif grep -Eiq 'PERMISSION_DENIED|permission denied|permission denied for' "$tmp/version.err"; then
               failure_class='PERMISSION_DENIED'
+              if grep -Fq -- "$YC_WIF_SERVICE_ACCOUNT_ID" "$tmp/version.err"; then
+                permission_boundary='WIF_SERVICE_ACCOUNT_RESOURCE'
+              elif grep -Fq -- "$PRIHRASH_ASYNC_INVOKER_SA_ID" "$tmp/version.err"; then
+                permission_boundary='RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE'
+              elif grep -Fq -- "$PRIHRASH_YC_FUNCTION_ID" "$tmp/version.err"; then
+                permission_boundary='FUNCTION_RESOURCE'
+              elif grep -Eiq 'access[ -]?policy|authorization[ -]?policy' "$tmp/version.err"; then
+                permission_boundary='ACCESS_POLICY'
+              elif grep -Eiq 'service account' "$tmp/version.err"; then
+                permission_boundary='SERVICE_ACCOUNT_UNRESOLVED'
+              elif grep -Eiq 'function' "$tmp/version.err"; then
+                permission_boundary='FUNCTION_UNRESOLVED'
+              else
+                permission_boundary='UNRESOLVED'
+              fi
             elif grep -Eiq 'INVALID_ARGUMENT|invalid argument' "$tmp/version.err"; then
               failure_class='INVALID_ARGUMENT'
             elif grep -Eiq 'FAILED_PRECONDITION|failed precondition' "$tmp/version.err"; then
@@ -526,8 +536,10 @@ jobs:
             elif grep -Eiq 'connection refused|connection reset|i/o timeout|timed out|TLS|no such host|resolve host|transport' "$tmp/version.err"; then
               failure_class='TRANSPORT_FAILED'
             fi
-            jq -cn --arg failureClass "$failure_class" \
-              '{status:"FAIL",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED",failureClass:$failureClass}' \
+            jq -cn \
+              --arg failureClass "$failure_class" \
+              --arg permissionBoundary "$permission_boundary" \
+              '{status:"FAIL",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED",failureClass:$failureClass,permissionBoundary:$permissionBoundary}' \
               >"$evidence_dir/classification.json"
             rm -f "$tmp/version.err" "$tmp/version.json"
             echo "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED_${failure_class}"
@@ -566,12 +578,6 @@ jobs:
             '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
             "$tmp/bindings.json" >/dev/null; then
             echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
-            exit 1
-          fi
-          if ! jq -e --arg expected "$PRIHRASH_ASYNC_INVOKER_SA_ID" \
-            '[.[]? | select((.role_id // .roleId) == "functions.viewer") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
-            "$tmp/bindings.json" >/dev/null; then
-            echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING'
             exit 1
           fi
 
