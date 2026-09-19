@@ -56,7 +56,7 @@ If the controlled Function invocation itself ends with a transport failure/timeo
 When durable recovery reports `VALIDATED_RUN_PRESENT`, the recovery-only handler refines that state using YDB scheme/current/staging reads only and emits one of these enum reasons without counts, amounts or row content:
 
 - `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT` — validation transition is durable; run-scoped staging tables are absent.
-- `VALIDATED_CURRENT_EMPTY_STAGING_EMPTY` — the staging table pair exists but remains empty.
+- `VALIDATED_CURRENT_EMPTY_STAGING_EMPTY` — the staging table pair exists but remains empty. This is resumable only through a separately gated controlled continuation: the runtime must reuse the exact pair, skip `copyTables`, prove the staging snapshot is still empty, and only then start bounded materialization.
 - `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` — staging contains data; completeness is not assumed.
 - `VALIDATED_CURRENT_NONEMPTY_STAGING_ABSENT` — canonical current is non-empty and staging is absent; swap may have applied, but exact post-swap reconciliation is still required.
 - `VALIDATED_CURRENT_NONEMPTY_STAGING_PRESENT` — current and staging are both present; stop for explicit recovery.
@@ -94,6 +94,8 @@ The deterministic transaction timestamp for the reconstructed controlled candida
 After two separately gated synchronous invocations returned `HTTP_502 / functionError=PRESENT` and mandatory recovery twice proved `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT`, the runtime source lifetime is bounded before controlled preparation. The Google reader, digest, access-token provider and full snapshot lease exist only inside observation construction and become unreachable before the application continuation starts. This mirrors the already-proven initial-bootstrap memory-lifetime correction and reduces peak retained source state without changing the observation, financial semantics, write set, calibrated caps, retries, IAM or provider authority.
 
 The first exact-source invocation after that correction no longer failed with provider-marked `HTTP_502`; instead the synchronous HTTPS client disconnected at approximately 301 seconds with `INITIAL_CONTROLLED_REBUILD_INVOKE_FAILED`, and mandatory recovery again proved `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT`. Yandex Cloud documents a 300-second HTTP keep-alive boundary and proportional CPU allocation below 2 GB RAM. The controlled Function resource envelope is therefore raised from 256 MB to 1 GB for this stage-specific WU7 invocation so preparation can complete inside the supported synchronous HTTP window. This changes neither quotas nor authority, and does not change the 600-second Function execution timeout, financial semantics, write set, calibrated batching caps, retries, IAM, timer/cutover or Google authority.
+
+The first separately gated 1 GB invocation passed deploy/postflight and ran past the prior ~301-second failure boundary, but still ended with `INITIAL_CONTROLLED_REBUILD_INVOKE_FAILED`. Mandatory read-only recovery then proved `VALIDATED_CURRENT_EMPTY_STAGING_EMPTY`: the durable validation transition and exact run-scoped staging setup exist, while both staging tables remain empty and canonical current is still empty. This state does not authorize replay of setup. A later continuation may proceed only through the exact recovery/readiness/WU7 gates; the application reuses the existing empty staging pair, does not call `copyTables` again, re-proves emptiness, and then resumes bounded materialization.
 
 ## Setup and staging recovery
 

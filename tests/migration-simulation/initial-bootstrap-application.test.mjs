@@ -835,11 +835,17 @@ test('controlled continuation reconstructs one deterministic candidate across ST
 });
 
 
-function controlledScheme(db, { unknownRenameAfterApply = false } = {}) {
+function controlledScheme(db, { unknownRenameAfterApply = false, existingEmptyStaging = false } = {}) {
   const compact = RUN_ID.replaceAll('-', '').toLowerCase();
   const runLeaf = `r_${compact}`;
   const runDirectory = `rebuild/${runLeaf}`;
-  const state = { rebuild: false, run: false, pair: false, copyCalls: 0, renameCalls: 0 };
+  const state = {
+    rebuild: existingEmptyStaging,
+    run: existingEmptyStaging,
+    pair: existingEmptyStaging,
+    copyCalls: 0,
+    renameCalls: 0,
+  };
   const transport = {
     async ensureDirectory(path) {
       if (path === 'rebuild') { state.rebuild = true; return; }
@@ -943,6 +949,31 @@ test('controlled rebuild continuation materializes staging, swaps once and commi
   assert.equal(db.state.stagingTransactions.size, 0);
   assert.equal(scheme.state.copyCalls, 1);
   assert.equal(scheme.state.renameCalls, 1);
+  assert.deepEqual(resumeIds.calls, []);
+});
+
+test('validated continuation resumes an existing exact empty staging pair without repeating copyTables', async () => {
+  const db = fakeDatabase();
+  const largeObservation = await seedControlledRebuild(db);
+  db.state.migrationRuns.get(RUN_ID).state = 'VALIDATED';
+  const scheme = controlledScheme(db, { existingEmptyStaging: true });
+  const resumeIds = allocator({ forbid: true });
+
+  const result = await runInitialControlledRebuildApplication(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(result.run.state, 'COMMITTED');
+  assert.equal(scheme.state.copyCalls, 0);
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'COMMITTED');
+  assert.equal(db.state.sourceRecords.size, 2);
+  assert.equal(db.state.transactions.size, 2);
   assert.deepEqual(resumeIds.calls, []);
 });
 
