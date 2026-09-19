@@ -25,7 +25,7 @@ test('R1 controlled rebuild binds exact recovery and readiness artifacts before 
   const recoveryGate = workflow.indexOf('Prove exact safe resumable recovery and READINESS_READY evidence');
   const providerBoundary = workflow.indexOf('Fail closed if dedicated provider boundary is unsafe');
   const deploy = workflow.indexOf('Deploy initial-controlled-rebuild-only Function version');
-  const invoke = workflow.indexOf('Start exact controlled rebuild tag asynchronously once');
+  const invoke = workflow.indexOf('Invoke exact controlled rebuild tag synchronously once');
   assert.equal(recoveryGate > 0 && recoveryGate < providerBoundary && providerBoundary < deploy && deploy < invoke, true);
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ inputs\.recovery_run_id \}\}/);
   assert.match(workflow, /r1-yandex-readiness-evidence-\$\{\{ inputs\.readiness_run_id \}\}/);
@@ -41,16 +41,13 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.match(workflow, /--source-path \.artifacts\/yandex-initial-controlled-rebuild-function/);
   assert.match(workflow, /--tags r1-initial-controlled-rebuild/);
   assert.match(workflow, /--execution-timeout 600s/);
-  assert.match(workflow, /--async-max-retries 0/);
-  assert.match(workflow, /--async-service-account-id "\$PRIHRASH_ASYNC_INVOKER_SA_ID"/);
-  assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.doesNotMatch(workflow, /--async-max-retries/);
+  assert.doesNotMatch(workflow, /--async-service-account-id/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_EDITOR_BINDING_MISSING/);
   assert.match(workflow, /functions\.editor/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
-  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
-  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
-  assert.match(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
+  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
+  assert.doesNotMatch(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_PUBLIC/);
@@ -59,43 +56,38 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_PRIVATE_HISTORICAL_EVIDENCE/);
 });
 
-test('controlled rebuild selects exact provider reuse or repair-only mode from deploy recovery evidence', async () => {
+test('controlled rebuild selects exact provider reuse or deploy mode from deploy recovery evidence', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   assert.match(workflow, /deploy_recovery_run_id:/);
   assert.match(workflow, /id: prerequisites/);
   assert.match(workflow, /r1-initial-controlled-rebuild-deploy-recovery-evidence-\$\{\{ inputs\.deploy_recovery_run_id \}\}/);
   assert.match(workflow, /\.verdict == "APPLIED"/);
   assert.match(workflow, /\.reason == "EXACT_ACTIVE_TAG"/);
-  assert.match(workflow, /\.verdict == "RECOVERY_REQUIRED"/);
-  assert.match(workflow, /\.reason == "TAG_ASYNC_CONFIG_MISSING"/);
   assert.match(workflow, /provider_mode=reuse/);
-  assert.match(workflow, /provider_mode=repair/);
+  assert.doesNotMatch(workflow, /provider_mode=repair/);
   assert.match(workflow, /provider_mode=deploy/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
   assert.match(workflow, /if: \$\{\{ steps\.prerequisites\.outputs\.provider_mode != 'reuse' \}\}/);
-  assert.match(workflow, /provider_mode != 'repair'.*provider_mode == 'reuse'.*steps\.provider-deploy\.outcome == 'success'/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED_DEPLOY_RECOVERY_REQUIRED/);
+  assert.match(workflow, /provider_mode == 'reuse'.*steps\.provider-deploy\.outcome == 'success'/);
+  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED/);
   assert.match(workflow, /serverless function version list --function-id/);
   assert.match(workflow, /serverless function version get-by-tag/);
   assert.match(workflow, /--format json-rest/);
-  assert.match(workflow, /asyncInvocationConfig\.retriesCount/);
-  assert.match(workflow, /asyncInvocationConfig\.serviceAccountId/);
-  assert.match(workflow, /asyncInvocationConfig\.successTarget\.ymqTarget/);
-  assert.match(workflow, /asyncInvocationConfig\.failureTarget\.ymqTarget/);
+  assert.match(workflow, /serviceAccountId/);
+  assert.doesNotMatch(workflow, /asyncInvocationConfig/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_READ_FAILED/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_NOT_EXACT_ACTIVE/);
 });
 
-test('controlled rebuild invocation is async-accepted only, while provider repair stops before invoke', async () => {
+test('controlled rebuild invokes synchronously once and requires exact COMMITTED result', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
-  assert.match(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE=async/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED_RECOVERY_REQUIRED/);
-  assert.match(workflow, /Record provider repair-only evidence/);
-  assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode == 'repair'/);
-  assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode != 'repair'/);
-  assert.doesNotMatch(workflow, /Require exact COMMITTED result/);
+  assert.match(workflow, /Invoke exact controlled rebuild tag synchronously once/);
+  assert.match(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE=sync/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_NONCOMMITTED_RECOVERY_REQUIRED/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_INVOKE_FUNCTION_TIMEOUT/);
+  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
+  assert.doesNotMatch(workflow, /Record provider repair-only evidence/);
 });
 
 
@@ -109,7 +101,7 @@ test('provider deploy failure is preserved as privacy-safe enum evidence without
   assert.match(workflow, /permissionBoundary/);
   assert.match(workflow, /\["code","failureClass","permissionBoundary","status"\]/);
   assert.match(workflow, /WIF_SERVICE_ACCOUNT_RESOURCE/);
-  assert.match(workflow, /RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE/);
+  assert.match(workflow, /RUNTIME_SERVICE_ACCOUNT_RESOURCE/);
   assert.match(workflow, /FUNCTION_RESOURCE/);
   assert.match(workflow, /ACCESS_POLICY/);
   assert.match(workflow, /UNRESOLVED/);
@@ -154,8 +146,8 @@ test('controlled rebuild runbook preserves authority and forbids silent cap/repl
   assert.match(runbook, /MigrationRun\.startedAt/);
   assert.match(runbook, /APPLIED \| NOT_APPLIED \| RECOVERY_REQUIRED/);
   assert.match(runbook, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
-  assert.match(runbook, /runtime\/async account `prihrash-initial-bootstrap`/);
-  assert.match(runbook, /no longer requires a WIF self-binding/);
-  assert.match(runbook, /core Cloud Functions async-invocation contract requires the async service account to invoke the Function/);
-  assert.match(runbook, /viewer binding is retained as live provider state but is not a WU7 repair prerequisite/);
+  assert.match(runbook, /Synchronous continuation transport/);
+  assert.match(runbook, /integration=raw/);
+  assert.match(runbook, /invoker timeout is 630 seconds/);
+  assert.match(runbook, /runtime-account `functions\.functionInvoker` \/ `functions\.viewer` bindings are retained as live provider state/);
 });
