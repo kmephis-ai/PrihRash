@@ -181,6 +181,7 @@ jobs:
           run-id: ${{ inputs.deploy_recovery_run_id }}
 
       - name: Prove exact safe resumable recovery and READINESS_READY evidence
+        id: prerequisites
         shell: bash
         env:
           DEPLOY_RECOVERY_RUN_ID: ${{ inputs.deploy_recovery_run_id }}
@@ -209,14 +210,30 @@ jobs:
             ' "$recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE'; exit 1; }
 
             deploy_recovery="$RUNNER_TEMP/r1-wu7-prereq/deploy-recovery/classification.json"
-            jq -e '
+            if jq -e '
               type == "object"
               and (keys | sort) == ["code","reason","status","verdict"]
               and .status == "PASS"
               and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
               and .verdict == "APPLIED"
               and .reason == "EXACT_ACTIVE_TAG"
-            ' "$deploy_recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_EVIDENCE_NOT_APPLIED'; exit 1; }
+            ' "$deploy_recovery" >/dev/null; then
+              echo 'provider_mode=reuse' >> "$GITHUB_OUTPUT"
+            elif jq -e '
+              type == "object"
+              and (keys | sort) == ["code","reason","status","verdict"]
+              and .status == "PASS"
+              and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
+              and .verdict == "RECOVERY_REQUIRED"
+              and .reason == "TAG_ASYNC_CONFIG_MISSING"
+            ' "$deploy_recovery" >/dev/null; then
+              echo 'provider_mode=repair' >> "$GITHUB_OUTPUT"
+            else
+              echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_EVIDENCE_NOT_BOUNDED'
+              exit 1
+            fi
+          else
+            echo 'provider_mode=deploy' >> "$GITHUB_OUTPUT"
           fi
       - name: Install Yandex Cloud CLI
         shell: bash
@@ -437,7 +454,7 @@ jobs:
           fi
 
       - name: Deploy initial-controlled-rebuild-only Function version
-        if: ${{ inputs.deploy_recovery_run_id == '' }}
+        if: ${{ steps.prerequisites.outputs.provider_mode != 'reuse' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -525,6 +542,7 @@ jobs:
           fi
 
       - name: Re-verify exact current main before controlled rebuild invocation
+        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' }}
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
@@ -541,6 +559,7 @@ jobs:
           fi
 
       - name: Start exact controlled rebuild tag asynchronously once
+        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' }}
         id: controlled-invoke
         continue-on-error: true
         shell: bash
@@ -587,8 +606,17 @@ jobs:
           rm -f "$tmp"
           exit "$invoke_status"
 
+      - name: Record provider repair-only evidence
+        if: ${{ steps.prerequisites.outputs.provider_mode == 'repair' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence"
+          mkdir -p "$evidence_dir"
+          printf '%s\n' '{"status":"PASS","code":"INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED"}' > "$evidence_dir/classification.json"
+
       - name: Publish enum-only controlled rebuild evidence
-        if: ${{ always() && (steps.controlled-invoke.outcome == 'success' || steps.controlled-invoke.outcome == 'failure') }}
+        if: ${{ always() && (steps.prerequisites.outputs.provider_mode == 'repair' || steps.controlled-invoke.outcome == 'success' || steps.controlled-invoke.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-initial-controlled-rebuild-evidence-${{ github.run_id }}
@@ -596,12 +624,19 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Require exact async acceptance only
+      - name: Require exact bounded provider result
         if: ${{ always() }}
         shell: bash
+        env:
+          PROVIDER_MODE: ${{ steps.prerequisites.outputs.provider_mode }}
         run: |
           set -euo pipefail
           evidence="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence/classification.json"
           test -f "$evidence" || { echo 'INITIAL_CONTROLLED_REBUILD_EVIDENCE_MISSING'; exit 1; }
+          if [ "$PROVIDER_MODE" = 'repair' ]; then
+            jq -e 'type == "object" and (keys | sort) == ["code","status"] and .status == "PASS" and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED"'               "$evidence" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIR_NOT_PROVEN'; exit 1; }
+            echo 'INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED_DEPLOY_RECOVERY_REQUIRED'
+            exit 0
+          fi
           jq -e 'type == "object" and (keys | sort) == ["code","status"] and .status == "PASS" and .code == "INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED"'             "$evidence" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_NOT_ACCEPTED'; exit 1; }
           echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED_RECOVERY_REQUIRED'
