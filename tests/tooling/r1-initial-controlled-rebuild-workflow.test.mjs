@@ -51,14 +51,23 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_PRIVATE_HISTORICAL_EVIDENCE/);
 });
 
-test('controlled rebuild may reuse only an exact APPLIED active tag without redeploying it', async () => {
+test('controlled rebuild selects exact provider reuse or repair-only mode from deploy recovery evidence', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   assert.match(workflow, /deploy_recovery_run_id:/);
+  assert.match(workflow, /id: prerequisites/);
   assert.match(workflow, /r1-initial-controlled-rebuild-deploy-recovery-evidence-\$\{\{ inputs\.deploy_recovery_run_id \}\}/);
   assert.match(workflow, /\.verdict == "APPLIED"/);
   assert.match(workflow, /\.reason == "EXACT_ACTIVE_TAG"/);
+  assert.match(workflow, /\.verdict == "RECOVERY_REQUIRED"/);
+  assert.match(workflow, /\.reason == "TAG_ASYNC_CONFIG_MISSING"/);
+  assert.match(workflow, /provider_mode=reuse/);
+  assert.match(workflow, /provider_mode=repair/);
+  assert.match(workflow, /provider_mode=deploy/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
-  assert.match(workflow, /if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}[\s\S]*Deploy initial-controlled-rebuild-only Function version|Deploy initial-controlled-rebuild-only Function version[\s\S]*if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}/);
+  assert.match(workflow, /if: \$\{\{ steps\.prerequisites\.outputs\.provider_mode != 'reuse' \}\}/);
+  assert.match(workflow, /if: \$\{\{ steps\.prerequisites\.outputs\.provider_mode != 'repair' \}\}/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED_DEPLOY_RECOVERY_REQUIRED/);
   assert.match(workflow, /serverless function version list --function-id/);
   assert.match(workflow, /serverless function version get-by-tag/);
   assert.match(workflow, /--format json-rest/);
@@ -70,11 +79,14 @@ test('controlled rebuild may reuse only an exact APPLIED active tag without rede
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT/);
 });
 
-test('controlled rebuild invocation is async-accepted only and requires later recovery', async () => {
+test('controlled rebuild invocation is async-accepted only, while provider repair stops before invoke', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   assert.match(workflow, /PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE=async/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED_RECOVERY_REQUIRED/);
+  assert.match(workflow, /Record provider repair-only evidence/);
+  assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode == 'repair'/);
+  assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode != 'repair'/);
   assert.doesNotMatch(workflow, /Require exact COMMITTED result/);
 });
 
