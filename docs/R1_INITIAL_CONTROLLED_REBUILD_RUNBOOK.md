@@ -91,6 +91,8 @@ The ordinary calibrated promotion cap is unchanged. Controlled staging batches a
 
 The deterministic transaction timestamp for the reconstructed controlled candidate is the durable `MigrationRun.startedAt`. A continuation therefore rebuilds the same current-write candidate instead of inventing a new timestamp on each recovery attempt.
 
+After two separately gated synchronous invocations returned `HTTP_502 / functionError=PRESENT` and mandatory recovery twice proved `VALIDATED_CURRENT_EMPTY_STAGING_ABSENT`, the runtime source lifetime is bounded before controlled preparation. The Google reader, digest, access-token provider and full snapshot lease exist only inside observation construction and become unreachable before the application continuation starts. This mirrors the already-proven initial-bootstrap memory-lifetime correction and reduces peak retained source state without changing the observation, financial semantics, write set, calibrated caps, retries, Function memory, IAM or provider authority.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
