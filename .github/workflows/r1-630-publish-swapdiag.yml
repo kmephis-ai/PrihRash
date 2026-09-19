@@ -1,0 +1,66 @@
+name: R1 630 publish verified swap diagnostic
+
+on:
+  push:
+    branches:
+      - transport/r1-630-swapdiag-publish
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'kmephis-ai/PrihRash'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BASE_SHA: acb40fb81befc548939f72146df729d27d591cbe
+      EXPECTED_PATCH_B64_SHA256: 663fb54d159a73c5a8d6f5239b3a144ae29c27820c47156d527385636b9cd963
+      EXPECTED_PATCH_SHA256: d9e86e0f2132e41996c0c6f6a956d1dfdda09d6d8bd525b6c6aa58cf7e068cf1
+      EXPECTED_TREE: fb62f2737ef35f427c1d53a279ccb77c81c0e47b
+      TARGET_BRANCH: agent/r1-630-swap-recovery-diagnostic-final
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and publish exact verified tree
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = 'transport/r1-630-swapdiag-publish'
+
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          main_sha="$(curl --fail --silent --show-error             --header "Authorization: Bearer ${GH_API_TOKEN}"             --header 'Accept: application/vnd.github+json'             "$api/branches/main" | jq -er '.commit.sha')"
+          test "$main_sha" = "$BASE_SHA"
+
+          cat .transport/swapdiag/part* > "$RUNNER_TEMP/swapdiag.patch.b64"
+          test "$(sha256sum "$RUNNER_TEMP/swapdiag.patch.b64" | awk '{print $1}')" = "$EXPECTED_PATCH_B64_SHA256"
+          base64 --decode "$RUNNER_TEMP/swapdiag.patch.b64" > "$RUNNER_TEMP/swapdiag.patch"
+          test "$(sha256sum "$RUNNER_TEMP/swapdiag.patch" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA256"
+
+          if git ls-remote --exit-code --heads origin "$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo 'TARGET_BRANCH_ALREADY_EXISTS'
+            exit 1
+          fi
+
+          git checkout --detach "$BASE_SHA"
+          git apply --check "$RUNNER_TEMP/swapdiag.patch"
+          git apply "$RUNNER_TEMP/swapdiag.patch"
+          git diff --check
+          git add             docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md             scripts/package-yandex-initial-controlled-rebuild-function.mjs             scripts/verify-yandex-initial-controlled-rebuild-package.mjs             src/migration/initialControlledRebuildApplication.ts             src/runtime/initialControlledRebuildJob.ts             src/runtime/yandexCloudInitialControlledRebuildFunction.ts             tests/integration/yandex-initial-controlled-rebuild-function.test.mjs             tests/migration-simulation/initial-bootstrap-application.test.mjs
+
+          tree="$(git write-tree)"
+          echo "TREE=$tree"
+          test "$tree" = "$EXPECTED_TREE"
+
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git commit -m 'R1 #630: add read-only exact swap recovery diagnostic'
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test "$(git rev-parse HEAD^)" = "$BASE_SHA"
+
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo 'R1_630_SWAP_DIAGNOSTIC_TREE_PUBLISHED'
