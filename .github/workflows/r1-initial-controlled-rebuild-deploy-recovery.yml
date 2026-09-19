@@ -281,6 +281,128 @@ jobs:
           mv "$candidate" "$evidence"
           cat "$evidence"
 
+      - name: Classify provider prerequisites and failed create operation read-only
+        shell: bash
+        env:
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-evidence"
+          diagnostic="$evidence_dir/provider-diagnostic.json"
+          provider_tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-provider-diagnostic"
+          gate_tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-gates"
+          mkdir -p "$evidence_dir" "$provider_tmp"
+
+          function_invoker='READ_FAILED'
+          self_use='READ_FAILED'
+          create_operation='READ_FAILED'
+
+          if yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+              --format json --retry 0 --no-user-output >"$provider_tmp/function.json" 2>"$provider_tmp/function.err"; then
+            function_id="$(jq -r '.id // empty' "$provider_tmp/function.json")"
+            if [ -n "$function_id" ]; then
+              echo "::add-mask::${function_id}"
+              if yc serverless function list-access-bindings --id "$function_id" \
+                  --format json --retry 0 --no-user-output >"$provider_tmp/function-bindings.json" 2>"$provider_tmp/function-bindings.err"; then
+                invoker_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "functions.functionInvoker" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
+                case "$invoker_count" in
+                  1) function_invoker='PROVEN' ;;
+                  0) function_invoker='MISSING' ;;
+                  *) function_invoker='AMBIGUOUS' ;;
+                esac
+              fi
+
+              if yc serverless function list-operations --id "$function_id" --limit 50 \
+                  --format json --retry 0 --no-user-output >"$provider_tmp/operations.json" 2>"$provider_tmp/operations.err"; then
+                failed_run="$gate_tmp/failed-run.json"
+                if [ -f "$failed_run" ]; then
+                  started="$(jq -r '.created_at // empty' "$failed_run")"
+                  finished="$(jq -r '.updated_at // empty' "$failed_run")"
+                  if [ -n "$started" ] && [ -n "$finished" ]; then
+                    start_epoch="$(( $(date -u -d "$started" +%s) - 15 ))"
+                    end_epoch="$(( $(date -u -d "$finished" +%s) + 15 ))"
+                    jq --arg creator "$YC_WIF_SERVICE_ACCOUNT_ID" --argjson start "$start_epoch" --argjson end "$end_epoch" '
+                      def epoch:
+                        sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601;
+                      [.[]?
+                        | . as $op
+                        | (($op.created_by // $op.createdBy // "") == $creator) as $same_creator
+                        | (($op.created_at // $op.createdAt // "") | try epoch catch null) as $ts
+                        | select($same_creator and $ts != null and $ts >= $start and $ts <= $end)
+                      ]
+                    ' "$provider_tmp/operations.json" >"$provider_tmp/matching-operations.json"
+                    operation_count="$(jq 'length' "$provider_tmp/matching-operations.json")"
+                    case "$operation_count" in
+                      0) create_operation='NO_MATCHING_OPERATION' ;;
+                      1)
+                        raw_code="$(jq -r '.[0].error.code // empty | tostring' "$provider_tmp/matching-operations.json")"
+                        if [ -n "$raw_code" ]; then
+                          case "$raw_code" in
+                            3|INVALID_ARGUMENT) create_operation='INVALID_ARGUMENT' ;;
+                            5|NOT_FOUND) create_operation='NOT_FOUND' ;;
+                            6|ALREADY_EXISTS) create_operation='ALREADY_EXISTS' ;;
+                            7|PERMISSION_DENIED) create_operation='PERMISSION_DENIED' ;;
+                            8|RESOURCE_EXHAUSTED) create_operation='RESOURCE_EXHAUSTED' ;;
+                            9|FAILED_PRECONDITION) create_operation='FAILED_PRECONDITION' ;;
+                            13|INTERNAL) create_operation='INTERNAL' ;;
+                            14|UNAVAILABLE) create_operation='UNAVAILABLE' ;;
+                            16|UNAUTHENTICATED) create_operation='UNAUTHENTICATED' ;;
+                            *) create_operation='OTHER_ERROR' ;;
+                          esac
+                        elif jq -e '.[0].done == false' "$provider_tmp/matching-operations.json" >/dev/null 2>&1; then
+                          create_operation='IN_PROGRESS'
+                        elif jq -e '.[0].done == true and (.[0].response != null)' "$provider_tmp/matching-operations.json" >/dev/null 2>&1; then
+                          create_operation='SUCCEEDED'
+                        else
+                          create_operation='COMPLETED_UNKNOWN'
+                        fi
+                        ;;
+                      *) create_operation='AMBIGUOUS' ;;
+                    esac
+                  fi
+                fi
+              fi
+            fi
+          fi
+
+          if yc iam service-account list-access-bindings --id "$YC_WIF_SERVICE_ACCOUNT_ID" \
+              --format json --retry 0 --no-user-output >"$provider_tmp/self-bindings.json" 2>"$provider_tmp/self-bindings.err"; then
+            self_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "iam.serviceAccounts.user" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/self-bindings.json")"
+            case "$self_count" in
+              1) self_use='PROVEN' ;;
+              0) self_use='MISSING' ;;
+              *) self_use='AMBIGUOUS' ;;
+            esac
+          else
+            self_use='NOT_READABLE'
+          fi
+
+          jq -cn \
+            --arg functionInvoker "$function_invoker" \
+            --arg selfUse "$self_use" \
+            --arg createOperation "$create_operation" \
+            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",functionInvoker:$functionInvoker,selfUse:$selfUse,createOperation:$createOperation}' \
+            >"$diagnostic"
+
+          jq -e '
+            type == "object"
+            and (keys | sort) == ["code","createOperation","functionInvoker","selfUse","status"]
+            and .status == "PASS"
+            and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC"
+            and (.functionInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
+            and (.selfUse | IN("PROVEN","MISSING","AMBIGUOUS","NOT_READABLE","READ_FAILED"))
+            and (.createOperation | IN("NO_MATCHING_OPERATION","INVALID_ARGUMENT","NOT_FOUND","ALREADY_EXISTS","PERMISSION_DENIED","RESOURCE_EXHAUSTED","FAILED_PRECONDITION","INTERNAL","UNAVAILABLE","UNAUTHENTICATED","OTHER_ERROR","IN_PROGRESS","SUCCEEDED","COMPLETED_UNKNOWN","AMBIGUOUS","READ_FAILED"))
+          ' "$diagnostic" >/dev/null
+          cat "$diagnostic"
+
+      - name: Publish enum-only provider diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-controlled-rebuild-provider-diagnostic-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-controlled-rebuild-deploy-recovery-evidence/provider-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish enum-only deploy recovery evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

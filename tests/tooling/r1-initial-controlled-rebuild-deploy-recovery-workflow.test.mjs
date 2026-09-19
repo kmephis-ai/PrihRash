@@ -73,3 +73,23 @@ test('deploy recovery emits enum-only APPLIED, NOT_APPLIED or RECOVERY_REQUIRED 
   assert.match(workflow, /TAG_MATCH_AMBIGUOUS/);
   assert.match(workflow, /r1-initial-controlled-rebuild-deploy-recovery-evidence-\$\{\{ github\.run_id \}\}/);
 });
+
+
+test('deploy recovery diagnoses failed provider create read-only without exposing provider payload', async () => {
+  const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml');
+  assert.match(workflow, /Classify provider prerequisites and failed create operation read-only/);
+  assert.match(workflow, /serverless function list-operations --id/);
+  assert.match(workflow, /serverless function list-access-bindings --id/);
+  assert.match(workflow, /iam service-account list-access-bindings --id/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC/);
+  assert.match(workflow, /PERMISSION_DENIED/);
+  assert.match(workflow, /INVALID_ARGUMENT/);
+  assert.match(workflow, /NO_MATCHING_OPERATION/);
+  assert.match(workflow, /functionInvoker/);
+  assert.match(workflow, /selfUse/);
+  assert.match(workflow, /createOperation/);
+  assert.doesNotMatch(workflow, /cat \"\$provider_tmp\/.*\.err\"/);
+  assert.doesNotMatch(workflow, /serverless function version create/);
+  assert.doesNotMatch(workflow, /serverless function invoke/);
+  assert.doesNotMatch(workflow, /add-access-binding|set-access-bindings|remove-access-binding/);
+});
