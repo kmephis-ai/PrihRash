@@ -86,6 +86,9 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_NONCOMMITTED_RECOVERY_REQUIRED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_INVOKE_FUNCTION_TIMEOUT/);
+  assert.match(workflow, /functionError/);
+  assert.match(workflow, /PRESENT/);
+  assert.match(workflow, /ABSENT/);
   assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
   assert.doesNotMatch(workflow, /Record provider repair-only evidence/);
 });
