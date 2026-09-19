@@ -46,6 +46,9 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
+  assert.match(workflow, /functions\.viewer/);
   assert.match(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
   assert.match(workflow, /--no-logging/);
@@ -145,4 +148,5 @@ test('controlled rebuild runbook preserves authority and forbids silent cap/repl
   assert.match(runbook, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
   assert.match(runbook, /runtime\/async account `prihrash-initial-bootstrap`/);
   assert.match(runbook, /no longer requires a WIF self-binding/);
+  assert.match(runbook, /functions\.functionInvoker.*functions\.viewer/);
 });

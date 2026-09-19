@@ -349,6 +349,7 @@ jobs:
 
           caller_invoker='READ_FAILED'
           async_invoker='READ_FAILED'
+          async_viewer='READ_FAILED'
           create_operation='READ_FAILED'
           runtime_sa_id=''
 
@@ -377,6 +378,12 @@ jobs:
                     1) async_invoker='PROVEN' ;;
                     0) async_invoker='MISSING' ;;
                     *) async_invoker='AMBIGUOUS' ;;
+                  esac
+                  viewer_count="$(jq --arg id "$runtime_sa_id" '[.[]? | select((.role_id // .roleId // "") == "functions.viewer" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
+                  case "$viewer_count" in
+                    1) async_viewer='PROVEN' ;;
+                    0) async_viewer='MISSING' ;;
+                    *) async_viewer='AMBIGUOUS' ;;
                   esac
                 fi
               fi
@@ -437,17 +444,19 @@ jobs:
           jq -cn \
             --arg callerInvoker "$caller_invoker" \
             --arg asyncInvoker "$async_invoker" \
+            --arg asyncViewer "$async_viewer" \
             --arg createOperation "$create_operation" \
-            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",callerInvoker:$callerInvoker,asyncInvoker:$asyncInvoker,createOperation:$createOperation}' \
+            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",callerInvoker:$callerInvoker,asyncInvoker:$asyncInvoker,asyncViewer:$asyncViewer,createOperation:$createOperation}' \
             >"$diagnostic"
 
           jq -e '
             type == "object"
-            and (keys | sort) == ["asyncInvoker","callerInvoker","code","createOperation","status"]
+            and (keys | sort) == ["asyncInvoker","asyncViewer","callerInvoker","code","createOperation","status"]
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC"
             and (.callerInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.asyncInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
+            and (.asyncViewer | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.createOperation | IN("NO_MATCHING_OPERATION","INVALID_ARGUMENT","NOT_FOUND","ALREADY_EXISTS","PERMISSION_DENIED","RESOURCE_EXHAUSTED","FAILED_PRECONDITION","INTERNAL","UNAVAILABLE","UNAUTHENTICATED","OTHER_ERROR","IN_PROGRESS","SUCCEEDED","COMPLETED_UNKNOWN","AMBIGUOUS","READ_FAILED"))
           ' "$diagnostic" >/dev/null
           cat "$diagnostic"
