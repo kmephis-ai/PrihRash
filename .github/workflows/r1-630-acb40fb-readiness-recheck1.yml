@@ -1,0 +1,67 @@
+name: R1 630 acb40fb readiness recheck1
+
+on:
+  push:
+    branches:
+      - transport/r1-630-acb40fb-readiness-recheck1
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch one fresh readiness recheck after ambiguous provider result
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: acb40fb81befc548939f72146df729d27d591cbe
+          FAILED_READINESS_RUN_ID: '35469366414'
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+
+          main="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/branches/main")"
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' <<<"$main" >/dev/null
+          test "$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/issues/630" | jq -er '.state')" = 'open'
+
+          failed="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs/$FAILED_READINESS_RUN_ID")"
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '
+            .head_sha == $sha
+            and .head_branch == "main"
+            and .name == "R1 Yandex readiness"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' <<<"$failed" >/dev/null
+
+          all="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs?per_page=100")"
+          if jq -e '
+            .workflow_runs | any(
+              (.status == "queued" or .status == "in_progress")
+              and (.name == "R1 initial shadow bootstrap"
+                   or .name == "R1 initial bootstrap orchestrator"
+                   or .name == "R1 initial controlled rebuild")
+            )
+          ' <<<"$all" >/dev/null; then
+            echo 'R1_630_READINESS_RECHECK_WRITER_ACTIVE'
+            exit 1
+          fi
+
+          existing="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/workflows/r1-yandex-readiness.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          failed_updated="$(jq -er '.updated_at' <<<"$failed")"
+          if jq -e --arg sha "$EXPECTED_MAIN_SHA" --arg after "$failed_updated" '
+            .workflow_runs | any(.head_sha == $sha and .created_at > $after)
+          ' <<<"$existing" >/dev/null; then
+            echo 'R1_630_READINESS_RECHECK_ALREADY_PRESENT'
+            exit 0
+          fi
+
+          curl --fail --silent --show-error --request POST             --header "$auth"             --header "$accept"             --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-yandex-readiness.yml/dispatches"             --data '{"ref":"main"}'
+          echo 'R1_630_READINESS_RECHECK_DISPATCHED'
