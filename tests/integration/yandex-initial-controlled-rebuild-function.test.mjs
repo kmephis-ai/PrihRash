@@ -3,9 +3,19 @@ import test from 'node:test';
 import { InitialBootstrapPrivateEvidenceError } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
 import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob.js';
 import { InitialControlledRebuildJobError } from '../../dist/runtime/initialControlledRebuildJob.js';
-import { executeYandexInitialControlledRebuildFunction } from '../../dist/runtime/yandexCloudInitialControlledRebuildFunction.js';
+import {
+  executeYandexInitialControlledRebuildFunction,
+  formatInitialControlledRebuildPhaseMarker,
+} from '../../dist/runtime/yandexCloudInitialControlledRebuildFunction.js';
 
 const ENV = Object.freeze({ PRIHRASH_GOOGLE_SPREADSHEET_ID: 'synthetic-sheet-id' });
+
+test('controlled rebuild phase marker is bounded to a single enum token', () => {
+  assert.equal(
+    formatInitialControlledRebuildPhaseMarker('BOOTSTRAP_RECONCILIATION_READ'),
+    'R1_CONTROLLED_PHASE:BOOTSTRAP_RECONCILIATION_READ',
+  );
+});
 async function execute(value) {
   return executeYandexInitialControlledRebuildFunction(ENV, async (environment) => {
     assert.equal(environment, ENV);

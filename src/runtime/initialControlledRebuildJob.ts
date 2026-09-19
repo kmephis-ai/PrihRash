@@ -13,6 +13,7 @@ import {
   type InitialControlledRebuildApplicationResult,
 } from '../migration/initialControlledRebuildApplication.js';
 import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
+import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../migration/initialBootstrapPrivateEvidence.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
 import type { InitialSnapshotProjectionContext } from '../migration/initialSnapshotProjection.js';
@@ -55,6 +56,39 @@ export interface InitialControlledRebuildJobYdbClient {
   close(): Promise<void>;
 }
 
+export type InitialControlledRebuildRuntimePhase =
+  | 'YDB_CLIENT_CREATE_START'
+  | 'YDB_CLIENT_READY'
+  | 'SOURCE_READ_START'
+  | 'SOURCE_READ_DONE'
+  | 'SCHEME_CLIENT_CREATE_START'
+  | 'SCHEME_CLIENT_READY'
+  | 'REFERENCE_READ_START'
+  | 'REFERENCE_READ_DONE'
+  | 'APPLICATION_START'
+  | `BOOTSTRAP_${InitialBootstrapApplicationPhase}`
+  | `CONTROLLED_${InitialControlledRebuildApplicationPhase}`
+  | 'APPLICATION_DONE'
+  | 'POST_COMMIT_RECONCILIATION_START'
+  | 'POST_COMMIT_RECONCILIATION_DONE'
+  | 'YDB_CLIENT_CLOSE_START'
+  | 'YDB_CLIENT_CLOSE_DONE';
+
+export interface InitialControlledRebuildJobObserver {
+  observePhase?(phase: InitialControlledRebuildRuntimePhase): void;
+}
+
+function observeRuntimePhase(
+  observer: Readonly<InitialControlledRebuildJobObserver>,
+  phase: InitialControlledRebuildRuntimePhase,
+): void {
+  try {
+    observer.observePhase?.(phase);
+  } catch {
+    // Diagnostics must never change controlled rebuild behavior or authority.
+  }
+}
+
 function reconciliationMatched(evidence: Readonly<InitialReconciliationEvidence>): boolean {
   return Number.isSafeInteger(evidence.unexplainedHighImpactMismatchCount)
     && evidence.unexplainedHighImpactMismatchCount === 0
@@ -95,16 +129,19 @@ async function readInitialControlledRebuildObservation(
 
 export async function runInitialControlledRebuildJob(
   config: Readonly<InitialBootstrapJobConfig>,
+  observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
 ): Promise<InitialControlledRebuildApplicationResult> {
   const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(config.privateHistoricalEvidence);
   const primitives = createNodeInitialBootstrapRuntimePrimitives();
 
   let ydbClient: Readonly<YdbJsDataClient>;
+  observeRuntimePhase(observer, 'YDB_CLIENT_CREATE_START');
   try {
     ydbClient = await createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
     });
+    observeRuntimePhase(observer, 'YDB_CLIENT_READY');
   } catch {
     throw new InitialControlledRebuildJobError('YDB_CLIENT_CREATE_FAILED');
   }
@@ -112,24 +149,30 @@ export async function runInitialControlledRebuildJob(
   let primaryError: unknown = null;
   let controlledPhase: InitialControlledRebuildApplicationPhase | null = null;
   try {
+    observeRuntimePhase(observer, 'SOURCE_READ_START');
     const observation = await readInitialControlledRebuildObservation(
       config,
       historicalEvidence,
       () => primitives.clock.now(),
     );
+    observeRuntimePhase(observer, 'SOURCE_READ_DONE');
     const adapter = new YdbAdapter(ydbClient.transport);
 
     let schemeTransport: YdbSchemeTransport;
+    observeRuntimePhase(observer, 'SCHEME_CLIENT_CREATE_START');
     try {
       schemeTransport = await ydbClient.createSchemeTransport();
+      observeRuntimePhase(observer, 'SCHEME_CLIENT_READY');
     } catch {
       throw new InitialControlledRebuildJobError('SCHEME_CLIENT_CREATE_FAILED');
     }
     const scheme = new YdbSchemeAdapter(schemeTransport);
 
     let refs;
+    observeRuntimePhase(observer, 'REFERENCE_READ_START');
     try {
       refs = await readYdbReferenceResolverSnapshot(adapter);
+      observeRuntimePhase(observer, 'REFERENCE_READ_DONE');
     } catch {
       throw new InitialControlledRebuildJobError('REFERENCE_READ_FAILED');
     }
@@ -144,6 +187,7 @@ export async function runInitialControlledRebuildJob(
     );
 
     let result: InitialControlledRebuildApplicationResult;
+    observeRuntimePhase(observer, 'APPLICATION_START');
     try {
       result = await runInitialControlledRebuildApplication(observation, {
         adapter,
@@ -152,29 +196,38 @@ export async function runInitialControlledRebuildJob(
         projectionContext,
         reconciliation: reconciliation.port,
         clock: primitives.clock,
+        observePhase(nextPhase) {
+          observeRuntimePhase(observer, `BOOTSTRAP_${nextPhase}`);
+        },
         observeControlledPhase(nextPhase) {
           controlledPhase = nextPhase;
+          observeRuntimePhase(observer, `CONTROLLED_${nextPhase}`);
         },
       });
     } catch {
       throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase);
     }
+    observeRuntimePhase(observer, 'APPLICATION_DONE');
 
     if (result.status === 'COMMITTED') {
+      observeRuntimePhase(observer, 'POST_COMMIT_RECONCILIATION_START');
       if (!reconciliationMatched(await reconciliation.verifyCommittedCurrent())) {
         throw new InitialControlledRebuildJobError(
           'POST_COMMIT_RECONCILIATION_MISMATCH',
           'POST_COMMIT_VERIFICATION',
         );
       }
+      observeRuntimePhase(observer, 'POST_COMMIT_RECONCILIATION_DONE');
     }
     return result;
   } catch (error) {
     primaryError = error;
     throw error;
   } finally {
+    observeRuntimePhase(observer, 'YDB_CLIENT_CLOSE_START');
     try {
       await ydbClient.close();
+      observeRuntimePhase(observer, 'YDB_CLIENT_CLOSE_DONE');
     } catch {
       if (primaryError === null) {
         throw new InitialControlledRebuildJobError('YDB_CLIENT_CLOSE_FAILED', controlledPhase);
@@ -185,6 +238,7 @@ export async function runInitialControlledRebuildJob(
 
 export function runInitialControlledRebuildJobFromEnvironment(
   environment: InitialBootstrapJobEnvironment = process.env,
+  observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
 ): Promise<InitialControlledRebuildApplicationResult> {
-  return runInitialControlledRebuildJob(readInitialBootstrapJobConfig(environment));
+  return runInitialControlledRebuildJob(readInitialBootstrapJobConfig(environment), observer);
 }

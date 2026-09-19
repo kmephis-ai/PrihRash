@@ -12,6 +12,8 @@ import {
   InitialControlledRebuildJobError,
   runInitialControlledRebuildJobFromEnvironment,
   type InitialControlledRebuildJobErrorCode,
+  type InitialControlledRebuildJobObserver,
+  type InitialControlledRebuildRuntimePhase,
 } from './initialControlledRebuildJob.js';
 import {
   InitialBootstrapJobError,
@@ -48,6 +50,22 @@ export interface YandexInitialControlledRebuildJob {
 }
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
+
+export const INITIAL_CONTROLLED_REBUILD_PHASE_MARKER_PREFIX = 'R1_CONTROLLED_PHASE:';
+
+export function formatInitialControlledRebuildPhaseMarker(
+  phase: InitialControlledRebuildRuntimePhase,
+): string {
+  return `${INITIAL_CONTROLLED_REBUILD_PHASE_MARKER_PREFIX}${phase}`;
+}
+
+function yandexPhaseObserver(): Readonly<InitialControlledRebuildJobObserver> {
+  return Object.freeze({
+    observePhase(phase: InitialControlledRebuildRuntimePhase) {
+      process.stdout.write(`${formatInitialControlledRebuildPhaseMarker(phase)}\n`);
+    },
+  });
+}
 
 const RECOVERY_REASONS = new Set<InitialControlledRebuildRecoveryReason>([
   'VALIDATION_TRANSITION_OUTCOME_UNKNOWN',
@@ -178,8 +196,9 @@ export async function initialControlledRebuildHandler(
   _event: unknown,
   _context: unknown,
 ): Promise<Readonly<YandexInitialControlledRebuildFunctionResult>> {
+  const observer = yandexPhaseObserver();
   return executeYandexInitialControlledRebuildFunction(
     process.env,
-    runInitialControlledRebuildJobFromEnvironment,
+    (environment) => runInitialControlledRebuildJobFromEnvironment(environment, observer),
   );
 }

@@ -51,7 +51,7 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
   assert.doesNotMatch(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
-  assert.match(workflow, /--no-logging/);
+  assert.doesNotMatch(workflow, /--no-logging/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_PUBLIC/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_TRIGGER_PRESENT/);
   assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
@@ -79,6 +79,27 @@ test('controlled rebuild selects exact provider reuse or deploy mode from deploy
   assert.doesNotMatch(workflow, /asyncInvocationConfig/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_READ_FAILED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_NOT_EXACT_ACTIVE/);
+});
+
+test('controlled rebuild timeout telemetry exposes only allowlisted phase enums and never raw provider logs', async () => {
+  const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
+  const runtime = await read('src/runtime/initialControlledRebuildJob.ts');
+  const fn = await read('src/runtime/yandexCloudInitialControlledRebuildFunction.ts');
+  assert.match(runtime, /InitialControlledRebuildRuntimePhase/);
+  assert.match(runtime, /BOOTSTRAP_\$\{InitialBootstrapApplicationPhase\}/);
+  assert.match(runtime, /CONTROLLED_\$\{InitialControlledRebuildApplicationPhase\}/);
+  assert.match(runtime, /Diagnostics must never change controlled rebuild behavior or authority/);
+  assert.match(fn, /R1_CONTROLLED_PHASE:/);
+  assert.match(fn, /formatInitialControlledRebuildPhaseMarker/);
+  assert.match(workflow, /Classify enum-only controlled runtime phase/);
+  assert.match(workflow, /serverless function logs/);
+  assert.match(workflow, /--tag r1-initial-controlled-rebuild/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PHASE_CLASSIFIED/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE/);
+  assert.match(workflow, /LOG_READ_FAILED/);
+  assert.match(workflow, /MARKER_MISSING/);
+  assert.match(workflow, /r1-initial-controlled-rebuild-phase-\$\{\{ github\.run_id \}\}/);
+  assert.doesNotMatch(workflow, /path:.*r1-initial-controlled-rebuild-provider-logs\.raw/);
 });
 
 test('controlled rebuild invokes synchronously once and requires exact COMMITTED result', async () => {
