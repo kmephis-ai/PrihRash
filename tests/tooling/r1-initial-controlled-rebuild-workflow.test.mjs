@@ -118,6 +118,17 @@ test('provider deploy failure is preserved as privacy-safe enum evidence without
   assert.doesNotMatch(workflow, /tee "\$tmp\/version\.err"/);
 });
 
+test('controlled rebuild releases Google source scope before application continuation', async () => {
+  const runtime = await read('src/runtime/initialControlledRebuildJob.ts');
+  const runStart = runtime.indexOf('export async function runInitialControlledRebuildJob(');
+  const runBody = runtime.slice(runStart);
+  assert.match(runtime, /async function readInitialControlledRebuildObservation[\s\S]*createCanonicalSourceDigest[\s\S]*new GoogleSheetsFullSnapshotReader[\s\S]*readFullSnapshotObservation[\s\S]*buildInitialBootstrapObservation/);
+  assert.match(runBody, /await readInitialControlledRebuildObservation/);
+  assert.doesNotMatch(runBody, /new GoogleSheetsFullSnapshotReader/);
+  assert.doesNotMatch(runBody, /const digest = createCanonicalSourceDigest/);
+  assert.doesNotMatch(runBody, /readFullSnapshotObservation/);
+});
+
 test('controlled rebuild runtime structurally reuses bounded WU7 recovery primitives', async () => {
   const application = await read('src/migration/initialControlledRebuildApplication.ts');
   const continuation = await read('src/migration/initialBootstrapApplication.ts');
