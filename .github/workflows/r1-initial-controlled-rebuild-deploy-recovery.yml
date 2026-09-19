@@ -358,6 +358,7 @@ jobs:
           mkdir -p "$evidence_dir" "$provider_tmp"
 
           caller_invoker='READ_FAILED'
+          caller_editor='READ_FAILED'
           async_invoker='READ_FAILED'
           async_viewer='READ_FAILED'
           create_operation='READ_FAILED'
@@ -381,6 +382,12 @@ jobs:
                   1) caller_invoker='PROVEN' ;;
                   0) caller_invoker='MISSING' ;;
                   *) caller_invoker='AMBIGUOUS' ;;
+                esac
+                editor_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "functions.editor" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
+                case "$editor_count" in
+                  1) caller_editor='PROVEN' ;;
+                  0) caller_editor='MISSING' ;;
+                  *) caller_editor='AMBIGUOUS' ;;
                 esac
                 if [ -n "$runtime_sa_id" ]; then
                   async_count="$(jq --arg id "$runtime_sa_id" '[.[]? | select((.role_id // .roleId // "") == "functions.functionInvoker" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
@@ -453,18 +460,20 @@ jobs:
 
           jq -cn \
             --arg callerInvoker "$caller_invoker" \
+            --arg callerEditor "$caller_editor" \
             --arg asyncInvoker "$async_invoker" \
             --arg asyncViewer "$async_viewer" \
             --arg createOperation "$create_operation" \
-            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",callerInvoker:$callerInvoker,asyncInvoker:$asyncInvoker,asyncViewer:$asyncViewer,createOperation:$createOperation}' \
+            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",callerInvoker:$callerInvoker,callerEditor:$callerEditor,asyncInvoker:$asyncInvoker,asyncViewer:$asyncViewer,createOperation:$createOperation}' \
             >"$diagnostic"
 
           jq -e '
             type == "object"
-            and (keys | sort) == ["asyncInvoker","asyncViewer","callerInvoker","code","createOperation","status"]
+            and (keys | sort) == ["asyncInvoker","asyncViewer","callerEditor","callerInvoker","code","createOperation","status"]
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC"
             and (.callerInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
+            and (.callerEditor | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.asyncInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.asyncViewer | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.createOperation | IN("NO_MATCHING_OPERATION","INVALID_ARGUMENT","NOT_FOUND","ALREADY_EXISTS","PERMISSION_DENIED","RESOURCE_EXHAUSTED","FAILED_PRECONDITION","INTERNAL","UNAVAILABLE","UNAUTHENTICATED","OTHER_ERROR","IN_PROGRESS","SUCCEEDED","COMPLETED_UNKNOWN","AMBIGUOUS","READ_FAILED"))

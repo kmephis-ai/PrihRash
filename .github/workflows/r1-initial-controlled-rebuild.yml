@@ -400,6 +400,12 @@ jobs:
             echo 'INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING'
             exit 1
           fi
+          if ! jq -e --arg expected "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.editor") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_WIF_EDITOR_BINDING_MISSING'
+            exit 1
+          fi
           if ! jq -e --arg expected "$runtime_sa_id" \
             '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
             "$tmp/bindings.json" >/dev/null; then
@@ -713,7 +719,13 @@ jobs:
           test -f "$evidence" || { echo 'INITIAL_CONTROLLED_REBUILD_EVIDENCE_MISSING'; exit 1; }
           if jq -e '
             type == "object"
-            and (keys | sort) == ["code","failureClass","status"]
+            and (
+              (keys | sort) == ["code","failureClass","status"]
+              or (
+                (keys | sort) == ["code","failureClass","permissionBoundary","status"]
+                and (.permissionBoundary | IN("NOT_APPLICABLE","FUNCTION_RESOURCE","RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE","WIF_SERVICE_ACCOUNT_RESOURCE","ACCESS_POLICY","SERVICE_ACCOUNT_UNRESOLVED","FUNCTION_UNRESOLVED","UNRESOLVED"))
+              )
+            )
             and .status == "FAIL"
             and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED"
             and (.failureClass | IN("SERVICE_ACCOUNT_NOT_AVAILABLE","PERMISSION_DENIED","INVALID_ARGUMENT","FAILED_PRECONDITION","RESOURCE_EXHAUSTED","UNAUTHENTICATED","NOT_FOUND","ALREADY_EXISTS","INTERNAL","SOURCE_PACKAGE_FAILED","TRANSPORT_FAILED","OTHER"))
