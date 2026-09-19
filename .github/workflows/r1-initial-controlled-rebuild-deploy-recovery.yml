@@ -146,7 +146,7 @@ jobs:
                   (keys | sort) == ["code","failureClass","status"]
                   or (
                     (keys | sort) == ["code","failureClass","permissionBoundary","status"]
-                    and (.permissionBoundary | IN("NOT_APPLICABLE","FUNCTION_RESOURCE","RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE","WIF_SERVICE_ACCOUNT_RESOURCE","ACCESS_POLICY","SERVICE_ACCOUNT_UNRESOLVED","FUNCTION_UNRESOLVED","UNRESOLVED"))
+                    and (.permissionBoundary | IN("NOT_APPLICABLE","FUNCTION_RESOURCE","RUNTIME_SERVICE_ACCOUNT_RESOURCE","RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE","WIF_SERVICE_ACCOUNT_RESOURCE","ACCESS_POLICY","SERVICE_ACCOUNT_UNRESOLVED","FUNCTION_UNRESOLVED","UNRESOLVED"))
                     and (
                       (.failureClass == "PERMISSION_DENIED" and .permissionBoundary != "NOT_APPLICABLE")
                       or (.failureClass != "PERMISSION_DENIED" and .permissionBoundary == "NOT_APPLICABLE")
@@ -190,7 +190,10 @@ jobs:
                 and ([$jobs[0].steps[]? | select(.name == "Require exact bounded provider result" and .conclusion == "failure")] | length) == 1
               )
             )
-            and ([$jobs[0].steps[]? | select(.name == "Start exact controlled rebuild tag asynchronously once" and .conclusion == "skipped")] | length) == 1
+            and (
+              ([$jobs[0].steps[]? | select(.name == "Start exact controlled rebuild tag asynchronously once" and .conclusion == "skipped")] | length) == 1
+              or ([$jobs[0].steps[]? | select(.name == "Invoke exact controlled rebuild tag synchronously once" and .conclusion == "skipped")] | length) == 1
+            )
           ' "$tmp/failed-jobs.json" >/dev/null || {
             echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_FAILURE_PHASE_NOT_PROVEN'
             exit 1
@@ -282,9 +285,9 @@ jobs:
 
           if ! yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
               --format json --retry 0 --no-user-output >"$tmp/runtime-sa.json" 2>"$tmp/runtime-sa.err"; then
-            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"ASYNC_RUNTIME_SA_READ_FAILED"}' >"$candidate"
+            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"RUNTIME_SA_READ_FAILED"}' >"$candidate"
           elif ! runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/runtime-sa.json" 2>/dev/null)"; then
-            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"ASYNC_RUNTIME_SA_METADATA_INVALID"}' >"$candidate"
+            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"RUNTIME_SA_METADATA_INVALID"}' >"$candidate"
           elif ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
             jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"FUNCTION_READ_FAILED"}' >"$candidate"
           else
@@ -303,19 +306,11 @@ jobs:
                   if ! yc serverless function version get-by-tag --function-id "$function_id" --tag "$TARGET_TAG"                     --format json-rest --retry 0 --no-user-output >"$tmp/tag.json" 2>"$tmp/tag.err"; then
                     jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_READ_FAILED"}' >"$candidate"
                   else
-                    metadata_reason="$(jq -r                       --arg runtime "$TARGET_RUNTIME"                       --arg entrypoint "$TARGET_ENTRYPOINT"                       --arg async_sa "$runtime_sa_id" '
+                    metadata_reason="$(jq -r                       --arg runtime "$TARGET_RUNTIME"                       --arg entrypoint "$TARGET_ENTRYPOINT"                       --arg runtime_sa "$runtime_sa_id" '
                       if (.runtime != $runtime or .entrypoint != $entrypoint or .status != "ACTIVE") then
                         "TAG_METADATA_NOT_EXACT_ACTIVE"
-                      elif ((.asyncInvocationConfig | type) != "object") then
-                        "TAG_ASYNC_CONFIG_MISSING"
-                      elif (((.asyncInvocationConfig.retriesCount // "") | tostring) != "0") then
-                        "TAG_ASYNC_RETRIES_NOT_ZERO"
-                      elif ((.asyncInvocationConfig.serviceAccountId // "") != $async_sa) then
-                        "TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT"
-                      elif ((.asyncInvocationConfig.successTarget.ymqTarget // null) != null) then
-                        "TAG_ASYNC_SUCCESS_TARGET_PRESENT"
-                      elif ((.asyncInvocationConfig.failureTarget.ymqTarget // null) != null) then
-                        "TAG_ASYNC_FAILURE_TARGET_PRESENT"
+                      elif ((.serviceAccountId // "") != $runtime_sa) then
+                        "TAG_RUNTIME_SERVICE_ACCOUNT_NOT_EXACT"
                       else
                         "EXACT_ACTIVE_TAG"
                       end
@@ -340,7 +335,7 @@ jobs:
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
             and (.verdict | IN("APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"))
-            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","ASYNC_RUNTIME_SA_READ_FAILED","ASYNC_RUNTIME_SA_METADATA_INVALID","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_READ_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_ASYNC_CONFIG_MISSING","TAG_ASYNC_RETRIES_NOT_ZERO","TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT","TAG_ASYNC_SUCCESS_TARGET_PRESENT","TAG_ASYNC_FAILURE_TARGET_PRESENT","TAG_MATCH_AMBIGUOUS"))
+            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","RUNTIME_SA_READ_FAILED","RUNTIME_SA_METADATA_INVALID","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_READ_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_RUNTIME_SERVICE_ACCOUNT_NOT_EXACT","TAG_MATCH_AMBIGUOUS"))
           ' "$candidate" >/dev/null
           mv "$candidate" "$evidence"
           cat "$evidence"
