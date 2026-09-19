@@ -66,6 +66,8 @@ These enums are structural evidence only. They do not declare staging completene
 
 The live WU7 Function may legitimately need longer than a synchronous HTTPS client connection remains reliable. Controlled continuation therefore uses Yandex Cloud Functions asynchronous invocation (`integration=async`) after all exact-main/recovery/readiness/provider-boundary gates pass. The deployed Function version must explicitly enable async invocation with zero provider retries and the already-proven WIF service account as the async invoker identity; no success/failure YMQ target is configured.
 
+Provider metadata proof uses `yc serverless function version get-by-tag --format json-rest`, so both deploy recovery and the immediate pre-invoke postflight validate the same REST-shaped `asyncInvocationConfig`: `retriesCount == 0`, exact async service-account identity, and no YMQ success/failure target. A tag is reusable only when those async settings are proven together with `ACTIVE`, `nodejs22` and `index.initialControlledRebuildHandler`. Runtime/entrypoint/status alone are insufficient for `EXACT_ACTIVE_TAG`.
+
 An HTTP `202` is classified only as:
 
 ```json

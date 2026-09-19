@@ -60,8 +60,13 @@ test('controlled rebuild may reuse only an exact APPLIED active tag without rede
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
   assert.match(workflow, /if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}[\s\S]*Deploy initial-controlled-rebuild-only Function version|Deploy initial-controlled-rebuild-only Function version[\s\S]*if: \$\{\{ inputs\.deploy_recovery_run_id == '' \}\}/);
   assert.match(workflow, /serverless function version list --function-id/);
-  assert.match(workflow, /async_invocation_config\.retries_count/);
-  assert.match(workflow, /async_invocation_config\.service_account_id/);
+  assert.match(workflow, /serverless function version get-by-tag/);
+  assert.match(workflow, /--format json-rest/);
+  assert.match(workflow, /asyncInvocationConfig\.retriesCount/);
+  assert.match(workflow, /asyncInvocationConfig\.serviceAccountId/);
+  assert.match(workflow, /asyncInvocationConfig\.successTarget\.ymqTarget/);
+  assert.match(workflow, /asyncInvocationConfig\.failureTarget\.ymqTarget/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_READ_FAILED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT/);
 });
 

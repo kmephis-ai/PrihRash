@@ -39,6 +39,12 @@ test('deploy recovery classifies only provider metadata and cannot create or inv
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml');
   assert.match(workflow, /serverless function get --name/);
   assert.match(workflow, /serverless function version list --function-id/);
+  assert.match(workflow, /serverless function version get-by-tag --function-id/);
+  assert.match(workflow, /--format json-rest/);
+  assert.match(workflow, /asyncInvocationConfig\.retriesCount/);
+  assert.match(workflow, /asyncInvocationConfig\.serviceAccountId/);
+  assert.match(workflow, /successTarget\.ymqTarget/);
+  assert.match(workflow, /failureTarget\.ymqTarget/);
   assert.match(workflow, /r1-initial-controlled-rebuild/);
   assert.match(workflow, /index\.initialControlledRebuildHandler/);
   assert.match(workflow, /nodejs22/);
@@ -55,7 +61,13 @@ test('deploy recovery emits enum-only APPLIED, NOT_APPLIED or RECOVERY_REQUIRED 
   assert.match(workflow, /"APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"/);
   assert.match(workflow, /EXACT_ACTIVE_TAG/);
   assert.match(workflow, /TAG_ABSENT/);
+  assert.match(workflow, /TAG_READ_FAILED/);
   assert.match(workflow, /TAG_METADATA_NOT_EXACT_ACTIVE/);
+  assert.match(workflow, /TAG_ASYNC_CONFIG_MISSING/);
+  assert.match(workflow, /TAG_ASYNC_RETRIES_NOT_ZERO/);
+  assert.match(workflow, /TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT/);
+  assert.match(workflow, /TAG_ASYNC_SUCCESS_TARGET_PRESENT/);
+  assert.match(workflow, /TAG_ASYNC_FAILURE_TARGET_PRESENT/);
   assert.match(workflow, /TAG_MATCH_AMBIGUOUS/);
   assert.match(workflow, /r1-initial-controlled-rebuild-deploy-recovery-evidence-\$\{\{ github\.run_id \}\}/);
 });

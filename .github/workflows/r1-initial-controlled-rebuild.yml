@@ -503,17 +503,22 @@ jobs:
             fi
             matching="$(jq --arg tag 'r1-initial-controlled-rebuild' '[.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)] | length' "$tmp/versions.json")"
             [ "$matching" = "1" ] || { echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_NOT_EXACT'; exit 1; }
-            jq -e --arg tag 'r1-initial-controlled-rebuild' --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
-              [.[]? | select((.tags | type) == "array" and (.tags | index($tag)) != null)][0] as $v
-              | ($v.runtime == "nodejs22")
-                and ($v.entrypoint == "index.initialControlledRebuildHandler")
-                and ($v.status == "ACTIVE")
-                and (($v.async_invocation_config | type) == "object")
-                and (($v.async_invocation_config.retries_count | tostring) == "0")
-                and ($v.async_invocation_config.service_account_id == $async_sa)
-                and (($v.async_invocation_config.success_target.ymq_target // null) == null)
-                and (($v.async_invocation_config.failure_target.ymq_target // null) == null)
-            ' "$tmp/versions.json" >/dev/null || {
+
+            if ! yc serverless function version get-by-tag               --function-id "$PRIHRASH_YC_FUNCTION_ID"               --tag r1-initial-controlled-rebuild               --format json-rest --retry 0 --no-user-output >"$tmp/tag.json" 2>"$tmp/tag.err"; then
+              echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_TAG_READ_FAILED'
+              exit 1
+            fi
+
+            jq -e --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+              (.runtime == "nodejs22")
+              and (.entrypoint == "index.initialControlledRebuildHandler")
+              and (.status == "ACTIVE")
+              and ((.asyncInvocationConfig | type) == "object")
+              and (((.asyncInvocationConfig.retriesCount // "") | tostring) == "0")
+              and ((.asyncInvocationConfig.serviceAccountId // "") == $async_sa)
+              and ((.asyncInvocationConfig.successTarget.ymqTarget // null) == null)
+              and ((.asyncInvocationConfig.failureTarget.ymqTarget // null) == null)
+            ' "$tmp/tag.json" >/dev/null || {
               echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_TAG_NOT_EXACT'
               exit 1
             }
