@@ -20,15 +20,17 @@ test('controlled rebuild deploy recovery is manual, exact-main and read-only', a
   assert.doesNotMatch(workflow, /actions: write/);
 });
 
-test('deploy recovery binds the exact failed pre-invoke run and WU7 authority', async () => {
+test('deploy recovery binds exact failed pre-invoke deploy or postflight proof modes and WU7 authority', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml');
   assert.match(workflow, /Provider-Authority: WU7_CONTROLLED_REBUILD/);
   assert.match(workflow, /Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY/);
   assert.match(workflow, /Blind-Replay: FORBIDDEN/);
   assert.match(workflow, /Deploy initial-controlled-rebuild-only Function version/);
-  assert.match(workflow, /conclusion == "failure"/);
+  assert.match(workflow, /select\(\.name == "Deploy initial-controlled-rebuild-only Function version" and \.conclusion == "failure"\)/);
+  assert.match(workflow, /select\(\.name == "Deploy initial-controlled-rebuild-only Function version" and \.conclusion == "skipped"\)/);
+  assert.match(workflow, /select\(\.name == "Re-verify private trigger-free boundary" and \.conclusion == "failure"\)/);
   assert.match(workflow, /Start exact controlled rebuild tag asynchronously once/);
-  assert.match(workflow, /conclusion == "skipped"/);
+  assert.match(workflow, /select\(\.name == "Start exact controlled rebuild tag asynchronously once" and \.conclusion == "skipped"\)/);
   assert.match(workflow, /FAILED_RUN_SHA: \$\{\{ inputs\.failed_run_sha \}\}/);
   assert.match(workflow, /\.head_sha == \$failed_sha/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_WRITER_CONFLICT/);
