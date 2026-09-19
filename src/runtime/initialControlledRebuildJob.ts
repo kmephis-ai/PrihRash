@@ -8,9 +8,11 @@ import {
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
+  diagnoseInitialControlledRebuildSwapRecovery,
   runInitialControlledRebuildApplication,
   type InitialControlledRebuildApplicationPhase,
   type InitialControlledRebuildApplicationResult,
+  type InitialControlledRebuildSwapRecoveryDiagnosticResult,
 } from '../migration/initialControlledRebuildApplication.js';
 import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
 import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
@@ -131,10 +133,20 @@ async function readInitialControlledRebuildObservation(
   );
 }
 
+export function runInitialControlledRebuildJob(
+  config: Readonly<InitialBootstrapJobConfig>,
+  observer?: Readonly<InitialControlledRebuildJobObserver>,
+): Promise<InitialControlledRebuildApplicationResult>;
+export function runInitialControlledRebuildJob(
+  config: Readonly<InitialBootstrapJobConfig>,
+  observer: Readonly<InitialControlledRebuildJobObserver>,
+  mode: 'SWAP_RECOVERY_DIAGNOSTIC',
+): Promise<InitialControlledRebuildSwapRecoveryDiagnosticResult>;
 export async function runInitialControlledRebuildJob(
   config: Readonly<InitialBootstrapJobConfig>,
   observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
-): Promise<InitialControlledRebuildApplicationResult> {
+  mode: 'CONTROLLED' | 'SWAP_RECOVERY_DIAGNOSTIC' = 'CONTROLLED',
+): Promise<InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult> {
   const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(config.privateHistoricalEvidence);
   const primitives = createNodeInitialBootstrapRuntimePrimitives();
 
@@ -193,30 +205,33 @@ export async function runInitialControlledRebuildJob(
       historicalEvidence,
     );
 
-    let result: InitialControlledRebuildApplicationResult;
+    let result: InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult;
     observeRuntimePhase(observer, 'APPLICATION_START');
+    const applicationDependencies = Object.freeze({
+      adapter,
+      scheme,
+      identityAllocator: primitives.identityAllocator,
+      projectionContext,
+      reconciliation: reconciliation.port,
+      clock: primitives.clock,
+      observePhase(nextPhase: InitialBootstrapApplicationPhase) {
+        observeRuntimePhase(observer, `BOOTSTRAP_${nextPhase}`);
+      },
+      observeControlledPhase(nextPhase: InitialControlledRebuildApplicationPhase) {
+        controlledPhase = nextPhase;
+        observeRuntimePhase(observer, `CONTROLLED_${nextPhase}`);
+      },
+    });
     try {
-      result = await runInitialControlledRebuildApplication(observation, {
-        adapter,
-        scheme,
-        identityAllocator: primitives.identityAllocator,
-        projectionContext,
-        reconciliation: reconciliation.port,
-        clock: primitives.clock,
-        observePhase(nextPhase) {
-          observeRuntimePhase(observer, `BOOTSTRAP_${nextPhase}`);
-        },
-        observeControlledPhase(nextPhase) {
-          controlledPhase = nextPhase;
-          observeRuntimePhase(observer, `CONTROLLED_${nextPhase}`);
-        },
-      });
+      result = mode === 'SWAP_RECOVERY_DIAGNOSTIC'
+        ? await diagnoseInitialControlledRebuildSwapRecovery(observation, applicationDependencies)
+        : await runInitialControlledRebuildApplication(observation, applicationDependencies);
     } catch {
       throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase);
     }
     observeRuntimePhase(observer, 'APPLICATION_DONE');
 
-    if (result.status === 'COMMITTED') {
+    if (mode === 'CONTROLLED' && result.status === 'COMMITTED') {
       observeRuntimePhase(observer, 'POST_COMMIT_RECONCILIATION_START');
       if (!reconciliationMatched(await reconciliation.verifyCommittedCurrent())) {
         throw new InitialControlledRebuildJobError(
@@ -248,4 +263,15 @@ export function runInitialControlledRebuildJobFromEnvironment(
   observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
 ): Promise<InitialControlledRebuildApplicationResult> {
   return runInitialControlledRebuildJob(readInitialBootstrapJobConfig(environment), observer);
+}
+
+export function runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment(
+  environment: InitialBootstrapJobEnvironment = process.env,
+  observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
+): Promise<InitialControlledRebuildSwapRecoveryDiagnosticResult> {
+  return runInitialControlledRebuildJob(
+    readInitialBootstrapJobConfig(environment),
+    observer,
+    'SWAP_RECOVERY_DIAGNOSTIC',
+  );
 }

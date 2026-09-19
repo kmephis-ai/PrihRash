@@ -13,7 +13,10 @@ import {
 import { InitialBootstrapIdentityManifestError } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapError } from '../../dist/migration/initialSnapshot.js';
 import { INITIAL_RECONCILIATION_CHECKS } from '../../dist/migration/initialValidationGate.js';
-import { runInitialControlledRebuildApplication } from '../../dist/migration/initialControlledRebuildApplication.js';
+import {
+  diagnoseInitialControlledRebuildSwapRecovery,
+  runInitialControlledRebuildApplication,
+} from '../../dist/migration/initialControlledRebuildApplication.js';
 
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const SNAPSHOT_ID = id(451001);
@@ -858,7 +861,11 @@ test('controlled continuation reconstructs one deterministic candidate across ST
 });
 
 
-function controlledScheme(db, { unknownRenameAfterApply = false, existingEmptyStaging = false } = {}) {
+function controlledScheme(db, {
+  unknownRenameAfterApply = false,
+  unknownRenameBeforeApply = false,
+  existingEmptyStaging = false,
+} = {}) {
   const compact = RUN_ID.replaceAll('-', '').toLowerCase();
   const runLeaf = `r_${compact}`;
   const runDirectory = `rebuild/${runLeaf}`;
@@ -893,6 +900,9 @@ function controlledScheme(db, { unknownRenameAfterApply = false, existingEmptySt
         { source: `${runDirectory}/transactions`, destination: 'transactions', replace: true },
         { source: `${runDirectory}/source_records`, destination: 'source_records', replace: true },
       ]);
+      if (unknownRenameBeforeApply) {
+        throw new YdbSchemeTransportOutcomeUnknownError(new Error('synthetic unknown before applied rename'));
+      }
       db.state.transactions = structuredClone(db.state.stagingTransactions);
       db.state.sourceRecords = structuredClone(db.state.stagingSourceRecords);
       db.state.stagingTransactions = new Map();
@@ -997,6 +1007,77 @@ test('validated continuation resumes an existing exact empty staging pair withou
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'COMMITTED');
   assert.equal(db.state.sourceRecords.size, 2);
   assert.equal(db.state.transactions.size, 2);
+  assert.deepEqual(resumeIds.calls, []);
+});
+
+test('swap recovery diagnostic proves exact staging NOT_APPLIED without replaying rename', async () => {
+  const db = fakeDatabase();
+  const largeObservation = await seedControlledRebuild(db);
+  const scheme = controlledScheme(db, { unknownRenameBeforeApply: true });
+  const resumeIds = allocator({ forbid: true });
+
+  const attempted = await runInitialControlledRebuildApplication(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(attempted.status, 'RECOVERY_REQUIRED');
+  assert.equal(attempted.reason, 'SWAP_OUTCOME_NOT_APPLIED');
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+  assert.equal(db.state.stagingSourceRecords.size, 2);
+  assert.equal(db.state.stagingTransactions.size, 2);
+
+  const diagnosed = await diagnoseInitialControlledRebuildSwapRecovery(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(diagnosed.status, 'CLASSIFIED');
+  assert.equal(diagnosed.verdict, 'NOT_APPLIED');
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+  assert.deepEqual(resumeIds.calls, []);
+});
+
+test('swap recovery diagnostic fails closed when nonempty staging no longer matches verified candidate', async () => {
+  const db = fakeDatabase();
+  const largeObservation = await seedControlledRebuild(db);
+  const scheme = controlledScheme(db, { unknownRenameBeforeApply: true });
+  const resumeIds = allocator({ forbid: true });
+
+  const attempted = await runInitialControlledRebuildApplication(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+  assert.equal(attempted.status, 'RECOVERY_REQUIRED');
+  assert.equal(attempted.reason, 'SWAP_OUTCOME_NOT_APPLIED');
+
+  db.state.stagingTransactions.delete([...db.state.stagingTransactions.keys()][0]);
+  const diagnosed = await diagnoseInitialControlledRebuildSwapRecovery(
+    largeObservation,
+    {
+      ...dependencies(db, resumeIds, clock(FINISHED_AT)),
+      scheme: scheme.adapter,
+    },
+  );
+
+  assert.equal(diagnosed.status, 'CLASSIFIED');
+  assert.equal(diagnosed.verdict, 'RECOVERY_REQUIRED');
+  assert.equal(scheme.state.renameCalls, 1);
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
   assert.deepEqual(resumeIds.calls, []);
 });
 

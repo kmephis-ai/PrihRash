@@ -21,6 +21,7 @@ import {
 import {
   recoverUnknownControlledInitialSwapOutcome,
   recoverUnknownControlledRebuildCopyOutcome,
+  type ControlledSchemeMutationRecoveryVerdict,
 } from './initialControlledRebuildSchemeRecovery.js';
 import { planInitialControlledRebuildSetup } from './initialControlledRebuildSetup.js';
 import { executeInitialControlledRebuildSetup } from './initialControlledRebuildSetupExecutor.js';
@@ -29,7 +30,11 @@ import {
   executeControlledRebuildStagingBatches,
   prepareControlledRebuildStagingBatches,
 } from './initialControlledRebuildStagingExecutor.js';
-import { gateControlledInitialSwap, type ControlledInitialSwapPlan } from './initialControlledRebuildSwapGate.js';
+import {
+  ControlledInitialSwapGateError,
+  gateControlledInitialSwap,
+  type ControlledInitialSwapPlan,
+} from './initialControlledRebuildSwapGate.js';
 import { executeControlledInitialSwap } from './initialControlledRebuildSwapExecutor.js';
 import { verifyControlledInitialCurrentState } from './initialControlledRebuildCurrentVerification.js';
 import { prepareMigrationRunValidatedWrite } from './migrationRunPersistence.js';
@@ -80,6 +85,19 @@ export type InitialControlledRebuildApplicationResult =
       status: 'RECOVERY_REQUIRED';
       run: Readonly<MigrationRun>;
       reason: InitialControlledRebuildRecoveryReason;
+    }>;
+
+export type InitialControlledRebuildSwapRecoveryDiagnosticResult =
+  | Readonly<{ status: 'BASELINE_EXISTS'; run: Readonly<MigrationRun> }>
+  | Readonly<{
+      status: 'VALIDATION_BLOCKED';
+      run: Readonly<MigrationRun>;
+      blockers: readonly Readonly<InitialValidationBlocker>[];
+    }>
+  | Readonly<{
+      status: 'CLASSIFIED';
+      run: Readonly<MigrationRun>;
+      verdict: ControlledSchemeMutationRecoveryVerdict;
     }>;
 
 function phase(
@@ -135,6 +153,77 @@ function isUnknownSchemeOutcome(error: unknown): boolean {
 function reconciliationMatched(evidence: Awaited<ReturnType<typeof verifyControlledInitialCurrentState>>): boolean {
   return evidence.unexplainedHighImpactMismatchCount === 0
     && Object.values(evidence.checks).every((value) => value === 'MATCHED');
+}
+
+function swapRecoveryClassification(
+  run: Readonly<MigrationRun>,
+  verdict: ControlledSchemeMutationRecoveryVerdict,
+): Readonly<InitialControlledRebuildSwapRecoveryDiagnosticResult> {
+  return Object.freeze({ status: 'CLASSIFIED' as const, run, verdict });
+}
+
+export async function diagnoseInitialControlledRebuildSwapRecovery(
+  observation: Readonly<InitialBootstrapObservation>,
+  dependencies: Readonly<InitialControlledRebuildApplicationDependencies>,
+): Promise<InitialControlledRebuildSwapRecoveryDiagnosticResult> {
+  phase(dependencies, 'PREPARATION');
+  const prepared = await prepareInitialControlledRebuildContinuation(observation, dependencies);
+  if (prepared.status === 'BASELINE_EXISTS') {
+    return Object.freeze({ status: 'BASELINE_EXISTS' as const, run: prepared.run });
+  }
+  if (prepared.status === 'VALIDATION_BLOCKED') {
+    return Object.freeze({
+      status: 'VALIDATION_BLOCKED' as const,
+      run: prepared.run,
+      blockers: prepared.blockers,
+    });
+  }
+  if (prepared.durableRun.state !== 'VALIDATED') {
+    return swapRecoveryClassification(prepared.durableRun, 'RECOVERY_REQUIRED');
+  }
+
+  const controlled = planControlledInitialRebuild(prepared.validatedRun, prepared.currentWrites, null);
+  phase(dependencies, 'SETUP_EVIDENCE');
+  const setupEvidence = await readInitialControlledRebuildSetupEvidence(
+    dependencies.scheme,
+    dependencies.adapter,
+    controlled,
+  );
+  if (
+    setupEvidence.currentTransactionCount !== 0
+    || setupEvidence.currentSourceRecordCount !== 0
+    || !setupEvidence.stagingTransactionsExists
+    || !setupEvidence.stagingSourceRecordsExists
+  ) {
+    return swapRecoveryClassification(prepared.validatedRun, 'RECOVERY_REQUIRED');
+  }
+
+  phase(dependencies, 'STAGING_RECONCILIATION');
+  const staging = await readControlledRebuildStagingEvidence(dependencies.adapter, controlled.stagingTables);
+  let swapPlan: Readonly<ControlledInitialSwapPlan>;
+  try {
+    swapPlan = gateControlledInitialSwap(
+      prepared.validatedRun,
+      controlled,
+      prepared.verifiedPlan,
+      staging,
+      null,
+    );
+  } catch (error) {
+    if (error instanceof ControlledInitialSwapGateError) {
+      return swapRecoveryClassification(prepared.validatedRun, 'RECOVERY_REQUIRED');
+    }
+    throw error;
+  }
+
+  phase(dependencies, 'SWAP_DISCRIMINATION');
+  const recovered = await recoverUnknownControlledInitialSwapOutcome(
+    dependencies.scheme,
+    dependencies.adapter,
+    swapPlan,
+    prepared.verifiedPlan,
+  );
+  return swapRecoveryClassification(prepared.validatedRun, recovered.verdict);
 }
 
 export async function runInitialControlledRebuildApplication(

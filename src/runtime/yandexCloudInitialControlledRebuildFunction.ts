@@ -11,6 +11,7 @@ import {
 import {
   InitialControlledRebuildJobError,
   runInitialControlledRebuildJobFromEnvironment,
+  runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment,
   type InitialControlledRebuildJobErrorCode,
   type InitialControlledRebuildJobObserver,
   type InitialControlledRebuildRuntimePhase,
@@ -25,6 +26,13 @@ export interface YandexInitialControlledRebuildValidationBlocker {
   readonly check?: InitialReconciliationCheck;
 }
 
+export type YandexInitialControlledRebuildRuntimeFailure = Readonly<{
+  status: 'FAIL';
+  code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED';
+  jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT';
+  phase: InitialControlledRebuildApplicationPhase | null;
+}>;
+
 export type YandexInitialControlledRebuildFunctionResult =
   | Readonly<{ status: 'PASS'; code: 'INITIAL_CONTROLLED_REBUILD_COMMITTED' }>
   | Readonly<{ status: 'NOOP'; code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' }>
@@ -38,12 +46,26 @@ export type YandexInitialControlledRebuildFunctionResult =
       code: 'INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED';
       recoveryReason: InitialControlledRebuildRecoveryReason;
     }>
+  | YandexInitialControlledRebuildRuntimeFailure;
+
+export type YandexInitialControlledRebuildSwapRecoveryDiagnosticFunctionResult =
   | Readonly<{
-      status: 'FAIL';
-      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED';
-      jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT';
-      phase: InitialControlledRebuildApplicationPhase | null;
-    }>;
+      status: 'PASS';
+      code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED';
+      verdict: 'APPLIED' | 'NOT_APPLIED';
+    }>
+  | Readonly<{
+      status: 'STOP';
+      code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED';
+      verdict: 'RECOVERY_REQUIRED';
+    }>
+  | Readonly<{ status: 'NOOP'; code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' }>
+  | Readonly<{
+      status: 'STOP';
+      code: 'INITIAL_CONTROLLED_REBUILD_VALIDATION_BLOCKED';
+      blockers: readonly Readonly<YandexInitialControlledRebuildValidationBlocker>[];
+    }>
+  | YandexInitialControlledRebuildRuntimeFailure;
 
 export interface YandexInitialControlledRebuildJob {
   (environment: InitialBootstrapJobEnvironment): Promise<unknown>;
@@ -104,7 +126,7 @@ function record(value: unknown): UnknownRecord | null {
 function runtimeFailure(
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT',
   phase: InitialControlledRebuildApplicationPhase | null = null,
-): Readonly<YandexInitialControlledRebuildFunctionResult> {
+): Readonly<YandexInitialControlledRebuildRuntimeFailure> {
   return Object.freeze({
     status: 'FAIL' as const,
     code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED' as const,
@@ -142,6 +164,44 @@ function validationBlockers(value: unknown): readonly Readonly<YandexInitialCont
     blockers.push(parsed);
   }
   return Object.freeze(blockers);
+}
+
+function sanitizeSwapRecoveryDiagnosticResult(
+  value: unknown,
+): Readonly<YandexInitialControlledRebuildSwapRecoveryDiagnosticFunctionResult> {
+  const result = record(value);
+  if (result === null || typeof result.status !== 'string') return runtimeFailure('UNCAUGHT');
+
+  if (result.status === 'CLASSIFIED') {
+    if (result.verdict === 'APPLIED' || result.verdict === 'NOT_APPLIED') {
+      return Object.freeze({
+        status: 'PASS' as const,
+        code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED' as const,
+        verdict: result.verdict,
+      });
+    }
+    if (result.verdict === 'RECOVERY_REQUIRED') {
+      return Object.freeze({
+        status: 'STOP' as const,
+        code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED' as const,
+        verdict: 'RECOVERY_REQUIRED' as const,
+      });
+    }
+    return runtimeFailure('UNCAUGHT');
+  }
+  if (result.status === 'BASELINE_EXISTS') {
+    return Object.freeze({ status: 'NOOP' as const, code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' as const });
+  }
+  if (result.status === 'VALIDATION_BLOCKED') {
+    const blockers = validationBlockers(result.blockers);
+    if (blockers === null) return runtimeFailure('UNCAUGHT');
+    return Object.freeze({
+      status: 'STOP' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_VALIDATION_BLOCKED' as const,
+      blockers,
+    });
+  }
+  return runtimeFailure('UNCAUGHT');
 }
 
 function sanitizeApplicationResult(value: unknown): Readonly<YandexInitialControlledRebuildFunctionResult> {
@@ -200,5 +260,31 @@ export async function initialControlledRebuildHandler(
   return executeYandexInitialControlledRebuildFunction(
     process.env,
     (environment) => runInitialControlledRebuildJobFromEnvironment(environment, observer),
+  );
+}
+
+export async function executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction(
+  environment: InitialBootstrapJobEnvironment,
+  runJob: YandexInitialControlledRebuildJob,
+): Promise<Readonly<YandexInitialControlledRebuildSwapRecoveryDiagnosticFunctionResult>> {
+  try {
+    return sanitizeSwapRecoveryDiagnosticResult(await runJob(environment));
+  } catch (error) {
+    if (error instanceof InitialControlledRebuildJobError) return runtimeFailure(error.code, error.phase);
+    if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
+      return runtimeFailure('CONFIG_INVALID');
+    }
+    return runtimeFailure('UNCAUGHT');
+  }
+}
+
+export async function initialControlledRebuildSwapRecoveryDiagnosticHandler(
+  _event: unknown,
+  _context: unknown,
+): Promise<Readonly<YandexInitialControlledRebuildSwapRecoveryDiagnosticFunctionResult>> {
+  const observer = yandexPhaseObserver();
+  return executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction(
+    process.env,
+    (environment) => runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment(environment, observer),
   );
 }
