@@ -26,6 +26,10 @@ import {
   type InitialBootstrapJobEnvironment,
 } from './initialBootstrapJob.js';
 
+export const INITIAL_CONTROLLED_REBUILD_YDB_READY_TIMEOUT_MS = 10_000 as const;
+export const INITIAL_CONTROLLED_REBUILD_YDB_READ_TIMEOUT_MS = 21_000 as const;
+export const INITIAL_CONTROLLED_REBUILD_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
 export type InitialControlledRebuildJobErrorCode =
   | 'SOURCE_READ_FAILED'
   | 'YDB_CLIENT_CREATE_FAILED'
@@ -140,6 +144,9 @@ export async function runInitialControlledRebuildJob(
     ydbClient = await createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
+      readyTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_READY_TIMEOUT_MS,
+      readTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_READ_TIMEOUT_MS,
+      transactionTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_TRANSACTION_TIMEOUT_MS,
     });
     observeRuntimePhase(observer, 'YDB_CLIENT_READY');
   } catch {

@@ -96,6 +96,76 @@ test('executes each prepared batch in its own serializable transaction', async (
   assert.equal(Object.isFrozen(result), true);
 });
 
+test('coalesces a large same-role staging batch into one AS_TABLE provider execute', async () => {
+  const writes = Object.freeze(Array.from({ length: 1_000 }, (_, index) => prepared(
+    'SOURCE_RECORD',
+    `00000000-0000-0000-0000-${String(index + 8000).padStart(12, '0')}`,
+  )));
+  const plan = Object.freeze({
+    ...controlled(),
+    batches: Object.freeze([
+      Object.freeze({ index: 0, writes, estimatedParameterBytes: 100_512 }),
+    ]),
+    expectedSourceRecordCount: writes.length,
+    expectedTransactionCount: 0,
+  });
+  const batches = prepareControlledRebuildStagingBatches(plan);
+  const executed = [];
+  const adapter = new YdbAdapter({
+    async executeRead() { throw new Error('standalone read not expected'); },
+    async serializableReadWrite(work) {
+      return work({
+        async execute(statement) {
+          executed.push(statement);
+          return { rows: [] };
+        },
+      });
+    },
+  });
+
+  const result = await executeControlledRebuildStagingBatches(adapter, batches);
+
+  assert.equal(executed.length, 1);
+  assert.match(executed[0].text, /^UPSERT INTO `rebuild\/r_[0-9a-f]{32}\/source_records` /);
+  assert.match(executed[0].text, /FROM AS_TABLE\(\$rows\)$/);
+  assert.equal(executed[0].parameters.rows.type, 'ListStruct');
+  assert.equal(executed[0].parameters.rows.value.rows.length, writes.length);
+  assert.deepEqual(result, { completedBatchIndexes: [0], completedWriteCount: writes.length });
+});
+
+test('fails closed on malformed staging write shape before opening a provider transaction', async () => {
+  const valid = prepared('SOURCE_RECORD', '00000000-0000-0000-0000-000000007101');
+  const malformed = Object.freeze({
+    ...valid,
+    statement: writeStatement(
+      'UPSERT INTO source_records (id, source_type) VALUES ($id)',
+      valid.statement.parameters,
+    ),
+  });
+  const plan = Object.freeze({
+    ...controlled(),
+    batches: Object.freeze([
+      Object.freeze({ index: 0, writes: Object.freeze([malformed]), estimatedParameterBytes: 356 }),
+    ]),
+  });
+  const batches = prepareControlledRebuildStagingBatches(plan);
+  let transactionStarted = false;
+  const adapter = new YdbAdapter({
+    async executeRead() { throw new Error('standalone read not expected'); },
+    async serializableReadWrite() {
+      transactionStarted = true;
+      throw new Error('transaction must not start');
+    },
+  });
+
+  await assert.rejects(
+    () => executeControlledRebuildStagingBatches(adapter, batches),
+    (error) => error instanceof ControlledRebuildStagingExecutorError
+      && error.code === 'STAGING_WRITE_SHAPE_INVALID',
+  );
+  assert.equal(transactionStarted, false);
+});
+
 test('later batch failure rolls back only that staging transaction and never runs a swap/marker', async () => {
   const batches = prepareControlledRebuildStagingBatches(controlled());
   const fake = fakeTransport(3);

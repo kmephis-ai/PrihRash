@@ -382,6 +382,19 @@ function applyWrite(statement, state) {
     run.error_code = parameter(statement, 'error_code');
     return text.includes('RETURNING id') ? [{ id: run.id }] : [];
   }
+  if (text.startsWith('UPSERT INTO `rebuild/') && text.includes('FROM AS_TABLE($rows)')) {
+    const rows = statement.parameters.rows;
+    if (rows?.type !== 'ListStruct') throw new Error('synthetic staging rows shape invalid');
+    const target = text.includes('/transactions`') ? state.stagingTransactions
+      : text.includes('/source_records`') ? state.stagingSourceRecords
+        : null;
+    if (target === null) throw new Error('synthetic staging table shape invalid');
+    for (const row of rows.value.rows) {
+      const values = Object.fromEntries(Object.entries(row).map(([key, value]) => [key, value.value]));
+      target.set(values.id, values);
+    }
+    return [];
+  }
   if (text.startsWith('UPSERT INTO `rebuild/') && text.includes('/transactions`')) {
     const values = Object.fromEntries(Object.entries(statement.parameters).map(([key, value]) => [key, value.value]));
     state.stagingTransactions.set(values.id, values);
