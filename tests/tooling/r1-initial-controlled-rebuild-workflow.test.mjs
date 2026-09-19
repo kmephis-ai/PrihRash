@@ -141,6 +141,16 @@ test('provider deploy failure is preserved as privacy-safe enum evidence without
   assert.doesNotMatch(workflow, /tee "\$tmp\/version\.err"/);
 });
 
+test('controlled rebuild bounds YDB ready, read and transaction lifetimes below HTTP transport boundary', async () => {
+  const runtime = await read('src/runtime/initialControlledRebuildJob.ts');
+  assert.match(runtime, /INITIAL_CONTROLLED_REBUILD_YDB_READY_TIMEOUT_MS = 10_000/);
+  assert.match(runtime, /INITIAL_CONTROLLED_REBUILD_YDB_READ_TIMEOUT_MS = 21_000/);
+  assert.match(runtime, /INITIAL_CONTROLLED_REBUILD_YDB_TRANSACTION_TIMEOUT_MS = 25_000/);
+  assert.match(runtime, /readyTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_READY_TIMEOUT_MS/);
+  assert.match(runtime, /readTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_READ_TIMEOUT_MS/);
+  assert.match(runtime, /transactionTimeoutMs: INITIAL_CONTROLLED_REBUILD_YDB_TRANSACTION_TIMEOUT_MS/);
+});
+
 test('controlled rebuild releases Google source scope before application continuation', async () => {
   const runtime = await read('src/runtime/initialControlledRebuildJob.ts');
   const runStart = runtime.indexOf('export async function runInitialControlledRebuildJob(');
