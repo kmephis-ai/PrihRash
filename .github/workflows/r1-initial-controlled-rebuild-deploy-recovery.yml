@@ -128,7 +128,7 @@ jobs:
               )
               or
               (
-                ([$jobs[0].steps[]? | select(.name == "Deploy initial-controlled-rebuild-only Function version" and .conclusion == "skipped")] | length) == 1
+                ([$jobs[0].steps[]? | select(.name == "Deploy initial-controlled-rebuild-only Function version" and (.conclusion == "success" or .conclusion == "skipped"))] | length) == 1
                 and ([$jobs[0].steps[]? | select(.name == "Re-verify private trigger-free boundary" and .conclusion == "failure")] | length) == 1
               )
             )
