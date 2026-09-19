@@ -61,10 +61,11 @@ function reconciliationMatched(evidence: Readonly<InitialReconciliationEvidence>
     && INITIAL_RECONCILIATION_CHECKS.every((check) => evidence.checks[check] === 'MATCHED');
 }
 
-export async function runInitialControlledRebuildJob(
+async function readInitialControlledRebuildObservation(
   config: Readonly<InitialBootstrapJobConfig>,
-): Promise<InitialControlledRebuildApplicationResult> {
-  const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(config.privateHistoricalEvidence);
+  historicalEvidence: ReturnType<typeof parseInitialBootstrapPrivateHistoricalEvidence>,
+  now: () => string,
+): Promise<ReturnType<typeof buildInitialBootstrapObservation>> {
   const digest = createCanonicalSourceDigest();
   const accessTokenProvider = createGoogleServiceAccountSheetsAccessTokenProvider({
     clientEmail: config.googleServiceAccountEmail,
@@ -76,6 +77,26 @@ export async function runInitialControlledRebuildJob(
     accessTokenProvider,
     digest,
   });
+
+  let lease;
+  try {
+    lease = await source.readFullSnapshotObservation();
+  } catch {
+    throw new InitialControlledRebuildJobError('SOURCE_READ_FAILED');
+  }
+
+  return buildInitialBootstrapObservation(
+    lease,
+    digest,
+    historicalEvidence,
+    now(),
+  );
+}
+
+export async function runInitialControlledRebuildJob(
+  config: Readonly<InitialBootstrapJobConfig>,
+): Promise<InitialControlledRebuildApplicationResult> {
+  const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(config.privateHistoricalEvidence);
   const primitives = createNodeInitialBootstrapRuntimePrimitives();
 
   let ydbClient: Readonly<YdbJsDataClient>;
@@ -91,17 +112,10 @@ export async function runInitialControlledRebuildJob(
   let primaryError: unknown = null;
   let controlledPhase: InitialControlledRebuildApplicationPhase | null = null;
   try {
-    let lease;
-    try {
-      lease = await source.readFullSnapshotObservation();
-    } catch {
-      throw new InitialControlledRebuildJobError('SOURCE_READ_FAILED');
-    }
-    const observation = buildInitialBootstrapObservation(
-      lease,
-      digest,
+    const observation = await readInitialControlledRebuildObservation(
+      config,
       historicalEvidence,
-      primitives.clock.now(),
+      () => primitives.clock.now(),
     );
     const adapter = new YdbAdapter(ydbClient.transport);
 
