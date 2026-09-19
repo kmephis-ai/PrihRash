@@ -455,11 +455,14 @@ jobs:
 
       - name: Deploy initial-controlled-rebuild-only Function version
         if: ${{ steps.prerequisites.outputs.provider_mode != 'reuse' }}
+        id: provider-deploy
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy"
-          mkdir -p "$tmp"
+          evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence"
+          mkdir -p "$tmp" "$evidence_dir"
           if ! yc serverless function version create \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
@@ -479,11 +482,41 @@ jobs:
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
-            echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_FAILED'
+            failure_class='OTHER'
+            if grep -Eiq 'service account is not available' "$tmp/version.err"; then
+              failure_class='SERVICE_ACCOUNT_NOT_AVAILABLE'
+            elif grep -Eiq 'PERMISSION_DENIED|permission denied|permission denied for' "$tmp/version.err"; then
+              failure_class='PERMISSION_DENIED'
+            elif grep -Eiq 'INVALID_ARGUMENT|invalid argument' "$tmp/version.err"; then
+              failure_class='INVALID_ARGUMENT'
+            elif grep -Eiq 'FAILED_PRECONDITION|failed precondition' "$tmp/version.err"; then
+              failure_class='FAILED_PRECONDITION'
+            elif grep -Eiq 'RESOURCE_EXHAUSTED|resource exhausted|quota' "$tmp/version.err"; then
+              failure_class='RESOURCE_EXHAUSTED'
+            elif grep -Eiq 'UNAUTHENTICATED|unauthenticated' "$tmp/version.err"; then
+              failure_class='UNAUTHENTICATED'
+            elif grep -Eiq 'NOT_FOUND|not found' "$tmp/version.err"; then
+              failure_class='NOT_FOUND'
+            elif grep -Eiq 'ALREADY_EXISTS|already exists' "$tmp/version.err"; then
+              failure_class='ALREADY_EXISTS'
+            elif grep -Eiq 'INTERNAL|internal error' "$tmp/version.err"; then
+              failure_class='INTERNAL'
+            elif grep -Eiq 'no such file|source path|archive|zip|package' "$tmp/version.err"; then
+              failure_class='SOURCE_PACKAGE_FAILED'
+            elif grep -Eiq 'connection refused|connection reset|i/o timeout|timed out|TLS|no such host|resolve host|transport' "$tmp/version.err"; then
+              failure_class='TRANSPORT_FAILED'
+            fi
+            jq -cn --arg failureClass "$failure_class" \
+              '{status:"FAIL",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED",failureClass:$failureClass}' \
+              >"$evidence_dir/classification.json"
+            rm -f "$tmp/version.err" "$tmp/version.json"
+            echo "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED_${failure_class}"
             exit 1
           fi
+          rm -f "$tmp/version.err"
 
       - name: Re-verify private trigger-free boundary
+        if: ${{ steps.prerequisites.outputs.provider_mode == 'reuse' || steps.provider-deploy.outcome == 'success' }}
         shell: bash
         env:
           DEPLOY_RECOVERY_RUN_ID: ${{ inputs.deploy_recovery_run_id }}
@@ -542,7 +575,7 @@ jobs:
           fi
 
       - name: Re-verify exact current main before controlled rebuild invocation
-        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' }}
+        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' && (steps.prerequisites.outputs.provider_mode == 'reuse' || steps.provider-deploy.outcome == 'success') }}
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
@@ -559,7 +592,7 @@ jobs:
           fi
 
       - name: Start exact controlled rebuild tag asynchronously once
-        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' }}
+        if: ${{ steps.prerequisites.outputs.provider_mode != 'repair' && (steps.prerequisites.outputs.provider_mode == 'reuse' || steps.provider-deploy.outcome == 'success') }}
         id: controlled-invoke
         continue-on-error: true
         shell: bash
@@ -607,7 +640,7 @@ jobs:
           exit "$invoke_status"
 
       - name: Record provider repair-only evidence
-        if: ${{ steps.prerequisites.outputs.provider_mode == 'repair' }}
+        if: ${{ success() && steps.prerequisites.outputs.provider_mode == 'repair' && steps.provider-deploy.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -616,7 +649,7 @@ jobs:
           printf '%s\n' '{"status":"PASS","code":"INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED"}' > "$evidence_dir/classification.json"
 
       - name: Publish enum-only controlled rebuild evidence
-        if: ${{ always() && (steps.prerequisites.outputs.provider_mode == 'repair' || steps.controlled-invoke.outcome == 'success' || steps.controlled-invoke.outcome == 'failure') }}
+        if: ${{ always() && (steps.provider-deploy.outcome == 'failure' || steps.prerequisites.outputs.provider_mode == 'repair' || steps.controlled-invoke.outcome == 'success' || steps.controlled-invoke.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-initial-controlled-rebuild-evidence-${{ github.run_id }}
@@ -633,6 +666,17 @@ jobs:
           set -euo pipefail
           evidence="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence/classification.json"
           test -f "$evidence" || { echo 'INITIAL_CONTROLLED_REBUILD_EVIDENCE_MISSING'; exit 1; }
+          if jq -e '
+            type == "object"
+            and (keys | sort) == ["code","failureClass","status"]
+            and .status == "FAIL"
+            and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED"
+            and (.failureClass | IN("SERVICE_ACCOUNT_NOT_AVAILABLE","PERMISSION_DENIED","INVALID_ARGUMENT","FAILED_PRECONDITION","RESOURCE_EXHAUSTED","UNAUTHENTICATED","NOT_FOUND","ALREADY_EXISTS","INTERNAL","SOURCE_PACKAGE_FAILED","TRANSPORT_FAILED","OTHER"))
+          ' "$evidence" >/dev/null; then
+            failure_class="$(jq -r '.failureClass' "$evidence")"
+            echo "INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED_${failure_class}"
+            exit 1
+          fi
           if [ "$PROVIDER_MODE" = 'repair' ]; then
             jq -e 'type == "object" and (keys | sort) == ["code","status"] and .status == "PASS" and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED"'               "$evidence" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIR_NOT_PROVEN'; exit 1; }
             echo 'INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED_DEPLOY_RECOVERY_REQUIRED'
