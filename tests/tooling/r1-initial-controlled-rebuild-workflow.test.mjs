@@ -30,7 +30,8 @@ test('R1 controlled rebuild binds exact recovery and readiness artifacts before 
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ inputs\.recovery_run_id \}\}/);
   assert.match(workflow, /r1-yandex-readiness-evidence-\$\{\{ inputs\.readiness_run_id \}\}/);
   assert.match(workflow, /\.verdict == "RECOVERY_REQUIRED"/);
-  assert.match(workflow, /\.reason == "STAGING_RUN_PRESENT" or \.reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT"/);
+  assert.match(workflow, /\.reason == "STAGING_RUN_PRESENT" or \.reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT" or \.reason == "VALIDATED_CURRENT_EMPTY_STAGING_EMPTY"/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
   assert.match(workflow, /\.code == "READINESS_READY"/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WRITER_CONFLICT/);
 });

@@ -195,7 +195,7 @@ jobs:
             and .status == "PASS"
             and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
             and .verdict == "RECOVERY_REQUIRED"
-            and (.reason == "STAGING_RUN_PRESENT" or .reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT")
+            and (.reason == "STAGING_RUN_PRESENT" or .reason == "VALIDATED_CURRENT_EMPTY_STAGING_ABSENT" or .reason == "VALIDATED_CURRENT_EMPTY_STAGING_EMPTY")
           ' "$recovery" >/dev/null || { echo 'INITIAL_CONTROLLED_REBUILD_RECOVERY_EVIDENCE_NOT_RESUMABLE'; exit 1; }
           jq -e '
             type == "object"
