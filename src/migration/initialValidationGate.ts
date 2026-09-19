@@ -72,7 +72,7 @@ function allProjectionCountersAreNonNegativeSafeIntegers(
 function evaluateInitialValidationForLifecycle(
   run: MigrationRun,
   projection: Readonly<InitialSnapshotProjection>,
-  reconciliation: Readonly<InitialReconciliationEvidence>,
+  reconciliation: Readonly<InitialReconciliationEvidence> | null,
   allowAlreadyValidated: boolean,
 ): InitialValidationResult {
   const blockers: Readonly<InitialValidationBlocker>[] = [];
@@ -118,18 +118,20 @@ function evaluateInitialValidationForLifecycle(
     blockers.push(blocker('TRANSACTION_COVERAGE_MISMATCH'));
   }
 
-  if (
-    !Number.isSafeInteger(reconciliation.unexplainedHighImpactMismatchCount)
-    || reconciliation.unexplainedHighImpactMismatchCount < 0
-  ) {
-    blockers.push(blocker('INVALID_RECONCILIATION_EVIDENCE'));
-  } else if (reconciliation.unexplainedHighImpactMismatchCount > 0) {
-    blockers.push(blocker('UNEXPLAINED_HIGH_IMPACT_MISMATCH'));
-  }
+  if (reconciliation !== null) {
+    if (
+      !Number.isSafeInteger(reconciliation.unexplainedHighImpactMismatchCount)
+      || reconciliation.unexplainedHighImpactMismatchCount < 0
+    ) {
+      blockers.push(blocker('INVALID_RECONCILIATION_EVIDENCE'));
+    } else if (reconciliation.unexplainedHighImpactMismatchCount > 0) {
+      blockers.push(blocker('UNEXPLAINED_HIGH_IMPACT_MISMATCH'));
+    }
 
-  for (const check of INITIAL_RECONCILIATION_CHECKS) {
-    if (reconciliation.checks[check] !== 'MATCHED') {
-      blockers.push(blocker('RECONCILIATION_CHECK_NOT_MATCHED', check));
+    for (const check of INITIAL_RECONCILIATION_CHECKS) {
+      if (reconciliation.checks[check] !== 'MATCHED') {
+        blockers.push(blocker('RECONCILIATION_CHECK_NOT_MATCHED', check));
+      }
     }
   }
 
@@ -157,4 +159,17 @@ export function evaluateInitialControlledRebuildContinuationValidation(
   reconciliation: Readonly<InitialReconciliationEvidence>,
 ): InitialValidationResult {
   return evaluateInitialValidationForLifecycle(run, projection, reconciliation, true);
+}
+
+export function evaluateValidatedInitialControlledRebuildContinuation(
+  run: MigrationRun,
+  projection: Readonly<InitialSnapshotProjection>,
+): InitialValidationResult {
+  if (run.state !== 'VALIDATED') {
+    return Object.freeze({
+      ok: false as const,
+      blockers: Object.freeze([blocker('RUN_NOT_STAGING')]),
+    });
+  }
+  return evaluateInitialValidationForLifecycle(run, projection, null, true);
 }

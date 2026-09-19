@@ -27,8 +27,10 @@ import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
   evaluateInitialControlledRebuildContinuationValidation,
   evaluateInitialValidation,
+  evaluateValidatedInitialControlledRebuildContinuation,
   type InitialReconciliationEvidence,
   type InitialValidationBlocker,
+  type InitialValidationResult,
 } from './initialValidationGate.js';
 import type { RawPayload } from './rawPayloadDecoder.js';
 import { refineInitialRunCounters } from './initialRunCounterRefinement.js';
@@ -584,18 +586,31 @@ export async function prepareInitialControlledRebuildContinuation(
     lineageCandidate,
     lineageObservations(lineageCandidate, observation),
   );
-  markApplicationPhase(dependencies, 'RECONCILIATION_READ');
-  const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
-    run: durableRun,
-    projection: prepared.projection,
-    lineage,
-  }));
-  markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
-  const validation = evaluateInitialControlledRebuildContinuationValidation(
-    durableRun,
-    prepared.projection,
-    reconciliation,
-  );
+  let validation: InitialValidationResult;
+  if (durableRun.state === 'VALIDATED') {
+    // The durable VALIDATED transition is the proof that full pre-promotion reconciliation
+    // already passed for this exact claimed source snapshot. Resume still re-proves the same
+    // immutable observation/identity binding and all projection/run invariants, but does not
+    // rescan every durable revision payload before each controlled staging attempt.
+    markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
+    validation = evaluateValidatedInitialControlledRebuildContinuation(
+      durableRun,
+      prepared.projection,
+    );
+  } else {
+    markApplicationPhase(dependencies, 'RECONCILIATION_READ');
+    const reconciliation = await dependencies.reconciliation.reconcile(Object.freeze({
+      run: durableRun,
+      projection: prepared.projection,
+      lineage,
+    }));
+    markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
+    validation = evaluateInitialControlledRebuildContinuationValidation(
+      durableRun,
+      prepared.projection,
+      reconciliation,
+    );
+  }
   if (!validation.ok) {
     return Object.freeze({
       status: 'VALIDATION_BLOCKED' as const,

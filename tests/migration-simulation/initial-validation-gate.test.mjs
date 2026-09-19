@@ -4,6 +4,7 @@ import { createMigrationRun } from '../../dist/migration/migrationRunState.js';
 import {
   INITIAL_RECONCILIATION_CHECKS,
   evaluateInitialValidation,
+  evaluateValidatedInitialControlledRebuildContinuation,
 } from '../../dist/migration/initialValidationGate.js';
 
 const RUN_ID = '00000000-0000-0000-0000-000000000971';
@@ -58,6 +59,23 @@ test('honestly classified AMBIGUOUS rows may validate when all reconciliation ch
   assert.equal(result.validatedRun.rowsAmbiguous, 2);
   assert.equal(result.validatedRun.finishedAt, null);
   assert.equal(Object.isFrozen(result.validatedRun), true);
+});
+
+test('durable VALIDATED controlled continuation reuses prior reconciliation proof but rechecks projection invariants', () => {
+  const validatedRun = run({ state: 'VALIDATED' });
+  const ready = evaluateValidatedInitialControlledRebuildContinuation(validatedRun, projection());
+
+  assert.equal(ready.ok, true);
+  assert.equal(ready.validatedRun.state, 'VALIDATED');
+
+  const invalid = evaluateValidatedInitialControlledRebuildContinuation(
+    run({ state: 'VALIDATED', rowsAmbiguous: 1 }),
+    projection({ invalid: 1, ambiguous: 1 }),
+  );
+  assert.equal(blockerCodes(invalid).includes('INVALID_ROWS_PRESENT'), true);
+
+  const notValidated = evaluateValidatedInitialControlledRebuildContinuation(run(), projection());
+  assert.deepEqual(blockerCodes(notValidated), ['RUN_NOT_STAGING']);
 });
 
 test('INVALID rows block validation even when aggregate reconciliation statuses say matched', () => {

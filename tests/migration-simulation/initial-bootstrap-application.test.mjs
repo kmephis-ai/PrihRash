@@ -820,13 +820,23 @@ test('controlled continuation reconstructs one deterministic candidate across ST
   assert.deepEqual(resumeIds.calls, []);
 
   db.state.migrationRuns.get(RUN_ID).state = 'VALIDATED';
+  const validatedPhases = [];
   const validated = await prepareInitialControlledRebuildContinuation(
     largeObservation,
-    dependencies(db, resumeIds, clock()),
+    dependencies(db, resumeIds, clock(), {
+      reconciliation: Object.freeze({
+        async reconcile() {
+          throw new Error('durable VALIDATED continuation must not repeat full reconciliation');
+        },
+      }),
+      observePhase: (phase) => validatedPhases.push(phase),
+    }),
   );
   assert.equal(validated.status, 'READY');
   assert.equal(validated.durableRun.state, 'VALIDATED');
   assert.equal(validated.validatedRun.state, 'VALIDATED');
+  assert.equal(validatedPhases.includes('RECONCILIATION_READ'), false);
+  assert.equal(validatedPhases.includes('VALIDATION_EVALUATION'), true);
   const validatedCreatedAt = validated.currentWrites
     .filter((write) => write.role === 'TRANSACTION')
     .map((write) => write.statement.parameters.created_at?.value);
