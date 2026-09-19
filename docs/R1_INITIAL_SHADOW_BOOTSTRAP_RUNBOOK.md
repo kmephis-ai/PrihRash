@@ -412,10 +412,10 @@ Function должна быть:
 - `functions.editor` только на `prihrash-r1-initial-bootstrap` Function;
 - `functions.functionInvoker` только на эту Function;
 - `iam.serviceAccounts.user` только на exact runtime SA `prihrash-initial-bootstrap`, необходимый deployment WIF для attachment этого SA к Function version и для WU7 async-конфигурации, где тот же runtime SA является `asyncInvocationConfig.serviceAccountId`;
-- WU7 target contract **не** использует `prihrash-github-initial-bootstrap` как async service account и не требует WIF self-binding; runtime/async SA `prihrash-initial-bootstrap` получает только на exact Function `prihrash-r1-initial-bootstrap` роли `functions.functionInvoker` и `functions.viewer`, как описано в `docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md`.
+- WU7 target contract **не** использует `prihrash-github-initial-bootstrap` как async service account и не требует WIF self-binding; обязательный async transport grant для runtime/async SA `prihrash-initial-bootstrap` — `functions.functionInvoker` только на exact Function `prihrash-r1-initial-bootstrap`. Уже выданный exact-Function `functions.viewer` не является repair prerequisite для WU7 и сохраняется только до отдельного least-privilege retirement decision; см. `docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md`.
 - `lockbox.viewer` только на dedicated bootstrap secret для lookup metadata/current version.
 
-Folder-scoped `functions.auditor` — единственное намеренное расширение metadata visibility за пределы dedicated Function: Yandex Cloud trigger-list API перечисляет triggers на уровне folder, а workflow fail-closed фильтрует этот список по exact Function ID. Exact-Function `functions.viewer` для runtime/async SA остаётся внутри dedicated Function boundary. Не поднимать `functions.viewer`, `functions.editor`, primitive `viewer`/`auditor` или более широкую authority на folder/cloud.
+Folder-scoped `functions.auditor` — единственное намеренное расширение metadata visibility за пределы dedicated Function: Yandex Cloud trigger-list API перечисляет triggers на уровне folder, а workflow fail-closed фильтрует этот список по exact Function ID. Уже существующий exact-Function `functions.viewer` для runtime/async SA не расширять на folder/cloud и не использовать как основание для нового IAM widening. Не поднимать `functions.viewer`, `functions.editor`, primitive `viewer`/`auditor` или более широкую authority на folder/cloud.
 
 WIF credential/binding должен принимать только canonical GitHub identity:
 

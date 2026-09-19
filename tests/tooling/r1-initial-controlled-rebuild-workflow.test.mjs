@@ -46,9 +46,8 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_WIF_INVOKER_BINDING_MISSING/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
-  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
-  assert.match(workflow, /functions\.viewer/);
+  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
+  assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING/);
   assert.match(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
   assert.match(workflow, /--no-logging/);
@@ -105,6 +104,12 @@ test('provider deploy failure is preserved as privacy-safe enum evidence without
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED/);
   assert.match(workflow, /SERVICE_ACCOUNT_NOT_AVAILABLE/);
   assert.match(workflow, /PERMISSION_DENIED/);
+  assert.match(workflow, /permissionBoundary/);
+  assert.match(workflow, /WIF_SERVICE_ACCOUNT_RESOURCE/);
+  assert.match(workflow, /RUNTIME_ASYNC_SERVICE_ACCOUNT_RESOURCE/);
+  assert.match(workflow, /FUNCTION_RESOURCE/);
+  assert.match(workflow, /ACCESS_POLICY/);
+  assert.match(workflow, /UNRESOLVED/);
   assert.match(workflow, /INVALID_ARGUMENT/);
   assert.match(workflow, /SOURCE_PACKAGE_FAILED/);
   assert.match(workflow, /TRANSPORT_FAILED/);
@@ -148,5 +153,6 @@ test('controlled rebuild runbook preserves authority and forbids silent cap/repl
   assert.match(runbook, /INITIAL_CONTROLLED_REBUILD_COMMITTED/);
   assert.match(runbook, /runtime\/async account `prihrash-initial-bootstrap`/);
   assert.match(runbook, /no longer requires a WIF self-binding/);
-  assert.match(runbook, /functions\.functionInvoker.*functions\.viewer/);
+  assert.match(runbook, /core Cloud Functions async-invocation contract requires the async service account to invoke the Function/);
+  assert.match(runbook, /viewer binding is retained as live provider state but is not a WU7 repair prerequisite/);
 });
