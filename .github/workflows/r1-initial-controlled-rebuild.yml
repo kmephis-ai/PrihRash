@@ -476,7 +476,6 @@ jobs:
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-controlled-rebuild \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
-            --no-logging \
             --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
@@ -625,6 +624,7 @@ jobs:
           evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence"
           candidate="$evidence_dir/classification.tmp"
           mkdir -p "$evidence_dir"
+          date -u +%Y-%m-%dT%H:%M:%SZ > "$evidence_dir/phase-since.txt"
 
           set +e
           npm run initial-controlled-rebuild:invoke | tee "$tmp"
@@ -664,6 +664,61 @@ jobs:
           mv "$candidate" "$evidence_dir/classification.json"
           rm -f "$tmp"
           exit "$invoke_status"
+
+      - name: Classify enum-only controlled runtime phase
+        if: ${{ always() && steps.controlled-invoke.outcome == 'failure' }}
+        id: controlled-phase
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/r1-initial-controlled-rebuild-phase"
+          phase_evidence="$evidence_dir/classification.json"
+          raw_logs="$RUNNER_TEMP/r1-initial-controlled-rebuild-provider-logs.raw"
+          since_file="$RUNNER_TEMP/r1-initial-controlled-rebuild-evidence/phase-since.txt"
+          mkdir -p "$evidence_dir"
+
+          if [ ! -s "$since_file" ]; then
+            printf '%s\n' '{"status":"UNKNOWN","code":"INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE","reason":"SINCE_MARKER_MISSING"}' > "$phase_evidence"
+            cat "$phase_evidence"
+            exit 0
+          fi
+
+          set +e
+          yc serverless function logs "$PRIHRASH_YC_FUNCTION_ID" \
+            --tag r1-initial-controlled-rebuild \
+            --since "$(cat "$since_file")" \
+            --limit 2000 > "$raw_logs" 2>/dev/null
+          logs_status="$?"
+          set -e
+
+          if [ "$logs_status" -ne 0 ]; then
+            rm -f "$raw_logs"
+            printf '%s\n' '{"status":"UNKNOWN","code":"INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE","reason":"LOG_READ_FAILED"}' > "$phase_evidence"
+            cat "$phase_evidence"
+            exit 0
+          fi
+
+          last_phase="$(grep -oE 'R1_CONTROLLED_PHASE:[A-Z_]+' "$raw_logs" | tail -n 1 | cut -d: -f2 || true)"
+          rm -f "$raw_logs"
+          case "$last_phase" in
+            YDB_CLIENT_CREATE_START|YDB_CLIENT_READY|SOURCE_READ_START|SOURCE_READ_DONE|SCHEME_CLIENT_CREATE_START|SCHEME_CLIENT_READY|REFERENCE_READ_START|REFERENCE_READ_DONE|APPLICATION_START|APPLICATION_DONE|POST_COMMIT_RECONCILIATION_START|POST_COMMIT_RECONCILIATION_DONE|YDB_CLIENT_CLOSE_START|YDB_CLIENT_CLOSE_DONE|BOOTSTRAP_ADMISSION_READ|BOOTSTRAP_CURRENT_STATE_PREFLIGHT|BOOTSTRAP_FRESH_CONTEXT_PREPARATION|BOOTSTRAP_FRESH_METADATA_PREPARATION|BOOTSTRAP_FRESH_CLAIM_WRITE|BOOTSTRAP_RESUME_CONTEXT_READ|BOOTSTRAP_RESUME_CONTEXT_PREPARATION|BOOTSTRAP_REVISION_EVIDENCE_PREPARATION|BOOTSTRAP_REVISION_EVIDENCE_WRITE|BOOTSTRAP_LINEAGE_PREPARATION|BOOTSTRAP_COUNTER_REFINEMENT_PREPARATION|BOOTSTRAP_COUNTER_REFINEMENT_WRITE|BOOTSTRAP_RECONCILIATION_READ|BOOTSTRAP_VALIDATION_EVALUATION|BOOTSTRAP_CURRENT_PLAN_PREPARATION|BOOTSTRAP_CURRENT_WRITE_PREPARATION|BOOTSTRAP_PRE_PROMOTION_PREFLIGHT|BOOTSTRAP_VALIDATION_WRITE_PREPARATION|BOOTSTRAP_VALIDATION_TRANSITION_WRITE|BOOTSTRAP_PROMOTION_WRITE|CONTROLLED_PREPARATION|CONTROLLED_VALIDATION_TRANSITION|CONTROLLED_SETUP_EVIDENCE|CONTROLLED_SETUP_MUTATION|CONTROLLED_STAGING_MATERIALIZATION|CONTROLLED_STAGING_RECONCILIATION|CONTROLLED_SWAP_DISCRIMINATION|CONTROLLED_SWAP_MUTATION|CONTROLLED_POST_SWAP_VERIFICATION|CONTROLLED_COMMIT_MARKER|CONTROLLED_POST_COMMIT_VERIFICATION)
+              jq -cn --arg phase "$last_phase" '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PHASE_CLASSIFIED",lastPhase:$phase}' > "$phase_evidence"
+              ;;
+            *)
+              printf '%s\n' '{"status":"UNKNOWN","code":"INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE","reason":"MARKER_MISSING"}' > "$phase_evidence"
+              ;;
+          esac
+          cat "$phase_evidence"
+
+      - name: Publish enum-only controlled runtime phase evidence
+        if: ${{ always() && steps.controlled-invoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-controlled-rebuild-phase-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-controlled-rebuild-phase/classification.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Publish enum-only controlled rebuild evidence
         if: ${{ always() && (steps.provider-deploy.outcome == 'failure' || steps.controlled-invoke.outcome == 'success' || steps.controlled-invoke.outcome == 'failure') }}
