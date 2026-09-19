@@ -1,5 +1,7 @@
 import {
   assessAtomicPromotionWrites,
+  COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES,
+  PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT,
   type PromotionWrite,
 } from './atomicPromotion.js';
 import type { PreparedInitialVerifiedCurrentWrite } from './initialVerifiedCurrentPersistence.js';
@@ -69,35 +71,38 @@ function chunkStagingWrites(
 ): readonly Readonly<ControlledInitialRebuildBatch>[] {
   const batches: Readonly<ControlledInitialRebuildBatch>[] = [];
   let current: Readonly<PreparedInitialVerifiedCurrentWrite>[] = [];
+  let currentEstimatedParameterBytes = COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES;
 
   const flush = (): void => {
     if (current.length === 0) return;
-    const assessment = assessAtomicPromotionWrites(current.map(toPromotionWrite));
-    if (!assessment.eligible) {
-      throw new ControlledInitialRebuildError('STAGING_WRITE_TOO_LARGE');
-    }
     batches.push(Object.freeze({
       index: batches.length,
       writes: Object.freeze([...current]),
-      estimatedParameterBytes: assessment.totalEstimatedParameterBytes,
+      estimatedParameterBytes: currentEstimatedParameterBytes,
     }));
     current = [];
+    currentEstimatedParameterBytes = COMMIT_MARKER_ESTIMATED_PARAMETER_BYTES;
   };
 
   for (const write of writes) {
+    // Validate every write exactly once. Once a single write has passed the query/parameter
+    // guards, candidate eligibility depends only on the cumulative parameter envelope; rescanning
+    // the whole growing batch is redundant and made planning superlinear before the first write.
     const singleAssessment = assessAtomicPromotionWrites([toPromotionWrite(write)]);
     if (!singleAssessment.eligible) {
       throw new ControlledInitialRebuildError('STAGING_WRITE_TOO_LARGE');
     }
 
-    const candidate = [...current, write];
-    const candidateAssessment = assessAtomicPromotionWrites(candidate.map(toPromotionWrite));
-    if (!candidateAssessment.eligible) {
+    const candidateEstimatedParameterBytes = currentEstimatedParameterBytes + write.estimatedParameterBytes;
+    if (
+      current.length > 0
+      && candidateEstimatedParameterBytes > PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT
+    ) {
       flush();
-      current = [write];
-    } else {
-      current = candidate;
     }
+
+    current.push(write);
+    currentEstimatedParameterBytes += write.estimatedParameterBytes;
   }
   flush();
 
