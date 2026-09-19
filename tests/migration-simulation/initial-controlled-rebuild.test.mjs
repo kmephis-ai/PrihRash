@@ -73,6 +73,22 @@ test('plans bounded staging batches and one atomic two-table replacement for ini
   assert.equal(Object.isFrozen(plan.batches), true);
 });
 
+test('plans a large bounded staging set without rescanning the growing batch', () => {
+  const writes = Object.freeze(Array.from({ length: 5_000 }, (_, index) =>
+    prepared('SOURCE_RECORD', `synthetic-source-${index}`, 128)));
+
+  const startedAt = performance.now();
+  const plan = planControlledInitialRebuild(validatedRun(), writes, null);
+  const elapsedMs = performance.now() - startedAt;
+
+  assert.deepEqual(plan.batches.map((batch) => batch.writes.length), [4092, 908]);
+  assert.equal(plan.batches.every((batch) => batch.estimatedParameterBytes <= 512 * 1024), true);
+  assert.ok(
+    elapsedMs < 2_500,
+    `controlled staging batch planning must stay linear; elapsed=${Math.round(elapsedMs)}ms`,
+  );
+});
+
 test('fails closed when a previous verified shadow exists', () => {
   assert.throws(
     () => planControlledInitialRebuild(
