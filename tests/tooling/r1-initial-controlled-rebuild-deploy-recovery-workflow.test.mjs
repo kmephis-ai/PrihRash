@@ -29,6 +29,12 @@ test('deploy recovery binds exact failed pre-invoke deploy or postflight proof m
   assert.match(workflow, /select\(\.name == "Deploy initial-controlled-rebuild-only Function version" and \.conclusion == "failure"\)/);
   assert.match(workflow, /select\(\.name == "Deploy initial-controlled-rebuild-only Function version" and \(\.conclusion == "success" or \.conclusion == "skipped"\)\)/);
   assert.match(workflow, /select\(\.name == "Re-verify private trigger-free boundary" and \.conclusion == "failure"\)/);
+  assert.match(workflow, /r1-initial-controlled-rebuild-evidence-\$\{FAILED_RUN_ID\}/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED/);
+  assert.match(workflow, /provider_deploy_failure_proven/);
+  assert.match(workflow, /Publish enum-only controlled rebuild evidence/);
+  assert.match(workflow, /Require exact bounded provider result/);
+  assert.match(workflow, /FAILED_EVIDENCE_AMBIGUOUS/);
   assert.match(workflow, /Start exact controlled rebuild tag asynchronously once/);
   assert.match(workflow, /select\(\.name == "Start exact controlled rebuild tag asynchronously once" and \.conclusion == "skipped"\)/);
   assert.match(workflow, /FAILED_RUN_SHA: \$\{\{ inputs\.failed_run_sha \}\}/);
