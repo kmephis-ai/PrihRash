@@ -262,7 +262,6 @@ export async function executeControlledRebuildStagingBatches(
     if (!assessment.eligible) {
       throw new ControlledRebuildStagingExecutorError('STAGING_BATCH_NOT_ATOMIC_ELIGIBLE');
     }
-
     const statements = buildBulkBatchStatements(batch.writes);
 
     await adapter.serializableReadWrite(async (transaction) => {
