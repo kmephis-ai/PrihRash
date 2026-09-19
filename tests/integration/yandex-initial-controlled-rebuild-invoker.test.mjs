@@ -19,6 +19,7 @@ async function runInvoker({
   functionId = true,
   token = true,
   invokeMode = 'sync',
+  functionError = false,
 } = {}) {
   const env = {
     PATH: process.env.PATH,
@@ -30,7 +31,7 @@ async function runInvoker({
     PRIHRASH_TEST_FETCH_BODY: body,
     PRIHRASH_TEST_FETCH_STATUS: String(status),
     PRIHRASH_TEST_FETCH_MODE: mode,
-    PRIHRASH_TEST_FUNCTION_ERROR: 'false',
+    PRIHRASH_TEST_FUNCTION_ERROR: functionError ? 'true' : 'false',
     ...(functionId ? { PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID: FUNCTION_ID } : {}),
     ...(token ? { YC_IAM_TOKEN: 'synthetic-short-lived-iam-token' } : {}),
     PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE: invokeMode,
@@ -132,5 +133,23 @@ test('controlled rebuild invoker bounds transport and config failures', async ()
 
   const http = await runInvoker({ status: 503, body: PRIVATE_LOOKING });
   assert.equal(http.exitCode, 2);
-  assertSafe(http, { status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_HTTP_FAILED', httpStatus: 'HTTP_503' });
+  assertSafe(http, {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_HTTP_FAILED',
+    httpStatus: 'HTTP_503',
+    functionError: 'ABSENT',
+  });
+
+  const functionError = await runInvoker({
+    status: 502,
+    body: PRIVATE_LOOKING,
+    functionError: true,
+  });
+  assert.equal(functionError.exitCode, 2);
+  assertSafe(functionError, {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_HTTP_FAILED',
+    httpStatus: 'HTTP_502',
+    functionError: 'PRESENT',
+  });
 });
