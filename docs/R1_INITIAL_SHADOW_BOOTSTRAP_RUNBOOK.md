@@ -412,6 +412,7 @@ Function должна быть:
 - `functions.editor` только на `prihrash-r1-initial-bootstrap` Function;
 - `functions.functionInvoker` только на эту Function;
 - `iam.serviceAccounts.user` только в объёме, необходимом для attachment `prihrash-initial-bootstrap` к Function version;
+- это разрешение относится к runtime SA `prihrash-initial-bootstrap` и **не** означает право `prihrash-github-initial-bootstrap` использовать самого себя. Если WU7 controlled rebuild выбирает deployment WIF SA как `asyncInvocationConfig.serviceAccountId`, нужен отдельный exact-resource self-binding `iam.serviceAccounts.user` на `prihrash-github-initial-bootstrap`; см. `docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md`.
 - `lockbox.viewer` только на dedicated bootstrap secret для lookup metadata/current version.
 
 Folder-scoped `functions.auditor` — единственное намеренное расширение metadata visibility за пределы dedicated Function: Yandex Cloud trigger-list API перечисляет triggers на уровне folder, а workflow fail-closed фильтрует этот список по exact Function ID. Не заменять эту роль на `functions.viewer`, `functions.editor`, primitive `viewer`/`auditor` или более широкую folder/cloud authority.
