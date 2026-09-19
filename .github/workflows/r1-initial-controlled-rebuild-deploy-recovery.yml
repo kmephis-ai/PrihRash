@@ -37,6 +37,7 @@ jobs:
     timeout-minutes: 15
     env:
       FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       TARGET_TAG: r1-initial-controlled-rebuild
       TARGET_RUNTIME: nodejs22
       TARGET_ENTRYPOINT: index.initialControlledRebuildHandler
@@ -68,6 +69,7 @@ jobs:
           test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA"
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test -n "$RUNTIME_SERVICE_ACCOUNT_NAME"
           [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_AUTHORITY_ISSUE_INVALID'; exit 1; }
           [[ "$FAILED_RUN_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_SHA_INVALID'; exit 1; }
           [[ "$FAILED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_RUN_ID_INVALID'; exit 1; }
@@ -268,9 +270,15 @@ jobs:
           tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-provider"
           mkdir -p "$evidence_dir" "$tmp"
 
-          if ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
+          if ! yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+              --format json --retry 0 --no-user-output >"$tmp/runtime-sa.json" 2>"$tmp/runtime-sa.err"; then
+            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"ASYNC_RUNTIME_SA_READ_FAILED"}' >"$candidate"
+          elif ! runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/runtime-sa.json" 2>/dev/null)"; then
+            jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"ASYNC_RUNTIME_SA_METADATA_INVALID"}' >"$candidate"
+          elif ! yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err"; then
             jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"FUNCTION_READ_FAILED"}' >"$candidate"
           else
+            echo "::add-mask::${runtime_sa_id}"
             function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
             echo "::add-mask::${function_id}"
             if ! yc serverless function version list --function-id "$function_id" --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err"; then
@@ -285,7 +293,7 @@ jobs:
                   if ! yc serverless function version get-by-tag --function-id "$function_id" --tag "$TARGET_TAG"                     --format json-rest --retry 0 --no-user-output >"$tmp/tag.json" 2>"$tmp/tag.err"; then
                     jq -cn '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED",verdict:"RECOVERY_REQUIRED",reason:"TAG_READ_FAILED"}' >"$candidate"
                   else
-                    metadata_reason="$(jq -r                       --arg runtime "$TARGET_RUNTIME"                       --arg entrypoint "$TARGET_ENTRYPOINT"                       --arg async_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+                    metadata_reason="$(jq -r                       --arg runtime "$TARGET_RUNTIME"                       --arg entrypoint "$TARGET_ENTRYPOINT"                       --arg async_sa "$runtime_sa_id" '
                       if (.runtime != $runtime or .entrypoint != $entrypoint or .status != "ACTIVE") then
                         "TAG_METADATA_NOT_EXACT_ACTIVE"
                       elif ((.asyncInvocationConfig | type) != "object") then
@@ -322,7 +330,7 @@ jobs:
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_CLASSIFIED"
             and (.verdict | IN("APPLIED","NOT_APPLIED","RECOVERY_REQUIRED"))
-            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_READ_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_ASYNC_CONFIG_MISSING","TAG_ASYNC_RETRIES_NOT_ZERO","TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT","TAG_ASYNC_SUCCESS_TARGET_PRESENT","TAG_ASYNC_FAILURE_TARGET_PRESENT","TAG_MATCH_AMBIGUOUS"))
+            and (.reason | IN("EXACT_ACTIVE_TAG","TAG_ABSENT","ASYNC_RUNTIME_SA_READ_FAILED","ASYNC_RUNTIME_SA_METADATA_INVALID","FUNCTION_READ_FAILED","VERSION_LIST_FAILED","TAG_READ_FAILED","TAG_METADATA_NOT_EXACT_ACTIVE","TAG_ASYNC_CONFIG_MISSING","TAG_ASYNC_RETRIES_NOT_ZERO","TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT","TAG_ASYNC_SUCCESS_TARGET_PRESENT","TAG_ASYNC_FAILURE_TARGET_PRESENT","TAG_MATCH_AMBIGUOUS"))
           ' "$candidate" >/dev/null
           mv "$candidate" "$evidence"
           cat "$evidence"
@@ -339,9 +347,16 @@ jobs:
           gate_tmp="$RUNNER_TEMP/r1-initial-controlled-rebuild-deploy-recovery-gates"
           mkdir -p "$evidence_dir" "$provider_tmp"
 
-          function_invoker='READ_FAILED'
-          self_use='READ_FAILED'
+          caller_invoker='READ_FAILED'
+          async_invoker='READ_FAILED'
           create_operation='READ_FAILED'
+          runtime_sa_id=''
+
+          if yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+              --format json --retry 0 --no-user-output >"$provider_tmp/runtime-sa.json" 2>"$provider_tmp/runtime-sa.err"; then
+            runtime_sa_id="$(jq -r '.id // empty' "$provider_tmp/runtime-sa.json")"
+            [ -z "$runtime_sa_id" ] || echo "::add-mask::${runtime_sa_id}"
+          fi
 
           if yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
               --format json --retry 0 --no-user-output >"$provider_tmp/function.json" 2>"$provider_tmp/function.err"; then
@@ -350,12 +365,20 @@ jobs:
               echo "::add-mask::${function_id}"
               if yc serverless function list-access-bindings --id "$function_id" \
                   --format json --retry 0 --no-user-output >"$provider_tmp/function-bindings.json" 2>"$provider_tmp/function-bindings.err"; then
-                invoker_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "functions.functionInvoker" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
-                case "$invoker_count" in
-                  1) function_invoker='PROVEN' ;;
-                  0) function_invoker='MISSING' ;;
-                  *) function_invoker='AMBIGUOUS' ;;
+                caller_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "functions.functionInvoker" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
+                case "$caller_count" in
+                  1) caller_invoker='PROVEN' ;;
+                  0) caller_invoker='MISSING' ;;
+                  *) caller_invoker='AMBIGUOUS' ;;
                 esac
+                if [ -n "$runtime_sa_id" ]; then
+                  async_count="$(jq --arg id "$runtime_sa_id" '[.[]? | select((.role_id // .roleId // "") == "functions.functionInvoker" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/function-bindings.json")"
+                  case "$async_count" in
+                    1) async_invoker='PROVEN' ;;
+                    0) async_invoker='MISSING' ;;
+                    *) async_invoker='AMBIGUOUS' ;;
+                  esac
+                fi
               fi
 
               if yc serverless function list-operations --id "$function_id" --limit 50 \
@@ -411,32 +434,20 @@ jobs:
             fi
           fi
 
-          if yc iam service-account list-access-bindings --id "$YC_WIF_SERVICE_ACCOUNT_ID" \
-              --format json --retry 0 --no-user-output >"$provider_tmp/self-bindings.json" 2>"$provider_tmp/self-bindings.err"; then
-            self_count="$(jq --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]? | select((.role_id // .roleId // "") == "iam.serviceAccounts.user" and (.subject.id // "") == $id and (.subject.type // "serviceAccount") == "serviceAccount")] | length' "$provider_tmp/self-bindings.json")"
-            case "$self_count" in
-              1) self_use='PROVEN' ;;
-              0) self_use='MISSING' ;;
-              *) self_use='AMBIGUOUS' ;;
-            esac
-          else
-            self_use='NOT_READABLE'
-          fi
-
           jq -cn \
-            --arg functionInvoker "$function_invoker" \
-            --arg selfUse "$self_use" \
+            --arg callerInvoker "$caller_invoker" \
+            --arg asyncInvoker "$async_invoker" \
             --arg createOperation "$create_operation" \
-            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",functionInvoker:$functionInvoker,selfUse:$selfUse,createOperation:$createOperation}' \
+            '{status:"PASS",code:"INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC",callerInvoker:$callerInvoker,asyncInvoker:$asyncInvoker,createOperation:$createOperation}' \
             >"$diagnostic"
 
           jq -e '
             type == "object"
-            and (keys | sort) == ["code","createOperation","functionInvoker","selfUse","status"]
+            and (keys | sort) == ["asyncInvoker","callerInvoker","code","createOperation","status"]
             and .status == "PASS"
             and .code == "INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC"
-            and (.functionInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
-            and (.selfUse | IN("PROVEN","MISSING","AMBIGUOUS","NOT_READABLE","READ_FAILED"))
+            and (.callerInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
+            and (.asyncInvoker | IN("PROVEN","MISSING","AMBIGUOUS","READ_FAILED"))
             and (.createOperation | IN("NO_MATCHING_OPERATION","INVALID_ARGUMENT","NOT_FOUND","ALREADY_EXISTS","PERMISSION_DENIED","RESOURCE_EXHAUSTED","FAILED_PRECONDITION","INTERNAL","UNAVAILABLE","UNAUTHENTICATED","OTHER_ERROR","IN_PROGRESS","SUCCEEDED","COMPLETED_UNKNOWN","AMBIGUOUS","READ_FAILED"))
           ' "$diagnostic" >/dev/null
           cat "$diagnostic"

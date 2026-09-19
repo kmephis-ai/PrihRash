@@ -51,6 +51,8 @@ test('deploy recovery classifies only provider metadata and cannot create or inv
   assert.match(workflow, /--format json-rest/);
   assert.match(workflow, /asyncInvocationConfig\.retriesCount/);
   assert.match(workflow, /asyncInvocationConfig\.serviceAccountId/);
+  assert.match(workflow, /--arg async_sa "\$runtime_sa_id"/);
+  assert.doesNotMatch(workflow, /--arg async_sa "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
   assert.match(workflow, /successTarget\.ymqTarget/);
   assert.match(workflow, /failureTarget\.ymqTarget/);
   assert.match(workflow, /r1-initial-controlled-rebuild/);
@@ -72,6 +74,8 @@ test('deploy recovery emits enum-only APPLIED, NOT_APPLIED or RECOVERY_REQUIRED 
   assert.match(workflow, /TAG_READ_FAILED/);
   assert.match(workflow, /TAG_METADATA_NOT_EXACT_ACTIVE/);
   assert.match(workflow, /TAG_ASYNC_CONFIG_MISSING/);
+  assert.match(workflow, /ASYNC_RUNTIME_SA_READ_FAILED/);
+  assert.match(workflow, /ASYNC_RUNTIME_SA_METADATA_INVALID/);
   assert.match(workflow, /TAG_ASYNC_RETRIES_NOT_ZERO/);
   assert.match(workflow, /TAG_ASYNC_SERVICE_ACCOUNT_NOT_EXACT/);
   assert.match(workflow, /TAG_ASYNC_SUCCESS_TARGET_PRESENT/);
@@ -86,14 +90,16 @@ test('deploy recovery diagnoses failed provider create read-only without exposin
   assert.match(workflow, /Classify provider prerequisites and failed create operation read-only/);
   assert.match(workflow, /serverless function list-operations --id/);
   assert.match(workflow, /serverless function list-access-bindings --id/);
-  assert.match(workflow, /iam service-account list-access-bindings --id/);
+  assert.match(workflow, /iam service-account get --name "\$RUNTIME_SERVICE_ACCOUNT_NAME"/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_DIAGNOSTIC/);
   assert.match(workflow, /PERMISSION_DENIED/);
   assert.match(workflow, /INVALID_ARGUMENT/);
   assert.match(workflow, /NO_MATCHING_OPERATION/);
-  assert.match(workflow, /functionInvoker/);
-  assert.match(workflow, /selfUse/);
+  assert.match(workflow, /callerInvoker/);
+  assert.match(workflow, /asyncInvoker/);
   assert.match(workflow, /createOperation/);
+  assert.doesNotMatch(workflow, /selfUse/);
+  assert.doesNotMatch(workflow, /iam service-account list-access-bindings --id/);
   assert.doesNotMatch(workflow, /cat \"\$provider_tmp\/.*\.err\"/);
   assert.doesNotMatch(workflow, /serverless function version create/);
   assert.doesNotMatch(workflow, /serverless function invoke/);
