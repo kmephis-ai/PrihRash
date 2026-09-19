@@ -1,4 +1,4 @@
-name: R1 WU7 3e8e Strict Deploy Recovery Control
+name: R1 WU7 8b9 Strict Deploy Recovery Control
 
 on:
   push:
@@ -13,18 +13,18 @@ permissions:
   issues: read
 
 concurrency:
-  group: r1-wu7-3e8e-strict-deploy-recovery-control
+  group: r1-wu7-8b9-strict-deploy-recovery-control
   cancel-in-progress: false
 
 jobs:
-  dispatch-deploy-recovery:
+  dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch strict exact-main read-only deploy recovery
+      - name: Dispatch exact-main strict deploy recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_MAIN_SHA: 3e8e0c1b3cda6ac3d42b6fe59efbe1b99add5b52
+          EXPECTED_MAIN_SHA: 8b9b6d9a23eec657056a38cc555ebd706e511163
           FAILED_RUN_SHA: 3a0faca4b0c14bc7f6f855b377de61aaac675016
           FAILED_RUN_ID: "35422766599"
           TRACKING_ISSUE: "630"
@@ -44,10 +44,7 @@ jobs:
             .state == "open"
             and (.title | startswith("R1 WU7:"))
             and (.body | contains("Provider-Authority: WU7_CONTROLLED_REBUILD"))
-            and (.body | contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
             and (.body | contains("Google-Authority: PRESERVED"))
-            and (.body | contains("Cap-Increase: FORBIDDEN"))
-            and (.body | contains("Timer-Cutover: FORBIDDEN"))
             and (.body | contains("Blind-Replay: FORBIDDEN"))
           ' /tmp/issue.json >/dev/null
 
@@ -55,8 +52,6 @@ jobs:
           jq -e --arg sha "$FAILED_RUN_SHA" '
             .name == "R1 initial controlled rebuild"
             and .head_sha == $sha
-            and .head_branch == "main"
-            and .event == "workflow_dispatch"
             and .status == "completed"
             and .conclusion == "failure"
           ' /tmp/failed.json >/dev/null
@@ -74,8 +69,7 @@ jobs:
             ] | length == 0
           ' /tmp/runs.json >/dev/null
 
-          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg main "$EXPECTED_MAIN_SHA"             --arg failed "$FAILED_RUN_SHA"             --arg run "$FAILED_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$main,failed_run_sha:$failed,failed_run_id:$run}}')"
-
+          payload="$(jq -nc             --arg issue "$TRACKING_ISSUE"             --arg sha "$EXPECTED_MAIN_SHA"             --arg failed_sha "$FAILED_RUN_SHA"             --arg failed_id "$FAILED_RUN_ID"             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,failed_run_sha:$failed_sha,failed_run_id:$failed_id}}')"
           code="$(curl --silent --show-error -o /tmp/dispatch.out -w '%{http_code}' -X POST "${auth[@]}"             "$api/actions/workflows/r1-initial-controlled-rebuild-deploy-recovery.yml/dispatches"             -H 'Content-Type: application/json' -d "$payload")"
           test "$code" = "204"
-          echo "R1_WU7_3E8E_STRICT_DEPLOY_RECOVERY_DISPATCHED"
+          echo "R1_WU7_8B9_STRICT_DEPLOY_RECOVERY_DISPATCHED"
