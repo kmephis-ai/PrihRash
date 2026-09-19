@@ -470,7 +470,7 @@ jobs:
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
             --entrypoint index.initialControlledRebuildHandler \
-            --memory 256m \
+            --memory 1g \
             --execution-timeout 600s \
             --source-path .artifacts/yandex-initial-controlled-rebuild-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
