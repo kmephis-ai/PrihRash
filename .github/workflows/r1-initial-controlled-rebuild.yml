@@ -406,6 +406,12 @@ jobs:
             echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
             exit 1
           fi
+          if ! jq -e --arg expected "$runtime_sa_id" \
+            '[.[]? | select((.role_id // .roleId) == "functions.viewer") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_VIEWER_BINDING_MISSING'
+            exit 1
+          fi
 
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           if ! secret_http="$(curl --silent --show-error \
@@ -560,6 +566,12 @@ jobs:
             '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
             "$tmp/bindings.json" >/dev/null; then
             echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+          if ! jq -e --arg expected "$PRIHRASH_ASYNC_INVOKER_SA_ID" \
+            '[.[]? | select((.role_id // .roleId) == "functions.viewer") | .subject] | map(select(.type == "serviceAccount" and .id == $expected)) | length == 1' \
+            "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_CONTROLLED_REBUILD_POSTFLIGHT_ASYNC_RUNTIME_VIEWER_BINDING_MISSING'
             exit 1
           fi
 
