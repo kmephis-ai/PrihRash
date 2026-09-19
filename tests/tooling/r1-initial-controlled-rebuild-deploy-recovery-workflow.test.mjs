@@ -98,6 +98,8 @@ test('deploy recovery diagnoses failed provider create read-only without exposin
   assert.match(workflow, /INVALID_ARGUMENT/);
   assert.match(workflow, /NO_MATCHING_OPERATION/);
   assert.match(workflow, /callerInvoker/);
+  assert.match(workflow, /callerEditor/);
+  assert.match(workflow, /functions\.editor/);
   assert.match(workflow, /asyncInvoker/);
   assert.match(workflow, /asyncViewer/);
   assert.match(workflow, /functions\.viewer/);
