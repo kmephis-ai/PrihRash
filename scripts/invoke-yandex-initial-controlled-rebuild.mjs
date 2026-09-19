@@ -154,12 +154,16 @@ async function readLimitedUtf8(response) {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { return null; }
 }
 function isTimeout(error) { return error !== null && typeof error === 'object' && Reflect.get(error, 'name') === 'TimeoutError'; }
-function safeHttpFailure(response) {
-  return Object.freeze({
+function safeHttpFailure(response, includeFunctionError = false) {
+  const result = {
     status: 'FAIL',
     code: 'INITIAL_CONTROLLED_REBUILD_HTTP_FAILED',
     httpStatus: SAFE_HTTP_STATUS.get(response.status) ?? 'HTTP_OTHER',
-  });
+  };
+  if (includeFunctionError) {
+    result.functionError = response.headers.has('x-function-error') ? 'PRESENT' : 'ABSENT';
+  }
+  return Object.freeze(result);
 }
 
 async function invoke(environment = process.env) {
@@ -193,7 +197,7 @@ async function invoke(environment = process.env) {
 
   if (response.status !== 200) {
     if (response.body !== null) await response.body.cancel().catch(() => {});
-    return safeHttpFailure(response);
+    return safeHttpFailure(response, true);
   }
   const body = await readLimitedUtf8(response);
   return body === null ? SAFE_OUTPUT_INVALID : (parseExactFunctionResult(body) ?? SAFE_OUTPUT_INVALID);

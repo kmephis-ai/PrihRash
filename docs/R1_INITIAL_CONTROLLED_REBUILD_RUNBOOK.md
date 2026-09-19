@@ -79,6 +79,8 @@ Do **not** grant invocation roles on the folder/cloud and do not broaden the dep
 
 A synchronous response is accepted as success only when the exact bounded result is `INITIAL_CONTROLLED_REBUILD_COMMITTED`. A timeout, transport error, HTTP error, STOP, NOOP or runtime failure is non-success and immediately enters the existing read-only recovery boundary. The handler is never blindly replayed after an unknown synchronous outcome.
 
+For a non-200 synchronous response, the invoker does not read or publish the response body, provider error message or stack. It records only the bounded HTTP enum plus whether the provider response contains the `X-Function-Error` header as `functionError=PRESENT|ABSENT`. This distinguishes a provider-marked function-code failure from an HTTP failure without that signal while keeping private/error payloads out of Actions artifacts. The header classification is diagnostic evidence only and never authorizes replay by itself.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:

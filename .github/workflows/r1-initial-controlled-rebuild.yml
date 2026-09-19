@@ -650,8 +650,9 @@ jobs:
                 or ($r.status == "FAIL" and ($r.code | IN("INITIAL_CONTROLLED_REBUILD_INVOKE_FAILED","INITIAL_CONTROLLED_REBUILD_INVOKE_FUNCTION_TIMEOUT","INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID"))
                     and (keys | sort) == ["code","status"])
                 or ($r.status == "FAIL" and $r.code == "INITIAL_CONTROLLED_REBUILD_HTTP_FAILED"
-                    and (keys | sort) == ["code","httpStatus","status"]
-                    and (.httpStatus | IN("HTTP_400","HTTP_403","HTTP_404","HTTP_413","HTTP_429","HTTP_500","HTTP_502","HTTP_503","HTTP_504","HTTP_OTHER")))
+                    and (keys | sort) == ["code","functionError","httpStatus","status"]
+                    and (.httpStatus | IN("HTTP_400","HTTP_403","HTTP_404","HTTP_413","HTTP_429","HTTP_500","HTTP_502","HTTP_503","HTTP_504","HTTP_OTHER"))
+                    and (.functionError | IN("PRESENT","ABSENT")))
                 or ($r.status == "FAIL" and $r.code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
                     and (keys | sort) == ["code","jobCode","phase","status"]
                     and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT","MODULE_LOAD_FAILED","HANDLER_UNCAUGHT"))))
@@ -708,7 +709,10 @@ jobs:
               or (.status == "STOP" and .code == "INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED" and (keys | sort) == ["code","recoveryReason","status"])
               or (.status == "STOP" and .code == "INITIAL_CONTROLLED_REBUILD_VALIDATION_BLOCKED" and (keys | sort) == ["blockers","code","status"])
               or (.status == "FAIL" and (.code | IN("INITIAL_CONTROLLED_REBUILD_INVOKE_FAILED","INITIAL_CONTROLLED_REBUILD_INVOKE_FUNCTION_TIMEOUT","INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID")) and (keys | sort) == ["code","status"])
-              or (.status == "FAIL" and .code == "INITIAL_CONTROLLED_REBUILD_HTTP_FAILED" and (keys | sort) == ["code","httpStatus","status"])
+              or (.status == "FAIL" and .code == "INITIAL_CONTROLLED_REBUILD_HTTP_FAILED"
+                  and (keys | sort) == ["code","functionError","httpStatus","status"]
+                  and (.httpStatus | IN("HTTP_400","HTTP_403","HTTP_404","HTTP_413","HTTP_429","HTTP_500","HTTP_502","HTTP_503","HTTP_504","HTTP_OTHER"))
+                  and (.functionError | IN("PRESENT","ABSENT")))
               or (.status == "FAIL" and .code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED" and (keys | sort) == ["code","jobCode","phase","status"])
             )
           ' "$evidence" >/dev/null; then
