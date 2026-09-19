@@ -65,7 +65,7 @@ test('controlled rebuild selects exact provider reuse or repair-only mode from d
   assert.match(workflow, /provider_mode=deploy/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_DEPLOY_RECOVERY_YDB_STATE_NOT_SAFE/);
   assert.match(workflow, /if: \$\{\{ steps\.prerequisites\.outputs\.provider_mode != 'reuse' \}\}/);
-  assert.match(workflow, /if: \$\{\{ steps\.prerequisites\.outputs\.provider_mode != 'repair' \}\}/);
+  assert.match(workflow, /provider_mode != 'repair'.*provider_mode == 'reuse'.*steps\.provider-deploy\.outcome == 'success'/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_REPAIRED_DEPLOY_RECOVERY_REQUIRED/);
   assert.match(workflow, /serverless function version list --function-id/);
@@ -88,6 +88,24 @@ test('controlled rebuild invocation is async-accepted only, while provider repai
   assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode == 'repair'/);
   assert.match(workflow, /steps\.prerequisites\.outputs\.provider_mode != 'repair'/);
   assert.doesNotMatch(workflow, /Require exact COMMITTED result/);
+});
+
+
+test('provider deploy failure is preserved as privacy-safe enum evidence without blind continuation', async () => {
+  const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
+  assert.match(workflow, /id: provider-deploy/);
+  assert.match(workflow, /continue-on-error: true/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_PROVIDER_DEPLOY_FAILED/);
+  assert.match(workflow, /SERVICE_ACCOUNT_NOT_AVAILABLE/);
+  assert.match(workflow, /PERMISSION_DENIED/);
+  assert.match(workflow, /INVALID_ARGUMENT/);
+  assert.match(workflow, /SOURCE_PACKAGE_FAILED/);
+  assert.match(workflow, /TRANSPORT_FAILED/);
+  assert.match(workflow, /steps\.provider-deploy\.outcome == 'failure'/);
+  assert.match(workflow, /steps\.provider-deploy\.outcome == 'success'/);
+  assert.match(workflow, /provider_mode == 'reuse' \|\| steps\.provider-deploy\.outcome == 'success'/);
+  assert.doesNotMatch(workflow, /cat "\$tmp\/version\.err"/);
+  assert.doesNotMatch(workflow, /tee "\$tmp\/version\.err"/);
 });
 
 test('controlled rebuild runtime structurally reuses bounded WU7 recovery primitives', async () => {
