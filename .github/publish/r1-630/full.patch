@@ -1,0 +1,583 @@
+From 15f5beac0899f41473df92ea962fee7a47970cbf Mon Sep 17 00:00:00 2001
+From: kmephis-ai <kmephis@gmail.com>
+Date: Sun, 20 Sep 2026 14:38:27 +0000
+Subject: [PATCH] fix(r1): wire historical Gate A proof into recovery
+
+---
+ .../r1-initial-bootstrap-orchestrator.yml     |  1 +
+ .../r1-initial-bootstrap-recovery.yml         |  1 +
+ docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md |  6 +-
+ ...dex-initial-bootstrap-recovery-package.mjs |  7 ++
+ .../initialStaleValidatedRecoveryGate.ts      |  4 -
+ src/runtime/initialBootstrapRecoveryConfig.ts | 14 +++
+ src/runtime/initialBootstrapRecoveryJob.ts    | 95 ++++++++++++++++---
+ .../initial-bootstrap-recovery-job.test.mjs   | 94 +++++++++++++++++-
+ ...ial-stale-validated-recovery-gate.test.mjs |  9 +-
+ ...itial-bootstrap-recovery-workflow.test.mjs |  6 +-
+ ...l-bootstrap-orchestrator-workflow.test.mjs |  4 +-
+ 11 files changed, 210 insertions(+), 31 deletions(-)
+
+diff --git a/.github/workflows/r1-initial-bootstrap-orchestrator.yml b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+index 3d344da..1b14e3d 100644
+--- a/.github/workflows/r1-initial-bootstrap-orchestrator.yml
++++ b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+@@ -332,6 +332,7 @@ jobs:
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
++            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
+             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err" || {
+               echo 'R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_DEPLOY_FAILED'
+               exit 1
+diff --git a/.github/workflows/r1-initial-bootstrap-recovery.yml b/.github/workflows/r1-initial-bootstrap-recovery.yml
+index 2a1564e..fef7ac3 100644
+--- a/.github/workflows/r1-initial-bootstrap-recovery.yml
++++ b/.github/workflows/r1-initial-bootstrap-recovery.yml
+@@ -374,6 +374,7 @@ jobs:
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
++            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
+             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+             echo 'INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED'
+             exit 1
+diff --git a/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md b/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
+index 168ab24..83459d9 100644
+--- a/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
++++ b/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
+@@ -142,17 +142,17 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д
+ 
+ Owner 2026-09-20 явно разрешил отдельный recovery contract для stale `VALIDATED` с сохранением audit/staging evidence. Нормативные predicates, marker-only transition и отдельный новый bootstrap определены в [MIGRATION_CONTRACT](MIGRATION_CONTRACT.md#stale-initial-validated-recovery-с-сохранением-auditstaging-evidence). Это решение разрешает разработку и доказательство gates; оно не вооружает production mutation или existing autocontinue.
+ 
+-Последнее доказанное evidence: full read-only recovery [35507371844](https://github.com/kmephis-ai/PrihRash/actions/runs/35507371844) на `6c9d9f8a723dd530d8a7ae28a434a59db19ef54d` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` и `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`. Оно доказывает source mismatch, но ещё не historical candidate reconstruction, exact staging reconciliation, завершение старой scheme operation или exclusion позднего writer.
++Последнее доказанное evidence до wiring historical proof в recovery surface: full read-only recovery [35516186419](https://github.com/kmephis-ai/PrihRash/actions/runs/35516186419) на `f07522512866477df50fab13da828f53264e1461` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`, `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` и Gate A blocker `HISTORICAL_CONTEXT_NOT_PROVEN`. Оно не разрешает mutation/replay и подтверждает, что следующий repository step должен использовать уже реализованные historical reconstruction + exact staging/NOT_APPLIED primitives внутри того же read-only recovery surface.
+ 
+ Текущая готовность нового contract:
+ 
+ | Gate | Требование | Статус |
+ | --- | --- | --- |
+-| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | НЕ ДОКАЗАН; implementation/evidence отсутствуют |
++| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | ЧАСТИЧНО РЕАЛИЗОВАН: historical reconstruction и exact staging/NOT_APPLIED подключены к read-only recovery; production proof и predicates in-flight/single-writer ещё обязательны |
+ | B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
+ | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
+ 
+-Следующий bounded implementation unit закрывает Gate A через существующие read-only reconstruction/reconciliation primitives и synthetic fixtures. Если исходный context или завершение provider operation нельзя доказать, сохраняется `RECOVERY_REQUIRED`; переход к B запрещён. Не запускать повторный swap diagnostic только из-за merge этого contract: runtime пока не изменён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
++После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+ 
+ ## Setup and staging recovery
+ 
+diff --git a/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs b/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
+index 6fdec10..396e4a2 100644
+--- a/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
++++ b/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
+@@ -32,7 +32,11 @@ const requiredFiles = [
+   'dist/migration/initialBootstrapStagingRevisionDiagnostic.js',
+   'dist/migration/initialBootstrapReferenceReconciliation.js',
+   'dist/migration/initialControlledRebuildValidatedRecoveryDiagnostic.js',
++  'dist/migration/initialStaleValidatedHistoricalSwapProof.js',
++  'dist/migration/initialStaleValidatedHistoricalCandidate.js',
++  'dist/migration/initialBootstrapPrivateEvidence.js',
+   'dist/reference/initialBootstrapReferenceSemantics.js',
++  'dist/reference/ydbReferenceEvidenceReader.js',
+ ];
+ for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
+ 
+@@ -91,6 +95,9 @@ for (const recoveryModule of [
+   'initialBootstrapStagingRevisionDiagnostic.js',
+   'initialBootstrapReferenceReconciliation.js',
+   'initialControlledRebuildValidatedRecoveryDiagnostic.js',
++  'initialStaleValidatedHistoricalSwapProof.js',
++  'initialStaleValidatedHistoricalCandidate.js',
++  'initialBootstrapPrivateEvidence.js',
+ ]) {
+   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
+   if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
+diff --git a/src/migration/initialStaleValidatedRecoveryGate.ts b/src/migration/initialStaleValidatedRecoveryGate.ts
+index 69e3889..989d2a0 100644
+--- a/src/migration/initialStaleValidatedRecoveryGate.ts
++++ b/src/migration/initialStaleValidatedRecoveryGate.ts
+@@ -39,10 +39,6 @@ export type InitialStaleValidatedRecoveryGateResult =
+ 
+ const SOURCE_DRIFT_EVIDENCE = new Set<InitialStaleValidatedSourceEvidence>([
+   'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+-  'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
+-  'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+-  'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+-  'AUTHORITATIVE_BINDING_MISMATCH',
+ ]);
+ 
+ export function evaluateInitialStaleValidatedRecoveryGate(
+diff --git a/src/runtime/initialBootstrapRecoveryConfig.ts b/src/runtime/initialBootstrapRecoveryConfig.ts
+index 32fd332..756240f 100644
+--- a/src/runtime/initialBootstrapRecoveryConfig.ts
++++ b/src/runtime/initialBootstrapRecoveryConfig.ts
+@@ -3,6 +3,7 @@ export const INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV = Object.freeze({
+   googleServiceAccountEmail: 'PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL',
+   googleServiceAccountPrivateKey: 'PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
+   ydbConnectionString: 'PRIHRASH_YDB_CONNECTION_STRING',
++  privateHistoricalEvidence: 'PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE',
+ });
+ 
+ export type InitialBootstrapRecoveryJobEnvironment = Readonly<Record<string, string | undefined>>;
+@@ -12,6 +13,7 @@ export interface InitialBootstrapRecoveryJobConfig {
+   readonly googleServiceAccountEmail: string;
+   readonly googleServiceAccountPrivateKey: string;
+   readonly ydbConnectionString: string;
++  readonly privateHistoricalEvidence?: string;
+ }
+ 
+ export type InitialBootstrapRecoveryJobErrorCode =
+@@ -19,6 +21,7 @@ export type InitialBootstrapRecoveryJobErrorCode =
+   | 'INVALID_GOOGLE_SERVICE_ACCOUNT_EMAIL'
+   | 'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'
+   | 'INVALID_YDB_CONNECTION_STRING'
++  | 'INVALID_PRIVATE_HISTORICAL_EVIDENCE'
+   | 'YDB_CLIENT_CLOSE_FAILED';
+ 
+ export class InitialBootstrapRecoveryJobError extends Error {
+@@ -48,6 +51,7 @@ function requiredSecret(value: unknown, code: InitialBootstrapRecoveryJobErrorCo
+ export function validateInitialBootstrapRecoveryConfig(
+   config: Readonly<InitialBootstrapRecoveryJobConfig>,
+ ): Readonly<InitialBootstrapRecoveryJobConfig> {
++  const privateHistoricalEvidence = config.privateHistoricalEvidence;
+   return Object.freeze({
+     spreadsheetId: requiredValue(config.spreadsheetId, 'INVALID_SPREADSHEET_ID'),
+     googleServiceAccountEmail: requiredValue(
+@@ -59,16 +63,26 @@ export function validateInitialBootstrapRecoveryConfig(
+       'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
+     ),
+     ydbConnectionString: requiredValue(config.ydbConnectionString, 'INVALID_YDB_CONNECTION_STRING'),
++    ...(privateHistoricalEvidence === undefined
++      ? {}
++      : {
++          privateHistoricalEvidence: requiredSecret(
++            privateHistoricalEvidence,
++            'INVALID_PRIVATE_HISTORICAL_EVIDENCE',
++          ),
++        }),
+   });
+ }
+ 
+ export function readInitialBootstrapRecoveryJobConfig(
+   environment: InitialBootstrapRecoveryJobEnvironment,
+ ): Readonly<InitialBootstrapRecoveryJobConfig> {
++  const privateHistoricalEvidence = environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.privateHistoricalEvidence];
+   return validateInitialBootstrapRecoveryConfig({
+     spreadsheetId: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.spreadsheetId] ?? '',
+     googleServiceAccountEmail: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.googleServiceAccountEmail] ?? '',
+     googleServiceAccountPrivateKey: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.googleServiceAccountPrivateKey] ?? '',
+     ydbConnectionString: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.ydbConnectionString] ?? '',
++    ...(privateHistoricalEvidence === undefined ? {} : { privateHistoricalEvidence }),
+   });
+ }
+diff --git a/src/runtime/initialBootstrapRecoveryJob.ts b/src/runtime/initialBootstrapRecoveryJob.ts
+index d8311f5..9cf53d8 100644
+--- a/src/runtime/initialBootstrapRecoveryJob.ts
++++ b/src/runtime/initialBootstrapRecoveryJob.ts
+@@ -12,6 +12,12 @@ import {
+   type YdbJsDataClient,
+ } from '../integration/ydb/ydbJsV6DataTransport.js';
+ import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
++import type { ReferenceResolver } from '../normalization/types.js';
++import { readYdbReferenceResolverSnapshot } from '../reference/ydbReferenceEvidenceReader.js';
++import {
++  parseInitialBootstrapPrivateHistoricalEvidence,
++  type InitialBootstrapPrivateHistoricalEvidence,
++} from '../migration/initialBootstrapPrivateEvidence.js';
+ import {
+   diagnoseValidatedControlledRebuildState,
+   type InitialValidatedControlledRebuildRecoveryReason,
+@@ -44,6 +50,10 @@ import {
+   evaluateInitialStaleValidatedRecoveryGate,
+   type InitialStaleValidatedRecoveryGateResult,
+ } from '../migration/initialStaleValidatedRecoveryGate.js';
++import {
++  diagnoseInitialStaleValidatedHistoricalSwapProof,
++  type InitialStaleValidatedHistoricalSwapProofResult,
++} from '../migration/initialStaleValidatedHistoricalSwapProof.js';
+ import {
+   InitialBootstrapRecoveryJobError,
+   readInitialBootstrapRecoveryJobConfig,
+@@ -92,11 +102,19 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
+ 
+ export interface InitialBootstrapRecoveryJobRuntime {
+   createDigest(): Readonly<CanonicalSourceDigest>;
++  parseHistoricalEvidence(serialized: string): Readonly<InitialBootstrapPrivateHistoricalEvidence>;
+   createSource(
+     config: Readonly<InitialBootstrapRecoveryJobConfig>,
+     digest: Readonly<CanonicalSourceDigest>,
+   ): Readonly<InitialBootstrapRecoveryJobSource>;
+   createYdbClient(config: Readonly<InitialBootstrapRecoveryJobConfig>): Promise<Readonly<InitialBootstrapRecoveryJobYdbClient>>;
++  readReferenceResolver(adapter: YdbAdapter): Promise<Readonly<ReferenceResolver>>;
++  diagnoseHistoricalSwapProof(
++    adapter: YdbAdapter,
++    scheme: YdbSchemeAdapter,
++    refs: ReferenceResolver,
++    historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
++  ): Promise<Readonly<InitialStaleValidatedHistoricalSwapProofResult>>;
+   diagnoseSurface(adapter: YdbAdapter): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
+   reconcileReferenceState(
+     adapter: YdbAdapter,
+@@ -131,6 +149,7 @@ export interface InitialBootstrapRecoveryJobRuntime {
+ 
+ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
+   createDigest: createCanonicalSourceDigest,
++  parseHistoricalEvidence: parseInitialBootstrapPrivateHistoricalEvidence,
+   createSource(
+     config: Readonly<InitialBootstrapRecoveryJobConfig>,
+     digest: Readonly<CanonicalSourceDigest>,
+@@ -152,6 +171,8 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
+       poolMaxSize: 1,
+     });
+   },
++  readReferenceResolver: readYdbReferenceResolverSnapshot,
++  diagnoseHistoricalSwapProof: diagnoseInitialStaleValidatedHistoricalSwapProof,
+   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
+   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
+   diagnoseValidatedSourceEvidence: diagnoseInitialValidatedSourceEvidence,
+@@ -189,6 +210,39 @@ function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassif
+   });
+ }
+ 
++function staleValidatedHistoricalEvidence(
++  result: Readonly<InitialStaleValidatedHistoricalSwapProofResult> | null,
++): Readonly<{
++  committedBaselinePresent: boolean;
++  uniqueValidatedRun: boolean;
++  validatedRunMetadataValid: boolean;
++  historicalContextProven: boolean;
++  currentStateEmpty: boolean;
++  stagingCandidateExact: boolean;
++  swapProvenNotApplied: boolean;
++}> {
++  if (result === null) {
++    return Object.freeze({
++      committedBaselinePresent: false,
++      uniqueValidatedRun: true,
++      validatedRunMetadataValid: true,
++      historicalContextProven: false,
++      currentStateEmpty: true,
++      stagingCandidateExact: false,
++      swapProvenNotApplied: false,
++    });
++  }
++  return Object.freeze({
++    committedBaselinePresent: result.status === 'STOP' && result.reason === 'COMMITTED_BASELINE_PRESENT',
++    uniqueValidatedRun: !(result.status === 'STOP' && result.reason === 'VALIDATED_RUN_NOT_UNIQUE'),
++    validatedRunMetadataValid: !(result.status === 'STOP' && result.reason === 'ADMISSION_EVIDENCE_INVALID'),
++    historicalContextProven: result.evidence.historicalContextProven,
++    currentStateEmpty: result.evidence.currentStateEmpty,
++    stagingCandidateExact: result.evidence.stagingCandidateExact,
++    swapProvenNotApplied: result.evidence.swapProvenNotApplied,
++  });
++}
++
+ export async function executeInitialBootstrapRecoveryJob(
+   config: Readonly<InitialBootstrapRecoveryJobConfig>,
+   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
+@@ -205,10 +259,8 @@ export async function executeInitialBootstrapRecoveryJob(
+     if (before.reason === 'VALIDATED_RUN_PRESENT') {
+       try {
+         const schemeTransport = await ydbClient.createSchemeTransport();
+-        const reason = await runtime.diagnoseValidatedControlledRebuildState(
+-          adapter,
+-          new YdbSchemeAdapter(schemeTransport),
+-        );
++        const scheme = new YdbSchemeAdapter(schemeTransport);
++        const reason = await runtime.diagnoseValidatedControlledRebuildState(adapter, scheme);
+         if (reason !== 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY') {
+           return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason });
+         }
+@@ -226,16 +278,35 @@ export async function executeInitialBootstrapRecoveryJob(
+         } catch {
+           validatedSourceEvidence = 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
+         }
++
++        const sourceMetadataValid = validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
++          && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
++        let historicalSwapProof: Readonly<InitialStaleValidatedHistoricalSwapProofResult> | null = null;
++        if (
++          sourceMetadataValid
++          && validatedSourceEvidence === 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
++          && validated.privateHistoricalEvidence !== undefined
++        ) {
++          try {
++            const historicalEvidence = runtime.parseHistoricalEvidence(validated.privateHistoricalEvidence);
++            const refs = await runtime.readReferenceResolver(adapter);
++            historicalSwapProof = await runtime.diagnoseHistoricalSwapProof(
++              adapter, scheme, refs, historicalEvidence,
++            );
++          } catch {
++            historicalSwapProof = null;
++          }
++        }
++        const historical = staleValidatedHistoricalEvidence(historicalSwapProof);
+         const staleValidatedRecoveryGate = evaluateInitialStaleValidatedRecoveryGate({
+-          committedBaselinePresent: false,
+-          uniqueValidatedRun: true,
+-          validatedRunMetadataValid: validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
+-            && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
++          committedBaselinePresent: historical.committedBaselinePresent,
++          uniqueValidatedRun: historical.uniqueValidatedRun,
++          validatedRunMetadataValid: sourceMetadataValid && historical.validatedRunMetadataValid,
+           sourceEvidence: validatedSourceEvidence,
+-          historicalContextProven: false,
+-          currentStateEmpty: true,
+-          stagingCandidateExact: false,
+-          swapProvenNotApplied: false,
++          historicalContextProven: historical.historicalContextProven,
++          currentStateEmpty: historical.currentStateEmpty,
++          stagingCandidateExact: historical.stagingCandidateExact,
++          swapProvenNotApplied: historical.swapProvenNotApplied,
+           inFlightProviderMutationAbsent: false,
+           singleWriterExclusive: false,
+         });
+diff --git a/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs b/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
+index 3067a0d..8fe0798 100644
+--- a/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
+@@ -15,6 +15,7 @@ const config = Object.freeze({
+   googleServiceAccountEmail: 'synthetic@example.test',
+   googleServiceAccountPrivateKey: 'synthetic-private-key',
+   ydbConnectionString: 'grpcs://synthetic.example.test/?database=/synthetic',
++  privateHistoricalEvidence: '{\"synthetic\":true}',
+ });
+ 
+ function lease() {
+@@ -55,6 +56,9 @@ function runtime(overrides = {}) {
+   let stagingRetirementDiagnosticCalls = 0;
+   let stagingExactRevisionDiagnosticCalls = 0;
+   let closes = 0;
++  let historicalEvidenceParses = 0;
++  let referenceReads = 0;
++  let historicalProofCalls = 0;
+   const result = {
+     runtime: {
+       createDigest() {
+@@ -63,6 +67,11 @@ function runtime(overrides = {}) {
+           digestCanonicalRow: () => 'synthetic-row-digest',
+         });
+       },
++      parseHistoricalEvidence(serialized) {
++        historicalEvidenceParses += 1;
++        assert.equal(serialized, config.privateHistoricalEvidence);
++        return Object.freeze({ synthetic: true });
++      },
+       createSource() {
+         return Object.freeze({
+           async readFullSnapshotObservation() {
+@@ -88,6 +97,22 @@ function runtime(overrides = {}) {
+           async close() { closes += 1; },
+         });
+       },
++      async readReferenceResolver() {
++        referenceReads += 1;
++        return Object.freeze({ synthetic: true });
++      },
++      async diagnoseHistoricalSwapProof() {
++        historicalProofCalls += 1;
++        return Object.freeze({
++          status: 'PROVEN_NOT_APPLIED',
++          evidence: Object.freeze({
++            historicalContextProven: true,
++            currentStateEmpty: true,
++            stagingCandidateExact: true,
++            swapProvenNotApplied: true,
++          }),
++        });
++      },
+       async diagnoseSurface() {
+         diagnoseCalls += 1;
+         return { verdict: 'RECOVERY_REQUIRED', reason: 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN' };
+@@ -139,6 +164,9 @@ function runtime(overrides = {}) {
+       stagingDurableDiagnosticCalls,
+       stagingRetirementDiagnosticCalls,
+       stagingExactRevisionDiagnosticCalls,
++      historicalEvidenceParses,
++      referenceReads,
++      historicalProofCalls,
+       closes,
+     }),
+   };
+@@ -159,6 +187,9 @@ test('recovery job reads fresh authoritative source only for residual reference
+     stagingDurableDiagnosticCalls: 0,
+     stagingRetirementDiagnosticCalls: 0,
+     stagingExactRevisionDiagnosticCalls: 0,
++    historicalEvidenceParses: 0,
++    referenceReads: 0,
++    historicalProofCalls: 0,
+     closes: 1,
+   });
+ });
+@@ -205,6 +236,9 @@ test('surface-only recovery classifies STAGING without Google or per-revision re
+     stagingDurableDiagnosticCalls: 0,
+     stagingRetirementDiagnosticCalls: 0,
+     stagingExactRevisionDiagnosticCalls: 0,
++    historicalEvidenceParses: 0,
++    referenceReads: 0,
++    historicalProofCalls: 0,
+     closes: 1,
+   });
+ });
+@@ -292,22 +326,68 @@ test('recovery job preserves VALIDATED structure and compares source read-only',
+     async diagnoseValidatedSourceEvidence(_adapter, digest, observations) {
+       assert.equal(digest, 'synthetic-digest');
+       assert.deepEqual(observations, [{ sourceOrdinal: 0, rowHint: 2, digest: 'synthetic-row-digest' }]);
+-      return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY';
++      return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
+     },
+   });
+   assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+     verdict: 'RECOVERY_REQUIRED',
+     reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+-    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+-    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' },
++    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
++    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN' },
+   });
+   assert.equal(controlledDiagnosticCalls, 1);
+   assert.equal(fixture.counters().sourceReads, 1);
+   assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
+   assert.equal(fixture.counters().reconcileCalls, 0);
++  assert.equal(fixture.counters().historicalEvidenceParses, 1);
++  assert.equal(fixture.counters().referenceReads, 1);
++  assert.equal(fixture.counters().historicalProofCalls, 1);
+   assert.equal(fixture.counters().closes, 1);
+ });
+ 
++test('recovery job rejects non-exact source drift before historical reconstruction', async () => {
++  const fixture = runtime({
++    async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
++    async diagnoseValidatedControlledRebuildState() { return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'; },
++    async diagnoseValidatedSourceEvidence() { return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'; },
++  });
++  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
++    verdict: 'RECOVERY_REQUIRED',
++    reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
++    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
++    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' },
++  });
++  assert.equal(fixture.counters().historicalEvidenceParses, 0);
++  assert.equal(fixture.counters().referenceReads, 0);
++  assert.equal(fixture.counters().historicalProofCalls, 0);
++});
++
++test('recovery job maps historical proof failure to the next exact Gate A blocker', async () => {
++  const fixture = runtime({
++    async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
++    async diagnoseValidatedControlledRebuildState() { return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'; },
++    async diagnoseValidatedSourceEvidence() { return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'; },
++    async diagnoseHistoricalSwapProof() {
++      return Object.freeze({
++        status: 'STOP',
++        reason: 'CURRENT_STATE_NOT_EMPTY',
++        evidence: Object.freeze({
++          historicalContextProven: true,
++          currentStateEmpty: false,
++          stagingCandidateExact: false,
++          swapProvenNotApplied: false,
++        }),
++      });
++    },
++  });
++  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
++    verdict: 'RECOVERY_REQUIRED',
++    reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
++    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
++    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'CURRENT_STATE_NOT_EMPTY' },
++  });
++});
++
+ test('recovery job preserves non-reference classification without touching Google', async () => {
+   const fixture = runtime({
+     async diagnoseSurface() {
+@@ -374,11 +454,19 @@ test('recovery config requires read-only Google credentials plus YDB connection'
+     PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
+     PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
+     PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
++    PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE: config.privateHistoricalEvidence,
+   }), config);
+   assert.throws(
+     () => readInitialBootstrapRecoveryJobConfig({ PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString }),
+     (error) => error?.code === 'INVALID_SPREADSHEET_ID',
+   );
++  const { privateHistoricalEvidence: _privateHistoricalEvidence, ...baseConfig } = config;
++  assert.deepEqual(readInitialBootstrapRecoveryJobConfig({
++    PRIHRASH_GOOGLE_SPREADSHEET_ID: config.spreadsheetId,
++    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
++    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
++    PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
++  }), baseConfig);
+ });
+ 
+ 
+diff --git a/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs b/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
+index aa8af89..ba46691 100644
+--- a/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
++++ b/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
+@@ -42,13 +42,10 @@ for (const sourceEvidence of [
+   'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+   'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+   'AUTHORITATIVE_BINDING_MISMATCH',
++  'AUTHORITATIVE_SNAPSHOT_MATCH',
++  'VALIDATED_METADATA_INVALID',
++  'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+ ]) {
+-  test(`accepts ${sourceEvidence} as source drift evidence but keeps remaining predicates mandatory`, () => {
+-    assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'READY_FOR_MARKER_ONLY' });
+-  });
+-}
+-
+-for (const sourceEvidence of ['AUTHORITATIVE_SNAPSHOT_MATCH', 'VALIDATED_METADATA_INVALID', 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED']) {
+   test(`rejects ${sourceEvidence} as stale drift proof`, () => {
+     assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' });
+   });
+diff --git a/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs b/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+index 44e22bc..1e0c21c 100644
+--- a/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
++++ b/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+@@ -39,7 +39,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
+-  assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
++  assert.match(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
+ });
+ 
+@@ -74,6 +74,10 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
+   assert.match(verifier, /initialBootstrapResidualSurface\.js/);
+   assert.match(verifier, /initialBootstrapReferenceReconciliation\.js/);
+   assert.match(verifier, /initialBootstrapReferenceSemantics\.js/);
++  assert.match(verifier, /initialStaleValidatedHistoricalSwapProof\.js/);
++  assert.match(verifier, /initialStaleValidatedHistoricalCandidate\.js/);
++  assert.match(verifier, /initialBootstrapPrivateEvidence\.js/);
++  assert.match(verifier, /ydbReferenceEvidenceReader\.js/);
+   assert.match(verifier, /recovery module contains a write-capable statement or transaction call/);
+   assert.match(verifier, /dist\/runtime\/yandexCloudInitialBootstrapFunction\.js/);
+   assert.match(verifier, /dist\/runtime\/scheduledSyncJob\.js/);
+diff --git a/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs b/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+index 1821d76..fb106ce 100644
+--- a/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
++++ b/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+@@ -28,7 +28,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
+   assert.match(workflow, /\.conclusion == "success"/);
+ });
+ 
+-test('orchestrator recovery boundary is read-only and excludes private bootstrap evidence', async () => {
++test('orchestrator recovery boundary stays read-only and includes historical proof evidence', async () => {
+   const workflow = await text(WORKFLOW);
+ 
+   assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
+@@ -38,7 +38,7 @@ test('orchestrator recovery boundary is read-only and excludes private bootstrap
+   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/g);
+   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
+-  assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
++  assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+   assert.doesNotMatch(workflow, /index\.initialBootstrapHandler/);
+   assert.doesNotMatch(workflow, /npm run initial-bootstrap:invoke/);
+ });
+-- 
+2.47.3
+
