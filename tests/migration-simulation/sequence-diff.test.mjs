@@ -50,10 +50,53 @@ test('insertion into a duplicate run fails closed as ambiguous', () => {
   assert.deepEqual(ops.map((op) => op.kind), ['UNCHANGED', 'AMBIGUOUS_BLOCK', 'UNCHANGED']);
 });
 
-test('reordered unique anchors fail closed instead of guessing identity', () => {
+test('pure reorder of unique exact rows preserves identity and only moves row hints', () => {
   const ops = diffSequences(
     [old('a', 1, 'A'), old('b', 2, 'B'), old('c', 3, 'C')],
     [current(1, 'B'), current(2, 'A'), current(3, 'C')],
+  );
+  assert.deepEqual(
+    ops.map((op) => [op.kind, op.sourceRecordId, op.previousRowHint, op.currentRowHint]),
+    [
+      ['UNCHANGED', 'b', 2, 1],
+      ['UNCHANGED', 'a', 1, 2],
+      ['UNCHANGED', 'c', 3, 3],
+    ],
+  );
+});
+
+test('reorder plus insertion preserves exact identities and creates only the new row', () => {
+  const ops = diffSequences(
+    [old('a', 1, 'A'), old('b', 2, 'B'), old('c', 3, 'C')],
+    [current(1, 'C'), current(2, 'X'), current(3, 'A'), current(4, 'B')],
+  );
+  assert.deepEqual(ops.map((op) => op.kind), ['UNCHANGED', 'INSERTED', 'UNCHANGED', 'UNCHANGED']);
+  assert.deepEqual(
+    ops.filter((op) => op.kind === 'UNCHANGED').map((op) => op.sourceRecordId),
+    ['c', 'a', 'b'],
+  );
+});
+
+test('reorder plus an unresolved changed row localizes ambiguity to unmatched residue', () => {
+  const ops = diffSequences(
+    [old('a', 1, 'A'), old('x', 2, 'OLD'), old('b', 3, 'B'), old('c', 4, 'C')],
+    [current(1, 'C'), current(2, 'A'), current(3, 'NEW'), current(4, 'B')],
+  );
+  assert.deepEqual(ops.map((op) => op.kind), [
+    'UNCHANGED',
+    'UNCHANGED',
+    'UNCHANGED',
+    'AMBIGUOUS_BLOCK',
+  ]);
+  const ambiguous = ops.at(-1);
+  assert.deepEqual(ambiguous.previousSourceRecordIds, ['x']);
+  assert.deepEqual(ambiguous.currentRowHints, [3]);
+});
+
+test('reordered exact duplicates still fail closed because duplicate identity is unprovable', () => {
+  const ops = diffSequences(
+    [old('a', 1, 'A'), old('d1', 2, 'D'), old('d2', 3, 'D'), old('b', 4, 'B')],
+    [current(1, 'B'), current(2, 'D'), current(3, 'A'), current(4, 'D')],
   );
   assert.deepEqual(ops.map((op) => op.kind), ['AMBIGUOUS_BLOCK']);
 });
