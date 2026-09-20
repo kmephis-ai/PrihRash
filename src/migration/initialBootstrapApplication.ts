@@ -22,6 +22,7 @@ import {
   diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
 } from './initialBootstrapStaleStagingRetirementDiagnostic.js';
 import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.js';
+import { hasInitialBootstrapGateCBlocker } from './initialBootstrapGateCGuard.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
@@ -156,7 +157,8 @@ export type InitialBootstrapRecoveryReason =
   | 'COUNTER_REFINEMENT_OUTCOME_UNKNOWN'
   | 'VALIDATION_TRANSITION_OUTCOME_UNKNOWN'
   | 'PROMOTION_OUTCOME_UNKNOWN'
-  | 'VALIDATED_RUN_REQUIRES_RECOVERY';
+  | 'VALIDATED_RUN_REQUIRES_RECOVERY'
+  | 'STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C';
 
 export type InitialControlledRebuildPreparationResult =
   | Readonly<{
@@ -678,6 +680,9 @@ export async function runInitialBootstrapApplication(
   const incomplete = admission.incompleteRuns[0] ?? null;
   if (incomplete?.state === 'VALIDATED') {
     return recoveryRequired('VALIDATED_RUN_REQUIRES_RECOVERY', incomplete);
+  }
+  if (incomplete === null && await hasInitialBootstrapGateCBlocker(dependencies.adapter)) {
+    return recoveryRequired('STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C', null);
   }
 
   markApplicationPhase(dependencies, 'CURRENT_STATE_PREFLIGHT');
