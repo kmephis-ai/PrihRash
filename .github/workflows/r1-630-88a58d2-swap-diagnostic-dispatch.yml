@@ -1,0 +1,57 @@
+name: R1 630 88a58d2 swap diagnostic dispatch
+
+on:
+  push:
+    branches:
+      - transport/r1-630-88a58d2-swap-diagnostic
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch exact-main read-only swap diagnostic
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          EXPECTED_MAIN_SHA: 88a58d21c356f09a0beb421152c86ba8886981cf
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+
+          main="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/branches/main")"
+          jq -e --arg sha "$EXPECTED_MAIN_SHA" '.commit.sha == $sha and .protected == true' <<<"$main" >/dev/null
+          issue="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/issues/630")"
+          jq -e '.state == "open" and (.title | startswith("R1 WU7:"))' <<<"$issue" >/dev/null
+
+          all="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs?per_page=100")"
+          if jq -e '
+            .workflow_runs | any(
+              (.status == "queued" or .status == "in_progress")
+              and (.name == "R1 initial shadow bootstrap"
+                   or .name == "R1 initial bootstrap orchestrator"
+                   or .name == "R1 initial controlled rebuild")
+            )
+          ' <<<"$all" >/dev/null; then
+            echo 'R1_630_SWAP_DIAGNOSTIC_WRITER_ACTIVE'
+            exit 1
+          fi
+
+          existing="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/workflows/r1-initial-controlled-rebuild-swap-recovery.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if jq -e --arg sha "$EXPECTED_MAIN_SHA" '.workflow_runs | any(.head_sha == $sha)' <<<"$existing" >/dev/null; then
+            echo 'R1_630_SWAP_DIAGNOSTIC_ALREADY_PRESENT'
+            exit 0
+          fi
+
+          payload="$(jq -cn             --arg issue '630'             --arg sha "$EXPECTED_MAIN_SHA"             --arg controlled '35469651936'             --arg recovery '35491486738'             --arg readiness '35491595499'             '{ref:"main",inputs:{tracking_issue:$issue,expected_main_sha:$sha,controlled_run_id:$controlled,recovery_run_id:$recovery,readiness_run_id:$readiness}}')"
+
+          curl --fail --silent --show-error --request POST             --header "$auth"             --header "$accept"             --header 'X-GitHub-Api-Version: 2022-11-28'             --header 'Content-Type: application/json'             "$api/actions/workflows/r1-initial-controlled-rebuild-swap-recovery.yml/dispatches"             --data "$payload"
+
+          echo 'R1_630_SWAP_DIAGNOSTIC_DISPATCHED'
