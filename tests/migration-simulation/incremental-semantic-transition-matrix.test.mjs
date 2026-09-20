@@ -58,21 +58,29 @@ test('transition matrix preserves verified history and exposes only deterministi
   assert.equal(Object.isFrozen(result.decisions), true);
 });
 
-test('invalid or unavailable current financial semantics block validation', () => {
+test('unknown reference vocabulary is quarantined locally while real semantic failures still block validation', () => {
   const result = runPlan(
-    [create(id(40), 40), create(id(41), 41), revise(id(42), 42)],
+    [create(id(40), 40), create(id(41), 41), create(id(42), 42), revise(id(43), 43), revise(id(44), 44)],
     [
       outcome({ currentRowHint: 40, sourceRecordId: id(40), lineageKind: 'CREATE', classification: 'INVALID' }),
       outcome({ currentRowHint: 41, sourceRecordId: id(41), lineageKind: 'CREATE', classification: 'FINANCIAL_RECORD', projection: { status: 'FAILED', stage: 'NORMALIZATION', errorCode: 'UNKNOWN_ACCOUNT' } }),
-      outcome({ currentRowHint: 42, sourceRecordId: id(42), lineageKind: 'REVISE', classification: 'FINANCIAL_RECORD', projection: { status: 'BLOCKED', reason: 'PREVIOUS_FINANCIAL_QUALITY_REQUIRED' } }),
+      outcome({ currentRowHint: 42, sourceRecordId: id(42), lineageKind: 'CREATE', classification: 'FINANCIAL_RECORD', projection: { status: 'FAILED', stage: 'NORMALIZATION', errorCode: 'MISSING_ACCOUNT' } }),
+      outcome({ currentRowHint: 43, sourceRecordId: id(43), lineageKind: 'REVISE', classification: 'FINANCIAL_RECORD', projection: { status: 'FAILED', stage: 'NORMALIZATION', errorCode: 'UNKNOWN_CATEGORY' } }),
+      outcome({ currentRowHint: 44, sourceRecordId: id(44), lineageKind: 'REVISE', classification: 'FINANCIAL_RECORD', projection: { status: 'BLOCKED', reason: 'PREVIOUS_FINANCIAL_QUALITY_REQUIRED' } }),
     ],
-    [revision(id(42), 42, 'OWNER_CORRECTION')],
-    [previous(id(42), 'FINANCIAL_RECORD', id(142), 2)],
+    [revision(id(43), 43, 'OWNER_CORRECTION'), revision(id(44), 44, 'OWNER_CORRECTION')],
+    [previous(id(43), 'FINANCIAL_RECORD', id(143), 2), previous(id(44), 'FINANCIAL_RECORD', id(144), 3)],
   );
   assert.deepEqual(result.decisions, [
     { kind: 'BLOCK_VALIDATION', sourceRecordId: id(40), reason: 'INVALID_CURRENT_OBSERVATION' },
-    { kind: 'BLOCK_VALIDATION', sourceRecordId: id(41), reason: 'FINANCIAL_PROJECTION_FAILED' },
-    { kind: 'BLOCK_VALIDATION', sourceRecordId: id(42), reason: 'FINANCIAL_PROJECTION_BLOCKED' },
+    { kind: 'CREATE_REVIEW_REQUIRED', sourceRecordId: id(41), classification: 'AMBIGUOUS' },
+    { kind: 'BLOCK_VALIDATION', sourceRecordId: id(42), reason: 'FINANCIAL_PROJECTION_FAILED' },
+    {
+      kind: 'REVIEW_REQUIRED_PRESERVE', sourceRecordId: id(43), reason: 'SEMANTIC_TRANSITION',
+      previousClassification: 'FINANCIAL_RECORD', currentClassification: 'FINANCIAL_RECORD',
+      transactionId: id(143), changeClass: 'OWNER_CORRECTION',
+    },
+    { kind: 'BLOCK_VALIDATION', sourceRecordId: id(44), reason: 'FINANCIAL_PROJECTION_BLOCKED' },
   ]);
 });
 
