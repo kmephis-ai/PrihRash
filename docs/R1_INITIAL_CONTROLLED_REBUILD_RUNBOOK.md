@@ -148,11 +148,28 @@ Owner 2026-09-20 явно разрешил отдельный recovery contract 
 
 | Gate | Требование | Статус |
 | --- | --- | --- |
-| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | ЧАСТИЧНО РЕАЛИЗОВАН: historical reconstruction и exact staging/NOT_APPLIED подключены к read-only recovery; production proof и predicates in-flight/single-writer ещё обязательны |
+| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | БЛОКИРОВАН НА CONDITION 6: live recovery `35519549022` доказал historical reconstruction + exact `NOT_APPLIED`, но retained/provider evidence не доказывает завершение старой SchemeShard mutation; condition 7 single-writer отдельно ещё не закрыт |
 | B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
 | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
 
 После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+
+### Historical provider-completion evidence gap — Gate A condition 6
+
+Investigation 2026-09-20 зафиксировало реальную границу evidence для historical ambiguous swap, не меняя normative Gate A:
+
+- historical controlled run [`35469651936`](https://github.com/kmephis-ai/PrihRash/actions/runs/35469651936) на `acb40fb81befc548939f72146df729d27d591cbe` сохранил только bounded `INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED / SWAP_OUTCOME_AMBIGUOUS`; его phase artifact = `INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE / LOG_READ_FAILED`;
+- full logs/artifacts этого run не содержат сохранённого YDB `session_id`, provider request id, SchemeShard `tx_id` или durable operation id;
+- historical `ydbJsV6SchemeTransport` выполнял `RenameTables` с `OperationMode.SYNC`; при unknown transport outcome он сохранял только error taxonomy, а `DeleteSession` был best-effort и не становился recovery evidence;
+- YDB server-side `RenameTables` отправляет schema transaction через TxProxy и ждёт SchemeShard transaction completion. Generic gRPC client-loss/operation-timeout path завершает клиентский RPC actor, но не является доказанным cancel/terminalization barrier для уже отправленной SchemeShard transaction. Source references: [`rpc_rename_tables.cpp`](https://github.com/ydb-platform/ydb/blob/981cc88b8600dc5bdd2f3c64f1b95bb446b1de9d/ydb/core/grpc_services/rpc_rename_tables.cpp), [`rpc_scheme_base.h`](https://github.com/ydb-platform/ydb/blob/981cc88b8600dc5bdd2f3c64f1b95bb446b1de9d/ydb/core/grpc_services/rpc_scheme_base.h), [`rpc_deferrable.h`](https://github.com/ydb-platform/ydb/blob/981cc88b8600dc5bdd2f3c64f1b95bb446b1de9d/ydb/core/grpc_services/rpc_deferrable.h), [`ydb_operation.proto`](https://github.com/ydb-platform/ydb/blob/981cc88b8600dc5bdd2f3c64f1b95bb446b1de9d/ydb/public/api/protos/ydb_operation.proto);
+- documented `ydb operation list` long-running kinds do not include table rename, so there is no documented generic LRO enumeration route for this lost SYNC operation: [YDB operation list](https://ydb.tech/docs/en/reference/ydb-cli/operation-list);
+- Yandex Audit Trails documents YDB management events, but its data-event supported-services list does not list Managed Service for YDB. Therefore current documented Managed YDB Audit Trails surfaces do not provide a read-only historical table-rename completion record for this run: [management events](https://yandex.cloud/en/docs/audit-trails/concepts/events), [data events](https://yandex.cloud/en/docs/audit-trails/concepts/events-data-plane).
+
+Следствие для current WU7: available retained evidence + documented read-only provider APIs недостаточны, чтобы задним числом доказать завершение/отсутствие ранее отправленной SchemeShard rename transaction. Gate A condition 6 поэтому остаётся `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`. Нельзя подменять этот proof истёкшим временем, завершением GitHub job/Function, session expiry/delete, двумя одинаковыми topology reads или exact `NOT_APPLIED` state shape — MIGRATION_CONTRACT явно требует отдельного provider-completion evidence.
+
+До появления дополнительного provider-side evidence или отдельного Owner decision, меняющего authority/normative recovery direction, **Gate B marker terminalization, Gate C fresh bootstrap, swap replay, cleanup и retirement не разрешены**. Condition 7 (cross-process single-writer exclusion) остаётся отдельным следующим predicate и не считается пройденным автоматически.
+
+Для будущих write attempts этот gap должен предотвращаться до mutation: recovery contract обязан сохранять durable provider correlation/completion evidence, которое реально можно read-only проверить после transport loss. Это future protocol hardening и не является retroactive proof для `35469651936`.
 
 ## Setup and staging recovery
 
