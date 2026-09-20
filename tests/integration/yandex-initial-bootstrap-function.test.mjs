@@ -84,6 +84,20 @@ test('baseline, controlled rebuild and recovery outcomes remain non-success boun
     code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
     recoveryReason: 'PROMOTION_OUTCOME_UNKNOWN',
   });
+  for (const recoveryReason of [
+    'GATE_C_TERMINALIZATION_EVIDENCE_INVALID',
+    'GATE_C_INCOMPLETE_RUN_PRESENT',
+  ]) {
+    assert.deepEqual(await execute({
+      status: 'RECOVERY_REQUIRED',
+      reason: recoveryReason,
+      run: { id: 'private' },
+    }), {
+      status: 'STOP',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+      recoveryReason,
+    });
+  }
 });
 
 test('malformed or unknown application result fails closed without echoing input', async () => {
