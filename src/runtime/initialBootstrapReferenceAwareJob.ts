@@ -25,6 +25,7 @@ import {
 import {
   InitialBootstrapApplicationError,
   runInitialBootstrapApplication,
+  runInitialBootstrapGateCApplication,
   type InitialBootstrapApplicationPhase,
 } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
@@ -347,9 +348,12 @@ function classifyApplicationRuntimeError(
   return classifyGenericApplicationPhase(phase);
 }
 
+type InitialBootstrapApplicationRunner = typeof runInitialBootstrapApplication;
+
 async function runApplicationSafely(
-  observation: Parameters<typeof runInitialBootstrapApplication>[0],
-  dependencies: Parameters<typeof runInitialBootstrapApplication>[1],
+  observation: Parameters<InitialBootstrapApplicationRunner>[0],
+  dependencies: Parameters<InitialBootstrapApplicationRunner>[1],
+  runApplication: InitialBootstrapApplicationRunner,
 ) {
   let phase: InitialBootstrapApplicationPhase | null = null;
   const observedDependencies = Object.freeze({
@@ -359,7 +363,7 @@ async function runApplicationSafely(
     },
   });
   try {
-    return await runInitialBootstrapApplication(observation, observedDependencies);
+    return await runApplication(observation, observedDependencies);
   } catch (error) {
     throw new InitialBootstrapReferenceAwareRuntimeError(
       classifyApplicationRuntimeError(error, phase),
@@ -370,7 +374,9 @@ async function runApplicationSafely(
   }
 }
 
-function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
+function createReferenceAwareRuntime(
+  runApplication: InitialBootstrapApplicationRunner,
+): Readonly<InitialBootstrapJobRuntime> {
   let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
   let digest: Readonly<CanonicalSourceDigest> | null = null;
   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
@@ -478,14 +484,14 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
           throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
         }
         releaseReferencePlanningState();
-        return runApplicationSafely(observation, dependencies);
+        return runApplicationSafely(observation, dependencies, runApplication);
       }
       if (isUnsafeNoRunRecoverySurface(recoverySurface)) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE');
       }
       if (referencePlan.writes.length === 0) {
         releaseReferencePlanningState();
-        return runApplicationSafely(observation, dependencies);
+        return runApplicationSafely(observation, dependencies, runApplication);
       }
 
       let admission;
@@ -504,7 +510,7 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
       return runApplicationSafely(observation, Object.freeze({
         ...dependencies,
         adapter,
-      }));
+      }), runApplication);
     },
   };
   return Object.freeze(runtime);
@@ -513,11 +519,29 @@ function createReferenceAwareRuntime(): Readonly<InitialBootstrapJobRuntime> {
 export function runInitialBootstrapReferenceAwareJob(
   config: Readonly<InitialBootstrapJobConfig>,
 ) {
-  return executeInitialBootstrapJob(config, createReferenceAwareRuntime());
+  return executeInitialBootstrapJob(
+    config,
+    createReferenceAwareRuntime(runInitialBootstrapApplication),
+  );
 }
 
 export function runInitialBootstrapReferenceAwareJobFromEnvironment(
   environment: InitialBootstrapJobEnvironment = process.env,
 ) {
   return runInitialBootstrapReferenceAwareJob(readInitialBootstrapJobConfig(environment));
+}
+
+export function runInitialBootstrapGateCReferenceAwareJob(
+  config: Readonly<InitialBootstrapJobConfig>,
+) {
+  return executeInitialBootstrapJob(
+    config,
+    createReferenceAwareRuntime(runInitialBootstrapGateCApplication),
+  );
+}
+
+export function runInitialBootstrapGateCReferenceAwareJobFromEnvironment(
+  environment: InitialBootstrapJobEnvironment = process.env,
+) {
+  return runInitialBootstrapGateCReferenceAwareJob(readInitialBootstrapJobConfig(environment));
 }
