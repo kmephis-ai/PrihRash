@@ -31,7 +31,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: r1-initial-controlled-rebuild-swap-recovery
+  group: r1-initial-bootstrap-writer
   cancel-in-progress: false
 
 jobs:
