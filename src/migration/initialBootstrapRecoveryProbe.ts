@@ -1,4 +1,5 @@
 import { readStatement, type YdbAdapter } from '../integration/ydb/adapter.js';
+import { INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE } from './initialBootstrapGateCGuard.js';
 import { INITIAL_BOOTSTRAP_STALE_STAGING_FAILURE_CODE } from './initialBootstrapStaleStagingRetirement.js';
 
 export type InitialBootstrapRecoveryVerdict = 'APPLIED' | 'NOT_APPLIED' | 'RECOVERY_REQUIRED';
@@ -32,6 +33,7 @@ export interface InitialBootstrapRecoveryEvidence {
   readonly validatedRuns: number;
   readonly failedRuns: number;
   readonly staleRetiredRuns: number;
+  readonly staleValidatedTerminalizedRuns: number;
   readonly committedRowsSeen: number | null;
   readonly sourceSnapshots: number;
   readonly identityManifests: number;
@@ -59,6 +61,8 @@ const COUNT_STATEMENTS = Object.freeze({
   failedRuns: "SELECT COUNT(*) AS row_count FROM migration_runs WHERE state = 'FAILED'",
   staleRetiredRuns: "SELECT COUNT(*) AS row_count FROM migration_runs WHERE state = 'FAILED' AND error_code = '"
     + INITIAL_BOOTSTRAP_STALE_STAGING_FAILURE_CODE + "'",
+  staleValidatedTerminalizedRuns: "SELECT COUNT(*) AS row_count FROM migration_runs WHERE state = 'FAILED' AND error_code = '"
+    + INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE + "'",
   sourceSnapshots: 'SELECT COUNT(*) AS row_count FROM source_snapshots',
   identityManifests: 'SELECT COUNT(*) AS row_count FROM initial_bootstrap_identity_manifests',
   sourceRecords: 'SELECT COUNT(*) AS row_count FROM source_records',
@@ -124,12 +128,16 @@ export function diagnoseInitialBootstrapRecoveryEvidence(
     || !Number.isSafeInteger(evidence.staleRetiredRuns)
     || evidence.staleRetiredRuns < 0
     || evidence.staleRetiredRuns > evidence.failedRuns
+    || !Number.isSafeInteger(evidence.staleValidatedTerminalizedRuns)
+    || evidence.staleValidatedTerminalizedRuns < 0
+    || evidence.staleValidatedTerminalizedRuns > evidence.failedRuns
+    || evidence.staleRetiredRuns + evidence.staleValidatedTerminalizedRuns > evidence.failedRuns
   ) {
     return classification('RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT');
   }
 
   if (evidence.migrationRuns === 0) {
-    if (evidence.staleRetiredRuns !== 0) {
+    if (evidence.staleRetiredRuns !== 0 || evidence.staleValidatedTerminalizedRuns !== 0) {
       return classification('RECOVERY_REQUIRED', 'RUN_STATE_COUNT_INCONSISTENT');
     }
     return allBootstrapTouchedStateEmpty(evidence)
@@ -137,7 +145,8 @@ export function diagnoseInitialBootstrapRecoveryEvidence(
       : classification('RECOVERY_REQUIRED', 'RESIDUAL_STATE_WITHOUT_RUN');
   }
 
-  if (evidence.failedRuns !== evidence.staleRetiredRuns) {
+  const knownHistoricalFailedRuns = evidence.staleRetiredRuns + evidence.staleValidatedTerminalizedRuns;
+  if (evidence.failedRuns !== knownHistoricalFailedRuns) {
     return classification('RECOVERY_REQUIRED', 'FAILED_RUN_PRESENT');
   }
 
@@ -214,6 +223,7 @@ export async function readInitialBootstrapRecoveryEvidence(
     validatedRuns: await readCount(adapter, COUNT_STATEMENTS.validatedRuns),
     failedRuns: await readCount(adapter, COUNT_STATEMENTS.failedRuns),
     staleRetiredRuns: await readCount(adapter, COUNT_STATEMENTS.staleRetiredRuns),
+    staleValidatedTerminalizedRuns: await readCount(adapter, COUNT_STATEMENTS.staleValidatedTerminalizedRuns),
     committedRowsSeen: await readCommittedRowsSeen(adapter),
     sourceSnapshots: await readCount(adapter, COUNT_STATEMENTS.sourceSnapshots),
     identityManifests: await readCount(adapter, COUNT_STATEMENTS.identityManifests),
