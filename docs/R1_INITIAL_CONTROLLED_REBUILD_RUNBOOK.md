@@ -129,6 +129,15 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д�
 
 Этот diagnostic не доказывает staging completeness, exact revision equality, swap outcome или COMMITTED baseline. Любой его enum оставляет `RECOVERY_REQUIRED` и не разрешает retirement VALIDATED run, rebuild/replay/swap/cleanup. После canonical gates допустима одна full read-only recovery на новом exact main. Следующий mutation path требует отдельного canonical gate; stale-STAGING terminalization contract нельзя применять к VALIDATED.
 
+## Live-source rule: cutoff, а не quiet window
+
+Нормативный [Migration Contract](MIGRATION_CONTRACT.md#71-live-authoritative-source-и-bootstrap-cutoff) запрещает предполагать остановку Google во время initial bootstrap. Каждый новый bootstrap связывается с immutable `Snapshot A`; staging/reconciliation/swap/COMMITTED этого run доказываются относительно A. Fresh Google `B != A`, появившийся **после** cutoff, является нормальным `AUTHORITATIVE_SOURCE_ADVANCED` и должен переходить в post-COMMITTED incremental catch-up `A → B`, а не автоматически превращать доказанный A в stale run.
+
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` из legacy/current recovery diagnostic нельзя использовать как универсальное правило «retire and restart». Для будущего cutoff-aware runtime требуется различать:
+- invalid/unprovable bound observation A → fail-closed;
+- proven A + newer current source B → baseline A может завершаться по своему immutable evidence; catch-up обязателен отдельно.
+
+Текущий pre-contract WU7 run остаётся исключением: у него уже есть historical `SWAP_OUTCOME_AMBIGUOUS`, поэтому до Gate A нельзя promotion/replay/retirement переинтерпретировать новым правилом. Gate A закрывает именно старую unknown-write ambiguity; после этого новый initial bootstrap должен быть cutoff-aware и не зависеть от quiet window.
 ## Owner decision: stale VALIDATED recovery contract
 
 Owner 2026-09-20 явно разрешил отдельный recovery contract для stale `VALIDATED` с сохранением audit/staging evidence. Нормативные predicates, marker-only transition и отдельный новый bootstrap определены в [MIGRATION_CONTRACT](MIGRATION_CONTRACT.md#stale-initial-validated-recovery-с-сохранением-auditstaging-evidence). Это решение разрешает разработку и доказательство gates; оно не вооружает production mutation или existing autocontinue.
