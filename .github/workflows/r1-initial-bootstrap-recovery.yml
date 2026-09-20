@@ -433,7 +433,8 @@ jobs:
           evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-recovery-evidence"
           mkdir -p "$evidence_dir"
           diagnostics="$RUNNER_TEMP/r1-recovery-diagnostics.log"
-          npm run initial-bootstrap-recovery:invoke 2> >(tee "$diagnostics" >&2) | tee "$tmp"
+          npm run initial-bootstrap-recovery:invoke 2> "$diagnostics" | tee "$tmp"
+          cat "$diagnostics" >&2
           tail -n 1 "$tmp" | jq -c -e '
             select(
               type == "object"
