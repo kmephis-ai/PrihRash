@@ -1,6 +1,7 @@
 import type {
   InitialControlledRebuildApplicationPhase,
   InitialControlledRebuildRecoveryReason,
+  InitialControlledRebuildSwapRecoveryReason,
 } from '../migration/initialControlledRebuildApplication.js';
 import { InitialBootstrapPrivateEvidenceError } from '../migration/initialBootstrapPrivateEvidence.js';
 import {
@@ -58,6 +59,7 @@ export type YandexInitialControlledRebuildSwapRecoveryDiagnosticFunctionResult =
       status: 'STOP';
       code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED';
       verdict: 'RECOVERY_REQUIRED';
+      recoveryReason: InitialControlledRebuildSwapRecoveryReason;
     }>
   | Readonly<{ status: 'NOOP'; code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' }>
   | Readonly<{
@@ -88,6 +90,13 @@ function yandexPhaseObserver(): Readonly<InitialControlledRebuildJobObserver> {
     },
   });
 }
+
+const SWAP_RECOVERY_REASONS = new Set<InitialControlledRebuildSwapRecoveryReason>([
+  'DURABLE_RUN_NOT_VALIDATED',
+  'SETUP_EVIDENCE_MISMATCH',
+  'STAGING_RECONCILIATION_MISMATCH',
+  'SWAP_DISCRIMINATION_AMBIGUOUS',
+]);
 
 const RECOVERY_REASONS = new Set<InitialControlledRebuildRecoveryReason>([
   'VALIDATION_TRANSITION_OUTCOME_UNKNOWN',
@@ -181,10 +190,15 @@ function sanitizeSwapRecoveryDiagnosticResult(
       });
     }
     if (result.verdict === 'RECOVERY_REQUIRED') {
+      if (
+        typeof result.reason !== 'string'
+        || !SWAP_RECOVERY_REASONS.has(result.reason as InitialControlledRebuildSwapRecoveryReason)
+      ) return runtimeFailure('UNCAUGHT');
       return Object.freeze({
         status: 'STOP' as const,
         code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED' as const,
         verdict: 'RECOVERY_REQUIRED' as const,
+        recoveryReason: result.reason as InitialControlledRebuildSwapRecoveryReason,
       });
     }
     return runtimeFailure('UNCAUGHT');

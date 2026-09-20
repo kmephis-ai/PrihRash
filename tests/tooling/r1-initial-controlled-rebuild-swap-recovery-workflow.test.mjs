@@ -40,7 +40,9 @@ test('swap recovery invokes once and emits enum-only tri-state evidence', async 
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-swap-recovery.yml');
   assert.match(workflow, /Invoke read-only exact swap recovery diagnostic once/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED/);
-  assert.match(workflow, /APPLIED.*NOT_APPLIED.*RECOVERY_REQUIRED/);
+  assert.match(workflow, /APPLIED[\s\S]*NOT_APPLIED[\s\S]*RECOVERY_REQUIRED/);
+  assert.match(workflow, /DURABLE_RUN_NOT_VALIDATED.*SETUP_EVIDENCE_MISMATCH.*STAGING_RECONCILIATION_MISMATCH.*SWAP_DISCRIMINATION_AMBIGUOUS/s);
+  assert.match(workflow, /recoveryReason/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /if-no-files-found: ignore/);
   assert.doesNotMatch(workflow, /renameTables|copyTables|executeControlledInitialSwap|cleanup|retire/i);

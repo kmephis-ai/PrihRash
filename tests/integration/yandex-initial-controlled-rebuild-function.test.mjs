@@ -45,20 +45,31 @@ test('controlled swap recovery diagnostic exposes only bounded verdict', async (
     status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED', verdict: 'APPLIED',
   });
   assert.deepEqual(await executeSwapDiagnostic({
-    status: 'CLASSIFIED', verdict: 'RECOVERY_REQUIRED', run: { id: 'private' }, raw: 'private',
+    status: 'CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RECONCILIATION_MISMATCH',
+    run: { id: 'private' },
+    raw: 'private',
   }), {
-    status: 'STOP', code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED', verdict: 'RECOVERY_REQUIRED',
+    status: 'STOP',
+    code: 'INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    recoveryReason: 'STAGING_RECONCILIATION_MISMATCH',
   });
 });
 
 test('controlled swap recovery diagnostic malformed result fails closed without echo', async () => {
-  const result = await executeSwapDiagnostic({
-    status: 'CLASSIFIED', verdict: 'PRIVATE', private: 'do-not-return',
-  });
-  assert.deepEqual(result, {
-    status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null,
-  });
-  assert.equal(JSON.stringify(result).includes('do-not-return'), false);
+  for (const value of [
+    { status: 'CLASSIFIED', verdict: 'PRIVATE', private: 'do-not-return' },
+    { status: 'CLASSIFIED', verdict: 'RECOVERY_REQUIRED', private: 'do-not-return' },
+    { status: 'CLASSIFIED', verdict: 'RECOVERY_REQUIRED', reason: 'PRIVATE_REASON', private: 'do-not-return' },
+  ]) {
+    const result = await executeSwapDiagnostic(value);
+    assert.deepEqual(result, {
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null,
+    });
+    assert.equal(JSON.stringify(result).includes('do-not-return'), false);
+  }
 });
 
 test('controlled rebuild committed result is reduced to exact PASS', async () => {

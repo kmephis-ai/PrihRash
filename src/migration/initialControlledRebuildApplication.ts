@@ -55,6 +55,12 @@ export type InitialControlledRebuildRecoveryReason =
   | 'POST_SWAP_VERIFICATION_MISMATCH'
   | 'POST_COMMIT_VERIFICATION_MISMATCH';
 
+export type InitialControlledRebuildSwapRecoveryReason =
+  | 'DURABLE_RUN_NOT_VALIDATED'
+  | 'SETUP_EVIDENCE_MISMATCH'
+  | 'STAGING_RECONCILIATION_MISMATCH'
+  | 'SWAP_DISCRIMINATION_AMBIGUOUS';
+
 export type InitialControlledRebuildApplicationPhase =
   | 'PREPARATION'
   | 'VALIDATION_TRANSITION'
@@ -97,7 +103,13 @@ export type InitialControlledRebuildSwapRecoveryDiagnosticResult =
   | Readonly<{
       status: 'CLASSIFIED';
       run: Readonly<MigrationRun>;
-      verdict: ControlledSchemeMutationRecoveryVerdict;
+      verdict: Exclude<ControlledSchemeMutationRecoveryVerdict, 'RECOVERY_REQUIRED'>;
+    }>
+  | Readonly<{
+      status: 'CLASSIFIED';
+      run: Readonly<MigrationRun>;
+      verdict: 'RECOVERY_REQUIRED';
+      reason: InitialControlledRebuildSwapRecoveryReason;
     }>;
 
 function phase(
@@ -157,9 +169,16 @@ function reconciliationMatched(evidence: Awaited<ReturnType<typeof verifyControl
 
 function swapRecoveryClassification(
   run: Readonly<MigrationRun>,
-  verdict: ControlledSchemeMutationRecoveryVerdict,
+  verdict: Exclude<ControlledSchemeMutationRecoveryVerdict, 'RECOVERY_REQUIRED'>,
 ): Readonly<InitialControlledRebuildSwapRecoveryDiagnosticResult> {
   return Object.freeze({ status: 'CLASSIFIED' as const, run, verdict });
+}
+
+function swapRecoveryRequired(
+  run: Readonly<MigrationRun>,
+  reason: InitialControlledRebuildSwapRecoveryReason,
+): Readonly<InitialControlledRebuildSwapRecoveryDiagnosticResult> {
+  return Object.freeze({ status: 'CLASSIFIED' as const, run, verdict: 'RECOVERY_REQUIRED' as const, reason });
 }
 
 export async function diagnoseInitialControlledRebuildSwapRecovery(
@@ -179,7 +198,7 @@ export async function diagnoseInitialControlledRebuildSwapRecovery(
     });
   }
   if (prepared.durableRun.state !== 'VALIDATED') {
-    return swapRecoveryClassification(prepared.durableRun, 'RECOVERY_REQUIRED');
+    return swapRecoveryRequired(prepared.durableRun, 'DURABLE_RUN_NOT_VALIDATED');
   }
 
   const controlled = planControlledInitialRebuild(prepared.validatedRun, prepared.currentWrites, null);
@@ -195,7 +214,7 @@ export async function diagnoseInitialControlledRebuildSwapRecovery(
     || !setupEvidence.stagingTransactionsExists
     || !setupEvidence.stagingSourceRecordsExists
   ) {
-    return swapRecoveryClassification(prepared.validatedRun, 'RECOVERY_REQUIRED');
+    return swapRecoveryRequired(prepared.validatedRun, 'SETUP_EVIDENCE_MISMATCH');
   }
 
   phase(dependencies, 'STAGING_RECONCILIATION');
@@ -211,7 +230,7 @@ export async function diagnoseInitialControlledRebuildSwapRecovery(
     );
   } catch (error) {
     if (error instanceof ControlledInitialSwapGateError) {
-      return swapRecoveryClassification(prepared.validatedRun, 'RECOVERY_REQUIRED');
+      return swapRecoveryRequired(prepared.validatedRun, 'STAGING_RECONCILIATION_MISMATCH');
     }
     throw error;
   }
@@ -223,7 +242,9 @@ export async function diagnoseInitialControlledRebuildSwapRecovery(
     swapPlan,
     prepared.verifiedPlan,
   );
-  return swapRecoveryClassification(prepared.validatedRun, recovered.verdict);
+  return recovered.verdict === 'RECOVERY_REQUIRED'
+    ? swapRecoveryRequired(prepared.validatedRun, 'SWAP_DISCRIMINATION_AMBIGUOUS')
+    : swapRecoveryClassification(prepared.validatedRun, recovered.verdict);
 }
 
 export async function runInitialControlledRebuildApplication(

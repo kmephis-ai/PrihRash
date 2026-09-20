@@ -212,11 +212,38 @@ jobs:
           out="$RUNNER_TEMP/swap-recovery-result.json"
           yc serverless function invoke --id "$FID" --tag r1-initial-controlled-rebuild-swap-recovery --data '{}' --format json --retry 0 --no-user-output > "$out"
           result="$(jq -cer 'if type=="string" then fromjson else . end' "$out")"
-          printf '%s\n' "$result" | jq -e 'type=="object" and .code=="INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED" and (.verdict=="APPLIED" or .verdict=="NOT_APPLIED" or .verdict=="RECOVERY_REQUIRED")' >/dev/null || { echo SWAP_RECOVERY_RESULT_INVALID; exit 1; }
+          printf '%s\n' "$result" | jq -e '
+            type=="object"
+            and .code=="INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED"
+            and (
+              (
+                .status=="PASS"
+                and (.verdict=="APPLIED" or .verdict=="NOT_APPLIED")
+                and (keys|sort)==["code","status","verdict"]
+              )
+              or
+              (
+                .status=="STOP"
+                and .verdict=="RECOVERY_REQUIRED"
+                and (
+                  .recoveryReason=="DURABLE_RUN_NOT_VALIDATED"
+                  or .recoveryReason=="SETUP_EVIDENCE_MISMATCH"
+                  or .recoveryReason=="STAGING_RECONCILIATION_MISMATCH"
+                  or .recoveryReason=="SWAP_DISCRIMINATION_AMBIGUOUS"
+                )
+                and (keys|sort)==["code","recoveryReason","status","verdict"]
+              )
+            )
+          ' >/dev/null || { echo SWAP_RECOVERY_RESULT_INVALID; exit 1; }
           verdict="$(printf '%s' "$result"|jq -r '.verdict')"
           status="$(printf '%s' "$result"|jq -r '.status')"
           mkdir -p "$RUNNER_TEMP/swap-recovery-evidence"
-          jq -n --arg status "$status" --arg code INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED --arg verdict "$verdict" '{status:$status,code:$code,verdict:$verdict}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+          if [ "$verdict" = RECOVERY_REQUIRED ]; then
+            recovery_reason="$(printf '%s' "$result"|jq -r '.recoveryReason')"
+            jq -n --arg status "$status" --arg code INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED --arg verdict "$verdict" --arg recoveryReason "$recovery_reason" '{status:$status,code:$code,verdict:$verdict,recoveryReason:$recoveryReason}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+          else
+            jq -n --arg status "$status" --arg code INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED --arg verdict "$verdict" '{status:$status,code:$code,verdict:$verdict}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+          fi
           echo "SWAP_RECOVERY_${verdict}"
 
       - name: Upload privacy-safe diagnostic evidence
