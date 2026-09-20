@@ -134,11 +134,12 @@ test('bootstrap execution envelope gives provider timeout precedence without ena
   assert.doesNotMatch(workflow, /--retry\s+[1-9]/);
 });
 
-test('bootstrap package exports only the dedicated handler and removes scheduled/schema runtime entrypoints', async () => {
+test('bootstrap package exports only dedicated bootstrap handlers and removes scheduled/schema runtime entrypoints', async () => {
   const packageScript = await text(PACKAGE_SCRIPT);
   const verifier = await text(PACKAGE_VERIFY);
 
   assert.match(packageScript, /export async function initialBootstrapHandler/);
+  assert.match(packageScript, /export async function initialBootstrapGateCHandler/);
   assert.match(packageScript, /await import\('\.\/dist\/runtime\/yandexCloudInitialBootstrapFunction\.js'\)/);
   assert.match(packageScript, /REFERENCE_FUNCTION_MODULE_LOAD_FAILED/);
   assert.match(packageScript, /REFERENCE_FUNCTION_HANDLER_UNCAUGHT/);
@@ -205,10 +206,10 @@ test('STAGING resume releases no-longer-needed reference planning state before a
   );
   assert.match(
     runtime,
-    /if \(referencePlan\.writes\.length === 0\) \{\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies\);\s*\}/s,
+    /if \(referencePlan\.writes\.length === 0\) \{\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies, runApplication\);\s*\}/s,
   );
   assert.match(
     runtime,
-    /isInitialBootstrapResidualReferenceRecoveryAuthorized\([\s\S]*?\)\) \{\s*throw new InitialBootstrapReferenceAwareRuntimeError\('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE'\);\s*\}\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies\);/s,
+    /isInitialBootstrapResidualReferenceRecoveryAuthorized\([\s\S]*?\)\) \{\s*throw new InitialBootstrapReferenceAwareRuntimeError\('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE'\);\s*\}\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies, runApplication\);/s,
   );
 });
