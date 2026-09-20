@@ -75,6 +75,16 @@ test('safe non-success Function results remain exact bounded output and exit non
     },
     {
       status: 'STOP',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+      recoveryReason: 'GATE_C_TERMINALIZATION_EVIDENCE_INVALID',
+    },
+    {
+      status: 'STOP',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_REQUIRED',
+      recoveryReason: 'GATE_C_INCOMPLETE_RUN_PRESENT',
+    },
+    {
+      status: 'STOP',
       code: 'INITIAL_BOOTSTRAP_VALIDATION_BLOCKED',
       blockers: [
         { code: 'INVALID_ROWS_PRESENT' },
