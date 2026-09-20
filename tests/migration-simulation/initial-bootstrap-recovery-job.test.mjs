@@ -299,6 +299,7 @@ test('recovery job preserves VALIDATED structure and compares source read-only',
     verdict: 'RECOVERY_REQUIRED',
     reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
     validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' },
   });
   assert.equal(controlledDiagnosticCalls, 1);
   assert.equal(fixture.counters().sourceReads, 1);
@@ -390,6 +391,7 @@ test('VALIDATED source diagnostic failure preserves structure and recovery bound
   assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
     verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
     validatedSourceEvidence: 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'VALIDATED_RUN_METADATA_INVALID' },
   });
   assert.equal(fixture.counters().closes, 1);
   assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
