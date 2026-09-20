@@ -1075,6 +1075,7 @@ test('swap recovery diagnostic fails closed when nonempty staging no longer matc
 
   assert.equal(diagnosed.status, 'CLASSIFIED');
   assert.equal(diagnosed.verdict, 'RECOVERY_REQUIRED');
+  assert.equal(diagnosed.reason, 'STAGING_RECONCILIATION_MISMATCH');
   assert.equal(scheme.state.renameCalls, 1);
   assert.equal(db.state.sourceRecords.size, 0);
   assert.equal(db.state.transactions.size, 0);
