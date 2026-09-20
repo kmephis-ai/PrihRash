@@ -10,6 +10,7 @@ import {
   InitialBootstrapApplicationError,
   prepareInitialControlledRebuildContinuation,
   runInitialBootstrapApplication,
+  runInitialBootstrapGateCApplication,
 } from '../../dist/migration/initialBootstrapApplication.js';
 import { InitialBootstrapIdentityManifestError } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapError } from '../../dist/migration/initialSnapshot.js';
@@ -24,6 +25,10 @@ import {
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`;
 const SNAPSHOT_ID = id(451001);
 const RUN_ID = id(451002);
+const GATE_C_SNAPSHOT_ID = id(451011);
+const GATE_C_RUN_ID = id(451012);
+const GATE_C_SOURCE_1 = id(451013);
+const GATE_C_TX_1 = id(451111);
 const SOURCE_1 = id(451003);
 const SOURCE_2 = id(451004);
 const TX_1 = id(451101);
@@ -106,7 +111,13 @@ function clock(...values) {
   });
 }
 
-function allocator({ sourceIds = [SOURCE_1, SOURCE_2], transactionIds = [TX_1, TX_2], forbid = false } = {}) {
+function allocator({
+  sourceIds = [SOURCE_1, SOURCE_2],
+  transactionIds = [TX_1, TX_2],
+  snapshotId = SNAPSHOT_ID,
+  runId = RUN_ID,
+  forbid = false,
+} = {}) {
   const calls = [];
   let sourceIndex = 0;
   let transactionIndex = 0;
@@ -123,12 +134,12 @@ function allocator({ sourceIds = [SOURCE_1, SOURCE_2], transactionIds = [TX_1, T
       allocateSnapshotId() {
         calls.push('snapshot');
         if (forbid) throw new Error('allocator called during resume: snapshot');
-        return SNAPSHOT_ID;
+        return snapshotId;
       },
       allocateMigrationRunId() {
         calls.push('run');
         if (forbid) throw new Error('allocator called during resume: run');
-        return RUN_ID;
+        return runId;
       },
       allocateSourceRecordId() { return next('source', sourceIds); },
       allocateTransactionId() { return next('transaction', transactionIds); },
@@ -554,6 +565,30 @@ function staleValidatedTerminalizedSeed(errorCode = INITIAL_BOOTSTRAP_STALE_VALI
       rows_ambiguous: 0n,
       error_code: errorCode,
     }]],
+    sourceSnapshots: [[SNAPSHOT_ID, {
+      captured_at: CAPTURED_AT,
+      source_sheet: 'Ответы на форму (11)',
+      snapshot_digest: DIGEST,
+      row_count: 1n,
+    }]],
+    manifests: [[RUN_ID, {
+      source_snapshot_id: SNAPSHOT_ID,
+      source_snapshot_digest: DIGEST,
+      binding_count: 1n,
+      bindings: 'synthetic-preserved-terminalized-manifest',
+    }]],
+    revisions: [[`${SOURCE_1}|1`, {
+      source_record_id: SOURCE_1,
+      revision: 1n,
+      migration_run_id: RUN_ID,
+      observed_at: CAPTURED_AT,
+      row_hint: 2n,
+      row_digest: 'synthetic-terminalized-row',
+      change_class: null,
+      raw_payload: JSON.stringify(expense('Synthetic preserved terminalized evidence')),
+    }]],
+    stagingSourceRecords: [[SOURCE_1, { id: SOURCE_1, classification: 'FINANCIAL_RECORD' }]],
+    stagingTransactions: [[TX_1, { id: TX_1, type: 'EXPENSE', amount_minor: 1234n }]],
   };
 }
 
@@ -600,6 +635,95 @@ test('fresh bootstrap is blocked after stale VALIDATED terminalization until sep
   assert.equal(db.events.some((event) => event.startsWith('tx:')), false);
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'FAILED');
   assert.equal(db.state.migrationRuns.get(RUN_ID).error_code, INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE);
+});
+
+test('dedicated Gate C starts a fresh identity set and preserves terminalized historical evidence', async () => {
+  const db = fakeDatabase({ seed: staleValidatedTerminalizedSeed() });
+  const ids = allocator({
+    sourceIds: [GATE_C_SOURCE_1],
+    transactionIds: [GATE_C_TX_1],
+    snapshotId: GATE_C_SNAPSHOT_ID,
+    runId: GATE_C_RUN_ID,
+  });
+  const lifecycleClock = clock(STARTED_AT, PROMOTED_AT, FINISHED_AT);
+  const oldSnapshot = structuredClone(db.state.sourceSnapshots.get(SNAPSHOT_ID));
+  const oldManifest = structuredClone(db.state.manifests.get(RUN_ID));
+  const oldRevision = structuredClone(db.state.revisions.get(`${SOURCE_1}|1`));
+  const oldStagingSource = structuredClone(db.state.stagingSourceRecords.get(SOURCE_1));
+  const oldStagingTransaction = structuredClone(db.state.stagingTransactions.get(TX_1));
+
+  const result = await runInitialBootstrapGateCApplication(
+    observation(),
+    dependencies(db, ids, lifecycleClock),
+  );
+
+  assert.equal(result.status, 'COMMITTED');
+  assert.equal(result.run.id, GATE_C_RUN_ID);
+  assert.equal(result.run.state, 'COMMITTED');
+  assert.deepEqual(ids.calls, ['source', 'snapshot', 'run', 'transaction']);
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'FAILED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).error_code, INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE);
+  assert.equal(db.state.migrationRuns.get(GATE_C_RUN_ID).state, 'COMMITTED');
+  assert.equal(db.state.sourceSnapshots.has(GATE_C_SNAPSHOT_ID), true);
+  assert.deepEqual(db.state.sourceSnapshots.get(SNAPSHOT_ID), oldSnapshot);
+  assert.deepEqual(db.state.manifests.get(RUN_ID), oldManifest);
+  assert.deepEqual(db.state.revisions.get(`${SOURCE_1}|1`), oldRevision);
+  assert.deepEqual(db.state.stagingSourceRecords.get(SOURCE_1), oldStagingSource);
+  assert.deepEqual(db.state.stagingTransactions.get(TX_1), oldStagingTransaction);
+});
+
+test('dedicated Gate C fails closed unless terminalization evidence is exactly one marker', async (t) => {
+  await t.test('missing marker', async () => {
+    const db = fakeDatabase();
+    const ids = allocator({ forbid: true });
+    const result = await runInitialBootstrapGateCApplication(
+      observation(),
+      dependencies(db, ids, clock()),
+    );
+    assert.deepEqual(result, {
+      status: 'RECOVERY_REQUIRED',
+      run: null,
+      reason: 'GATE_C_TERMINALIZATION_EVIDENCE_INVALID',
+    });
+    assert.deepEqual(ids.calls, []);
+  });
+
+  await t.test('duplicate markers', async () => {
+    const seed = staleValidatedTerminalizedSeed();
+    seed.migrationRuns.push([id(451099), {
+      ...structuredClone(seed.migrationRuns[0][1]),
+      id: id(451099),
+    }]);
+    const db = fakeDatabase({ seed });
+    const ids = allocator({ forbid: true });
+    const result = await runInitialBootstrapGateCApplication(
+      observation(),
+      dependencies(db, ids, clock()),
+    );
+    assert.deepEqual(result, {
+      status: 'RECOVERY_REQUIRED',
+      run: null,
+      reason: 'GATE_C_TERMINALIZATION_EVIDENCE_INVALID',
+    });
+    assert.deepEqual(ids.calls, []);
+  });
+});
+
+test('dedicated Gate C refuses any new claim while an incomplete run exists', async () => {
+  const seed = staleValidatedTerminalizedSeed();
+  seed.migrationRuns.push(...stagingSeed().migrationRuns);
+  const db = fakeDatabase({ seed });
+  const ids = allocator({ forbid: true });
+
+  const result = await runInitialBootstrapGateCApplication(
+    observation(),
+    dependencies(db, ids, clock()),
+  );
+
+  assert.equal(result.status, 'RECOVERY_REQUIRED');
+  assert.equal(result.reason, 'GATE_C_INCOMPLETE_RUN_PRESENT');
+  assert.equal(result.run?.state, 'STAGING');
+  assert.deepEqual(ids.calls, []);
 });
 
 test('exact STAGING claim resumes durable identities without allocator reuse and preserves original captured_at', async () => {

@@ -22,7 +22,10 @@ import {
   diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
 } from './initialBootstrapStaleStagingRetirementDiagnostic.js';
 import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.js';
-import { hasInitialBootstrapGateCBlocker } from './initialBootstrapGateCGuard.js';
+import {
+  hasInitialBootstrapGateCBlocker,
+  readInitialBootstrapGateCBlockerCount,
+} from './initialBootstrapGateCGuard.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
 import { reconstructInitialBootstrapDurableObservation } from './initialStaleValidatedHistoricalCandidate.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
@@ -161,7 +164,11 @@ export type InitialBootstrapRecoveryReason =
   | 'VALIDATION_TRANSITION_OUTCOME_UNKNOWN'
   | 'PROMOTION_OUTCOME_UNKNOWN'
   | 'VALIDATED_RUN_REQUIRES_RECOVERY'
-  | 'STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C';
+  | 'STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C'
+  | 'GATE_C_TERMINALIZATION_EVIDENCE_INVALID'
+  | 'GATE_C_INCOMPLETE_RUN_PRESENT';
+
+type InitialBootstrapAdmissionMode = 'ORDINARY' | 'STALE_VALIDATED_GATE_C';
 
 export type InitialControlledRebuildPreparationResult =
   | Readonly<{
@@ -675,9 +682,10 @@ function isApplicationResult(
   return 'status' in value;
 }
 
-export async function runInitialBootstrapApplication(
+async function runInitialBootstrapApplicationWithAdmission(
   observation: Readonly<InitialBootstrapObservation>,
   dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+  admissionMode: InitialBootstrapAdmissionMode,
 ): Promise<InitialBootstrapApplicationResult> {
   markApplicationPhase(dependencies, 'ADMISSION_READ');
   const admission = await readScheduledSyncAdmissionEvidence(dependencies.adapter);
@@ -692,11 +700,21 @@ export async function runInitialBootstrapApplication(
   }
 
   const incomplete = admission.incompleteRuns[0] ?? null;
+  if (admissionMode === 'STALE_VALIDATED_GATE_C' && incomplete !== null) {
+    return recoveryRequired('GATE_C_INCOMPLETE_RUN_PRESENT', incomplete);
+  }
   if (incomplete?.state === 'VALIDATED') {
     return recoveryRequired('VALIDATED_RUN_REQUIRES_RECOVERY', incomplete);
   }
-  if (incomplete === null && await hasInitialBootstrapGateCBlocker(dependencies.adapter)) {
-    return recoveryRequired('STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C', null);
+  if (incomplete === null) {
+    if (admissionMode === 'STALE_VALIDATED_GATE_C') {
+      const blockerCount = await readInitialBootstrapGateCBlockerCount(dependencies.adapter);
+      if (blockerCount !== 1) {
+        return recoveryRequired('GATE_C_TERMINALIZATION_EVIDENCE_INVALID', null);
+      }
+    } else if (await hasInitialBootstrapGateCBlocker(dependencies.adapter)) {
+      return recoveryRequired('STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C', null);
+    }
   }
 
   markApplicationPhase(dependencies, 'CURRENT_STATE_PREFLIGHT');
@@ -806,4 +824,22 @@ export async function runInitialBootstrapApplication(
     }
     throw error;
   }
+}
+
+export async function runInitialBootstrapApplication(
+  observation: Readonly<InitialBootstrapObservation>,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+): Promise<InitialBootstrapApplicationResult> {
+  return runInitialBootstrapApplicationWithAdmission(observation, dependencies, 'ORDINARY');
+}
+
+export async function runInitialBootstrapGateCApplication(
+  observation: Readonly<InitialBootstrapObservation>,
+  dependencies: Readonly<InitialBootstrapApplicationDependencies>,
+): Promise<InitialBootstrapApplicationResult> {
+  return runInitialBootstrapApplicationWithAdmission(
+    observation,
+    dependencies,
+    'STALE_VALIDATED_GATE_C',
+  );
 }
