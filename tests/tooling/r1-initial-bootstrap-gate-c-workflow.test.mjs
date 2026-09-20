@@ -24,7 +24,7 @@ test('Gate C runs only after successful main CI and shares the single initial-bo
   assert.match(workflow, /workflows:\s*\n\s*- CI/);
   assert.match(workflow, /name: Checkout trusted main[\s\S]*?ref: main/);
   assert.doesNotMatch(workflow, /ref: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
-  assert.match(workflow, /git rev-parse HEAD\)" = "\$SOURCE_SHA"/);
+  assert.match(workflow, /git rev-parse HEAD\)\" = \"\$SOURCE_SHA\"/);
   assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/);
   assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/);
   assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/);
