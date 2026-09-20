@@ -1,0 +1,33 @@
+name: Publish exact Gate B tree v2
+on:
+  push:
+    branches:
+      - transport/r1-630-gate-b-publish-v2-1c3d0609
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Reconstruct and publish exact reviewed tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .transport/r1-630-gate-b-patch/*.txt > "$RUNNER_TEMP/payload.b64"
+          test "$(wc -c < "$RUNNER_TEMP/payload.b64" | tr -d ' ')" = '24080'
+          test "$(sha256sum "$RUNNER_TEMP/payload.b64" | awk '{print $1}')" = 'bb3b7d956938b67867030d20ea9b7a4f0b8a3b80074d4fa15e5f1b3d61938295'
+          base64 --decode "$RUNNER_TEMP/payload.b64" | gzip --decompress > "$RUNNER_TEMP/gate-b.patch"
+          test "$(sha256sum "$RUNNER_TEMP/gate-b.patch" | awk '{print $1}')" = '8c666fb657a6b1b86e84e20035c819bbc415f37cbcfa9b549cf7f8d9fb303799'
+          git checkout --detach 1c3d060942675264f3781349b2dc4dc992041bcf
+          git apply --index "$RUNNER_TEMP/gate-b.patch"
+          git diff --cached --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git commit -m 'feat(r1): add bounded stale validated Gate B'
+          test "$(git rev-parse HEAD^{tree})" = '445efd2ac688d108dad2bed26ee2853319f755d4'
+          git push origin "HEAD:refs/heads/agent/r1-630-gate-b-production-v2"
