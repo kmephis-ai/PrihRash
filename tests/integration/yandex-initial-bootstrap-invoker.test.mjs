@@ -326,3 +326,17 @@ test('missing function id or IAM token fails before any invocation', async () =>
   assert.equal(missingToken.exitCode, 2);
   assertSafeOutput(missingToken, { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID' });
 });
+
+
+test('resume read phases remain bounded runtime evidence through the bootstrap invoker', async () => {
+  for (const applicationPhase of ['RESUME_IDENTITY_MANIFEST_READ', 'RESUME_SNAPSHOT_READ']) {
+    const value = {
+      status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+      runtimeCode: 'REFERENCE_APPLICATION_YDB_DATA_FAILED', applicationPhase,
+      metadataFailureCode: null, ydbDataFailureCode: 'YDB_TRANSPORT_QUERY_EXECUTION_FAILED',
+    };
+    const result = await runInvoker({ body: JSON.stringify(value) });
+    assert.equal(result.exitCode, 2);
+    assertSafeOutput(result, value);
+  }
+});

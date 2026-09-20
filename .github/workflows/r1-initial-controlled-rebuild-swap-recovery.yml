@@ -241,6 +241,8 @@ jobs:
                 and (
                   .bootstrapPhase=="ADMISSION_READ"
                   or .bootstrapPhase=="RESUME_CONTEXT_READ"
+                  or .bootstrapPhase=="RESUME_IDENTITY_MANIFEST_READ"
+                  or .bootstrapPhase=="RESUME_SNAPSHOT_READ"
                   or .bootstrapPhase=="RESUME_CONTEXT_PREPARATION"
                   or .bootstrapPhase=="LINEAGE_PREPARATION"
                   or .bootstrapPhase=="VALIDATION_EVALUATION"

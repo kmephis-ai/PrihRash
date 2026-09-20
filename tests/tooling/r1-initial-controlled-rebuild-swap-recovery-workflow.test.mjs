@@ -46,7 +46,7 @@ test('swap recovery invokes once and emits enum-only tri-state or bounded runtim
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED/);
   assert.match(workflow, /SOURCE_READ_FAILED[\s\S]*APPLICATION_FAILED[\s\S]*YDB_CLIENT_CLOSE_FAILED/);
   assert.match(workflow, /PREPARATION[\s\S]*STAGING_RECONCILIATION[\s\S]*SWAP_DISCRIMINATION/);
-  assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*LINEAGE_PREPARATION[\s\S]*CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*LINEAGE_PREPARATION[\s\S]*CURRENT_WRITE_PREPARATION/);
   assert.match(workflow, /\{status,code,jobCode,phase,bootstrapPhase\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /if-no-files-found: ignore/);

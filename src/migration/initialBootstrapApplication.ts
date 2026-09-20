@@ -117,6 +117,8 @@ export type InitialBootstrapApplicationPhase =
   | 'FRESH_METADATA_PREPARATION'
   | 'FRESH_CLAIM_WRITE'
   | 'RESUME_CONTEXT_READ'
+  | 'RESUME_IDENTITY_MANIFEST_READ'
+  | 'RESUME_SNAPSHOT_READ'
   | 'RESUME_CONTEXT_PREPARATION'
   | 'REVISION_EVIDENCE_PREPARATION'
   | 'REVISION_EVIDENCE_WRITE'
@@ -450,12 +452,14 @@ async function prepareResumeContext(
   if (run.sourceSnapshotDigest !== observation.snapshotDigest) {
     throw new InitialBootstrapApplicationError('RESUME_SNAPSHOT_DIGEST_MISMATCH');
   }
+  markApplicationPhase(dependencies, 'RESUME_IDENTITY_MANIFEST_READ');
   const recovered = await recoverInitialBootstrapIdentities(
     dependencies.adapter,
     run.id,
     observation.snapshotDigest,
     resumeObservations(observation),
   );
+  markApplicationPhase(dependencies, 'RESUME_SNAPSHOT_READ');
   const snapshot = await readDurableSnapshot(
     dependencies.adapter,
     recovered.sourceSnapshotId,

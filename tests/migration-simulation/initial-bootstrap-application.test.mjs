@@ -581,6 +581,31 @@ test('stale STAGING snapshot mismatch is classified at RESUME_CONTEXT_READ befor
   assert.equal(db.state.transactions.size, 0);
 });
 
+test('resume read failures preserve the exact read layer without writes or identity allocation', async (t) => {
+  for (const [table, phase] of [
+    ['manifests', 'RESUME_IDENTITY_MANIFEST_READ'],
+    ['sourceSnapshots', 'RESUME_SNAPSHOT_READ'],
+  ]) {
+    await t.test(phase, async () => {
+      const db = fakeDatabase({ seed: stagingSeed() });
+      if (table === 'manifests') db.state.manifests.clear();
+      else db.state.sourceSnapshots.get(SNAPSHOT_ID).captured_at = 'invalid-timestamp';
+      const ids = allocator({ forbid: true });
+      const phases = [];
+      await assert.rejects(() => prepareInitialControlledRebuildContinuation(
+        observation(), dependencies(db, ids, clock(), {
+          observePhase(value) { phases.push(value); },
+        }),
+      ));
+      assert.equal(phases.at(-1), phase);
+      assert.deepEqual(ids.calls, []);
+      assert.equal(db.events.some((event) => event.startsWith('tx:')), false);
+      assert.equal(db.state.sourceRecords.size, 0);
+      assert.equal(db.state.transactions.size, 0);
+    });
+  }
+});
+
 test('exact STAGING claim resumes when YDB returns source snapshot captured_at as native Date', async () => {
   const db = fakeDatabase({ seed: stagingSeed({ capturedAt: new Date(CAPTURED_AT) }) });
   const ids = allocator({ forbid: true });
