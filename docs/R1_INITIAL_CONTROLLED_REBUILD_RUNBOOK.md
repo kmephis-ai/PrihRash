@@ -133,9 +133,11 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д�
 
 Нормативный [Migration Contract](MIGRATION_CONTRACT.md#71-live-authoritative-source-и-bootstrap-cutoff) запрещает предполагать остановку Google во время initial bootstrap. Каждый новый bootstrap связывается с immutable `Snapshot A`; staging/reconciliation/swap/COMMITTED этого run доказываются относительно A. Fresh Google `B != A`, появившийся **после** cutoff, является нормальным `AUTHORITATIVE_SOURCE_ADVANCED` и должен переходить в post-COMMITTED incremental catch-up `A → B`, а не автоматически превращать доказанный A в stale run.
 
-`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` из legacy/current recovery diagnostic нельзя использовать как универсальное правило «retire and restart». Для будущего cutoff-aware runtime требуется различать:
-- invalid/unprovable bound observation A → fail-closed;
-- proven A + newer current source B → baseline A может завершаться по своему immutable evidence; catch-up обязателен отдельно.
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` из legacy/current recovery diagnostic нельзя использовать как универсальное правило «retire and restart». Cutoff-aware continuation различает:
+- invalid/unprovable bound observation A → fail-closed `BOOTSTRAP_OBSERVATION_INVALID`;
+- proven A + newer current source B → resume восстанавливает immutable A только из exact durable `source_snapshots` + identity manifest + полного revision=1 raw-payload evidence того же run, продолжает baseline A и не подменяет его live B; после `COMMITTED(A)` catch-up обязателен отдельно через обычный `START_INCREMENTAL`.
+
+Если хотя бы часть exact durable A отсутствует, malformed или не совпадает с manifest/snapshot/run binding, live B **не используется** для заполнения пробела: continuation fail-closed. Таким образом Google остаётся authoritative live source, а YDB evidence используется только как immutable resume evidence уже захваченного cutoff A, а не как вторая financial authority.
 
 Текущий pre-contract WU7 run остаётся исключением: у него уже есть historical `SWAP_OUTCOME_AMBIGUOUS`, поэтому до Gate A нельзя promotion/replay/retirement переинтерпретировать новым правилом. Gate A закрывает именно старую unknown-write ambiguity; после этого новый initial bootstrap должен быть cutoff-aware и не зависеть от quiet window.
 ## Owner decision: stale VALIDATED recovery contract
