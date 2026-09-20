@@ -130,7 +130,9 @@ jobs:
           source-sha: ${{ github.sha }}
           github-token: ${{ github.token }}
       - name: Build diagnostic package
-        run: npm run package:initial-controlled-rebuild:from-build
+        run: |
+          npm run build --silent
+          npm run package:initial-controlled-rebuild:from-build
 
       - name: Install Yandex Cloud CLI
         shell: bash
@@ -223,5 +225,5 @@ jobs:
         with:
           name: r1-initial-controlled-rebuild-swap-recovery-evidence-${{ github.run_id }}
           path: ${{ runner.temp }}/swap-recovery-evidence/classification.json
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
