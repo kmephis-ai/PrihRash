@@ -7,6 +7,7 @@ import { prepareScheduledIncrementalCandidate } from '../../dist/migration/sched
 const BASELINE_RUN = '00000000-0000-0000-0000-000000006001';
 const RUN_ID = '00000000-0000-0000-0000-000000006002';
 const SOURCE_ID = '00000000-0000-0000-0000-000000006003';
+const REVIEW_SOURCE_ID = '00000000-0000-0000-0000-000000006008';
 const TX_ID = '00000000-0000-0000-0000-000000006004';
 const ACCOUNT_ID = '00000000-0000-0000-0000-000000006005';
 const CATEGORY_ID = '00000000-0000-0000-0000-000000006006';
@@ -212,4 +213,51 @@ test('planner does not request transaction identity when source semantics are no
   const plan = await prepareScheduledIncrementalCandidate(input);
   assert.deepEqual(transactionRequests, []);
   assert.equal(plan.candidates.transactionCandidates.transactions.length, 0);
+});
+
+test('unknown reference vocabulary is quarantined without blocking an unrelated deterministic financial row', async () => {
+  let transactionRequests = null;
+  const unknownCategoryPayload = Object.freeze({
+    ...rawPayload,
+    expense_category: { kind: 'STRING', value: 'Synthetic Unknown Category' },
+    description: { kind: 'STRING', value: 'Synthetic quarantined row' },
+  });
+  const input = baseInput({
+    projection: Object.freeze({
+      rows: Object.freeze([
+        Object.freeze({ rowHint: 2, digest: 'digest-known', rawPayload }),
+        Object.freeze({ rowHint: 3, digest: 'digest-unknown-category', rawPayload: unknownCategoryPayload }),
+      ]),
+    }),
+    sourceIdentityAllocator: Object.freeze({
+      async allocate(requests) {
+        assert.deepEqual(requests.map((request) => request.currentRowHint), [2, 3]);
+        return Object.freeze([
+          Object.freeze({ currentRowHint: 2, sourceRecordId: SOURCE_ID }),
+          Object.freeze({ currentRowHint: 3, sourceRecordId: REVIEW_SOURCE_ID }),
+        ]);
+      },
+    }),
+    transactionIdentityAllocator: Object.freeze({
+      async allocate(requests) {
+        transactionRequests = requests;
+        return Object.freeze([{ sourceRecordId: SOURCE_ID, transactionId: TX_ID }]);
+      },
+    }),
+  });
+
+  const plan = await prepareScheduledIncrementalCandidate(input);
+
+  assert.deepEqual(plan.semantic.transition.decisions.map((decision) => decision.kind), [
+    'CREATE_FINANCIAL_CANDIDATE',
+    'CREATE_REVIEW_REQUIRED',
+  ]);
+  assert.deepEqual(transactionRequests, [{ sourceRecordId: SOURCE_ID }]);
+  const quarantined = plan.candidates.sourceCandidates.sourceRecords.find((record) => record.id === REVIEW_SOURCE_ID);
+  assert.equal(quarantined.classification, 'AMBIGUOUS');
+  assert.equal(quarantined.transactionId, null);
+  assert.equal(quarantined.state, null);
+  assert.equal(plan.candidates.transactionCandidates.transactions.length, 1);
+  assert.equal(plan.candidates.transactionCandidates.transactions[0].id, TX_ID);
+  assert.equal(plan.reconciliation.promotionBlocker, null);
 });

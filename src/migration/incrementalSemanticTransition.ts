@@ -260,6 +260,7 @@ function blockedDecision(
   if (outcome.classification !== 'FINANCIAL_RECORD') return null;
 
   if (outcome.financialProjection.status === 'FAILED') {
+    if (isLocalReferenceVocabularyFailure(outcome)) return null;
     return Object.freeze({
       kind: 'BLOCK_VALIDATION' as const,
       sourceRecordId,
@@ -274,6 +275,18 @@ function blockedDecision(
     });
   }
   return null;
+}
+
+function isLocalReferenceVocabularyFailure(
+  outcome: Readonly<IncrementalCurrentObservationSemanticOutcome>,
+): boolean {
+  return outcome.classification === 'FINANCIAL_RECORD'
+    && outcome.financialProjection.status === 'FAILED'
+    && outcome.financialProjection.stage === 'NORMALIZATION'
+    && (
+      outcome.financialProjection.errorCode === 'UNKNOWN_ACCOUNT'
+      || outcome.financialProjection.errorCode === 'UNKNOWN_CATEGORY'
+    );
 }
 
 function reviewPreserve(
@@ -332,6 +345,14 @@ export function buildIncrementalSemanticTransitionPlan(
 
     if (intent.kind === 'CREATE') {
       if (outcome.classification === 'FINANCIAL_RECORD') {
+        if (isLocalReferenceVocabularyFailure(outcome)) {
+          decisions.push(Object.freeze({
+            kind: 'CREATE_REVIEW_REQUIRED' as const,
+            sourceRecordId,
+            classification: 'AMBIGUOUS' as const,
+          }));
+          continue;
+        }
         if (outcome.financialProjection.status !== 'CANDIDATE') {
           throw new IncrementalSemanticTransitionError('OBSERVATION_INTENT_MISMATCH');
         }
@@ -389,6 +410,17 @@ export function buildIncrementalSemanticTransitionPlan(
     const changeClass = changeById.get(sourceRecordId);
     if (changeClass === undefined) {
       throw new IncrementalSemanticTransitionError('MISSING_REVISED_CHANGE_CLASS');
+    }
+
+    if (isLocalReferenceVocabularyFailure(outcome)) {
+      decisions.push(reviewPreserve(
+        sourceRecordId,
+        changeClass === 'AMBIGUOUS_CHANGE' ? 'AMBIGUOUS_CHANGE' : 'SEMANTIC_TRANSITION',
+        previous,
+        outcome.classification,
+        changeClass,
+      ));
+      continue;
     }
 
     if (changeClass === 'AMBIGUOUS_CHANGE') {
