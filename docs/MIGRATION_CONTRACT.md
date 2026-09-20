@@ -177,6 +177,22 @@ COMMITTED(A)
 
 Initial bootstrap и catch-up — разные authority boundaries. Этот контракт **не активирует timer/scheduled sync автоматически** и не меняет `Google authoritative → YDB shadow`; до отдельного scheduled-sync gate catch-up выполняется только через разрешённый bounded runtime surface.
 
+### 7.2. Live mutable source
+
+После bootstrap cutoff Google остаётся не только live, но и **mutable**. В OPEN legacy working period нормальны ручные edits существующей row, изменение даты, amount/category/account/Vika/note, ручной move/sort, редкое прямое создание financial row без Form и сознательное удаление ещё не закрытой операции.
+
+Эти действия не являются schema drift сами по себе. Migration обязан различать data mutation от row movement:
+
+- `row_hint`/ordinal — locator only;
+- pure reorder exact observations → `UNCHANGED` identities с обновлённым locator;
+- deterministic one-row/content correction → revision того же SourceRecord только когда identity доказана;
+- reorder + недоказуемый changed residue локализует `AMBIGUOUS_BLOCK` только на несопоставимом остатке, а не на весь snapshot;
+- exact duplicate/reordered duplicate identity не угадывается.
+
+Unknown/new vocabulary также должно быть fail-closed **локально**, когда identity и остальные source rows доказаны: затронутая observation становится review-required, а unrelated deterministic rows не должны блокироваться только из-за одной новой/ошибочной category. Runtime quarantine/materialization этого правила требует отдельного implementation proof и не разрешает invented aliases.
+
+Legacy close является многошаговым owner workflow. Snapshot между началом создания service markers и доказанным завершением cleanup может быть `CLOSE_IN_PROGRESS`; это не основание объявлять весь source permanently ambiguous. До отдельного formatting proof background color не используется runtime как close predicate.
+
 ### Текущий WU7 recovery exception
 
 Run, который существовал до принятия этого правила и уже имеет неизвестный historical swap outcome, нельзя задним числом считать безопасным только потому, что live source продвинулся. Его ambiguity должна быть закрыта текущим exact read-only recovery contract (Gate A и последующие разрешённые gates). Но эта разовая recovery-ситуация **не является шаблоном для будущих bootstrap**: после её закрытия новый bootstrap обязан использовать cutoff + catch-up semantics выше.
@@ -189,18 +205,20 @@ Run, который существовал до принятия этого пр
 ### Safe cases
 
 - unchanged row → same SourceRecord;
-- insertion между стабильными anchors → новый SourceRecord;
-- deletion → SourceRecord state `MISSING`;
-- одиночное изменение между однозначными anchors → revision same SourceRecord.
+- pure reorder unique exact rows → same SourceRecords независимо от нового row order; меняется только locator;
+- insertion между доказанными identities/anchors → новый SourceRecord;
+- deletion → SourceRecord state `MISSING` до применения period-aware resolution semantics;
+- одиночное изменение между однозначно доказанными identities/anchors → revision same SourceRecord.
 
 ### Ambiguous cases
 
 - сложный block replacement;
-- массовый reorder;
+- reorder с несколькими одновременно изменёнными/unmatched rows, для которых identity нельзя доказать exact evidence;
+- reorder exact duplicates, если нельзя доказать, какой SourceRecord соответствует какой физической row;
 - структурное изменение типа;
 - несколько потенциально одинаковых matches.
 
-Такие участки fail-closed → `AMBIGUOUS`/`REVIEW_REQUIRED`.
+Такие **участки** fail-closed → `AMBIGUOUS`/`REVIEW_REQUIRED`; deterministic unaffected rows продолжают иметь доказанную lineage и не должны автоматически попадать в тот же ambiguous block.
 
 ### 8.1. Incremental lineage counters
 
@@ -254,6 +272,10 @@ Automatic `WORKFLOW_TRANSFORM` разрешён только если однов
 - account/member change вне доказанного cleanup context.
 
 Canonical Transaction обновляется, `version += 1`.
+
+В OPEN legacy working period такие corrections являются нормальным operational behavior, а не причиной global sync stop. Изменение даты вместе с физическим перемещением row остаётся одной содержательной correction только если SourceRecord identity доказана; при недоказуемой identity fail-closed локализуется на этой observation/block.
+
+После доказанного close изменение только `note` считается metadata-only correction и не требует пересчёта PeriodClose, если финансовые поля и period membership не изменились.
 
 ### AMBIGUOUS_CHANGE
 
@@ -390,9 +412,17 @@ Exact duplicates не удаляются автоматически.
 Source row disappeared:
 
 - `SourceRecord.state=MISSING`;
-- canonical Transaction не hard-delete;
-- reconciliation показывает review item;
-- требуется осознанное resolution.
+- canonical Transaction никогда не hard-delete;
+- дальнейший effect зависит от доказанного period/workflow context.
+
+### 17.0. OPEN vs CLOSED disappearance
+
+Если одновременно доказаны exact SourceRecord↔Transaction link и принадлежность к текущему OPEN legacy working set, исчезновение row может автоматически классифицироваться как `OPEN_PERIOD_OWNER_CANCELLATION`: historical SourceRecord/revisions сохраняются, canonical Transaction переводится в semantic VOID/excluded state через optimistic guarded mutation.
+
+Если OPEN membership не доказана, либо row относится к CLOSED period, автоматический cancel запрещён: mismatch остаётся review-required. CLOSED-period disappearance не выводится как owner intent только из отсутствия строки.
+
+До реализации exact OPEN-working-set predicate runtime сохраняет существующий безопасный `MISSING → review` behavior; этот contract не разрешает преждевременный automatic VOID.
+
 
 Минимальные resolution codes:
 

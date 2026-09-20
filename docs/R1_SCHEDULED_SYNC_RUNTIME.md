@@ -58,6 +58,20 @@ Concrete Google Sheets reader запрашивает только canonical `О�
 
 Для доказанного header-only source-schema перехода v2→v3 full snapshot digest меняется вместе с exact header vector, но row lineage digest сохраняет v2-compatible framing при неизменённых A–K cells. Это предотвращает массовые ложные revisions только из-за `adapter_schema_version`; новые/реально изменённые observations сохраняют v3 provenance.
 
+### Live-mutable lineage boundary
+
+Scheduled/incremental runtime не предполагает append-only Google:
+
+- exact unique row, перемещённая сортировкой, сохраняет тот же SourceRecord; меняется только row locator;
+- pure reorder не создаёт `rows_changed/rows_missing/rows_ambiguous`; 
+- при reorder с несколькими недоказанными changed rows ambiguity относится только к unmatched residue; unrelated exact identities остаются usable evidence;
+- exact duplicate reorder остаётся fail-closed, если identity конкретной duplicate row доказать нельзя;
+- изменение даты/amount/category/account/Vika/note в доказанной identity проходит ordinary correction semantics, а не превращается в delete+insert только из-за перемещения строки.
+
+OPEN-period automatic cancellation и local unknown-vocabulary quarantine являются отдельными mutation/application boundaries: до их focused implementation proof существующий runtime сохраняет `MISSING → review` и текущий fail-closed vocabulary behavior. Этот документ не разрешает скрыто ослаблять validation ради throughput.
+
+Legacy close может быть прочитан в промежуточном `CLOSE_IN_PROGRESS` состоянии. Formatting/color не входит в текущий A–K reader; использовать owner close color можно только после отдельного provider proof и source-contract update.
+
 ## Atomic run claim
 
 Read-only admission не является distributed lock. Два scheduler invocation могут одновременно получить `START_INCREMENTAL`, поэтому STAGING run нельзя просто записывать после preflight без повторной проверки provider state.

@@ -54,6 +54,62 @@ function countDigests(rows: readonly { digest: string }[]): Map<string, number> 
   return counts;
 }
 
+
+function allDigestsUnique(
+  rows: readonly { digest: string }[],
+  counts: ReadonlyMap<string, number>,
+): boolean {
+  return rows.every((row) => counts.get(row.digest) === 1);
+}
+
+function reorderAwareUniqueDiff(
+  previous: readonly PreviousSequenceRow[],
+  current: readonly CurrentSequenceRow[],
+): SequenceDiffOperation[] {
+  const previousByDigest = new Map(previous.map((row) => [row.digest, row] as const));
+  const currentByDigest = new Map(current.map((row) => [row.digest, row] as const));
+  const previousOnly = previous.filter((row) => !currentByDigest.has(row.digest));
+  const currentOnly = current.filter((row) => !previousByDigest.has(row.digest));
+  const operations: SequenceDiffOperation[] = [];
+
+  for (const row of current) {
+    const oldRow = previousByDigest.get(row.digest);
+    if (oldRow !== undefined) {
+      operations.push({
+        kind: 'UNCHANGED',
+        sourceRecordId: oldRow.sourceRecordId,
+        previousRowHint: oldRow.rowHint,
+        currentRowHint: row.rowHint,
+        digest: row.digest,
+      });
+      continue;
+    }
+    if (previousOnly.length === 0) {
+      operations.push({ kind: 'INSERTED', currentRowHint: row.rowHint, digest: row.digest });
+    }
+  }
+
+  if (currentOnly.length === 0) {
+    for (const row of previousOnly) {
+      operations.push({
+        kind: 'MISSING',
+        sourceRecordId: row.sourceRecordId,
+        previousRowHint: row.rowHint,
+        digest: row.digest,
+      });
+    }
+  } else if (previousOnly.length > 0) {
+    operations.push({
+      kind: 'AMBIGUOUS_BLOCK',
+      previousSourceRecordIds: previousOnly.map((row) => row.sourceRecordId),
+      previousRowHints: previousOnly.map((row) => row.rowHint),
+      currentRowHints: currentOnly.map((row) => row.rowHint),
+    });
+  }
+
+  return operations;
+}
+
 function ambiguousWholeSnapshot(
   previous: readonly PreviousSequenceRow[],
   current: readonly CurrentSequenceRow[],
@@ -96,6 +152,12 @@ export function diffSequences(
 
   for (let index = 1; index < anchors.length; index += 1) {
     if ((anchors[index - 1]?.currentIndex ?? -1) >= (anchors[index]?.currentIndex ?? -1)) {
+      if (
+        allDigestsUnique(previous, previousCounts)
+        && allDigestsUnique(current, currentCounts)
+      ) {
+        return reorderAwareUniqueDiff(previous, current);
+      }
       return ambiguousWholeSnapshot(previous, current);
     }
   }

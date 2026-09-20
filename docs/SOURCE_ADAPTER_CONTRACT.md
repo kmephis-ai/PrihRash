@@ -15,6 +15,20 @@ sheet: Ответы на форму (11)
 
 Reference sheets не участвуют в создании Transactions.
 
+### 1.1. Operational mutability
+
+`Ответы на форму (11)` — live mutable operational source. Google Form является обычным путём создания операций, но не единственным допустимым provenance: владелец может очень редко создать обычную financial row вручную непосредственно в sheet.
+
+До CUTOVER adapter обязан предполагать, что существующие A–K rows могут быть вручную исправлены и физически переставлены. В частности:
+
+- physical A (`Отметка времени`) может быть вручную исправлена по календарному дню;
+- amount/category/account/Vika/description/note могут быть исправлены владельцем;
+- row order может меняться из-за ручного move/sort;
+- row position/ordinal не является identity и используется только как locator/evidence;
+- исчезновение row не означает automatic hard delete.
+
+Formatting, background color, hidden state и колонка L сейчас **не входят** в canonical A–K payload. Owner подтвердил, что окраска шести close rows означает завершённый legacy close, но runtime не имеет права использовать цвет как physical predicate до отдельного read-only provider proof и явного update этого contract.
+
 ## 2. Physical columns
 
 Последняя live read-only проверка header по exact Google spreadsheet identity: **2026-09-10**.
@@ -254,6 +268,8 @@ VIKA
 ```
 
 `LOAN` optional. Exact duplicate marker kind допустим и сам по себе не создаёт новый close.
+
+Категория close/service rows не является частью marker identity: владелец обычно выбирает первую удобную Form category, потому что amount=0 и category не участвует в итоговой сумме. Нельзя закреплять конкретную category (например `Продукты`) как close predicate без отдельного доказательства.
 
 Только exact marker rows внутри доказанного cluster получают `LEGACY_PERIOD_CLOSE`. Посторонняя zero row внутри того же day/window не повышается до close marker. Known marker row вне доказанного cluster → fail-closed `AMBIGUOUS`/`REVIEW_REQUIRED`.
 

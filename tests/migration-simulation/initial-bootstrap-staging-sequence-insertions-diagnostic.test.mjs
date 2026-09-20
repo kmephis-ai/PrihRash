@@ -85,7 +85,7 @@ test('staging revision diagnostic proves deterministic insertion-only source dri
   );
 });
 
-test('staging revision diagnostic fails closed for revision, deletion and reorder mixed with growth', async () => {
+test('staging revision diagnostic still fails closed for revision and deletion mixed with growth', async () => {
   const revision = Object.freeze([
     observation(0, 2, 'A'),
     observation(1, 3, 'B-CHANGED'),
@@ -98,19 +98,27 @@ test('staging revision diagnostic fails closed for revision, deletion and reorde
     observation(2, 4, 'X'),
     observation(3, 5, 'Y'),
   ]);
-  const reorder = Object.freeze([
+
+  for (const current of [revision, deletion]) {
+    assert.equal(
+      await classify(current),
+      'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    );
+  }
+});
+
+test('staging revision diagnostic treats pure reorder plus growth as source advancement', async () => {
+  const reorderWithInsertion = Object.freeze([
     observation(0, 2, 'B'),
     observation(1, 3, 'A'),
     observation(2, 4, 'C'),
     observation(3, 5, 'X'),
   ]);
 
-  for (const current of [revision, deletion, reorder]) {
-    assert.equal(
-      await classify(current),
-      'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
-    );
-  }
+  assert.equal(
+    await classify(reorderWithInsertion),
+    'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+  );
 });
 
 test('staging revision diagnostic fails closed when insertion lands inside duplicate digest evidence', async () => {
