@@ -41,6 +41,10 @@ import {
   type InitialBootstrapRecoverySurfaceClassification,
 } from '../migration/initialBootstrapResidualSurface.js';
 import {
+  evaluateInitialStaleValidatedRecoveryGate,
+  type InitialStaleValidatedRecoveryGateResult,
+} from '../migration/initialStaleValidatedRecoveryGate.js';
+import {
   InitialBootstrapRecoveryJobError,
   readInitialBootstrapRecoveryJobConfig,
   validateInitialBootstrapRecoveryConfig,
@@ -78,6 +82,7 @@ export type InitialBootstrapSourceDecodeDiagnostic =
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly validatedSourceEvidence?: InitialValidatedSourceDiagnostic;
+  readonly staleValidatedRecoveryGate?: InitialStaleValidatedRecoveryGateResult;
   readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
   readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
@@ -221,7 +226,20 @@ export async function executeInitialBootstrapRecoveryJob(
         } catch {
           validatedSourceEvidence = 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
         }
-        return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason, validatedSourceEvidence });
+        const staleValidatedRecoveryGate = evaluateInitialStaleValidatedRecoveryGate({
+          committedBaselinePresent: false,
+          uniqueValidatedRun: true,
+          validatedRunMetadataValid: validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
+            && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+          sourceEvidence: validatedSourceEvidence,
+          historicalContextProven: false,
+          currentStateEmpty: true,
+          stagingCandidateExact: false,
+          swapProvenNotApplied: false,
+          inFlightProviderMutationAbsent: false,
+          singleWriterExclusive: false,
+        });
+        return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason, validatedSourceEvidence, staleValidatedRecoveryGate });
       } catch {
         return Object.freeze({
           verdict: 'RECOVERY_REQUIRED' as const,
