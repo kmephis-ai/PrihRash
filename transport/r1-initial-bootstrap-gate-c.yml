@@ -1,0 +1,399 @@
+name: R1 initial bootstrap Gate C
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+  issues: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: r1-initial-bootstrap-writer
+  cancel-in-progress: false
+
+jobs:
+  gate-c:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      FUNCTION_TAG: r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact post-merge CI source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Verify one-shot Gate C repository authority
+        id: authority
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1' || { echo GATE_C_RERUN_FORBIDDEN; exit 1; }
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || { echo GATE_C_CHECKOUT_SHA_MISMATCH; exit 1; }
+          test -n "$YC_FOLDER_ID"; test -n "$YC_WIF_SERVICE_ACCOUNT_ID"; test -n "$YC_LOCKBOX_SECRET_ID"
+
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+          tmp="$RUNNER_TEMP/gate-c-authority"; mkdir -p "$tmp"
+
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/branches/main" -o "$tmp/main.json"
+          jq -e --arg sha "$SOURCE_SHA" '.commit.sha==$sha and .protected==true' "$tmp/main.json" >/dev/null \
+            || { echo GATE_C_MAIN_NOT_EXACT_PROTECTED; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/actions/runs/${{ github.event.workflow_run.id }}" -o "$tmp/ci.json"
+          jq -e --arg sha "$SOURCE_SHA" '
+            .name=="CI"
+            and .head_sha==$sha
+            and .head_branch=="main"
+            and .event=="push"
+            and .status=="completed"
+            and .conclusion=="success"
+          ' "$tmp/ci.json" >/dev/null || { echo GATE_C_TRIGGER_CI_NOT_EXACT; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/commits/${SOURCE_SHA}/pulls" -o "$tmp/prs.json"
+          jq -cer --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            [.[] | select(
+              .merged_at != null
+              and .merge_commit_sha==$sha
+              and .base.ref=="main"
+              and .head.repo.full_name==$repo
+            )] | if length==1 then .[0] else empty end
+          ' "$tmp/prs.json" > "$tmp/pr.json" || { echo GATE_C_SOURCE_PR_NOT_UNIQUE; exit 1; }
+
+          body="$(jq -r '.body // ""' "$tmp/pr.json")"
+          marker="$(jq -Rn --arg body "$body" '
+            def exact($prefix): [$body|split("\n")[]|select(startswith($prefix))];
+            (exact("Provider-Attempt: ")) as $attempt
+            | (exact("Provider-Authority: ")) as $authority
+            | (exact("Expected-Transition: ")) as $transition
+            | (exact("Tracking-Issue: #")) as $tracking
+            | (exact("Regression-Test: ")) as $test
+            | {
+                valid: (
+                  $attempt==["Provider-Attempt: GATE_C_READY"]
+                  and $authority==["Provider-Authority: R1_GATE_C_FRESH_BOOTSTRAP_ONCE"]
+                  and $transition==["Expected-Transition: STALE_VALIDATED_GATE_C/FRESH_BOOTSTRAP"]
+                  and ($tracking|length)==1
+                  and ($tracking[0]|test("^Tracking-Issue: #[1-9][0-9]*$"))
+                  and $test==["Regression-Test: tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs"]
+                ),
+                issue: (if ($tracking|length)==1 then ($tracking[0]|sub("^Tracking-Issue: #"; "")) else null end)
+              }
+          ')"
+          test "$(jq -r '.valid' <<<"$marker")" = true || { echo GATE_C_PR_AUTHORITY_MARKER_INVALID; exit 1; }
+          tracking_issue="$(jq -er '.issue' <<<"$marker")"
+          pr_number="$(jq -er '.number' "$tmp/pr.json")"
+          pr_title="$(jq -r '.title' "$tmp/pr.json")"
+          [[ "$pr_title" == "R1 #${tracking_issue}:"* ]] || { echo GATE_C_PR_TITLE_NOT_BOUND_TO_ISSUE; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/issues/${tracking_issue}" -o "$tmp/issue.json"
+          jq -e '
+            .state=="open"
+            and (.title|startswith("R1 WU7 Gate C:"))
+            and (.body|contains("Provider-Authority: R1_GATE_C_FRESH_BOOTSTRAP_ONCE"))
+            and (.body|contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY"))
+            and (.body|contains("Google-Authority: PRESERVED"))
+            and (.body|contains("Timer-Cutover: FORBIDDEN"))
+            and (.body|contains("Production-Writer: FORBIDDEN"))
+            and (.body|contains("Cleanup-Retirement: FORBIDDEN"))
+            and (.body|contains("Cap-Increase: FORBIDDEN"))
+            and (.body|contains("Blind-Replay: FORBIDDEN"))
+          ' "$tmp/issue.json" >/dev/null || { echo GATE_C_TRACKING_ISSUE_NOT_AUTHORIZED; exit 1; }
+
+          parent_issue="$(jq -r '.body | capture("Parent-R1-Issue: #(?<n>[1-9][0-9]*)").n // empty' "$tmp/issue.json")"
+          [[ "$parent_issue" =~ ^[1-9][0-9]*$ ]] || { echo GATE_C_PARENT_ISSUE_MARKER_MISSING; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/issues/${parent_issue}" -o "$tmp/parent.json"
+          jq -e '.state=="open" and (.title|startswith("R1 WU7:"))' "$tmp/parent.json" >/dev/null \
+            || { echo GATE_C_PARENT_R1_INACTIVE; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H "$accept" \
+            "$api/actions/workflows/r1-initial-bootstrap-gate-c.yml/runs?branch=main&event=workflow_run&per_page=100" \
+            -o "$tmp/history.json"
+          jq -e --arg sha "$SOURCE_SHA" --argjson self "$GITHUB_RUN_ID" '
+            [.workflow_runs[] | select(.head_sha==$sha and .id!=$self)] | length==0
+          ' "$tmp/history.json" >/dev/null || { echo GATE_C_ALREADY_ATTEMPTED_FOR_SHA; exit 1; }
+
+          printf 'tracking_issue=%s\nparent_issue=%s\nsource_pr=%s\n' "$tracking_issue" "$parent_issue" "$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install exact-source dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Restore verified exact-source artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.event.workflow_run.head_sha }}
+          github-token: ${{ github.token }}
+
+      - name: Dispatch and wait for fresh exact-main readiness
+        id: readiness
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PRIHRASH_R1_EXPECTED_MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs readiness)"
+          printf '%s\n' "$result" | jq -e '
+            .status=="PASS"
+            and .code=="R1_BOOTSTRAP_ORCHESTRATOR_CHILD_WORKFLOW_COMPLETED"
+            and .workflow=="readiness"
+            and (.runId|type)=="number"
+            and .conclusion=="success"
+          ' >/dev/null || { echo GATE_C_READINESS_DISPATCH_OR_RUN_FAILED; exit 1; }
+          printf 'run_id=%s\n' "$(jq -r '.runId' <<<"$result")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify fresh enum-only readiness evidence
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          READINESS_RUN_ID: ${{ steps.readiness.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          accept='Accept: application/vnd.github+json'
+          tmp="$RUNNER_TEMP/gate-c-readiness"; mkdir -p "$tmp"
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/actions/runs/${READINESS_RUN_ID}" -o "$tmp/run.json"
+          jq -e --arg sha "$SOURCE_SHA" '
+            .name=="R1 Yandex readiness"
+            and .head_sha==$sha
+            and .head_branch=="main"
+            and .event=="workflow_dispatch"
+            and .status=="completed"
+            and .conclusion=="success"
+          ' "$tmp/run.json" >/dev/null || { echo GATE_C_READINESS_RUN_NOT_EXACT; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H "$accept" "$api/actions/runs/${READINESS_RUN_ID}/artifacts?per_page=100" -o "$tmp/artifacts.json"
+          artifact_url="$(jq -er --arg name "r1-yandex-readiness-evidence-${READINESS_RUN_ID}" '
+            [.artifacts[]|select(.name==$name and .expired==false)]
+            | if length==1 then .[0].archive_download_url else empty end
+          ' "$tmp/artifacts.json")" || { echo GATE_C_READINESS_ARTIFACT_MISSING; exit 1; }
+          curl --fail --silent --show-error --location -H "$h" -H "$accept" "$artifact_url" -o "$tmp/evidence.zip"
+          unzip -p "$tmp/evidence.zip" classification.json > "$tmp/classification.json"
+          jq -e 'type=="object" and (keys|sort)==["code","status"] and .status=="PASS" and .code=="READINESS_READY"' \
+            "$tmp/classification.json" >/dev/null || { echo GATE_C_READINESS_NOT_READY; exit 1; }
+
+      - name: Re-verify exact main and authority before provider mutation
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          TRACKING_ISSUE: ${{ steps.authority.outputs.tracking_issue }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          current="$(curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/branches/main" | jq -er '.commit.sha')"
+          test "$current" = "$SOURCE_SHA" || { echo GATE_C_MAIN_MOVED_BEFORE_PROVIDER; exit 1; }
+          state="$(curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" | jq -er '.state')"
+          test "$state" = open || { echo GATE_C_AUTHORITY_REVOKED_BEFORE_PROVIDER; exit 1; }
+
+      - name: Build reviewed bootstrap package with Gate C entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build --silent
+          npm run package:initial-bootstrap:from-build --silent
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/yc"
+          curl --fail --silent --show-error --location https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz -o "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$RUNNER_TEMP/yc"
+          yc_bin="$(find "$RUNNER_TEMP/yc" -type f -name yc -perm -u+x -print -quit)"; test -n "$yc_bin"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange exact GitHub OIDC token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-c-auth"; mkdir -p "$tmp"
+          aud="$(jq -rn --arg v "$OIDC_AUDIENCE" '$v|@uri')"
+          curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${aud}" -o "$tmp/oidc.json"
+          oidc="$(jq -er '.value|select(type=="string" and length>0)' "$tmp/oidc.json")"; echo "::add-mask::$oidc"
+          payload="${oidc#*.}"; payload="${payload%%.*}"; payload="${payload//-/+}"; payload="${payload//_/\/}"
+          case "$((${#payload}%4))" in 2) payload="${payload}==";; 3) payload="${payload}=";; 0);; *) echo GATE_C_OIDC_CLAIMS_INVALID; exit 1;; esac
+          printf %s "$payload" | base64 --decode > "$tmp/claims.json"
+          jq -e --arg iss "$OIDC_ISSUER" --arg aud "$OIDC_AUDIENCE" --arg sub "$OIDC_SUBJECT" '
+            .iss==$iss and ((.aud==$aud) or ((.aud|type)=="array" and (.aud|length)==1 and .aud[0]==$aud)) and .sub==$sub
+          ' "$tmp/claims.json" >/dev/null || { echo GATE_C_OIDC_CLAIMS_INVALID; exit 1; }
+          curl --fail --silent --show-error -X POST https://auth.yandex.cloud/oauth/token -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' -o "$tmp/iam.json"
+          token="$(jq -er '.access_token|select(type=="string" and length>0)' "$tmp/iam.json")"; echo "::add-mask::$token"; echo "YC_IAM_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Resolve private trigger-free provider boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-c-provider"; mkdir -p "$tmp"
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/function.json"
+          fid="$(jq -er '.id|select(type=="string" and length>0)' "$tmp/function.json")"; echo "::add-mask::$fid"
+          yc serverless function list-access-bindings --id "$fid" --format json --retry 0 --no-user-output > "$tmp/bindings.json"
+          jq -e '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject.id]|any(.=="allUsers" or .=="allAuthenticatedUsers")|not' "$tmp/bindings.json" >/dev/null \
+            || { echo GATE_C_FUNCTION_PUBLIC; exit 1; }
+          jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject]|any(.type=="serviceAccount" and .id==$id)' "$tmp/bindings.json" >/dev/null \
+            || { echo GATE_C_WIF_INVOKER_MISSING; exit 1; }
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/triggers.json"
+          jq -e --arg id "$fid" '[..|strings|select(.==$id)]|length==0' "$tmp/triggers.json" >/dev/null || { echo GATE_C_FUNCTION_TRIGGER_PRESENT; exit 1; }
+          runtime_sa="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output | jq -er '.id')"; echo "::add-mask::$runtime_sa"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${YC_IAM_TOKEN}" "https://lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${YC_LOCKBOX_SECRET_ID}" -o "$tmp/secret.json"
+          jq -e --arg id "$YC_LOCKBOX_SECRET_ID" --arg name "$LOCKBOX_SECRET_NAME" --arg folder "$YC_FOLDER_ID" '.id==$id and .name==$name and .folderId==$folder and .status=="ACTIVE"' "$tmp/secret.json" >/dev/null \
+            || { echo GATE_C_LOCKBOX_METADATA_INVALID; exit 1; }
+          lockbox_ver="$(jq -er '.currentVersion.id|select(type=="string" and length>0)' "$tmp/secret.json")"; echo "::add-mask::$lockbox_ver"
+          { echo "GATE_C_FUNCTION_ID=$fid"; echo "GATE_C_RUNTIME_SA=$runtime_sa"; echo "GATE_C_LOCKBOX_VERSION=$lockbox_ver"; } >> "$GITHUB_ENV"
+
+      - name: Re-verify exact main immediately before Gate C deployment
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(curl --fail --silent --show-error -H "Authorization: Bearer ${GH_API_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$sha" = "$SOURCE_SHA" || { echo GATE_C_MAIN_MOVED_BEFORE_DEPLOY; exit 1; }
+
+      - name: Deploy Gate C-only bootstrap Function version
+        shell: bash
+        run: |
+          set -euo pipefail
+          yc serverless function version create \
+            --function-id "$GATE_C_FUNCTION_ID" \
+            --runtime nodejs22 \
+            --entrypoint index.initialBootstrapGateCHandler \
+            --memory 256m \
+            --execution-timeout 600s \
+            --source-path .artifacts/yandex-initial-bootstrap-function \
+            --service-account-id "$GATE_C_RUNTIME_SA" \
+            --tags "$FUNCTION_TAG" \
+            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+            --no-logging \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_C_LOCKBOX_VERSION},key=google_spreadsheet_id" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_C_LOCKBOX_VERSION},key=google_service_account_email" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_C_LOCKBOX_VERSION},key=google_service_account_private_key" \
+            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_C_LOCKBOX_VERSION},key=ydb_connection_string" \
+            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_C_LOCKBOX_VERSION},key=initial_bootstrap_private_historical_evidence" \
+            --format json --retry 0 --no-user-output >/dev/null
+
+      - name: Re-verify private trigger-free Gate C deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-c-postflight"; mkdir -p "$tmp"
+          yc serverless function list-access-bindings --id "$GATE_C_FUNCTION_ID" --format json --retry 0 --no-user-output > "$tmp/bindings.json"
+          jq -e '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject.id]|any(.=="allUsers" or .=="allAuthenticatedUsers")|not' "$tmp/bindings.json" >/dev/null \
+            || { echo GATE_C_FUNCTION_PUBLIC_AFTER_DEPLOY; exit 1; }
+          jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject]|any(.type=="serviceAccount" and .id==$id)' "$tmp/bindings.json" >/dev/null \
+            || { echo GATE_C_WIF_INVOKER_MISSING_AFTER_DEPLOY; exit 1; }
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/triggers.json"
+          jq -e --arg id "$GATE_C_FUNCTION_ID" '[..|strings|select(.==$id)]|length==0' "$tmp/triggers.json" >/dev/null \
+            || { echo GATE_C_TRIGGER_PRESENT_AFTER_DEPLOY; exit 1; }
+
+      - name: Re-assert exact current main and authority immediately before Gate C invoke
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          TRACKING_ISSUE: ${{ steps.authority.outputs.tracking_issue }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          sha="$(curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/branches/main" | jq -er '.commit.sha')"
+          test "$sha" = "$SOURCE_SHA" || { echo GATE_C_MAIN_MOVED_BEFORE_INVOKE; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" -o "$RUNNER_TEMP/gate-c-authority-before-invoke.json"
+          jq -e '.state=="open" and (.body|contains("Provider-Authority: R1_GATE_C_FRESH_BOOTSTRAP_ONCE")) and (.body|contains("Blind-Replay: FORBIDDEN"))' \
+            "$RUNNER_TEMP/gate-c-authority-before-invoke.json" >/dev/null || { echo GATE_C_AUTHORITY_REVOKED_BEFORE_INVOKE; exit 1; }
+
+      - name: Invoke dedicated Gate C exactly once
+        id: gate-c-invoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID="$GATE_C_FUNCTION_ID"
+          out="$RUNNER_TEMP/gate-c-invoke.json"
+          err="$RUNNER_TEMP/gate-c-invoke.err"
+          evidence="$RUNNER_TEMP/r1-initial-bootstrap-gate-c-evidence"
+          mkdir -p "$evidence"
+
+          set +e
+          npm --silent run initial-bootstrap:invoke >"$out" 2>"$err"
+          rc=$?
+          set -e
+
+          test "$(grep -cve '^$' "$out")" -eq 1 || { echo GATE_C_INVOKER_STDOUT_INVALID; exit 1; }
+          jq -e '
+            type=="object"
+            and (.status|IN("PASS","NOOP","STOP","FAIL"))
+            and (.code|type)=="string"
+            and (.code|test("^[A-Z0-9_]+$"))
+            and ([keys[]] - [
+              "status","code","recoveryReason","blockers","runtimeCode","applicationPhase",
+              "metadataFailureCode","ydbDataFailureCode","staleRetirementFailureCode","httpStatus","functionError"
+            ] | length)==0
+            and ((.recoveryReason? // "")|type)=="string"
+            and ((.runtimeCode? // "")|type)=="string"
+            and ((.applicationPhase? // "")|type)=="string"
+            and ((.metadataFailureCode? // "")|type)=="string"
+            and ((.ydbDataFailureCode? // "")|type)=="string"
+            and ((.staleRetirementFailureCode? // "")|type)=="string"
+            and ((.httpStatus? // "")|type)=="string"
+            and ((.functionError? // "")|type)=="string"
+            and ((.blockers? // [])|type)=="array"
+            and all((.blockers? // [])[];
+              type=="object"
+              and ([keys[]]-["code","check"]|length)==0
+              and (.code|type)=="string"
+              and (.code|test("^[A-Z0-9_]+$"))
+              and ((.check? // "")|type)=="string"
+              and ((.check? // "")|test("^[A-Z0-9_]*$"))
+            )
+            and (if .status=="PASS" then (keys|sort)==["code","status"] and .code=="INITIAL_BOOTSTRAP_COMMITTED" else true end)
+          ' "$out" >/dev/null || { echo GATE_C_ENUM_EVIDENCE_INVALID; exit 1; }
+          jq -c '.' "$out" > "$evidence/classification.json"
+          exit "$rc"
+
+      - name: Publish enum-only Gate C evidence
+        if: ${{ always() && (steps.gate-c-invoke.outcome == 'success' || steps.gate-c-invoke.outcome == 'failure') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-gate-c-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-bootstrap-gate-c-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 30
