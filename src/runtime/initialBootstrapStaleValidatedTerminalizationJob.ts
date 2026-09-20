@@ -80,7 +80,7 @@ export interface InitialBootstrapStaleValidatedGateBRuntime {
 
 const productionRuntime: Readonly<InitialBootstrapStaleValidatedGateBRuntime> = Object.freeze({
   runRecovery: runInitialBootstrapRecoveryJob,
-  createYdbClient(config) {
+  createYdbClient(config: Readonly<InitialBootstrapRecoveryJobConfig>) {
     return createYdbJsV6MetadataDataClient({
       connectionString: config.ydbConnectionString,
       poolMaxSize: 1,
