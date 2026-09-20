@@ -61,7 +61,25 @@ Legacy `Вика=Да` означает, что расход оплатила В
 
 Calendar analytics используют `occurred_on`. Принадлежность к расчётному периоду хранится отдельно и не вычисляется только из даты.
 
-## 5.1. Историческая гранулярность и точность даты
+### 5.1. Live mutable source до закрытия периода
+
+`Ответы на форму (11)` — не append-only журнал. До CUTOVER это живая рабочая таблица. Основной intake идёт через Google Form, но обычная financial row может очень редко быть создана вручную; сам факт отсутствия Form provenance не делает строку невалидной.
+
+Пока legacy working period остаётся OPEN, владелец может:
+
+- исправлять дату в physical A; обычно меняется календарный день, а время не имеет самостоятельной financial semantics;
+- исправлять amount/category/account/Vika/description/note;
+- перемещать и сортировать строки;
+- удалить ошибочную/полностью возвращённую операцию;
+- добавлять новые операции параллельно shadow sync.
+
+Row position/ordinal — locator, не financial identity. Pure reorder сам по себе не создаёт revision и не меняет финансовый смысл.
+
+OPEN-period disappearance может означать owner cancellation. YDB history физически не удаляется: automatic effect допустим только когда OPEN working-set membership и exact linked identity доказаны отдельным migration rule; иначе review-required. Для CLOSED period disappearance не применяется автоматически.
+
+После доказанного close финансовая часть периода считается стабильной. Metadata-only `note` correction допустима без пересчёта PeriodClose, если никакие финансовые поля не изменились.
+
+## 5.2. Историческая гранулярность и точность даты
 
 Source history неоднородна: часть ранних расходов может представлять месячные/периодные агрегаты по категории, а более поздняя история — реальные item-level операции. Нельзя изображать оба типа одинаково.
 
@@ -168,25 +186,36 @@ else:
 
 ## 12. Closing balance
 
-Формула текущего процесса:
+Legacy close различает два разных факта, которые нельзя приравнивать:
+
+- `CreditPurchases` — сумма реальных EXPENSE, оплаченных `Карта Credit`; используется в expense analytics;
+- `ActualCreditSettlement` — сколько владелец фактически перечислил на кредитку при закрытии; это cash/liability settlement, а не второй EXPENSE.
+
+`ActualCreditSettlement` может быть больше или меньше `CreditPurchases`. Такое расхождение само по себе не является reconciliation error.
+
+Расходная аналитика:
+
+```text
+TotalExpenses =
+    CreditPurchases
+  + NegativePositions
+  + VikaRed
+```
+
+Legacy денежный closing balance считается по фактическому settlement:
 
 ```text
 ClosingBalance =
     PreviousClosingBalance
   + PositivePositions
-  - CreditCards
   - NegativePositions
   - VikaRed
+  - ActualCreditSettlement
 ```
 
-Контрольный invariant:
+Для legacy source `ActualCreditSettlement` разрешено извлекать только из доказанной close/service row `Кредитки` и её note K в доказанном close context. Если settlement evidence отсутствует или неоднозначно, нельзя автоматически подставлять `CreditPurchases`; значение остаётся unknown/review-required для close semantics.
 
-```text
-TotalExpenses = CreditCards + NegativePositions + VikaRed
-ClosingBalance = PreviousClosingBalance + TotalIncome - TotalExpenses
-```
-
-Если invariant не выполняется, PeriodClose не подтверждается. System-managed PeriodClose использует только records с достаточно доказанной transaction granularity и period membership; исторические `PERIOD_AGGREGATE` не втягиваются в новый close engine автоматически.
+System-managed PeriodClose использует только records с достаточно доказанной transaction granularity и period membership; исторические `PERIOD_AGGREGATE` не втягиваются в новый close engine автоматически.
 
 ## 12.1. Bootstrap первого system-managed периода
 
@@ -194,18 +223,22 @@ ClosingBalance = PreviousClosingBalance + TotalIncome - TotalExpenses
 
 Перед первым system-managed period владелец подтверждает последнее надёжное значение `Текущий баланс` из legacy `Месячные` как opening balance следующего периода. Anchor хранит дату и provenance `LEGACY_CONFIRMED`.
 
-## 13. Что делает старый workflow после закрытия
+## 13. Что делает старый workflow при закрытии
 
-После закрытия пользователь вручную:
+Legacy close — это ручной многошаговый процесс, а не один atomic edit. Владелец:
 
-- меняет `Карта Credit` на `Карта Visa`;
-- меняет `Наличка` на `Карта Visa`;
-- очищает `Вика=Да`;
-- создаёт zero-amount строки `Итоги по месяцу`.
+1. через Form создаёт шесть zero-amount expense service rows: `Плюсовые позиции`, `Кредитки`, `Минусовые позиции`, `Вика Красное`, `Возврат займа`, `Текущий баланс`;
+2. заполняет K итоговыми/контрольными значениями; категория service rows не несёт финансового смысла и обычно выбирается только ради удобства Form;
+3. для `Кредитки` K отражает фактически перечисленный `ActualCreditSettlement`, а не обязательное равенство сумме Credit purchases;
+4. вручную массово меняет `Карта Credit → Карта Visa`, `Наличка → Карта Visa` и очищает `Вика=Да`;
+5. рассчитывает `Текущий баланс`;
+6. только после полного завершения этих действий визуально окрашивает шесть service rows — для владельца это означает «период официально закрыт».
 
-Эти действия нужны только для старого рабочего процесса и не являются корректировкой истории.
+Следовательно между первым и последним шагом источник может находиться в нормальном `CLOSE_IN_PROGRESS` состоянии. Snapshot, попавший в середину close, не должен автоматически превращать всю миграцию в permanent ambiguity: close-dependent interpretation откладывается до доказанного завершения, а независимые source rows могут продолжать синхронизироваться.
 
-Новая система не должна выполнять такой cleanup вообще.
+Color является подтверждённым owner workflow signal, но **не входит в physical adapter contract**, пока отдельный read-only provider audit не докажет exact formatting predicate. До такого proof код не читает/не угадывает цвет.
+
+Credit/Cash/Vika cleanup нужен только legacy workflow и не является исправлением исходной истории. Новая система не должна выполнять такой cleanup вообще.
 
 ## 14. Legacy period-close markers
 
