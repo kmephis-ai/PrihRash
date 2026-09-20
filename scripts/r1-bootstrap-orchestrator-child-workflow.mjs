@@ -124,7 +124,7 @@ async function main() {
   const workflow = WORKFLOWS[kind];
   const token = process.env.GITHUB_TOKEN;
   const repository = process.env.GITHUB_REPOSITORY;
-  const expectedSha = process.env.GITHUB_SHA;
+  const expectedSha = process.env.PRIHRASH_R1_EXPECTED_MAIN_SHA ?? process.env.GITHUB_SHA;
   if (
     workflow === undefined
     || repository !== REPOSITORY
