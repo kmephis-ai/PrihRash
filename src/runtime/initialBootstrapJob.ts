@@ -247,6 +247,7 @@ export async function executeInitialBootstrapJob(
       adapter,
       identityAllocator: primitives.identityAllocator,
       projectionContext,
+      historicalEvidence,
       reconciliation: reconciliation.port,
       clock: primitives.clock,
     });

@@ -25,6 +25,7 @@ import {
 
 export type InitialStaleValidatedHistoricalCandidateErrorCode =
   | 'RUN_NOT_VALIDATED'
+  | 'RUN_NOT_RESUMABLE'
   | 'MANIFEST_EVIDENCE_INVALID'
   | 'SNAPSHOT_EVIDENCE_INVALID'
   | 'REVISION_EVIDENCE_INVALID'
@@ -197,6 +198,85 @@ function parseRevisions(
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
   }
   return Object.freeze(revisions);
+}
+
+export async function reconstructInitialBootstrapDurableObservation(
+  reader: YdbReadScope,
+  run: Readonly<MigrationRun>,
+  historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+): Promise<Readonly<{
+  capturedAt: string;
+  snapshotDigest: string;
+  rows: readonly Readonly<{
+    rowHint: number;
+    digest: string;
+    rawPayload: RawPayload;
+    aggregatePeriodMonth: string | null;
+  }>[];
+}>> {
+  if (
+    (run.state !== 'STAGING' && run.state !== 'VALIDATED')
+    || run.finishedAt !== null
+    || run.errorCode !== null
+  ) {
+    throw new InitialStaleValidatedHistoricalCandidateError('RUN_NOT_RESUMABLE');
+  }
+
+  let readback;
+  try {
+    const manifestResult = await reader.read<Record<string, unknown>>(
+      initialBootstrapIdentityManifestReadStatement(run.id),
+    );
+    readback = parseInitialBootstrapIdentityManifestRows(run.id, manifestResult.rows);
+  } catch {
+    throw new InitialStaleValidatedHistoricalCandidateError('MANIFEST_EVIDENCE_INVALID');
+  }
+
+  if (
+    readback.runState !== run.state
+    || readback.runSnapshotDigest !== run.sourceSnapshotDigest
+    || readback.snapshotDigest !== run.sourceSnapshotDigest
+    || readback.manifest.sourceSnapshotDigest !== run.sourceSnapshotDigest
+    || readback.snapshotRowCount !== run.rowsSeen
+    || readback.manifest.bindings.length !== run.rowsSeen
+  ) {
+    throw new InitialStaleValidatedHistoricalCandidateError('MANIFEST_EVIDENCE_INVALID');
+  }
+
+  const snapshotResult = await reader.read<SnapshotRow>(snapshotStatement(readback.manifest.sourceSnapshotId));
+  const capturedAt = parseSnapshot(snapshotResult.rows, run.sourceSnapshotDigest, run.rowsSeen);
+  historicalEvidence.assertCompatibleRowCount(run.rowsSeen);
+
+  const expectedBySource = new Map(readback.manifest.bindings.map((binding) => [
+    binding.sourceRecordId,
+    Object.freeze({ rowHint: binding.rowHint, rowDigest: binding.rowDigest }),
+  ] as const));
+  let durableRevisions: readonly Readonly<HistoricalRevision>[];
+  try {
+    const revisionResult = await reader.read<RevisionRow>(revisionStatement(run.id));
+    durableRevisions = parseRevisions(revisionResult.rows, run, capturedAt, expectedBySource);
+  } catch (error) {
+    if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;
+    throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+  }
+
+  const revisionBySource = new Map(durableRevisions.map((revision) => [revision.sourceRecordId, revision] as const));
+  return Object.freeze({
+    capturedAt,
+    snapshotDigest: run.sourceSnapshotDigest,
+    rows: Object.freeze(readback.manifest.bindings.map((binding) => {
+      const revision = revisionBySource.get(binding.sourceRecordId);
+      if (revision === undefined) {
+        throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+      }
+      return Object.freeze({
+        rowHint: binding.rowHint,
+        digest: binding.rowDigest,
+        rawPayload: revision.rawPayload,
+        aggregatePeriodMonth: historicalEvidence.aggregatePeriodMonthForSourceOrdinal(binding.sourceOrdinal),
+      });
+    })),
+  });
 }
 
 export async function reconstructInitialStaleValidatedHistoricalCandidate(

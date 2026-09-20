@@ -216,6 +216,7 @@ export async function runInitialControlledRebuildJob(
       scheme,
       identityAllocator: primitives.identityAllocator,
       projectionContext,
+      historicalEvidence,
       reconciliation: reconciliation.port,
       clock: primitives.clock,
       observePhase(nextPhase: InitialBootstrapApplicationPhase) {

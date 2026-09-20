@@ -23,6 +23,8 @@ import {
 } from './initialBootstrapStaleStagingRetirementDiagnostic.js';
 import { planInitialBootstrapPromotion } from './initialBootstrapPromotionRoute.js';
 import { hasInitialBootstrapGateCBlocker } from './initialBootstrapGateCGuard.js';
+import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
+import { reconstructInitialBootstrapDurableObservation } from './initialStaleValidatedHistoricalCandidate.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
@@ -139,6 +141,7 @@ export interface InitialBootstrapApplicationDependencies {
   readonly adapter: YdbAdapter;
   readonly identityAllocator: InitialBootstrapIdentityAllocator;
   readonly projectionContext: Readonly<InitialSnapshotProjectionContext>;
+  readonly historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>;
   readonly reconciliation: InitialBootstrapReconciliationPort;
   readonly clock: InitialBootstrapApplicationClock;
   readonly observePhase?: (phase: InitialBootstrapApplicationPhase) => void;
@@ -206,7 +209,7 @@ export type InitialBootstrapApplicationResult =
 
 export type InitialBootstrapApplicationErrorCode =
   | 'MULTIPLE_INCOMPLETE_RUNS'
-  | 'RESUME_SNAPSHOT_DIGEST_MISMATCH'
+  | 'BOOTSTRAP_OBSERVATION_INVALID'
   | 'RESUME_RUN_COUNTERS_MISMATCH'
   | 'RESUME_COUNTER_REFINEMENT_CONFLICT'
   | 'SNAPSHOT_EVIDENCE_MISSING'
@@ -238,6 +241,7 @@ interface PreparedBootstrapContext {
   readonly candidate: Readonly<InitialBootstrapCandidateEnvelope>;
   readonly projection: Readonly<InitialSnapshotProjection>;
   readonly assignments: readonly Readonly<InitialTransactionIdentityAssignment>[];
+  readonly observation: Readonly<InitialBootstrapObservation>;
 }
 
 function counter(value: unknown): number | null {
@@ -442,7 +446,7 @@ async function prepareFreshContext(
     }
     throw error;
   }
-  return Object.freeze({ candidate, projection, assignments });
+  return Object.freeze({ candidate, projection, assignments, observation });
 }
 
 async function prepareResumeContext(
@@ -451,22 +455,31 @@ async function prepareResumeContext(
   dependencies: Readonly<InitialBootstrapApplicationDependencies>,
 ): Promise<Readonly<PreparedBootstrapContext>> {
   markApplicationPhase(dependencies, 'RESUME_CONTEXT_READ');
+  let resumeObservation = observation;
   if (run.sourceSnapshotDigest !== observation.snapshotDigest) {
-    throw new InitialBootstrapApplicationError('RESUME_SNAPSHOT_DIGEST_MISMATCH');
+    try {
+      resumeObservation = await reconstructInitialBootstrapDurableObservation(
+        dependencies.adapter,
+        run,
+        dependencies.historicalEvidence,
+      );
+    } catch {
+      throw new InitialBootstrapApplicationError('BOOTSTRAP_OBSERVATION_INVALID');
+    }
   }
   markApplicationPhase(dependencies, 'RESUME_IDENTITY_MANIFEST_READ');
   const recovered = await recoverInitialBootstrapIdentities(
     dependencies.adapter,
     run.id,
-    observation.snapshotDigest,
-    resumeObservations(observation),
+    resumeObservation.snapshotDigest,
+    resumeObservations(resumeObservation),
   );
   markApplicationPhase(dependencies, 'RESUME_SNAPSHOT_READ');
   const snapshot = await readDurableSnapshot(
     dependencies.adapter,
     recovered.sourceSnapshotId,
-    observation.snapshotDigest,
-    observation.rows.length,
+    resumeObservation.snapshotDigest,
+    resumeObservation.rows.length,
   );
   markApplicationPhase(dependencies, 'RESUME_CONTEXT_PREPARATION');
   const baseCandidate = buildInitialBootstrapCandidate({
@@ -495,6 +508,7 @@ async function prepareResumeContext(
     candidate,
     projection,
     assignments: recovered.transactionAssignments,
+    observation: resumeObservation,
   });
 }
 
@@ -590,7 +604,7 @@ export async function prepareInitialControlledRebuildContinuation(
     : prepared.candidate;
   const lineage = buildInitialSourceLineageProjection(
     lineageCandidate,
-    lineageObservations(lineageCandidate, observation),
+    lineageObservations(lineageCandidate, prepared.observation),
   );
   let validation: InitialValidationResult;
   if (durableRun.state === 'VALIDATED') {
@@ -693,13 +707,13 @@ export async function runInitialBootstrapApplication(
     : await prepareResumeContext(observation, incomplete, dependencies);
   if ('status' in prepared) return prepared;
 
-  const evidenceRecovery = await persistRevisionEvidence(prepared, observation, dependencies);
+  const evidenceRecovery = await persistRevisionEvidence(prepared, prepared.observation, dependencies);
   if (evidenceRecovery !== null) return evidenceRecovery;
 
   markApplicationPhase(dependencies, 'LINEAGE_PREPARATION');
   const lineage = buildInitialSourceLineageProjection(
     prepared.candidate,
-    lineageObservations(prepared.candidate, observation),
+    lineageObservations(prepared.candidate, prepared.observation),
   );
   const refined = await refineDurableRun(
     prepared.candidate.run,

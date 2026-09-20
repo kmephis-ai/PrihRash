@@ -467,11 +467,19 @@ function fakeDatabase({ seed = {}, unknownCommitAt = null } = {}) {
   return { state, events, adapter: new YdbAdapter(transport) };
 }
 
+const historicalEvidence = Object.freeze({
+  granularityEvidence: projectionContext.granularityEvidence,
+  aggregateMonthRanges: Object.freeze([]),
+  aggregatePeriodMonthForSourceOrdinal() { return null; },
+  assertCompatibleRowCount(rowCount) { assert.equal(Number.isSafeInteger(rowCount) && rowCount >= 0, true); },
+});
+
 function dependencies(db, ids, lifecycleClock, overrides = {}) {
   return Object.freeze({
     adapter: db.adapter,
     identityAllocator: ids.value,
     projectionContext: overrides.projectionContext ?? projectionContext,
+    historicalEvidence: overrides.historicalEvidence ?? historicalEvidence,
     reconciliation: overrides.reconciliation ?? Object.freeze({
       async reconcile() {
         assert.ok(db.state.revisions.size > 0, 'reconciliation must run after durable revision evidence');
@@ -605,7 +613,7 @@ test('exact STAGING claim resumes durable identities without allocator reuse and
   assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, TX_1);
 });
 
-test('stale STAGING snapshot mismatch is classified at RESUME_CONTEXT_READ before any resume writes', async () => {
+test('advanced live source fails closed when durable cutoff A is not fully reconstructable', async () => {
   const db = fakeDatabase({ seed: stagingSeed() });
   const ids = allocator({ forbid: true });
   const lifecycleClock = clock();
@@ -623,7 +631,7 @@ test('stale STAGING snapshot mismatch is classified at RESUME_CONTEXT_READ befor
       }),
     ),
     (error) => error instanceof InitialBootstrapApplicationError
-      && error.code === 'RESUME_SNAPSHOT_DIGEST_MISMATCH',
+      && error.code === 'BOOTSTRAP_OBSERVATION_INVALID',
   );
 
   assert.equal(phases.at(-1), 'RESUME_CONTEXT_READ');
@@ -896,15 +904,28 @@ test('controlled continuation reconstructs one deterministic candidate across ST
   assert.equal(first.status, 'CONTROLLED_REBUILD_REQUIRED');
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
 
+  const liveObservationB = Object.freeze({
+    ...largeObservation,
+    snapshotDigest: 'synthetic-live-source-b-digest',
+    rows: Object.freeze(largeObservation.rows.map((row, index) => Object.freeze({
+      ...row,
+      digest: `synthetic-live-b-row-${index + 1}`,
+      rawPayload: expense(`Live source B row ${index + 1}`),
+    }))),
+  });
   const resumeIds = allocator({ forbid: true });
   const staging = await prepareInitialControlledRebuildContinuation(
-    largeObservation,
+    liveObservationB,
     dependencies(db, resumeIds, clock()),
   );
   assert.equal(staging.status, 'READY');
   assert.equal(staging.durableRun.state, 'STAGING');
   assert.equal(staging.validatedRun.state, 'VALIDATED');
   assert.equal(staging.currentWrites.length > 0, true);
+  const stagingTransactionDescriptions = staging.currentWrites
+    .filter((write) => write.role === 'TRANSACTION')
+    .map((write) => write.statement.parameters.description?.value);
+  assert.deepEqual(stagingTransactionDescriptions, [largeDescription, largeDescription]);
   const stagingCreatedAt = staging.currentWrites
     .filter((write) => write.role === 'TRANSACTION')
     .map((write) => write.statement.parameters.created_at?.value);
@@ -914,7 +935,7 @@ test('controlled continuation reconstructs one deterministic candidate across ST
   db.state.migrationRuns.get(RUN_ID).state = 'VALIDATED';
   const validatedPhases = [];
   const validated = await prepareInitialControlledRebuildContinuation(
-    largeObservation,
+    liveObservationB,
     dependencies(db, resumeIds, clock(), {
       reconciliation: Object.freeze({
         async reconcile() {
