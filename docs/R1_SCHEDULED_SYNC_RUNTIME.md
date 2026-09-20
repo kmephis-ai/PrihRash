@@ -17,6 +17,13 @@
 - `NO_CHANGE` — свежий digest точно равен digest последнего COMMITTED baseline; новый MigrationRun не создаётся;
 - `START_INCREMENTAL` — clean COMMITTED baseline существует и fresh digest изменился.
 
+### Post-bootstrap catch-up для live Google
+
+Первый `COMMITTED(A)` является point-in-time baseline для immutable bootstrap cutoff A, а не требованием остановить Google на время bootstrap. Если к моменту завершения baseline authoritative Google уже стал `B`, следующий bounded invocation использует обычный admission и должен получить `START_INCREMENTAL` для fresh immutable observation B.
+
+Это и есть canonical catch-up `A → B`; отдельный второй migration engine не создаётся. Изменения source, появившиеся после cutoff A, не являются причиной переигрывать initial bootstrap только из-за нового digest. Если во время обработки B Google стал C, этот invocation завершает только B, а следующий sync рассматривает C.
+
+До отдельного timer-activation gate такой catch-up может запускаться только через разрешённую bounded runtime surface; это правило не включает schedule автоматически.
 
 ## Schema prerequisite
 
