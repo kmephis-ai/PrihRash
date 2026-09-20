@@ -1,0 +1,100 @@
+From 15f5beac0899f41473df92ea962fee7a47970cbf Mon Sep 17 00:00:00 2001
+From: kmephis-ai <kmephis@gmail.com>
+Date: Sun, 20 Sep 2026 14:38:27 +0000
+Subject: [PATCH] fix(r1): wire historical Gate A proof into recovery
+
+---
+ .../r1-initial-bootstrap-orchestrator.yml     |  1 +
+ .../r1-initial-bootstrap-recovery.yml         |  1 +
+ docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md |  6 +-
+ ...dex-initial-bootstrap-recovery-package.mjs |  7 ++
+ .../initialStaleValidatedRecoveryGate.ts      |  4 -
+ src/runtime/initialBootstrapRecoveryConfig.ts | 14 +++
+ src/runtime/initialBootstrapRecoveryJob.ts    | 95 ++++++++++++++++---
+ .../initial-bootstrap-recovery-job.test.mjs   | 94 +++++++++++++++++-
+ ...ial-stale-validated-recovery-gate.test.mjs |  9 +-
+ ...itial-bootstrap-recovery-workflow.test.mjs |  6 +-
+ ...l-bootstrap-orchestrator-workflow.test.mjs |  4 +-
+ 11 files changed, 210 insertions(+), 31 deletions(-)
+
+diff --git a/.github/workflows/r1-initial-bootstrap-orchestrator.yml b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+index 3d344da..1b14e3d 100644
+--- a/.github/workflows/r1-initial-bootstrap-orchestrator.yml
++++ b/.github/workflows/r1-initial-bootstrap-orchestrator.yml
+@@ -332,6 +332,7 @@ jobs:
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
++            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
+             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err" || {
+               echo 'R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_DEPLOY_FAILED'
+               exit 1
+diff --git a/.github/workflows/r1-initial-bootstrap-recovery.yml b/.github/workflows/r1-initial-bootstrap-recovery.yml
+index 2a1564e..fef7ac3 100644
+--- a/.github/workflows/r1-initial-bootstrap-recovery.yml
++++ b/.github/workflows/r1-initial-bootstrap-recovery.yml
+@@ -374,6 +374,7 @@ jobs:
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
+             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
+             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
++            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
+             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+             echo 'INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED'
+             exit 1
+diff --git a/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md b/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
+index 168ab24..83459d9 100644
+--- a/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
++++ b/docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md
+@@ -142,17 +142,17 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д
+ 
+ Owner 2026-09-20 явно разрешил отдельный recovery contract для stale `VALIDATED` с сохранением audit/staging evidence. Нормативные predicates, marker-only transition и отдельный новый bootstrap определены в [MIGRATION_CONTRACT](MIGRATION_CONTRACT.md#stale-initial-validated-recovery-с-сохранением-auditstaging-evidence). Это решение разрешает разработку и доказательство gates; оно не вооружает production mutation или existing autocontinue.
+ 
+-Последнее доказанное evidence: full read-only recovery [35507371844](https://github.com/kmephis-ai/PrihRash/actions/runs/35507371844) на `6c9d9f8a723dd530d8a7ae28a434a59db19ef54d` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` и `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`. Оно доказывает source mismatch, но ещё не historical candidate reconstruction, exact staging reconciliation, завершение старой scheme operation или exclusion позднего writer.
++Последнее доказанное evidence до wiring historical proof в recovery surface: full read-only recovery [35516186419](https://github.com/kmephis-ai/PrihRash/actions/runs/35516186419) на `f07522512866477df50fab13da828f53264e1461` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`, `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` и Gate A blocker `HISTORICAL_CONTEXT_NOT_PROVEN`. Оно не разрешает mutation/replay и подтверждает, что следующий repository step должен использовать уже реализованные historical reconstruction + exact staging/NOT_APPLIED primitives внутри того же read-only recovery surface.
+ 
+ Текущая готовность нового contract:
+ 
+ | Gate | Требование | Статус |
+ | --- | --- | --- |
+-| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | НЕ ДОКАЗАН; implementation/evidence отсутствуют |
++| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | ЧАСТИЧНО РЕАЛИЗОВАН: historical reconstruction и exact staging/NOT_APPLIED подключены к read-only recovery; production proof и predicates in-flight/single-writer ещё обязательны |
+ | B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
+ | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
+ 
+-Следующий bounded implementation unit закрывает Gate A через существующие read-only reconstruction/reconciliation primitives и synthetic fixtures. Если исходный context или завершение provider operation нельзя доказать, сохраняется `RECOVERY_REQUIRED`; переход к B запрещён. Не запускать повторный swap diagnostic только из-за merge этого contract: runtime пока не изменён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
++После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+ 
+ ## Setup and staging recovery
+ 
+diff --git a/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs b/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
+index 6fdec10..396e4a2 100644
+--- a/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
++++ b/scripts/verify-yandex-initial-bootstrap-recovery-package.mjs
+@@ -32,7 +32,11 @@ const requiredFiles = [
+   'dist/migration/initialBootstrapStagingRevisionDiagnostic.js',
+   'dist/migration/initialBootstrapReferenceReconciliation.js',
+   'dist/migration/initialControlledRebuildValidatedRecoveryDiagnostic.js',
++  'dist/migration/initialStaleValidatedHistoricalSwapProof.js',
++  'dist/migration/initialStaleValidatedHistoricalCandidate.js',
++  'dist/migration/initialBootstrapPrivateEvidence.js',
+   'dist/reference/initialBootstrapReferenceSemantics.js',
++  'dist/reference/ydbReferenceEvidenceReader.js',
+ ];
+ for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
+ 
+@@ -91,6 +95,9 @@ for (const recoveryModule of [
+   'initialBootstrapStagingRevisionDiagnostic.js',
+   'initialBootstrapReferenceReconciliation.js',
+   'initialControlledRebuildValidatedRecoveryDiagnostic.js',
++  'initialStaleValidatedHistoricalSwapProof.js',
++  'initialStaleValidatedHistoricalCandidate.js',
++  'initialBootstrapPrivateEvidence.js',
+ ]) {
+   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
+   if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {
+diff --git a/src/migration/initialStaleValidatedRecoveryGate.ts b/src/migration/initialStaleValidatedRecoveryGate.ts
+index 69e3889..989d2a0 100644
+--- a/src/migration/initialStaleValidatedRecoveryGate.ts
++++ b/src/migration/initialStaleValidatedRecoveryGate.ts
+@@ -39,10 +39,6 @@ export type InitialStaleValidatedRecoveryGateResult =
+ 
