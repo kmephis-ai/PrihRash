@@ -175,6 +175,26 @@ Investigation 2026-09-20 зафиксировало реальную грани�
 
 Для будущих write attempts этот gap должен предотвращаться до mutation: recovery contract обязан сохранять durable provider correlation/completion evidence, которое реально можно read-only проверить после transport loss. Это future protocol hardening и не является retroactive proof для `35469651936`.
 
+### Provider support log request — condition 6 evidence acquisition
+
+Официальный Yandex Cloud support path допускает запрос сервисных логов о собственных ресурсах независимо от support plan: [data requests](https://yandex.cloud/en/docs/support/request), [Support Center](https://yandex.cloud/en/docs/support/cloud-center). Для этого historical gap не нужно включать новый Audit Trail или расширять IAM. Managed YDB control-plane Audit Trails не содержит table-rename completion events и не заменяет SchemeShard evidence.
+
+Target historical correlation:
+
+- GitHub run `35469651936`, source SHA `acb40fb81befc548939f72146df729d27d591cbe`;
+- workflow window `2026-09-19T21:11:21Z .. 21:13:38Z`;
+- controlled Function invocation started approximately `2026-09-19T21:12:29Z`;
+- bounded result at `2026-09-19T21:13:29Z`: `SWAP_OUTCOME_AMBIGUOUS`;
+- support search window should include a conservative tail after client timeout, for example `2026-09-19T21:12:00Z .. 21:30:00Z`, and explicitly answer whether any matching SchemeShard transaction remained active after that interval.
+
+YDB native audit-log semantics show the evidence shape to request: schema-copy/rename events may contain `component=schemeshard`, `tx_id`, `request_id`, `operation`, `status`, `detailed_status`, database/path context; `status` is the operation completion status with values `SUCCESS`, `ERROR`, or `IN-PROCESS`: [YDB audit log](https://ydb.tech/docs/en/security/audit-log). This does **not** assert that Managed YDB exposes the native audit stream directly to the owner; the supported acquisition route for this historical attempt is a private Yandex Cloud support data request.
+
+The private ticket should bind the exact Managed YDB resource and exact rename/table paths privately and ask support for all matching SchemeShard `RenameTables` / `ALTER TABLE RENAME` records in the target window, including terminal timestamp/status and whether a matching transaction can still become active/apply later. Database IDs, table paths, service-account IDs, returned `tx_id`/`request_id`, raw service logs and provider archive links must not be copied to GitHub.
+
+Condition 6 may be reconsidered only if the returned provider evidence binds to this exact database/operation and proves a terminal server-side state. An exact matching SchemeShard record with terminal `status=SUCCESS` or `status=ERROR`, or an explicit provider statement based on internal state/logs that the matching historical transaction is terminal and cannot later apply, is potentially sufficient subject to exact run/path binding. `IN-PROCESS`, management-event absence, elapsed time, Function/GitHub completion, stable topology reads or exact `NOT_APPLIED` without provider completion proof remain insufficient.
+
+Until that evidence is reviewed privately and reduced to bounded enum-only project evidence, production Gate B workflow/function remains intentionally absent.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
