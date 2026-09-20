@@ -41,10 +41,10 @@ jobs:
       YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
 
     steps:
-      - name: Checkout exact post-merge CI source
+      - name: Checkout trusted main
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: main
           persist-credentials: false
 
       - name: Verify one-shot Gate C repository authority
