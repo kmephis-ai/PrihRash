@@ -43,6 +43,10 @@ test('swap recovery invokes once and emits enum-only tri-state evidence', async 
   assert.match(workflow, /APPLIED[\s\S]*NOT_APPLIED[\s\S]*RECOVERY_REQUIRED/);
   assert.match(workflow, /DURABLE_RUN_NOT_VALIDATED.*SETUP_EVIDENCE_MISMATCH.*STAGING_RECONCILIATION_MISMATCH.*SWAP_DISCRIMINATION_AMBIGUOUS/s);
   assert.match(workflow, /recoveryReason/);
+  assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED/);
+  assert.match(workflow, /SOURCE_READ_FAILED[\s\S]*APPLICATION_FAILED[\s\S]*YDB_CLIENT_CLOSE_FAILED/);
+  assert.match(workflow, /PREPARATION[\s\S]*STAGING_RECONCILIATION[\s\S]*SWAP_DISCRIMINATION/);
+  assert.match(workflow, /\{status,code,jobCode,phase\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /if-no-files-found: ignore/);
   assert.doesNotMatch(workflow, /renameTables|copyTables|executeControlledInitialSwap|cleanup|retire/i);
