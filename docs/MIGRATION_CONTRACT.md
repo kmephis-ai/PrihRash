@@ -136,6 +136,50 @@ Digest не является Transaction ID.
 
 Позже возможен optimisation path, но периодический full reconciliation должен сохраниться.
 
+## 7.1. Live authoritative source и bootstrap cutoff
+
+До CUTOVER authoritative Google Sheet продолжает обслуживать реальные ежедневные доходы/расходы и **не замораживается ради migration**. Новая строка, owner correction или другой допустимый source change во время длительного initial bootstrap — ожидаемое состояние системы.
+
+Каждый initial MigrationRun связывается с одним immutable authoritative observation:
+
+```text
+Snapshot A
+source_snapshot_digest = digest(A)
+→ bootstrap cutoff A
+```
+
+Для этого run:
+
+1. candidate строится только из `A`;
+2. staging materialization доказывается против `A`;
+3. pre-promotion reconciliation доказывает `staging == candidate(A)`;
+4. swap/current reconciliation и `COMMITTED(A)` доказывают point-in-time baseline `A`;
+5. arbitrary fresh reread Google `B` **не подменяет A внутри этого run**.
+
+Если после захвата `A` live Google стал `B`, это различается как два принципиально разных случая:
+
+- `BOOTSTRAP_OBSERVATION_INVALID` — невозможно доказать/восстановить сам immutable `A`, нарушен его schema/binding/evidence contract либо candidate(A) неоднозначен. Run fail-closed и не может быть promoted.
+- `AUTHORITATIVE_SOURCE_ADVANCED` — immutable `A` доказан, но текущий authoritative Google уже содержит последующие изменения `B`. Это **не является причиной retirement/restart только по факту нового digest**. После доказанного `COMMITTED(A)` возникает обязательный catch-up `A → latest Google`.
+
+Catch-up использует обычный canonical incremental contract относительно **последнего COMMITTED snapshot**:
+
+```text
+COMMITTED(A)
+→ fresh immutable observation B
+→ deterministic sequence/semantic diff A → B
+→ bounded incremental MigrationRun
+→ COMMITTED(B)
+```
+
+Если во время catch-up Google успел стать `C`, invocation продолжает работать с уже захваченным immutable `B`; следующий sync обрабатывает `B → C`. Нельзя требовать момента, когда Google полностью перестал меняться.
+
+Безопасные новые insertions/corrections после cutoff не делают `COMMITTED(A)` недействительным. Ambiguous delta блокирует только соответствующий incremental promotion/review; он не откатывает доказанный point-in-time baseline.
+
+Initial bootstrap и catch-up — разные authority boundaries. Этот контракт **не активирует timer/scheduled sync автоматически** и не меняет `Google authoritative → YDB shadow`; до отдельного scheduled-sync gate catch-up выполняется только через разрешённый bounded runtime surface.
+
+### Текущий WU7 recovery exception
+
+Run, который существовал до принятия этого правила и уже имеет неизвестный historical swap outcome, нельзя задним числом считать безопасным только потому, что live source продвинулся. Его ambiguity должна быть закрыта текущим exact read-only recovery contract (Gate A и последующие разрешённые gates). Но эта разовая recovery-ситуация **не является шаблоном для будущих bootstrap**: после её закрытия новый bootstrap обязан использовать cutoff + catch-up semantics выше.
 ## 8. Sequence reconciliation
 
 Для определения lineage между snapshots использовать deterministic sequence diff/LCS/Myers-equivalent.

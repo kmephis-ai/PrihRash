@@ -65,6 +65,9 @@ Rolling-wave dependency: candidate/evidence части initial bootstrap мог�
 
 R1 bootstrap/incremental `shadow/migration writes` в YDB являются частью shadow replication и не меняют authority: до CUTOVER Google остаётся единственной write authority.
 
+R1 **не требует source freeze**: Google остаётся живым operational source во время initial bootstrap. Verified initial baseline — это point-in-time `COMMITTED(A)` для immutable cutoff observation A; обычные изменения Google после cutoff догоняются отдельным incremental `A → B`, а не инвалидируют A только из-за fresh digest mismatch.
+
+R1 production proof должен включать не только initial `COMMITTED(A)`, но и минимум один доказанный catch-up от этого baseline к более свежему authoritative observation, если source реально продвинулся. Ambiguous catch-up delta остаётся fail-closed на своём run и не отменяет уже доказанный baseline A.
 - `FAILED` run не меняет verified shadow;
 - минимум один полный real расчётный цикл;
 - Credit/Cash/Vika semantics сохранены при доказанном cleanup context;
