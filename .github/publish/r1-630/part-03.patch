@@ -1,0 +1,100 @@
++          && validatedSourceEvidence === 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
++          && validated.privateHistoricalEvidence !== undefined
++        ) {
++          try {
++            const historicalEvidence = runtime.parseHistoricalEvidence(validated.privateHistoricalEvidence);
++            const refs = await runtime.readReferenceResolver(adapter);
++            historicalSwapProof = await runtime.diagnoseHistoricalSwapProof(
++              adapter, scheme, refs, historicalEvidence,
++            );
++          } catch {
++            historicalSwapProof = null;
++          }
++        }
++        const historical = staleValidatedHistoricalEvidence(historicalSwapProof);
+         const staleValidatedRecoveryGate = evaluateInitialStaleValidatedRecoveryGate({
+-          committedBaselinePresent: false,
+-          uniqueValidatedRun: true,
+-          validatedRunMetadataValid: validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
+-            && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
++          committedBaselinePresent: historical.committedBaselinePresent,
++          uniqueValidatedRun: historical.uniqueValidatedRun,
++          validatedRunMetadataValid: sourceMetadataValid && historical.validatedRunMetadataValid,
+           sourceEvidence: validatedSourceEvidence,
+-          historicalContextProven: false,
+-          currentStateEmpty: true,
+-          stagingCandidateExact: false,
+-          swapProvenNotApplied: false,
++          historicalContextProven: historical.historicalContextProven,
++          currentStateEmpty: historical.currentStateEmpty,
++          stagingCandidateExact: historical.stagingCandidateExact,
++          swapProvenNotApplied: historical.swapProvenNotApplied,
+           inFlightProviderMutationAbsent: false,
+           singleWriterExclusive: false,
+         });
+diff --git a/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs b/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
+index 3067a0d..8fe0798 100644
+--- a/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
++++ b/tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs
+@@ -15,6 +15,7 @@ const config = Object.freeze({
+   googleServiceAccountEmail: 'synthetic@example.test',
+   googleServiceAccountPrivateKey: 'synthetic-private-key',
+   ydbConnectionString: 'grpcs://synthetic.example.test/?database=/synthetic',
++  privateHistoricalEvidence: '{\"synthetic\":true}',
+ });
+ 
+ function lease() {
+@@ -55,6 +56,9 @@ function runtime(overrides = {}) {
+   let stagingRetirementDiagnosticCalls = 0;
+   let stagingExactRevisionDiagnosticCalls = 0;
+   let closes = 0;
++  let historicalEvidenceParses = 0;
++  let referenceReads = 0;
++  let historicalProofCalls = 0;
+   const result = {
+     runtime: {
+       createDigest() {
+@@ -63,6 +67,11 @@ function runtime(overrides = {}) {
+           digestCanonicalRow: () => 'synthetic-row-digest',
+         });
+       },
++      parseHistoricalEvidence(serialized) {
++        historicalEvidenceParses += 1;
++        assert.equal(serialized, config.privateHistoricalEvidence);
++        return Object.freeze({ synthetic: true });
++      },
+       createSource() {
+         return Object.freeze({
+           async readFullSnapshotObservation() {
+@@ -88,6 +97,22 @@ function runtime(overrides = {}) {
+           async close() { closes += 1; },
+         });
+       },
++      async readReferenceResolver() {
++        referenceReads += 1;
++        return Object.freeze({ synthetic: true });
++      },
++      async diagnoseHistoricalSwapProof() {
++        historicalProofCalls += 1;
++        return Object.freeze({
++          status: 'PROVEN_NOT_APPLIED',
++          evidence: Object.freeze({
++            historicalContextProven: true,
++            currentStateEmpty: true,
++            stagingCandidateExact: true,
++            swapProvenNotApplied: true,
++          }),
++        });
++      },
+       async diagnoseSurface() {
+         diagnoseCalls += 1;
+         return { verdict: 'RECOVERY_REQUIRED', reason: 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN' };
+@@ -139,6 +164,9 @@ function runtime(overrides = {}) {
+       stagingDurableDiagnosticCalls,
+       stagingRetirementDiagnosticCalls,
+       stagingExactRevisionDiagnosticCalls,
++      historicalEvidenceParses,
++      referenceReads,
++      historicalProofCalls,
+       closes,
+     }),
