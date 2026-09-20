@@ -448,12 +448,19 @@ jobs:
           }
           if jq -e '.reason == "VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY"' "$evidence_dir/classification.json" >/dev/null; then
             source_evidence="$(sed -n 's/^R1_VALIDATED_SOURCE_EVIDENCE=//p' "$diagnostics")"
+            gate_blocker="$(sed -n 's/^R1_STALE_VALIDATED_GATE_BLOCKER=//p' "$diagnostics")"
             case "$source_evidence" in
               AUTHORITATIVE_SNAPSHOT_MATCH|AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH|AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED|AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY|AUTHORITATIVE_ROW_COUNT_MISMATCH|AUTHORITATIVE_BINDING_MISMATCH|VALIDATED_METADATA_INVALID|VALIDATED_SOURCE_DIAGNOSTIC_FAILED) ;;
               *) echo INITIAL_BOOTSTRAP_VALIDATED_SOURCE_EVIDENCE_INVALID; exit 1 ;;
             esac
+            case "$gate_blocker" in
+              COMMITTED_BASELINE_PRESENT|VALIDATED_RUN_NOT_UNIQUE|VALIDATED_RUN_METADATA_INVALID|SOURCE_DRIFT_NOT_PROVEN|HISTORICAL_CONTEXT_NOT_PROVEN|CURRENT_STATE_NOT_EMPTY|STAGING_CANDIDATE_NOT_EXACT|SWAP_NOT_PROVEN_NOT_APPLIED|IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN|SINGLE_WRITER_EXCLUSION_NOT_PROVEN) ;;
+              *) echo INITIAL_BOOTSTRAP_STALE_VALIDATED_GATE_BLOCKER_INVALID; exit 1 ;;
+            esac
             jq -cn --arg evidence "$source_evidence" '{validatedSourceEvidence:$evidence}' > "$evidence_dir/validated-source.json"
+            jq -cn --arg blocker "$gate_blocker" '{staleValidatedRecoveryGate:{status:"BLOCKED",blocker:$blocker}}' > "$evidence_dir/gate-a.json"
             cat "$evidence_dir/validated-source.json"
+            cat "$evidence_dir/gate-a.json"
           fi
           rm -f "$tmp" "$diagnostics"
 

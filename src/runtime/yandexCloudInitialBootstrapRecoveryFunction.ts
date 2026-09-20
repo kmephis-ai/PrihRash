@@ -18,6 +18,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       verdict: InitialBootstrapRecoveryVerdict;
       reason: InitialBootstrapRecoverySurfaceReason;
       validatedSourceEvidence?: InitialBootstrapRecoveryJobResult['validatedSourceEvidence'];
+      staleValidatedRecoveryGate?: InitialBootstrapRecoveryJobResult['staleValidatedRecoveryGate'];
       stagingRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionEvidence'];
       stagingDurableRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingDurableRevisionEvidence'];
       stagingRetirementEvidence?: InitialBootstrapRecoveryJobResult['stagingRetirementEvidence'];
@@ -43,6 +44,27 @@ const VALIDATED_SOURCE_EVIDENCE = new Set([
   'VALIDATED_METADATA_INVALID',
   'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
 ]);
+
+const STALE_VALIDATED_GATE_BLOCKERS = new Set([
+  'COMMITTED_BASELINE_PRESENT',
+  'VALIDATED_RUN_NOT_UNIQUE',
+  'VALIDATED_RUN_METADATA_INVALID',
+  'SOURCE_DRIFT_NOT_PROVEN',
+  'HISTORICAL_CONTEXT_NOT_PROVEN',
+  'CURRENT_STATE_NOT_EMPTY',
+  'STAGING_CANDIDATE_NOT_EXACT',
+  'SWAP_NOT_PROVEN_NOT_APPLIED',
+  'IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN',
+  'SINGLE_WRITER_EXCLUSION_NOT_PROVEN',
+]);
+
+function validStaleValidatedRecoveryGate(
+  value: InitialBootstrapRecoveryJobResult['staleValidatedRecoveryGate'],
+): boolean {
+  return value !== undefined
+    && value.status === 'BLOCKED'
+    && STALE_VALIDATED_GATE_BLOCKERS.has(value.blocker);
+}
 
 const STAGING_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingRevisionEvidence']>>([
   'NO_REVISION_EVIDENCE',
@@ -182,7 +204,8 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
 function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>, surfaceOnly = false): boolean {
   if (value.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly) {
     if (value.validatedSourceEvidence === undefined || !VALIDATED_SOURCE_EVIDENCE.has(value.validatedSourceEvidence)) return false;
-  } else if (value.validatedSourceEvidence !== undefined) return false;
+    if (!validStaleValidatedRecoveryGate(value.staleValidatedRecoveryGate)) return false;
+  } else if (value.validatedSourceEvidence !== undefined || value.staleValidatedRecoveryGate !== undefined) return false;
   const diagnostic = value.stagingRevisionEvidence;
   const durableDiagnostic = value.stagingDurableRevisionEvidence;
   const retirementDiagnostic = value.stagingRetirementEvidence;
@@ -231,6 +254,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.validatedSourceEvidence === undefined
         ? {}
         : { validatedSourceEvidence: classification.validatedSourceEvidence }),
+      ...(classification.staleValidatedRecoveryGate === undefined
+        ? {}
+        : { staleValidatedRecoveryGate: classification.staleValidatedRecoveryGate }),
       ...(classification.stagingRevisionEvidence === undefined
         ? {}
         : { stagingRevisionEvidence: classification.stagingRevisionEvidence }),
