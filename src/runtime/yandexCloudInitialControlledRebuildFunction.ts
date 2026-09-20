@@ -3,6 +3,7 @@ import type {
   InitialControlledRebuildRecoveryReason,
   InitialControlledRebuildSwapRecoveryReason,
 } from '../migration/initialControlledRebuildApplication.js';
+import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapPrivateEvidenceError } from '../migration/initialBootstrapPrivateEvidence.js';
 import {
   INITIAL_RECONCILIATION_CHECKS,
@@ -32,6 +33,7 @@ export type YandexInitialControlledRebuildRuntimeFailure = Readonly<{
   code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED';
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT';
   phase: InitialControlledRebuildApplicationPhase | null;
+  bootstrapPhase: InitialBootstrapApplicationPhase | null;
 }>;
 
 export type YandexInitialControlledRebuildFunctionResult =
@@ -135,12 +137,14 @@ function record(value: unknown): UnknownRecord | null {
 function runtimeFailure(
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT',
   phase: InitialControlledRebuildApplicationPhase | null = null,
+  bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
 ): Readonly<YandexInitialControlledRebuildRuntimeFailure> {
   return Object.freeze({
     status: 'FAIL' as const,
     code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED' as const,
     jobCode,
     phase,
+    bootstrapPhase,
   });
 }
 
@@ -258,7 +262,9 @@ export async function executeYandexInitialControlledRebuildFunction(
   try {
     return sanitizeApplicationResult(await runJob(environment));
   } catch (error) {
-    if (error instanceof InitialControlledRebuildJobError) return runtimeFailure(error.code, error.phase);
+    if (error instanceof InitialControlledRebuildJobError) {
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+    }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');
     }
@@ -284,7 +290,9 @@ export async function executeYandexInitialControlledRebuildSwapRecoveryDiagnosti
   try {
     return sanitizeSwapRecoveryDiagnosticResult(await runJob(environment));
   } catch (error) {
-    if (error instanceof InitialControlledRebuildJobError) return runtimeFailure(error.code, error.phase);
+    if (error instanceof InitialControlledRebuildJobError) {
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+    }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');
     }

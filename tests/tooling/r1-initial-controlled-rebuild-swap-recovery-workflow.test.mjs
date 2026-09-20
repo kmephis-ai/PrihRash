@@ -36,7 +36,7 @@ test('swap recovery deploy exposes read-only diagnostic handler with exact-sourc
   assert.doesNotMatch(workflow, /--async-|allUsers.*add-access-binding/);
 });
 
-test('swap recovery invokes once and emits enum-only tri-state evidence', async () => {
+test('swap recovery invokes once and emits enum-only tri-state or bounded runtime evidence', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-swap-recovery.yml');
   assert.match(workflow, /Invoke read-only exact swap recovery diagnostic once/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED/);
@@ -46,8 +46,16 @@ test('swap recovery invokes once and emits enum-only tri-state evidence', async 
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED/);
   assert.match(workflow, /SOURCE_READ_FAILED[\s\S]*APPLICATION_FAILED[\s\S]*YDB_CLIENT_CLOSE_FAILED/);
   assert.match(workflow, /PREPARATION[\s\S]*STAGING_RECONCILIATION[\s\S]*SWAP_DISCRIMINATION/);
-  assert.match(workflow, /\{status,code,jobCode,phase\}/);
+  assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*LINEAGE_PREPARATION[\s\S]*CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /\{status,code,jobCode,phase,bootstrapPhase\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /if-no-files-found: ignore/);
   assert.doesNotMatch(workflow, /renameTables|copyTables|executeControlledInitialSwap|cleanup|retire/i);
+});
+
+test('swap recovery runtime keeps bootstrap subphase only inside controlled PREPARATION', async () => {
+  const source = await read('src/runtime/initialControlledRebuildJob.ts');
+  assert.match(source, /bootstrapPhase = nextPhase;/);
+  assert.match(source, /if \(nextPhase !== 'PREPARATION'\) bootstrapPhase = null;/);
+  assert.match(source, /InitialControlledRebuildJobError\('APPLICATION_FAILED', controlledPhase, bootstrapPhase\)/);
 });

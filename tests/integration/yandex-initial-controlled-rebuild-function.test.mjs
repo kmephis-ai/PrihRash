@@ -60,12 +60,25 @@ test('controlled swap recovery diagnostic exposes only bounded verdict', async (
 
 test('controlled swap recovery diagnostic preserves bounded runtime failure taxonomy', async () => {
   assert.deepEqual(
+    await executeSwapDiagnostic(
+      new InitialControlledRebuildJobError('APPLICATION_FAILED', 'PREPARATION', 'RESUME_CONTEXT_READ'),
+    ),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RESUME_CONTEXT_READ',
+    },
+  );
+  assert.deepEqual(
     await executeSwapDiagnostic(new InitialControlledRebuildJobError('APPLICATION_FAILED', 'STAGING_RECONCILIATION')),
     {
       status: 'FAIL',
       code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
       jobCode: 'APPLICATION_FAILED',
       phase: 'STAGING_RECONCILIATION',
+      bootstrapPhase: null,
     },
   );
   assert.deepEqual(
@@ -75,6 +88,7 @@ test('controlled swap recovery diagnostic preserves bounded runtime failure taxo
       code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
       jobCode: 'SOURCE_READ_FAILED',
       phase: null,
+      bootstrapPhase: null,
     },
   );
 });
@@ -87,7 +101,7 @@ test('controlled swap recovery diagnostic malformed result fails closed without 
   ]) {
     const result = await executeSwapDiagnostic(value);
     assert.deepEqual(result, {
-      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null,
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null, bootstrapPhase: null,
     });
     assert.equal(JSON.stringify(result).includes('do-not-return'), false);
   }
@@ -130,7 +144,7 @@ test('controlled rebuild malformed application result fails closed without echo'
   ]) {
     const result = await execute(value);
     assert.deepEqual(result, {
-      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null,
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null, bootstrapPhase: null,
     });
     assert.equal(JSON.stringify(result).includes('do-not-return'), false);
   }
@@ -140,12 +154,12 @@ test('controlled rebuild runtime errors retain only job code and controlled phas
   assert.deepEqual(
     await execute(new InitialControlledRebuildJobError('APPLICATION_FAILED', 'SWAP_MUTATION')),
     {
-      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'APPLICATION_FAILED', phase: 'SWAP_MUTATION',
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'APPLICATION_FAILED', phase: 'SWAP_MUTATION', bootstrapPhase: null,
     },
   );
   assert.deepEqual(
     await execute(new Error('private provider text')),
-    { status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null },
+    { status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'UNCAUGHT', phase: null, bootstrapPhase: null },
   );
 });
 
@@ -155,7 +169,7 @@ test('controlled rebuild config failures collapse to safe config enum', async ()
     new InitialBootstrapJobError('INVALID_YDB_CONNECTION_STRING'),
   ]) {
     assert.deepEqual(await execute(error), {
-      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'CONFIG_INVALID', phase: null,
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED', jobCode: 'CONFIG_INVALID', phase: null, bootstrapPhase: null,
     });
   }
 });

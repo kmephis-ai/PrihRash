@@ -44,15 +44,18 @@ export type InitialControlledRebuildJobErrorCode =
 export class InitialControlledRebuildJobError extends Error {
   readonly code: InitialControlledRebuildJobErrorCode;
   readonly phase: InitialControlledRebuildApplicationPhase | null;
+  readonly bootstrapPhase: InitialBootstrapApplicationPhase | null;
 
   constructor(
     code: InitialControlledRebuildJobErrorCode,
     phase: InitialControlledRebuildApplicationPhase | null = null,
+    bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
   ) {
     super(code);
     this.name = 'InitialControlledRebuildJobError';
     this.code = code;
     this.phase = phase;
+    this.bootstrapPhase = bootstrapPhase;
   }
 }
 
@@ -167,6 +170,7 @@ export async function runInitialControlledRebuildJob(
 
   let primaryError: unknown = null;
   let controlledPhase: InitialControlledRebuildApplicationPhase | null = null;
+  let bootstrapPhase: InitialBootstrapApplicationPhase | null = null;
   try {
     observeRuntimePhase(observer, 'SOURCE_READ_START');
     const observation = await readInitialControlledRebuildObservation(
@@ -215,10 +219,12 @@ export async function runInitialControlledRebuildJob(
       reconciliation: reconciliation.port,
       clock: primitives.clock,
       observePhase(nextPhase: InitialBootstrapApplicationPhase) {
+        bootstrapPhase = nextPhase;
         observeRuntimePhase(observer, `BOOTSTRAP_${nextPhase}`);
       },
       observeControlledPhase(nextPhase: InitialControlledRebuildApplicationPhase) {
         controlledPhase = nextPhase;
+        if (nextPhase !== 'PREPARATION') bootstrapPhase = null;
         observeRuntimePhase(observer, `CONTROLLED_${nextPhase}`);
       },
     });
@@ -227,7 +233,7 @@ export async function runInitialControlledRebuildJob(
         ? await diagnoseInitialControlledRebuildSwapRecovery(observation, applicationDependencies)
         : await runInitialControlledRebuildApplication(observation, applicationDependencies);
     } catch {
-      throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase);
+      throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase, bootstrapPhase);
     }
     observeRuntimePhase(observer, 'APPLICATION_DONE');
 

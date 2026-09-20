@@ -71,7 +71,11 @@ test('controlled rebuild invoker preserves bounded STOP and runtime enum results
     },
     {
       status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
-      jobCode: 'APPLICATION_FAILED', phase: 'SWAP_MUTATION',
+      jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase: 'RESUME_CONTEXT_READ',
+    },
+    {
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED', phase: 'SWAP_MUTATION', bootstrapPhase: null,
     },
     {
       status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
@@ -115,6 +119,13 @@ test('controlled rebuild invoker rejects extra/private fields and unknown enums 
     PRIVATE_LOOKING,
     JSON.stringify({ status: 'PASS', code: 'INITIAL_CONTROLLED_REBUILD_COMMITTED', private: PRIVATE_LOOKING }),
     JSON.stringify({ status: 'STOP', code: 'INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED', recoveryReason: PRIVATE_LOOKING }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'PRIVATE_PHASE',
+    }),
   ]) {
     const result = await runInvoker({ body });
     assert.equal(result.exitCode, 2);

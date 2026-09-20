@@ -233,13 +233,30 @@ jobs:
               or .phase=="STAGING_RECONCILIATION"
               or .phase=="SWAP_DISCRIMINATION"
             )
-            and (keys|sort)==["code","jobCode","phase","status"]
+            and (
+              .bootstrapPhase==null
+              or (
+                .jobCode=="APPLICATION_FAILED"
+                and .phase=="PREPARATION"
+                and (
+                  .bootstrapPhase=="ADMISSION_READ"
+                  or .bootstrapPhase=="RESUME_CONTEXT_READ"
+                  or .bootstrapPhase=="RESUME_CONTEXT_PREPARATION"
+                  or .bootstrapPhase=="LINEAGE_PREPARATION"
+                  or .bootstrapPhase=="VALIDATION_EVALUATION"
+                  or .bootstrapPhase=="CURRENT_PLAN_PREPARATION"
+                  or .bootstrapPhase=="CURRENT_WRITE_PREPARATION"
+                )
+              )
+            )
+            and (keys|sort)==["bootstrapPhase","code","jobCode","phase","status"]
           ' >/dev/null; then
             mkdir -p "$RUNNER_TEMP/swap-recovery-evidence"
-            printf '%s\n' "$result" | jq -c '{status,code,jobCode,phase}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+            printf '%s\n' "$result" | jq -c '{status,code,jobCode,phase,bootstrapPhase}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
             job_code="$(printf '%s' "$result"|jq -r '.jobCode')"
             phase_value="$(printf '%s' "$result"|jq -r '.phase // "NONE"')"
-            printf 'SWAP_RECOVERY_RUNTIME_FAILED_%s_%s\n' "$job_code" "$phase_value"
+            bootstrap_phase_value="$(printf '%s' "$result"|jq -r '.bootstrapPhase // "NONE"')"
+            printf 'SWAP_RECOVERY_RUNTIME_FAILED_%s_%s_%s\n' "$job_code" "$phase_value" "$bootstrap_phase_value"
             exit 1
           fi
 
