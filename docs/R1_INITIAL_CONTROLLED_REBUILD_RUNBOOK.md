@@ -144,6 +144,8 @@ Owner 2026-09-20 явно разрешил отдельный recovery contract 
 
 Последнее доказанное evidence до wiring historical proof в recovery surface: full read-only recovery [35516186419](https://github.com/kmephis-ai/PrihRash/actions/runs/35516186419) на `f07522512866477df50fab13da828f53264e1461` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`, `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` и Gate A blocker `HISTORICAL_CONTEXT_NOT_PROVEN`. Оно не разрешает mutation/replay и подтверждает, что следующий repository step должен использовать уже реализованные historical reconstruction + exact staging/NOT_APPLIED primitives внутри того же read-only recovery surface.
 
+Owner также явно разрешил узкое ослабление Gate A: вместо полного historical projection/reference reconstruction допустима только privacy-safe temporal correlation `swap discrimination reached → invocation completed` **вместе** с отдельным exact `NOT_APPLIED`. Это снижает прежнюю fail-closed гарантию для historical context и применимо только к marker-only terminalization данного stale run; temporal correlation сама по себе, `APPLIED`/ambiguous discriminator, in-flight mutation или competing writer всё ещё оставляют `RECOVERY_REQUIRED`.
+
 Текущая готовность нового contract:
 
 | Gate | Требование | Статус |
