@@ -85,7 +85,7 @@ jobs:
 
           grep -Fq 'Historical one-run Owner exception (2026-09-20)' docs/MIGRATION_CONTRACT.md || { echo GATE_B_OWNER_EXCEPTION_NOT_CANONICAL; exit 1; }
           grep -Fq '35469651936' docs/MIGRATION_CONTRACT.md || { echo GATE_B_OWNER_EXCEPTION_RUN_MISSING; exit 1; }
-          grep -Fq 'future ambiguous provider mutations' docs/MIGRATION_CONTRACT.md || { echo GATE_B_FUTURE_STRICTNESS_MISSING; exit 1; }
+          grep -Fq 'Для всех будущих ambiguous provider mutations condition 6 остаётся строгим' docs/MIGRATION_CONTRACT.md || { echo GATE_B_FUTURE_STRICTNESS_MISSING; exit 1; }
 
           curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o "$tmp/ci.json"
           jq -e --arg sha "$GITHUB_SHA" '.workflow_runs|any(.head_sha==$sha and .conclusion=="success")' "$tmp/ci.json" >/dev/null || { echo GATE_B_EXACT_SHA_CI_MISSING; exit 1; }
