@@ -58,6 +58,8 @@ Code, schemas, paths, identifiers, protocols — English.
 - `occurred_on` не заменяет `financial_period_id`; same-day close boundary требует explicit membership.
 - `WORKFLOW_TRANSFORM` требует доказанного close context, не только пары old→new.
 - `FAILED MigrationRun` не может изменить verified shadow.
+- **LIVE-SOURCE invariant:** до CUTOVER Google Sheets постоянно меняется и остаётся operational authority; никогда не предполагай freeze/quiet window ради migration. Initial bootstrap обязан быть привязан к одному immutable source observation/cutoff. Обычные source changes после cutoff относятся к последующему incremental catch-up и сами по себе не инвалидируют уже доказанный cutoff/baseline.
+- При fresh Google digest ≠ bootstrap cutoff сначала различай: `BOOTSTRAP_OBSERVATION_INVALID` (сам cutoff недоказуем → fail-closed) и `AUTHORITATIVE_SOURCE_ADVANCED` (cutoff доказан, Google уже новее → baseline не перезапускать только из-за этого; после `COMMITTED` требуется catch-up от последнего COMMITTED observation).
 - R1 shadow/migration writes в YDB разрешены только по `MIGRATION_CONTRACT` и не меняют authority: Google остаётся единственной write authority. YDB-authoritative product/Writer writes (`YDB_WRITE_ENABLED=true`) запрещены до CUTOVER GATE; Writer UX можно доказывать в test/private pilot namespace.
 - Reverse Google mirror после cutover обязан иметь stable canonical ID и не создавать re-import loop.
 - YDB schema меняй только versioned migration scripts.
