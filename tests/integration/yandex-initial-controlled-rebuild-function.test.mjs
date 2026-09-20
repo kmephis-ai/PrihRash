@@ -58,6 +58,27 @@ test('controlled swap recovery diagnostic exposes only bounded verdict', async (
   });
 });
 
+test('controlled swap recovery diagnostic preserves bounded runtime failure taxonomy', async () => {
+  assert.deepEqual(
+    await executeSwapDiagnostic(new InitialControlledRebuildJobError('APPLICATION_FAILED', 'STAGING_RECONCILIATION')),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'STAGING_RECONCILIATION',
+    },
+  );
+  assert.deepEqual(
+    await executeSwapDiagnostic(new InitialControlledRebuildJobError('SOURCE_READ_FAILED')),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'SOURCE_READ_FAILED',
+      phase: null,
+    },
+  );
+});
+
 test('controlled swap recovery diagnostic malformed result fails closed without echo', async () => {
   for (const value of [
     { status: 'CLASSIFIED', verdict: 'PRIVATE', private: 'do-not-return' },

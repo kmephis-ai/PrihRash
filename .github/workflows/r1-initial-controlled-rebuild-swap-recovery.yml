@@ -212,6 +212,37 @@ jobs:
           out="$RUNNER_TEMP/swap-recovery-result.json"
           yc serverless function invoke --id "$FID" --tag r1-initial-controlled-rebuild-swap-recovery --data '{}' --format json --retry 0 --no-user-output > "$out"
           result="$(jq -cer 'if type=="string" then fromjson else . end' "$out")"
+          if printf '%s\n' "$result" | jq -e '
+            type=="object"
+            and .status=="FAIL"
+            and .code=="INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
+            and (
+              .jobCode=="SOURCE_READ_FAILED"
+              or .jobCode=="YDB_CLIENT_CREATE_FAILED"
+              or .jobCode=="SCHEME_CLIENT_CREATE_FAILED"
+              or .jobCode=="REFERENCE_READ_FAILED"
+              or .jobCode=="APPLICATION_FAILED"
+              or .jobCode=="YDB_CLIENT_CLOSE_FAILED"
+              or .jobCode=="CONFIG_INVALID"
+              or .jobCode=="UNCAUGHT"
+            )
+            and (
+              .phase==null
+              or .phase=="PREPARATION"
+              or .phase=="SETUP_EVIDENCE"
+              or .phase=="STAGING_RECONCILIATION"
+              or .phase=="SWAP_DISCRIMINATION"
+            )
+            and (keys|sort)==["code","jobCode","phase","status"]
+          ' >/dev/null; then
+            mkdir -p "$RUNNER_TEMP/swap-recovery-evidence"
+            printf '%s\n' "$result" | jq -c '{status,code,jobCode,phase}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+            job_code="$(printf '%s' "$result"|jq -r '.jobCode')"
+            phase_value="$(printf '%s' "$result"|jq -r '.phase // "NONE"')"
+            printf 'SWAP_RECOVERY_RUNTIME_FAILED_%s_%s\n' "$job_code" "$phase_value"
+            exit 1
+          fi
+
           printf '%s\n' "$result" | jq -e '
             type=="object"
             and .code=="INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED"
