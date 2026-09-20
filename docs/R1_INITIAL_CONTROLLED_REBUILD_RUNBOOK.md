@@ -129,6 +129,22 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д�
 
 Этот diagnostic не доказывает staging completeness, exact revision equality, swap outcome или COMMITTED baseline. Любой его enum оставляет `RECOVERY_REQUIRED` и не разрешает retirement VALIDATED run, rebuild/replay/swap/cleanup. После canonical gates допустима одна full read-only recovery на новом exact main. Следующий mutation path требует отдельного canonical gate; stale-STAGING terminalization contract нельзя применять к VALIDATED.
 
+## Owner decision: stale VALIDATED recovery contract
+
+Owner 2026-09-20 явно разрешил отдельный recovery contract для stale `VALIDATED` с сохранением audit/staging evidence. Нормативные predicates, marker-only transition и отдельный новый bootstrap определены в [MIGRATION_CONTRACT](MIGRATION_CONTRACT.md#stale-initial-validated-recovery-с-сохранением-auditstaging-evidence). Это решение разрешает разработку и доказательство gates; оно не вооружает production mutation или existing autocontinue.
+
+Последнее доказанное evidence: full read-only recovery [35507371844](https://github.com/kmephis-ai/PrihRash/actions/runs/35507371844) на `6c9d9f8a723dd530d8a7ae28a434a59db19ef54d` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` и `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`. Оно доказывает source mismatch, но ещё не historical candidate reconstruction, exact staging reconciliation, завершение старой scheme operation или exclusion позднего writer.
+
+Текущая готовность нового contract:
+
+| Gate | Требование | Статус |
+| --- | --- | --- |
+| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | НЕ ДОКАЗАН; implementation/evidence отсутствуют |
+| B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
+| C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
+
+Следующий bounded implementation unit закрывает Gate A через существующие read-only reconstruction/reconciliation primitives и synthetic fixtures. Если исходный context или завершение provider operation нельзя доказать, сохраняется `RECOVERY_REQUIRED`; переход к B запрещён. Не запускать повторный swap diagnostic только из-за merge этого contract: runtime пока не изменён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
