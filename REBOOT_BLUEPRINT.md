@@ -101,6 +101,25 @@ Google Sheets остаётся единственной финансовой и�
 
 Google остаётся authoritative. YDB получает автоматическую shadow-копию через normalizer и reconciliation.
 
+### Live source invariant до cutover
+
+Google Sheets — **живой operational source**, а не миграционный snapshot, который можно заморозить. До отдельного CUTOVER пользователи продолжают добавлять и корректировать доходы/расходы во время bootstrap, reconciliation и shadow sync. Проект **не требует и не предполагает quiet/freeze window** для Google.
+
+Initial bootstrap фиксирует один immutable authoritative observation `Snapshot A` как point-in-time cutoff. Staging, reconciliation и promotion конкретного MigrationRun доказываются относительно именно этого `Snapshot A`. Если после cutoff Google уже стал `Snapshot B`, обычные новые операции/owner corrections сами по себе **не инвалидируют доказанный A и не требуют перезапуска bootstrap**.
+
+Нормальный путь:
+
+```text
+Snapshot A (immutable cutoff)
+→ staging/reconciliation(A)
+→ COMMITTED(A)
+→ fresh Google Snapshot B
+→ canonical incremental reconciliation A → B
+→ COMMITTED(B)
+```
+
+Невозможность доказать сам `Snapshot A`, schema/binding corruption или неоднозначность внутри его own observation остаются fail-closed. Изменение live source **после** доказанного cutoff — это subsequent incremental input. Если catch-up A→B содержит ambiguous lineage/change, блокируется соответствующий incremental run/review, а уже доказанный `COMMITTED(A)` не отменяется.
+
 ### Stage C — приложение читает YDB
 
 PWA читает в основном YDB для скорости, но Google остаётся authority/fallback.
