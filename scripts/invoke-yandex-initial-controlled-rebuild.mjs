@@ -30,6 +30,15 @@ const PHASES = new Set([
   'COMMIT_MARKER',
   'POST_COMMIT_VERIFICATION',
 ]);
+const BOOTSTRAP_PHASES = new Set([
+  'ADMISSION_READ',
+  'RESUME_CONTEXT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'LINEAGE_PREPARATION',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+]);
 const JOB_CODES = new Set([
   'SOURCE_READ_FAILED',
   'YDB_CLIENT_CREATE_FAILED',
@@ -126,11 +135,38 @@ function parseExactFunctionResult(stdout) {
   if (
     result.status === 'FAIL'
     && result.code === 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED'
-    && exactKeys(result, ['status', 'code', 'jobCode', 'phase'])
     && typeof result.jobCode === 'string'
     && JOB_CODES.has(result.jobCode)
     && (result.phase === null || (typeof result.phase === 'string' && PHASES.has(result.phase)))
-  ) return Object.freeze({ status: result.status, code: result.code, jobCode: result.jobCode, phase: result.phase });
+  ) {
+    if (
+      exactKeys(result, ['status', 'code', 'jobCode', 'phase'])
+      && (result.jobCode === 'MODULE_LOAD_FAILED' || result.jobCode === 'HANDLER_UNCAUGHT')
+      && result.phase === null
+    ) {
+      return Object.freeze({ status: result.status, code: result.code, jobCode: result.jobCode, phase: result.phase });
+    }
+    if (
+      exactKeys(result, ['status', 'code', 'jobCode', 'phase', 'bootstrapPhase'])
+      && (
+        result.bootstrapPhase === null
+        || (
+          result.jobCode === 'APPLICATION_FAILED'
+          && result.phase === 'PREPARATION'
+          && typeof result.bootstrapPhase === 'string'
+          && BOOTSTRAP_PHASES.has(result.bootstrapPhase)
+        )
+      )
+    ) {
+      return Object.freeze({
+        status: result.status,
+        code: result.code,
+        jobCode: result.jobCode,
+        phase: result.phase,
+        bootstrapPhase: result.bootstrapPhase,
+      });
+    }
+  }
   return null;
 }
 

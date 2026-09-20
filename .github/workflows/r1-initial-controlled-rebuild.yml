@@ -654,8 +654,25 @@ jobs:
                     and (.httpStatus | IN("HTTP_400","HTTP_403","HTTP_404","HTTP_413","HTTP_429","HTTP_500","HTTP_502","HTTP_503","HTTP_504","HTTP_OTHER"))
                     and (.functionError | IN("PRESENT","ABSENT")))
                 or ($r.status == "FAIL" and $r.code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
-                    and (keys | sort) == ["code","jobCode","phase","status"]
-                    and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT","MODULE_LOAD_FAILED","HANDLER_UNCAUGHT"))))
+                    and (
+                      (
+                        (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                        and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT"))
+                        and (
+                          .bootstrapPhase == null
+                          or (
+                            .jobCode == "APPLICATION_FAILED"
+                            and .phase == "PREPARATION"
+                            and (.bootstrapPhase | IN("ADMISSION_READ","RESUME_CONTEXT_READ","RESUME_CONTEXT_PREPARATION","LINEAGE_PREPARATION","VALIDATION_EVALUATION","CURRENT_PLAN_PREPARATION","CURRENT_WRITE_PREPARATION"))
+                          )
+                        )
+                      )
+                      or (
+                        (keys | sort) == ["code","jobCode","phase","status"]
+                        and (.jobCode | IN("MODULE_LOAD_FAILED","HANDLER_UNCAUGHT"))
+                        and .phase == null
+                      )
+                    )))
             )
           ' > "$candidate"; then
             printf '%s\n' '{"status":"FAIL","code":"INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID"}' > "$candidate"
@@ -768,7 +785,29 @@ jobs:
                   and (keys | sort) == ["code","functionError","httpStatus","status"]
                   and (.httpStatus | IN("HTTP_400","HTTP_403","HTTP_404","HTTP_413","HTTP_429","HTTP_500","HTTP_502","HTTP_503","HTTP_504","HTTP_OTHER"))
                   and (.functionError | IN("PRESENT","ABSENT")))
-              or (.status == "FAIL" and .code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED" and (keys | sort) == ["code","jobCode","phase","status"])
+              or (
+                .status == "FAIL"
+                and .code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
+                and (
+                  (
+                    (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                    and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT"))
+                    and (
+                      .bootstrapPhase == null
+                      or (
+                        .jobCode == "APPLICATION_FAILED"
+                        and .phase == "PREPARATION"
+                        and (.bootstrapPhase | IN("ADMISSION_READ","RESUME_CONTEXT_READ","RESUME_CONTEXT_PREPARATION","LINEAGE_PREPARATION","VALIDATION_EVALUATION","CURRENT_PLAN_PREPARATION","CURRENT_WRITE_PREPARATION"))
+                      )
+                    )
+                  )
+                  or (
+                    (keys | sort) == ["code","jobCode","phase","status"]
+                    and (.jobCode | IN("MODULE_LOAD_FAILED","HANDLER_UNCAUGHT"))
+                    and .phase == null
+                  )
+                )
+              )
             )
           ' "$evidence" >/dev/null; then
             echo 'INITIAL_CONTROLLED_REBUILD_NONCOMMITTED_RECOVERY_REQUIRED'
