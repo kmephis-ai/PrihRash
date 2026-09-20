@@ -148,10 +148,18 @@ const productionRuntime: Readonly<InitialStaleValidatedHistoricalSwapProofRuntim
   readAdmission: readScheduledSyncAdmissionEvidence,
   reconstructHistoricalCandidate: reconstructInitialStaleValidatedHistoricalCandidate,
   readSetupEvidence: readInitialControlledRebuildSetupEvidence,
-  readStagingEvidence(adapter, plan) {
+  readStagingEvidence(
+    adapter: YdbAdapter,
+    plan: Readonly<ControlledInitialRebuildPlan>,
+  ) {
     return readControlledRebuildStagingEvidence(adapter, plan.stagingTables);
   },
-  gateSwap(run, controlled, verifiedPlan, staging) {
+  gateSwap(
+    run: Readonly<MigrationRun>,
+    controlled: Readonly<ControlledInitialRebuildPlan>,
+    verifiedPlan: Readonly<InitialVerifiedCurrentPlan>,
+    staging: Awaited<ReturnType<typeof readControlledRebuildStagingEvidence>>,
+  ) {
     return gateControlledInitialSwap(run, controlled, verifiedPlan, staging, null);
   },
   recoverSwap: recoverUnknownControlledInitialSwapOutcome,
