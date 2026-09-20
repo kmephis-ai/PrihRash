@@ -493,7 +493,7 @@ async function prepareResumeContext(
   assertResumeRunMatchesCandidate(run, baseCandidate);
   const candidate = envelopeWithRun(baseCandidate, run);
   const projection = projectInitialSnapshot(
-    projectionRows(candidate, observation),
+    projectionRows(candidate, resumeObservation),
     dependencies.projectionContext,
   );
   // The identity manifest is claimed while the durable run is STAGING. Controlled rebuild may
