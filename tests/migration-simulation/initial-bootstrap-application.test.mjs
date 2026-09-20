@@ -5,6 +5,7 @@ import {
   YdbTransportCommitOutcomeUnknownError,
 } from '../../dist/integration/ydb/adapter.js';
 import { YdbSchemeAdapter, YdbSchemeTransportOutcomeUnknownError } from '../../dist/integration/ydb/scheme.js';
+import { createCanonicalSourceDigest } from '../../dist/integration/google/canonicalSourceDigest.js';
 import {
   InitialBootstrapApplicationError,
   prepareInitialControlledRebuildContinuation,
@@ -12,6 +13,7 @@ import {
 } from '../../dist/migration/initialBootstrapApplication.js';
 import { InitialBootstrapIdentityManifestError } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapError } from '../../dist/migration/initialSnapshot.js';
+import { serializeRawPayloadForLineageDigest } from '../../dist/migration/rawPayloadProvenance.js';
 import { INITIAL_RECONCILIATION_CHECKS } from '../../dist/migration/initialValidationGate.js';
 import { INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE } from '../../dist/migration/initialBootstrapGateCGuard.js';
 import {
@@ -53,6 +55,10 @@ function expense(description = 'Synthetic bootstrap expense') {
     vika_flag: null,
     note: null,
   };
+}
+
+function canonicalRowDigest(rawPayload) {
+  return createCanonicalSourceDigest().digestCanonicalRow(serializeRawPayloadForLineageDigest(rawPayload));
 }
 
 function observation(rows = [{ rowHint: 2, digest: 'synthetic-row-1', rawPayload: expense(), aggregatePeriodMonth: null }], capturedAt = CAPTURED_AT) {
@@ -892,9 +898,10 @@ test('controlled continuation reconstructs one deterministic candidate across ST
   const db = fakeDatabase();
   const ids = allocator();
   const largeDescription = 'x'.repeat(300_000);
+  const largePayload = expense(largeDescription);
   const largeObservation = observation([
-    { rowHint: 2, digest: 'synthetic-large-row-1', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
-    { rowHint: 3, digest: 'synthetic-large-row-2', rawPayload: expense(largeDescription), aggregatePeriodMonth: null },
+    { rowHint: 2, digest: canonicalRowDigest(largePayload), rawPayload: largePayload, aggregatePeriodMonth: null },
+    { rowHint: 3, digest: canonicalRowDigest(largePayload), rawPayload: largePayload, aggregatePeriodMonth: null },
   ]);
 
   const first = await runInitialBootstrapApplication(
