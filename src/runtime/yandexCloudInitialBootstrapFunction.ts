@@ -15,6 +15,7 @@ import {
   classifyInitialBootstrapStaleRetirementFailureCode,
   classifyInitialBootstrapYdbDataFailureCode,
   InitialBootstrapReferenceAwareRuntimeError,
+  runInitialBootstrapGateCReferenceAwareJobFromEnvironment,
   runInitialBootstrapReferenceAwareJobFromEnvironment,
   type InitialBootstrapMetadataFailureCode,
   type InitialBootstrapReferenceAwareRuntimeErrorCode,
@@ -117,6 +118,8 @@ const RECOVERY_REASONS = new Set<InitialBootstrapRecoveryReason>([
   'PROMOTION_OUTCOME_UNKNOWN',
   'VALIDATED_RUN_REQUIRES_RECOVERY',
   'STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C',
+  'GATE_C_TERMINALIZATION_EVIDENCE_INVALID',
+  'GATE_C_INCOMPLETE_RUN_PRESENT',
 ]);
 
 const RECONCILIATION_CHECKS = new Set<InitialReconciliationCheck>(INITIAL_RECONCILIATION_CHECKS);
@@ -323,5 +326,15 @@ export async function initialBootstrapHandler(
       runInitialBootstrapReferenceAwareJobFromEnvironment,
       runInitialBootstrapStaleStagingRetirementJobFromEnvironment,
     ),
+  );
+}
+
+export async function initialBootstrapGateCHandler(
+  _event: unknown,
+  _context: unknown,
+): Promise<Readonly<YandexInitialBootstrapFunctionResult>> {
+  return executeYandexInitialBootstrapFunction(
+    process.env,
+    runInitialBootstrapGateCReferenceAwareJobFromEnvironment,
   );
 }
