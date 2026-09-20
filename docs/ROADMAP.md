@@ -68,6 +68,10 @@ R1 bootstrap/incremental `shadow/migration writes` в YDB являются ча�
 R1 **не требует source freeze**: Google остаётся живым operational source во время initial bootstrap. Verified initial baseline — это point-in-time `COMMITTED(A)` для immutable cutoff observation A; обычные изменения Google после cutoff догоняются отдельным incremental `A → B`, а не инвалидируют A только из-за fresh digest mismatch.
 
 R1 production proof должен включать не только initial `COMMITTED(A)`, но и минимум один доказанный catch-up от этого baseline к более свежему authoritative observation, если source реально продвинулся. Ambiguous catch-up delta остаётся fail-closed на своём run и не отменяет уже доказанный baseline A.
+
+R1 также обязан доказать live-mutable behavior на synthetic scenario: pure row reorder не меняет financial identity; ordinary OPEN-period corrections не вызывают global stop; reorder + недоказанное изменение локализует ambiguity; unknown vocabulary блокирует только затронутую observation после отдельного quarantine implementation proof; CLOSED history не удаляется автоматически.
+
+До завершения R1 implementation должно сохранять различие `CreditPurchases` (expense analytics) и `ActualCreditSettlement` (legacy close cash/liability settlement). Их mismatch не является автоматическим reconciliation failure.
 - `FAILED` run не меняет verified shadow;
 - минимум один полный real расчётный цикл;
 - Credit/Cash/Vika semantics сохранены при доказанном cleanup context;
