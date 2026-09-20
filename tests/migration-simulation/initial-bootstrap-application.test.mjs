@@ -13,6 +13,7 @@ import {
 import { InitialBootstrapIdentityManifestError } from '../../dist/migration/initialBootstrapIdentityManifest.js';
 import { InitialBootstrapError } from '../../dist/migration/initialSnapshot.js';
 import { INITIAL_RECONCILIATION_CHECKS } from '../../dist/migration/initialValidationGate.js';
+import { INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE } from '../../dist/migration/initialBootstrapGateCGuard.js';
 import {
   diagnoseInitialControlledRebuildSwapRecovery,
   runInitialControlledRebuildApplication,
@@ -225,6 +226,13 @@ function statementRows(statement, state) {
   const text = statement.text;
   if (text.includes("FROM migration_runs WHERE state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
     return admissionRows(state);
+  }
+  if (text.includes("FROM migration_runs WHERE state = 'FAILED' AND error_code = 'INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT'")) {
+    return [{
+      row_count: BigInt([...state.migrationRuns.values()].filter(
+        (run) => run.state === 'FAILED' && run.error_code === INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE,
+      ).length),
+    }];
   }
   if (text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
     const runId = parameter(statement, 'migration_run_id');
@@ -517,6 +525,25 @@ function stagingSeed({ state = 'STAGING', capturedAt = CAPTURED_AT } = {}) {
   };
 }
 
+function staleValidatedTerminalizedSeed(errorCode = INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE) {
+  return {
+    migrationRuns: [[RUN_ID, {
+      id: RUN_ID,
+      started_at: STARTED_AT,
+      finished_at: FINISHED_AT,
+      source_snapshot_digest: DIGEST,
+      state: 'FAILED',
+      rows_seen: 1n,
+      rows_new: 1n,
+      rows_changed: 0n,
+      rows_missing: 0n,
+      rows_ambiguous: 0n,
+      error_code: errorCode,
+    }]],
+  };
+}
+
+
 test('fresh synthetic financial bootstrap claims evidence, validates and atomically commits verified current', async () => {
   const db = fakeDatabase();
   const ids = allocator();
@@ -535,6 +562,30 @@ test('fresh synthetic financial bootstrap claims evidence, validates and atomica
   assert.equal(db.state.transactions.get(TX_1).amount_minor, 1234n);
   assert.deepEqual(ids.calls, ['source', 'snapshot', 'run', 'transaction']);
   assert.equal(lifecycleClock.reads(), 3);
+});
+
+test('fresh bootstrap is blocked after stale VALIDATED terminalization until separate Gate C', async () => {
+  const db = fakeDatabase({ seed: staleValidatedTerminalizedSeed() });
+  const ids = allocator({ forbid: true });
+  const phases = [];
+
+  const result = await runInitialBootstrapApplication(
+    observation(),
+    dependencies(db, ids, clock(), {
+      observePhase(phase) { phases.push(phase); },
+    }),
+  );
+
+  assert.deepEqual(result, {
+    status: 'RECOVERY_REQUIRED',
+    run: null,
+    reason: 'STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C',
+  });
+  assert.deepEqual(ids.calls, []);
+  assert.equal(phases.at(-1), 'ADMISSION_READ');
+  assert.equal(db.events.some((event) => event.startsWith('tx:')), false);
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'FAILED');
+  assert.equal(db.state.migrationRuns.get(RUN_ID).error_code, INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE);
 });
 
 test('exact STAGING claim resumes durable identities without allocator reuse and preserves original captured_at', async () => {

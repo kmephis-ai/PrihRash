@@ -145,6 +145,14 @@ A normal `allow_staging_resume=true` orchestrator may arm only when this additio
 diagnostic is `EXACT_CURRENT_RUN_MATCH`. Any other enum remains a recovery/root-cause
 boundary and must not trigger a bootstrap invoke.
 
+### Stale VALIDATED terminalization / Gate C writer guard
+
+Stale-`VALIDATED` recovery uses the shared GitHub Actions concurrency group `r1-initial-bootstrap-writer` together with initial bootstrap and controlled-rebuild execution surfaces. `cancel-in-progress=false` means a competing dispatch may queue but cannot execute while standalone recovery owns the shared group. The orchestrator remains on its separate concurrency group and cannot be treated as proof of this shared writer boundary.
+
+Serialization alone is insufficient because a queued ordinary bootstrap could otherwise start immediately after a later marker-only `VALIDATED → FAILED` terminalization. Therefore the normal bootstrap application performs a durable post-lock Gate C guard before any fresh claim. If any exact `FAILED / INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT` marker exists and there is no resumable incomplete run, it returns `RECOVERY_REQUIRED / STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C`. It does not allocate a new run/snapshot/identity set. A future Gate C implementation must be a separate explicitly gated path; this guard intentionally keeps ordinary bootstrap fail-closed until then.
+
+This mechanism does not prove Gate A condition 6 and does not by itself complete condition 7 or authorize marker terminalization. A future Gate B workflow must hold the same shared writer lock continuously from its own fresh Gate A preflight through terminal marker read-back. The guard here prevents queued/late ordinary bootstrap execution from crossing the B→C boundary without a separate gate.
+
 ### Temporary read-only recovery autocontinue
 
 While #453 is active, a merged `R1 #453:` PR may request exactly one fresh standalone

@@ -6,6 +6,12 @@ const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery
 const packageScript = await readFile('scripts/package-yandex-initial-bootstrap-recovery-function.mjs', 'utf8');
 const verifier = await readFile('scripts/verify-yandex-initial-bootstrap-recovery-package.mjs', 'utf8');
 const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap-recovery.mjs', 'utf8');
+const bootstrapWorkflow = await readFile('.github/workflows/r1-initial-shadow-bootstrap.yml', 'utf8');
+const controlledWorkflow = await readFile('.github/workflows/r1-initial-controlled-rebuild.yml', 'utf8');
+const swapRecoveryWorkflow = await readFile('.github/workflows/r1-initial-controlled-rebuild-swap-recovery.yml', 'utf8');
+const orchestratorWorkflow = await readFile('.github/workflows/r1-initial-bootstrap-orchestrator.yml', 'utf8');
+const bootstrapApplication = await readFile('src/migration/initialBootstrapApplication.ts', 'utf8');
+const gateCGuard = await readFile('src/migration/initialBootstrapGateCGuard.ts', 'utf8');
 
 test('initial bootstrap recovery workflow stays manual-only and exact-main guarded', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -27,6 +33,17 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FAILED_ATTEMPT_MISSING/);
   assert.match(workflow, /\.conclusion == "failure"/);
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-recovery-diagnostic/);
+});
+
+test('stale VALIDATED recovery holds the shared writer boundary and queued bootstrap remains Gate C blocked', () => {
+  for (const writerWorkflow of [workflow, bootstrapWorkflow, controlledWorkflow, swapRecoveryWorkflow]) {
+    assert.match(writerWorkflow, /concurrency:[\s\S]*group: r1-initial-bootstrap-writer[\s\S]*cancel-in-progress: false/);
+  }
+  assert.match(orchestratorWorkflow, /group: r1-initial-bootstrap-orchestrator/);
+  assert.match(gateCGuard, /INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT/);
+  assert.match(gateCGuard, /FROM migration_runs WHERE state = 'FAILED' AND error_code =/);
+  assert.match(bootstrapApplication, /STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C/);
+  assert.match(bootstrapApplication, /incomplete === null && await hasInitialBootstrapGateCBlocker/);
 });
 
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
