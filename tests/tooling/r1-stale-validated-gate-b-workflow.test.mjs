@@ -4,6 +4,7 @@ import test from 'node:test';
 
 const workflowPath = new URL('../../.github/workflows/r1-initial-bootstrap-stale-validated-terminalization.yml', import.meta.url);
 const packagePath = new URL('../../package.json', import.meta.url);
+const contractPath = new URL('../../docs/MIGRATION_CONTRACT.md', import.meta.url);
 
 test('Gate B workflow is manual, exact-run bounded, shared-lock serialized and has no automatic trigger', async () => {
   const source = await readFile(workflowPath, 'utf8');
@@ -19,6 +20,10 @@ test('Gate B workflow is manual, exact-run bounded, shared-lock serialized and h
   assert.match(source, /READINESS_READY/);
   assert.match(source, /actions\/workflows\/ci\.yml/);
   assert.match(source, /Historical one-run Owner exception \(2026-09-20\)/);
+  const contract = await readFile(contractPath, 'utf8');
+  const futureStrictnessGuard = 'Для всех будущих ambiguous provider mutations condition 6 остаётся строгим';
+  assert.equal(contract.includes(futureStrictnessGuard), true);
+  assert.equal(source.includes(`grep -Fq '${futureStrictnessGuard}' docs/MIGRATION_CONTRACT.md`), true);
 });
 
 test('Gate B provider surface reuses private function boundary and cannot blindly replay WRITE', async () => {
