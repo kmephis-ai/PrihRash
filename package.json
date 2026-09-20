@@ -19,7 +19,7 @@
     "test:schema": "node --test tests/schema/*.test.mjs",
     "test:ydb-adapter": "npm run build --silent && node --test tests/integration/*.test.mjs",
     "privacy": "node scripts/privacy-smoke.mjs",
-    "check": "npm run privacy && npm run lint && npm run typecheck && npm run build && npm run test:from-build && npm run package:function:from-build && npm run package:schema-bootstrap:from-build && npm run package:schema-upgrade-003:from-build && npm run package:initial-bootstrap:from-build && npm run package:initial-bootstrap-recovery:from-build && npm run package:initial-controlled-rebuild:from-build",
+    "check": "npm run privacy && npm run lint && npm run typecheck && npm run build && npm run test:from-build && npm run package:function:from-build && npm run package:schema-bootstrap:from-build && npm run package:schema-upgrade-003:from-build && npm run package:initial-bootstrap:from-build && npm run package:initial-bootstrap-recovery:from-build && npm run package:initial-controlled-rebuild:from-build && npm run package:initial-bootstrap-stale-validated-terminalization:from-build",
     "preview:build": "node scripts/build-r2-ui-preview.mjs",
     "preview:r2": "npm run preview:build --silent && node scripts/serve-r2-ui-preview.mjs",
     "package:schema-bootstrap": "npm run build --silent && npm run package:schema-bootstrap:from-build --silent",
@@ -39,7 +39,9 @@
     "package:initial-bootstrap-recovery:from-build": "node scripts/package-yandex-initial-bootstrap-recovery-function.mjs && node scripts/verify-yandex-initial-bootstrap-recovery-package.mjs",
     "package:initial-controlled-rebuild": "npm run build --silent && npm run package:initial-controlled-rebuild:from-build --silent",
     "initial-controlled-rebuild:invoke": "node scripts/invoke-yandex-initial-controlled-rebuild.mjs",
-    "package:initial-controlled-rebuild:from-build": "node scripts/package-yandex-initial-controlled-rebuild-function.mjs && node scripts/verify-yandex-initial-controlled-rebuild-package.mjs"
+    "package:initial-controlled-rebuild:from-build": "node scripts/package-yandex-initial-controlled-rebuild-function.mjs && node scripts/verify-yandex-initial-controlled-rebuild-package.mjs",
+    "package:initial-bootstrap-stale-validated-terminalization": "npm run build --silent && npm run package:initial-bootstrap-stale-validated-terminalization:from-build --silent",
+    "package:initial-bootstrap-stale-validated-terminalization:from-build": "node scripts/package-yandex-initial-bootstrap-stale-validated-terminalization-function.mjs && node scripts/verify-yandex-initial-bootstrap-stale-validated-terminalization-package.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3",

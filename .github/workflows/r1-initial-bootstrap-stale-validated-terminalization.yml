@@ -1,0 +1,287 @@
+name: R1 stale VALIDATED Gate B terminalization
+
+on:
+  workflow_dispatch:
+    inputs:
+      tracking_issue:
+        description: Open R1 WU7 authority Issue number
+        required: true
+        type: string
+      expected_main_sha:
+        description: Exact protected main SHA authorized for Gate B
+        required: true
+        type: string
+      readiness_run_id:
+        description: Fresh exact-main readiness run proving READINESS_READY
+        required: true
+        type: string
+      confirmation:
+        description: Type ALLOW_STALE_VALIDATED_MARKER_ONLY
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: r1-initial-bootstrap-writer
+  cancel-in-progress: false
+
+jobs:
+  stale-validated-terminalization:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      FUNCTION_TAG: r1-stale-validated-gate-b
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      HISTORICAL_CONTROLLED_RUN_ID: '35469651936'
+      HISTORICAL_SOURCE_SHA: acb40fb81befc548939f72146df729d27d591cbe
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify exact one-run Gate B authority
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          TRACKING_ISSUE: ${{ inputs.tracking_issue }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          READINESS_RUN_ID: ${{ inputs.readiness_run_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_RUN_ATTEMPT" = '1' || { echo GATE_B_RERUN_FORBIDDEN; exit 1; }
+          test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA" || { echo GATE_B_EXPECTED_MAIN_MISMATCH; exit 1; }
+          test "$CONFIRMATION" = ALLOW_STALE_VALIDATED_MARKER_ONLY || { echo GATE_B_CONFIRMATION_MISSING; exit 1; }
+          [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo GATE_B_TRACKING_ISSUE_INVALID; exit 1; }
+          [[ "$READINESS_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo GATE_B_READINESS_RUN_INVALID; exit 1; }
+          test -n "$YC_FOLDER_ID"; test -n "$YC_WIF_SERVICE_ACCOUNT_ID"; test -n "$YC_LOCKBOX_SECRET_ID"
+
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          tmp="$RUNNER_TEMP/gate-b-authority"; mkdir -p "$tmp"
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/branches/main" -o "$tmp/main.json"
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha==$sha and .protected==true' "$tmp/main.json" >/dev/null || { echo GATE_B_MAIN_NOT_EXACT_PROTECTED; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" -o "$tmp/issue.json"
+          jq -e '.state=="open" and (.title|startswith("R1 WU7:")) and (.body|contains("Provider-Authority: WU7_CONTROLLED_REBUILD")) and (.body|contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY")) and (.body|contains("Google-Authority: PRESERVED")) and (.body|contains("Blind-Replay: FORBIDDEN"))' "$tmp/issue.json" >/dev/null || { echo GATE_B_AUTHORITY_ISSUE_NOT_READY; exit 1; }
+
+          grep -Fq 'Historical one-run Owner exception (2026-09-20)' docs/MIGRATION_CONTRACT.md || { echo GATE_B_OWNER_EXCEPTION_NOT_CANONICAL; exit 1; }
+          grep -Fq '35469651936' docs/MIGRATION_CONTRACT.md || { echo GATE_B_OWNER_EXCEPTION_RUN_MISSING; exit 1; }
+          grep -Fq 'future ambiguous provider mutations' docs/MIGRATION_CONTRACT.md || { echo GATE_B_FUTURE_STRICTNESS_MISSING; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o "$tmp/ci.json"
+          jq -e --arg sha "$GITHUB_SHA" '.workflow_runs|any(.head_sha==$sha and .conclusion=="success")' "$tmp/ci.json" >/dev/null || { echo GATE_B_EXACT_SHA_CI_MISSING; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/runs/${HISTORICAL_CONTROLLED_RUN_ID}" -o "$tmp/historical.json"
+          jq -e --arg sha "$HISTORICAL_SOURCE_SHA" --argjson id "$HISTORICAL_CONTROLLED_RUN_ID" '.id==$id and .name=="R1 initial controlled rebuild" and .head_sha==$sha and .head_branch=="main" and .event=="workflow_dispatch" and .status=="completed" and .conclusion=="failure"' "$tmp/historical.json" >/dev/null || { echo GATE_B_HISTORICAL_RUN_NOT_EXACT; exit 1; }
+
+          download_evidence() {
+            local run_id="$1" expected_name="$2" output_dir="$3"
+            mkdir -p "$output_dir"
+            curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/runs/${run_id}/artifacts?per_page=100" -o "$output_dir/artifacts.json"
+            local artifact_id
+            artifact_id="$(jq -er --arg name "$expected_name" '[.artifacts[]|select(.name==$name and .expired==false)]|if length==1 then .[0].id else empty end' "$output_dir/artifacts.json")" || { echo GATE_B_EVIDENCE_ARTIFACT_MISSING; exit 1; }
+            curl --fail --silent --show-error --location -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/artifacts/${artifact_id}/zip" -o "$output_dir/evidence.zip"
+            unzip -q "$output_dir/evidence.zip" -d "$output_dir/unpacked"
+          }
+
+          download_evidence "$HISTORICAL_CONTROLLED_RUN_ID" "r1-initial-controlled-rebuild-evidence-${HISTORICAL_CONTROLLED_RUN_ID}" "$tmp/historical-evidence"
+          jq -e 'type=="object" and (keys|sort)==["code","recoveryReason","status"] and .status=="STOP" and .code=="INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED" and .recoveryReason=="SWAP_OUTCOME_AMBIGUOUS"' "$tmp/historical-evidence/unpacked/classification.json" >/dev/null || { echo GATE_B_HISTORICAL_AMBIGUITY_NOT_PROVEN; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/runs/${READINESS_RUN_ID}" -o "$tmp/readiness.json"
+          jq -e --arg sha "$GITHUB_SHA" '.name=="R1 Yandex readiness" and .head_branch=="main" and .head_sha==$sha and .event=="workflow_dispatch" and .status=="completed" and .conclusion=="success"' "$tmp/readiness.json" >/dev/null || { echo GATE_B_READINESS_RUN_NOT_EXACT; exit 1; }
+          download_evidence "$READINESS_RUN_ID" "r1-yandex-readiness-evidence-${READINESS_RUN_ID}" "$tmp/readiness-evidence"
+          jq -e 'type=="object" and (keys|sort)==["code","status"] and .status=="PASS" and .code=="READINESS_READY"' "$tmp/readiness-evidence/unpacked/classification.json" >/dev/null || { echo GATE_B_READINESS_NOT_READY; exit 1; }
+
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/runs/${GITHUB_RUN_ID}" -o "$tmp/self.json"
+          gate_b_finished_at="$(jq -er '.created_at|select(type=="string" and length>0)' "$tmp/self.json")"
+          printf 'GATE_B_FINISHED_AT=%s\n' "$gate_b_finished_at" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install exact-source dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Restore verified exact-source artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
+
+      - name: Build Gate B-only package
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build --silent
+          npm run package:initial-bootstrap-stale-validated-terminalization:from-build --silent
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/yc"
+          curl --fail --silent --show-error --location https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz -o "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$RUNNER_TEMP/yc"
+          yc_bin="$(find "$RUNNER_TEMP/yc" -type f -name yc -perm -u+x -print -quit)"; test -n "$yc_bin"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange exact GitHub OIDC token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-b-auth"; mkdir -p "$tmp"
+          aud="$(jq -rn --arg v "$OIDC_AUDIENCE" '$v|@uri')"
+          curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${aud}" -o "$tmp/oidc.json"
+          oidc="$(jq -er '.value|select(type=="string" and length>0)' "$tmp/oidc.json")"; echo "::add-mask::$oidc"
+          payload="${oidc#*.}"; payload="${payload%%.*}"; payload="${payload//-/+}"; payload="${payload//_/\/}"
+          case "$((${#payload}%4))" in 2) payload="${payload}==";; 3) payload="${payload}=";; 0);; *) echo GATE_B_OIDC_CLAIMS_INVALID; exit 1;; esac
+          printf %s "$payload" | base64 --decode > "$tmp/claims.json"
+          jq -e --arg iss "$OIDC_ISSUER" --arg aud "$OIDC_AUDIENCE" --arg sub "$OIDC_SUBJECT" '.iss==$iss and .aud==$aud and .sub==$sub' "$tmp/claims.json" >/dev/null || { echo GATE_B_OIDC_CLAIMS_INVALID; exit 1; }
+          curl --fail --silent --show-error -X POST https://auth.yandex.cloud/oauth/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" --data-urlencode "subject_token=${oidc}" --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' -o "$tmp/iam.json"
+          token="$(jq -er '.access_token|select(type=="string" and length>0)' "$tmp/iam.json")"; echo "::add-mask::$token"; echo "YC_IAM_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Resolve private trigger-free provider boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-b-provider"; mkdir -p "$tmp"
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/function.json"
+          fid="$(jq -er '.id|select(type=="string" and length>0)' "$tmp/function.json")"; echo "::add-mask::$fid"
+          yc serverless function list-access-bindings --id "$fid" --format json --retry 0 --no-user-output > "$tmp/bindings.json"
+          jq -e '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject.id]|any(.=="allUsers" or .=="allAuthenticatedUsers")|not' "$tmp/bindings.json" >/dev/null || { echo GATE_B_FUNCTION_PUBLIC; exit 1; }
+          jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject]|any(.type=="serviceAccount" and .id==$id)' "$tmp/bindings.json" >/dev/null || { echo GATE_B_WIF_INVOKER_MISSING; exit 1; }
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/triggers.json"
+          jq -e --arg id "$fid" '[..|strings|select(.==$id)]|length==0' "$tmp/triggers.json" >/dev/null || { echo GATE_B_FUNCTION_TRIGGER_PRESENT; exit 1; }
+          runtime_sa="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output | jq -er '.id')"; echo "::add-mask::$runtime_sa"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${YC_IAM_TOKEN}" "https://lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${YC_LOCKBOX_SECRET_ID}" -o "$tmp/secret.json"
+          jq -e --arg id "$YC_LOCKBOX_SECRET_ID" --arg name "$LOCKBOX_SECRET_NAME" --arg folder "$YC_FOLDER_ID" '.id==$id and .name==$name and .folderId==$folder and .status=="ACTIVE"' "$tmp/secret.json" >/dev/null || { echo GATE_B_LOCKBOX_METADATA_INVALID; exit 1; }
+          lockbox_ver="$(jq -er '.currentVersion.id|select(type=="string" and length>0)' "$tmp/secret.json")"; echo "::add-mask::$lockbox_ver"
+          { echo "GATE_B_FUNCTION_ID=$fid"; echo "GATE_B_RUNTIME_SA=$runtime_sa"; echo "GATE_B_LOCKBOX_VERSION=$lockbox_ver"; } >> "$GITHUB_ENV"
+
+      - name: Re-verify exact main before Gate B deployment
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(curl --fail --silent --show-error -H "Authorization: Bearer ${GH_API_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$sha" = "$GITHUB_SHA" || { echo GATE_B_MAIN_MOVED_BEFORE_DEPLOY; exit 1; }
+
+      - name: Deploy Gate B-only Function version
+        shell: bash
+        run: |
+          set -euo pipefail
+          yc serverless function version create \
+            --function-id "$GATE_B_FUNCTION_ID" \
+            --runtime nodejs22 \
+            --entrypoint index.initialBootstrapStaleValidatedTerminalizationHandler \
+            --memory 1g \
+            --execution-timeout 240s \
+            --environment "PRIHRASH_R1_GATE_B_FINISHED_AT=${GATE_B_FINISHED_AT}" \
+            --environment "PRIHRASH_R1_GATE_B_SOURCE_SHA=${GITHUB_SHA}" \
+            --source-path .artifacts/yandex-initial-bootstrap-stale-validated-terminalization-function \
+            --service-account-id "$GATE_B_RUNTIME_SA" \
+            --tags "$FUNCTION_TAG" \
+            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
+            --no-logging \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_B_LOCKBOX_VERSION},key=google_spreadsheet_id" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_B_LOCKBOX_VERSION},key=google_service_account_email" \
+            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_B_LOCKBOX_VERSION},key=google_service_account_private_key" \
+            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_B_LOCKBOX_VERSION},key=ydb_connection_string" \
+            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${GATE_B_LOCKBOX_VERSION},key=initial_bootstrap_private_historical_evidence" \
+            --format json --retry 0 --no-user-output >/dev/null
+
+      - name: Re-verify private Gate B deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/gate-b-postflight"; mkdir -p "$tmp"
+          yc serverless function list-access-bindings --id "$GATE_B_FUNCTION_ID" --format json --retry 0 --no-user-output > "$tmp/bindings.json"
+          jq -e '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject.id]|any(.=="allUsers" or .=="allAuthenticatedUsers")|not' "$tmp/bindings.json" >/dev/null || { echo GATE_B_FUNCTION_PUBLIC_AFTER_DEPLOY; exit 1; }
+          jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject]|any(.type=="serviceAccount" and .id==$id)' "$tmp/bindings.json" >/dev/null || { echo GATE_B_WIF_INVOKER_MISSING_AFTER_DEPLOY; exit 1; }
+          yc serverless trigger list --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/triggers.json"
+          jq -e --arg id "$GATE_B_FUNCTION_ID" '[..|strings|select(.==$id)]|length==0' "$tmp/triggers.json" >/dev/null || { echo GATE_B_TRIGGER_PRESENT_AFTER_DEPLOY; exit 1; }
+
+      - name: Re-assert exact current main immediately before marker attempt
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(curl --fail --silent --show-error -H "Authorization: Bearer ${GH_API_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$sha" = "$GITHUB_SHA" || { echo GATE_B_MAIN_MOVED_BEFORE_WRITE; exit 1; }
+
+      - name: Invoke marker-only WRITE once with read-only unknown-outcome recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/gate-b-evidence"; mkdir -p "$evidence_dir"
+          write_out="$RUNNER_TEMP/gate-b-write.json"; write_err="$RUNNER_TEMP/gate-b-write.err"
+          set +e
+          yc serverless function invoke --id "$GATE_B_FUNCTION_ID" --tag "$FUNCTION_TAG" --data '{"mode":"WRITE"}' --format json --retry 0 --no-user-output > "$write_out" 2> "$write_err"
+          write_rc=$?
+          set -e
+
+          normalize() { jq -cer 'if type=="string" then fromjson else . end' "$1" 2>/dev/null; }
+          classify_result() {
+            local result="$1"
+            if printf '%s\n' "$result" | jq -e 'type=="object" and (keys|sort)==["code","outcome","status"] and .status=="PASS" and .code=="INITIAL_BOOTSTRAP_STALE_VALIDATED_TERMINALIZED" and .outcome=="EXACT_FAILED_MARKER"' >/dev/null; then
+              printf '%s\n' "$result" | jq -c '{status,code,outcome}' > "$evidence_dir/classification.json"
+              return 0
+            fi
+            if printf '%s\n' "$result" | jq -e 'type=="object" and (keys|sort)==["code","reason","status"] and .status=="STOP" and .code=="INITIAL_BOOTSTRAP_STALE_VALIDATED_TERMINALIZATION_BLOCKED" and (.reason=="PREFLIGHT_NOT_OWNER_EXCEPTION_READY" or .reason=="TERMINAL_MARKER_ALREADY_PRESENT" or .reason=="VALIDATED_RUN_NOT_UNIQUE" or .reason=="MARKER_OUTCOME_UNCHANGED_VALIDATED_NO_RETRY" or .reason=="MARKER_OUTCOME_RECOVERY_REQUIRED")' >/dev/null; then
+              printf '%s\n' "$result" | jq -c '{status,code,reason}' > "$evidence_dir/classification.json"
+              return 2
+            fi
+            return 1
+          }
+
+          write_result=''
+          if [ "$write_rc" -eq 0 ]; then write_result="$(normalize "$write_out" || true)"; fi
+          if [ -n "$write_result" ]; then
+            set +e; classify_result "$write_result"; classification_rc=$?; set -e
+            if [ "$classification_rc" -eq 0 ]; then echo GATE_B_APPLIED; exit 0; fi
+            if [ "$classification_rc" -eq 2 ]; then echo GATE_B_STOPPED; exit 1; fi
+          fi
+
+          echo GATE_B_WRITE_OUTCOME_UNKNOWN_RECOVER_READ_ONLY
+          recover_out="$RUNNER_TEMP/gate-b-recover.json"
+          yc serverless function invoke --id "$GATE_B_FUNCTION_ID" --tag "$FUNCTION_TAG" --data '{"mode":"RECOVER"}' --format json --retry 0 --no-user-output > "$recover_out"
+          recover_result="$(normalize "$recover_out")" || { echo GATE_B_RECOVERY_OUTPUT_INVALID; exit 1; }
+          set +e; classify_result "$recover_result"; classification_rc=$?; set -e
+          if [ "$classification_rc" -eq 0 ]; then echo GATE_B_APPLIED_AFTER_READ_ONLY_RECOVERY; exit 0; fi
+          if [ "$classification_rc" -eq 2 ]; then echo GATE_B_RECOVERY_REQUIRED_NO_RETRY; exit 1; fi
+          echo GATE_B_RECOVERY_OUTPUT_INVALID
+          exit 1
+
+      - name: Publish enum-only Gate B evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-stale-validated-gate-b-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate-b-evidence/classification.json
+          if-no-files-found: ignore
+          retention-days: 30

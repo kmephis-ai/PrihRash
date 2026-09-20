@@ -112,3 +112,71 @@ test('exact FAILED marker is not APPLIED when canonical current is non-empty', a
     );
   }
 });
+
+test('durable recovery accepts exactly one terminal marker plus empty current', async () => {
+  const reads = [];
+  const adapter = new YdbAdapter({
+    async executeRead(statement) {
+      reads.push(statement);
+      if (statement.text.includes("state = 'FAILED' AND error_code = 'INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT'")) {
+        return { rows: [{ row_count: 1n }] };
+      }
+      if (statement.text === 'SELECT COUNT(*) AS row_count FROM source_records') return { rows: [{ row_count: 0n }] };
+      if (statement.text === 'SELECT COUNT(*) AS row_count FROM transactions') return { rows: [{ row_count: 0n }] };
+      throw new Error(`unexpected read: ${statement.text}`);
+    },
+    async serializableReadWrite() { throw new Error('write not allowed'); },
+  });
+  const module = await import('../../dist/migration/initialBootstrapStaleValidatedTerminalization.js');
+  assert.deepEqual(
+    await module.diagnoseInitialBootstrapStaleValidatedTerminalizationDurableOutcome(adapter),
+    { verdict: 'APPLIED', reason: 'EXACT_FAILED_MARKER' },
+  );
+  assert.equal(reads.every((statement) => statement.kind === 'READ'), true);
+});
+
+test('durable recovery treats unchanged VALIDATED as no-retry and duplicate markers as ambiguous', async () => {
+  const module = await import('../../dist/migration/initialBootstrapStaleValidatedTerminalization.js');
+  const validatedAdapter = new YdbAdapter({
+    async executeRead(statement) {
+      if (statement.text.includes("state = 'FAILED' AND error_code = 'INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT'")) {
+        return { rows: [{ row_count: 0n }] };
+      }
+      if (statement.text.includes("FROM migration_runs WHERE state IN ('COMMITTED', 'STAGING', 'VALIDATED')")) {
+        return { rows: [{
+          id: RUN_ID,
+          started_at: STARTED_AT,
+          finished_at: null,
+          source_snapshot_digest: DIGEST,
+          state: 'VALIDATED',
+          rows_seen: 2n,
+          rows_new: 2n,
+          rows_changed: 0n,
+          rows_missing: 0n,
+          rows_ambiguous: 0n,
+          error_code: null,
+        }] };
+      }
+      throw new Error(`unexpected read: ${statement.text}`);
+    },
+    async serializableReadWrite() { throw new Error('write not allowed'); },
+  });
+  assert.deepEqual(
+    await module.diagnoseInitialBootstrapStaleValidatedTerminalizationDurableOutcome(validatedAdapter),
+    { verdict: 'RECOVERY_REQUIRED', reason: 'UNCHANGED_VALIDATED_NO_RETRY' },
+  );
+
+  const duplicateAdapter = new YdbAdapter({
+    async executeRead(statement) {
+      if (statement.text.includes("state = 'FAILED' AND error_code = 'INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT'")) {
+        return { rows: [{ row_count: 2n }] };
+      }
+      throw new Error(`unexpected read: ${statement.text}`);
+    },
+    async serializableReadWrite() { throw new Error('write not allowed'); },
+  });
+  assert.deepEqual(
+    await module.diagnoseInitialBootstrapStaleValidatedTerminalizationDurableOutcome(duplicateAdapter),
+    { verdict: 'RECOVERY_REQUIRED', reason: 'TERMINAL_MARKER_AMBIGUOUS' },
+  );
+});

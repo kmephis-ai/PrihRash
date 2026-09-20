@@ -187,3 +187,25 @@ test('Gate B rolls back when exact terminal row read-back does not match immutab
   assert.equal(f.events.includes('marker-write'), true);
   assert.equal(f.events.includes('readback'), true);
 });
+
+test('Gate B binds the transaction to the exact preflight VALIDATED run', async () => {
+  const f = fixture();
+  const expected = Object.freeze({
+    id: RUN_ID,
+    startedAt: STARTED_AT,
+    finishedAt: null,
+    sourceSnapshotDigest: DIGEST,
+    state: 'VALIDATED',
+    rowsSeen: 3,
+    rowsNew: 2,
+    rowsChanged: 0,
+    rowsMissing: 0,
+    rowsAmbiguous: 0,
+    errorCode: null,
+  });
+  assert.equal(
+    await errorCode(terminalizeInitialBootstrapStaleValidatedRun(f.adapter, FINISHED_AT, expected)),
+    'VALIDATED_RUN_CHANGED',
+  );
+  assert.equal(f.statements.some((statement) => statement.kind === 'WRITE'), false);
+});

@@ -37,10 +37,14 @@ export function initialBootstrapGateCBlockerStatement(): Readonly<YdbStatement> 
   );
 }
 
-export async function hasInitialBootstrapGateCBlocker(adapter: YdbAdapter): Promise<boolean> {
+export async function readInitialBootstrapGateCBlockerCount(adapter: YdbAdapter): Promise<number> {
   const result = await adapter.read<GateCBlockerRow>(initialBootstrapGateCBlockerStatement());
   if (result.rows.length !== 1) {
     throw new InitialBootstrapGateCGuardError('MALFORMED_GATE_C_BLOCKER_EVIDENCE');
   }
-  return count(result.rows[0]?.row_count) > 0;
+  return count(result.rows[0]?.row_count);
+}
+
+export async function hasInitialBootstrapGateCBlocker(adapter: YdbAdapter): Promise<boolean> {
+  return (await readInitialBootstrapGateCBlockerCount(adapter)) > 0;
 }
