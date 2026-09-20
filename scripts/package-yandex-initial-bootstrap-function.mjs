@@ -51,7 +51,7 @@ const HANDLER_UNCAUGHT_FAILURE = Object.freeze({
   metadataFailureCode: null,
 });
 
-export async function initialBootstrapHandler(event, context) {
+async function runGuardedHandler(exportName, event, context) {
   let runtimeModule;
   try {
     runtimeModule = await import('./dist/runtime/yandexCloudInitialBootstrapFunction.js');
@@ -59,15 +59,24 @@ export async function initialBootstrapHandler(event, context) {
     return MODULE_LOAD_FAILURE;
   }
 
-  if (typeof runtimeModule.initialBootstrapHandler !== 'function') {
+  const handler = runtimeModule[exportName];
+  if (typeof handler !== 'function') {
     return MODULE_LOAD_FAILURE;
   }
 
   try {
-    return await runtimeModule.initialBootstrapHandler(event, context);
+    return await handler(event, context);
   } catch {
     return HANDLER_UNCAUGHT_FAILURE;
   }
+}
+
+export async function initialBootstrapHandler(event, context) {
+  return runGuardedHandler('initialBootstrapHandler', event, context);
+}
+
+export async function initialBootstrapGateCHandler(event, context) {
+  return runGuardedHandler('initialBootstrapGateCHandler', event, context);
 }
 `;
 
