@@ -288,7 +288,7 @@ export async function reconstructInitialStaleValidatedHistoricalCandidate(
     throw new InitialStaleValidatedHistoricalCandidateError('PROJECTION_CONTEXT_MISMATCH');
   }
 
-  const assignments: Readonly<InitialTransactionIdentityAssignment>[] = Object.freeze(
+  const assignments: readonly Readonly<InitialTransactionIdentityAssignment>[] = Object.freeze(
     readback.manifest.bindings.flatMap((binding) => (
       binding.transactionId === null
         ? []
