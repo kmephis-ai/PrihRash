@@ -84,7 +84,8 @@ function lifecycleStatement(
     'UPDATE migration_runs SET state = $state, finished_at = $finished_at, error_code = $error_code '
       + 'WHERE id = $id AND state = $expected_state AND source_snapshot_digest = $source_snapshot_digest '
       + 'AND rows_seen = $rows_seen AND rows_new = $rows_new AND rows_changed = $rows_changed '
-      + 'AND rows_missing = $rows_missing AND rows_ambiguous = $rows_ambiguous',
+      + 'AND rows_missing = $rows_missing AND rows_ambiguous = $rows_ambiguous '
+      + 'AND finished_at IS NULL AND error_code IS NULL',
     parameters,
   );
   return Object.freeze({

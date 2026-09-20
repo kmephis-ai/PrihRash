@@ -151,7 +151,7 @@ Owner также явно разрешил узкое ослабление Gate 
 | Gate | Требование | Статус |
 | --- | --- | --- |
 | A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | БЛОКИРОВАН НА CONDITION 6; condition 7 ЧАСТИЧНО РЕАЛИЗОВАН: shared writer group + post-lock Gate C guard закрывают queued late-bootstrap, но будущий Gate B ещё должен удерживать тот же lock непрерывно от fresh preflight до terminalization read-back |
-| B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
+| B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | TRANSACTION PRIMITIVE РЕАЛИЗОВАН SYNTHETIC-ONLY: admission + empty current + exact marker write/read-back в одной serializable transaction; unknown-outcome recovery и production workflow ещё не реализованы, live dispatch запрещён |
 | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
 
 После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.

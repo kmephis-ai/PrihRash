@@ -35,6 +35,7 @@ test('prepares conditional STAGING to VALIDATED lifecycle update', () => {
 
   assert.equal(write.statement.kind, 'WRITE');
   assert.equal(write.statement.text.startsWith('UPDATE migration_runs SET state = $state'), true);
+  assert.match(write.statement.text, /finished_at IS NULL AND error_code IS NULL$/);
   assert.equal(write.statement.parameters.id.type, 'Uuid');
   assert.equal(write.statement.parameters.state.value, 'VALIDATED');
   assert.equal(write.statement.parameters.expected_state.value, 'STAGING');
