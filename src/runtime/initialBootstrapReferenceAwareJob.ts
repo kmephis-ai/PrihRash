@@ -281,6 +281,8 @@ function classifyGenericApplicationPhase(
     case 'CURRENT_STATE_PREFLIGHT':
     case 'FRESH_CLAIM_WRITE':
     case 'RESUME_CONTEXT_READ':
+    case 'RESUME_IDENTITY_MANIFEST_READ':
+    case 'RESUME_SNAPSHOT_READ':
     case 'REVISION_EVIDENCE_WRITE':
     case 'COUNTER_REFINEMENT_WRITE':
     case 'RECONCILIATION_READ':
