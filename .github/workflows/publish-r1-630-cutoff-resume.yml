@@ -1,0 +1,33 @@
+name: Publish exact R1 cutoff-aware resume tree
+on:
+  push:
+    branches:
+      - transport/r1-630-cutoff-resume-publish-0d251deb
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Reconstruct and publish exact reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .transport/r1-630-cutoff-resume-patch/*.txt > "$RUNNER_TEMP/payload.b64"
+          test "$(wc -c < "$RUNNER_TEMP/payload.b64" | tr -d ' ')" = '7012'
+          test "$(sha256sum "$RUNNER_TEMP/payload.b64" | awk '{print $1}')" = '428b3124cdc8b32d340febabec02c6fd65bfd9e10d92f18c206f8e8ff7b7a9be'
+          base64 --decode "$RUNNER_TEMP/payload.b64" | gzip --decompress > "$RUNNER_TEMP/cutoff.patch"
+          test "$(sha256sum "$RUNNER_TEMP/cutoff.patch" | awk '{print $1}')" = '00d0c0d62500f98c302309b76bf7e525a6545f964f46fdd5192fde866432f9d2'
+          git checkout --detach 0d251deb406e8710ce6ad68aac45e386af70fdea
+          git apply --index "$RUNNER_TEMP/cutoff.patch"
+          git diff --cached --check
+          git config user.name 'kmephis-ai'
+          git config user.email 'kmephis@gmail.com'
+          git commit -m 'fix(r1): resume immutable bootstrap cutoff after source advance'
+          test "$(git rev-parse HEAD^{tree})" = 'c628a8b1ae864d2763e4d2801000dbc0dbe80d90'
+          git push origin "HEAD:refs/heads/agent/r1-630-cutoff-aware-resume"
