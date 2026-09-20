@@ -279,7 +279,7 @@ test('recovery job preserves durable STAGING evidence when the Google-aware diag
   });
 });
 
-test('recovery job refines VALIDATED into enum-only controlled structure evidence without Google reads', async () => {
+test('recovery job preserves VALIDATED structure and compares source read-only', async () => {
   let controlledDiagnosticCalls = 0;
   const fixture = runtime({
     async diagnoseSurface() {
@@ -289,13 +289,20 @@ test('recovery job refines VALIDATED into enum-only controlled structure evidenc
       controlledDiagnosticCalls += 1;
       return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY';
     },
+    async diagnoseValidatedSourceEvidence(_adapter, digest, observations) {
+      assert.equal(digest, 'synthetic-digest');
+      assert.deepEqual(observations, [{ sourceOrdinal: 0, rowHint: 2, digest: 'synthetic-row-digest' }]);
+      return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY';
+    },
   });
   assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
     verdict: 'RECOVERY_REQUIRED',
     reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
   });
   assert.equal(controlledDiagnosticCalls, 1);
-  assert.equal(fixture.counters().sourceReads, 0);
+  assert.equal(fixture.counters().sourceReads, 1);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
   assert.equal(fixture.counters().reconcileCalls, 0);
   assert.equal(fixture.counters().closes, 1);
 });
@@ -371,4 +378,32 @@ test('recovery config requires read-only Google credentials plus YDB connection'
     () => readInitialBootstrapRecoveryJobConfig({ PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString }),
     (error) => error?.code === 'INVALID_SPREADSHEET_ID',
   );
+});
+
+
+test('VALIDATED source diagnostic failure preserves structure and recovery boundary', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
+    async diagnoseValidatedControlledRebuildState() { return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'; },
+    createSource() { throw new Error('private source failure'); },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+    validatedSourceEvidence: 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+  });
+  assert.equal(fixture.counters().closes, 1);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
+});
+
+test('other VALIDATED structures and surface-only mode never read the authoritative source', async () => {
+  for (const reason of ['VALIDATED_CURRENT_EMPTY_STAGING_EMPTY', 'VALIDATED_CURRENT_NONEMPTY_STAGING_PRESENT', 'VALIDATED_CONTROLLED_STRUCTURE_AMBIGUOUS']) {
+    const fixture = runtime({
+      async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
+      async diagnoseValidatedControlledRebuildState() { return reason; },
+    });
+    assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), { verdict: 'RECOVERY_REQUIRED', reason });
+    assert.equal(fixture.counters().sourceReads, 0);
+    assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime, true), { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' });
+    assert.equal(fixture.counters().sourceReads, 0);
+  }
 });

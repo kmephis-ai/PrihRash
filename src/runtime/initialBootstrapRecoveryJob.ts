@@ -19,6 +19,8 @@ import {
 import { decodeRawPayloadForSourceClassification } from '../migration/rawPayloadClassificationAdapter.js';
 import type { RawPayload, RawPayloadDecodeErrorCode } from '../migration/rawPayloadDecoder.js';
 import {
+  diagnoseInitialValidatedSourceEvidence,
+  type InitialValidatedSourceDiagnostic,
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
@@ -75,6 +77,7 @@ export type InitialBootstrapSourceDecodeDiagnostic =
   | 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
+  readonly validatedSourceEvidence?: InitialValidatedSourceDiagnostic;
   readonly stagingRevisionEvidence?: InitialBootstrapStagingRevisionDiagnostic;
   readonly stagingDurableRevisionEvidence?: InitialBootstrapStagingDurableRevisionDiagnostic;
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
@@ -94,6 +97,11 @@ export interface InitialBootstrapRecoveryJobRuntime {
     adapter: YdbAdapter,
     rows: Parameters<typeof reconcileInitialBootstrapReferenceState>[1],
   ): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
+  diagnoseValidatedSourceEvidence(
+    adapter: YdbAdapter,
+    sourceSnapshotDigest: string,
+    observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
+  ): Promise<InitialValidatedSourceDiagnostic>;
   diagnoseStagingRevisionEvidence(
     adapter: YdbAdapter,
     sourceSnapshotDigest: string,
@@ -141,6 +149,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   },
   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
+  diagnoseValidatedSourceEvidence: diagnoseInitialValidatedSourceEvidence,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
   diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseStagingExactRevisionEvidence: diagnoseInitialBootstrapStagingExactRevisionEvidence,
@@ -195,7 +204,24 @@ export async function executeInitialBootstrapRecoveryJob(
           adapter,
           new YdbSchemeAdapter(schemeTransport),
         );
-        return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason });
+        if (reason !== 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY') {
+          return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason });
+        }
+        let validatedSourceEvidence: InitialValidatedSourceDiagnostic;
+        try {
+          const digest = runtime.createDigest();
+          const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
+          const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
+          validatedSourceEvidence = await runtime.diagnoseValidatedSourceEvidence(
+            adapter, lease.snapshotDigest,
+            projected.rows.map((row, sourceOrdinal) => Object.freeze({
+              sourceOrdinal, rowHint: row.rowHint, digest: row.digest,
+            })),
+          );
+        } catch {
+          validatedSourceEvidence = 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
+        }
+        return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason, validatedSourceEvidence });
       } catch {
         return Object.freeze({
           verdict: 'RECOVERY_REQUIRED' as const,

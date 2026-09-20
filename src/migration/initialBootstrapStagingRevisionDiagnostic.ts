@@ -214,7 +214,7 @@ function normalizeObservations(
   return Object.freeze(normalized);
 }
 
-function stagingManifestStatement() {
+function stagingManifestStatement(expectedState: 'STAGING' | 'VALIDATED' = 'STAGING') {
   return readStatement(
     'SELECT r.id AS migration_run_id, r.state AS run_state, '
       + 'CAST(r.source_snapshot_digest AS Utf8) AS run_snapshot_digest, r.rows_seen AS rows_seen, '
@@ -225,18 +225,21 @@ function stagingManifestStatement() {
       + 'FROM migration_runs AS r '
       + 'JOIN initial_bootstrap_identity_manifests AS m ON m.migration_run_id = r.id '
       + 'JOIN source_snapshots AS s ON s.id = m.source_snapshot_id '
-      + "WHERE r.state = 'STAGING' LIMIT 2",
+      + (expectedState === 'STAGING'
+        ? "WHERE r.state = 'STAGING' LIMIT 2"
+        : "WHERE r.state IN ('STAGING', 'VALIDATED') LIMIT 2"),
   );
 }
 
 function parseStagingManifest(
   rows: readonly Readonly<StagingManifestEvidenceRow>[],
+  expectedState: 'STAGING' | 'VALIDATED' = 'STAGING',
 ): ManifestParseResult {
   if (rows.length !== 1) {
     return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_CARDINALITY_MISMATCH' as const });
   }
   const row = rows[0];
-  if (row === undefined || row.run_state !== 'STAGING') {
+  if (row === undefined || row.run_state !== expectedState) {
     return Object.freeze({ ok: false, diagnostic: 'STAGING_MANIFEST_STRUCTURE_MISMATCH' as const });
   }
   const migrationRunId = normalizedUuid(row.migration_run_id);
@@ -686,4 +689,37 @@ export async function diagnoseInitialBootstrapStagingRevisionEvidence(
   const sourceDiagnostic = authoritativeBindingDiagnostic(parsed.manifest, sourceSnapshotDigest, observations);
   if (sourceDiagnostic !== null) return sourceDiagnostic;
   return diagnoseDurableRevisionEvidenceFromManifest(reader, parsed.manifest);
+}
+
+
+export type InitialValidatedSourceDiagnostic =
+  | 'AUTHORITATIVE_SNAPSHOT_MATCH'
+  | 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+  | 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'
+  | 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'
+  | 'AUTHORITATIVE_ROW_COUNT_MISMATCH'
+  | 'AUTHORITATIVE_BINDING_MISMATCH'
+  | 'VALIDATED_METADATA_INVALID'
+  | 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
+
+// Read-only source comparison. This never authorizes stale-STAGING retirement or swap.
+export async function diagnoseInitialValidatedSourceEvidence(
+  reader: YdbReadScope,
+  sourceSnapshotDigest: string,
+  observations: readonly Readonly<InitialBootstrapStagingRevisionObservation>[],
+): Promise<InitialValidatedSourceDiagnostic> {
+  const result = await reader.read<StagingManifestEvidenceRow>(stagingManifestStatement('VALIDATED'));
+  const parsed = parseStagingManifest(result.rows, 'VALIDATED');
+  if (!parsed.ok) return 'VALIDATED_METADATA_INVALID';
+  const diagnostic = authoritativeBindingDiagnostic(parsed.manifest, sourceSnapshotDigest, observations);
+  switch (diagnostic) {
+    case null: return 'AUTHORITATIVE_SNAPSHOT_MATCH';
+    case 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH':
+    case 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED':
+    case 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY':
+    case 'AUTHORITATIVE_ROW_COUNT_MISMATCH':
+    case 'AUTHORITATIVE_BINDING_MISMATCH':
+      return diagnostic;
+    default: return 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
+  }
 }

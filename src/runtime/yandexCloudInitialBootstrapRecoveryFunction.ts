@@ -17,6 +17,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED';
       verdict: InitialBootstrapRecoveryVerdict;
       reason: InitialBootstrapRecoverySurfaceReason;
+      validatedSourceEvidence?: InitialBootstrapRecoveryJobResult['validatedSourceEvidence'];
       stagingRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionEvidence'];
       stagingDurableRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingDurableRevisionEvidence'];
       stagingRetirementEvidence?: InitialBootstrapRecoveryJobResult['stagingRetirementEvidence'];
@@ -31,6 +32,17 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
 export interface YandexInitialBootstrapRecoveryJob {
   (environment: InitialBootstrapRecoveryJobEnvironment): Promise<Readonly<InitialBootstrapRecoveryJobResult>>;
 }
+
+const VALIDATED_SOURCE_EVIDENCE = new Set([
+  'AUTHORITATIVE_SNAPSHOT_MATCH',
+  'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+  'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
+  'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+  'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+  'AUTHORITATIVE_BINDING_MISMATCH',
+  'VALIDATED_METADATA_INVALID',
+  'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+]);
 
 const STAGING_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingRevisionEvidence']>>([
   'NO_REVISION_EVIDENCE',
@@ -168,6 +180,9 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
 ]);
 
 function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>, surfaceOnly = false): boolean {
+  if (value.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly) {
+    if (value.validatedSourceEvidence === undefined || !VALIDATED_SOURCE_EVIDENCE.has(value.validatedSourceEvidence)) return false;
+  } else if (value.validatedSourceEvidence !== undefined) return false;
   const diagnostic = value.stagingRevisionEvidence;
   const durableDiagnostic = value.stagingDurableRevisionEvidence;
   const retirementDiagnostic = value.stagingRetirementEvidence;
@@ -213,6 +228,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED' as const,
       verdict: classification.verdict,
       reason: classification.reason,
+      ...(classification.validatedSourceEvidence === undefined
+        ? {}
+        : { validatedSourceEvidence: classification.validatedSourceEvidence }),
       ...(classification.stagingRevisionEvidence === undefined
         ? {}
         : { stagingRevisionEvidence: classification.stagingRevisionEvidence }),

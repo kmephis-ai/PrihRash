@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  diagnoseInitialValidatedSourceEvidence,
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
   diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
@@ -553,4 +554,36 @@ test('staging revision diagnostic uses one run scan plus one table-parameter col
   assert.equal(evidenceReader.calls.every((statement) => statement.kind === 'READ'), true);
   assert.match(evidenceReader.calls[1].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
   assert.doesNotMatch(evidenceReader.calls[2].text, /source_record_id_\d+/);
+});
+
+
+test('VALIDATED source diagnostic classifies drift using immutable manifest with read-only access', async () => {
+  const original = observations(2);
+  const insertion = [{ sourceOrdinal: 0, rowHint: 2, digest: 'inserted' },
+    ...original.map((row, i) => ({ ...row, sourceOrdinal: i + 1, rowHint: i + 3 }))];
+  for (const [digest, rows, expected] of [
+    [SNAPSHOT_DIGEST, original, 'AUTHORITATIVE_SNAPSHOT_MATCH'],
+    ['changed', observations(3), 'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED'],
+    ['changed', insertion, 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'],
+    ['changed', [{ ...original[0], digest: 'changed' }, original[1]], 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'],
+    ['changed', [original[0]], 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'],
+    [SNAPSHOT_DIGEST, [{ ...original[0], digest: 'changed' }, original[1]], 'AUTHORITATIVE_BINDING_MISMATCH'],
+  ]) {
+    let reads = 0;
+    const reader = { async read(statement) {
+      reads += 1;
+      assert.match(statement.text, /WHERE r.state IN \('STAGING', 'VALIDATED'\)/);
+      return { rows: [{ ...manifestRow(original), run_state: 'VALIDATED' }] };
+    } };
+    assert.equal(await diagnoseInitialValidatedSourceEvidence(reader, digest, rows), expected);
+    assert.equal(reads, 1);
+  }
+});
+
+test('VALIDATED source diagnostic rejects wrong lifecycle, duplicate and inconsistent durable metadata', async () => {
+  const original = observations(2);
+  const valid = { ...manifestRow(original), run_state: 'VALIDATED' };
+  for (const rows of [[], [valid, valid], [manifestRow(original)], [{ ...valid, manifest_snapshot_digest: 'other' }], [{ ...valid, bindings: {} }]]) {
+    assert.equal(await diagnoseInitialValidatedSourceEvidence({ async read() { return { rows }; } }, SNAPSHOT_DIGEST, original), 'VALIDATED_METADATA_INVALID');
+  }
 });

@@ -172,6 +172,8 @@ test('recovery invoker accepts validated controlled structure reasons with the c
       code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
       verdict: 'RECOVERY_REQUIRED',
       reason,
+      ...(reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'
+        ? { validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY' } : {}),
     });
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
@@ -191,7 +193,8 @@ test('recovery invoker accepts validated controlled structure reasons with the c
       verdict: 'RECOVERY_REQUIRED',
       reason,
     });
-    assert.equal(stderr, '');
+    assert.equal(stderr, reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'
+      ? 'R1_VALIDATED_SOURCE_EVIDENCE=AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY\n' : '');
   }
 });
 
@@ -230,4 +233,15 @@ test('surface-only invoker accepts bare STAGING enum only when explicitly select
       return true;
     },
   );
+});
+
+
+test('VALIDATED source invoker rejects missing, unknown, extra and wrong-state evidence without echo', async () => {
+  const base = { status: 'PASS', code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED', verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' };
+  for (const value of [base, { ...base, validatedSourceEvidence: 'private text' }, { ...base, validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_MATCH', private: 'private text' }, { ...base, reason: 'VALIDATED_CURRENT_EMPTY_STAGING_EMPTY', validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_MATCH' }]) {
+    const yc = await fakeYc(value);
+    await assert.rejects(() => execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+      cwd: process.cwd(), env: { ...process.env, PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id', PRIHRASH_YC_BIN: yc },
+    }), (error) => error.code === 2 && !error.stdout.includes('private text') && !error.stderr.includes('private text'));
+  }
 });

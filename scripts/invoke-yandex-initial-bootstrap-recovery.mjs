@@ -19,6 +19,17 @@ const SAFE_OUTPUT_FAILURE = Object.freeze({
   code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
 });
 const VERDICTS = new Set(['APPLIED', 'NOT_APPLIED', 'RECOVERY_REQUIRED']);
+const VALIDATED_SOURCE_EVIDENCE = new Set([
+  'AUTHORITATIVE_SNAPSHOT_MATCH',
+  'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+  'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
+  'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+  'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+  'AUTHORITATIVE_BINDING_MISMATCH',
+  'VALIDATED_METADATA_INVALID',
+  'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+]);
+
 const STAGING_REVISION_EVIDENCE = new Set([
   'NO_REVISION_EVIDENCE',
   'PARTIAL_CURRENT_RUN_ONLY',
@@ -214,7 +225,11 @@ function parseExactResult(stdout, surfaceOnly = false) {
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
-    const validDiagnosticShape = result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
+    const validatedSourceEvidence = result.validatedSourceEvidence;
+    const validDiagnosticShape = result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
+      ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence'])
+        && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
+      : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
       : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
@@ -251,6 +266,7 @@ function parseExactResult(stdout, surfaceOnly = false) {
         verdict: result.verdict,
         reason: result.reason,
       }),
+      validatedSourceEvidence: result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' ? validatedSourceEvidence ?? null : null,
       stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence ?? null : null,
       stagingDurableRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingDurableRevisionEvidence ?? null
@@ -330,6 +346,9 @@ async function invokeRecovery(environment = process.env) {
 }
 
 const invocation = await invokeRecovery();
+if (invocation.validatedSourceEvidence != null) {
+  process.stderr.write(`R1_VALIDATED_SOURCE_EVIDENCE=${invocation.validatedSourceEvidence}\n`);
+}
 if (invocation.stagingRevisionEvidence !== null) {
   process.stderr.write(`R1_STAGING_REVISION_EVIDENCE=${invocation.stagingRevisionEvidence}\n`);
 }

@@ -119,6 +119,16 @@ After that contract was corrected, exact-main diagnostic `35500282782` classifie
 
 Последний read-only diagnostic `35505256401` на `9ce30163b5f43dc55323d76745a74f3b14120a55` локализовал blocker до `APPLICATION_FAILED / PREPARATION / RESUME_CONTEXT_READ`. Fresh recovery `35504901039` подтвердил `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`; readiness `35505177912` — `READINESS_READY`. Чтобы различить причины внутри resume-read, после успешной проверки snapshot digest выставляется `RESUME_IDENTITY_MANIFEST_READ`, а перед чтением durable snapshot — `RESUME_SNAPSHOT_READ`. Digest mismatch по-прежнему останавливается на `RESUME_CONTEXT_READ`: stale-STAGING retirement contract не изменён. Новые фазы не расширяют result schema или write authority. После merge допустим только один отдельно gated read-only diagnostic с fresh exact-main recovery/readiness; financial writes, replay, swap и cleanup этим изменением не разрешены.
 
+## Read-only source drift при VALIDATED
+
+Diagnostic `35506553480` на exact `5299dd379e57f4a488f6297a84102d6c0b56e4ff` повторно остановился на `APPLICATION_FAILED / PREPARATION / RESUME_CONTEXT_READ`. По текущему коду между этой фазой и следующим marker выполняется только snapshot digest check: это локализует отказ до mismatch authoritative observation и durable run. Manifest/snapshot reads не достигнуты. Recovery `35506459580` доказал `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`, readiness `35506461132` — `READINESS_READY`.
+
+Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь дополнительно выполняет один Google snapshot read и сравнивает его с согласованным durable run/manifest/snapshot. Используются существующие правила digest/binding/prefix/insertion-only comparison; STAGING classifier и retirement остаются ограничены STAGING. Остальные structural states и surface-only recovery не читают Google для этого diagnostic.
+
+Поле `validatedSourceEvidence` содержит только один enum: `AUTHORITATIVE_SNAPSHOT_MATCH`, `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`, `AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED`, `AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY`, `AUTHORITATIVE_ROW_COUNT_MISMATCH`, `AUTHORITATIVE_BINDING_MISMATCH`, `VALIDATED_METADATA_INVALID` или `VALIDATED_SOURCE_DIAGNOSTIC_FAILED`. Reader error не превращается в source match. Invoker сохраняет прежний четырёхполевой classification и публикует enum отдельно; workflow сохраняет `validated-source.json` рядом с `classification.json`. Raw rows, digests, counts, identifiers и payload не публикуются.
+
+Этот diagnostic не доказывает staging completeness, exact revision equality, swap outcome или COMMITTED baseline. Любой его enum оставляет `RECOVERY_REQUIRED` и не разрешает retirement VALIDATED run, rebuild/replay/swap/cleanup. После canonical gates допустима одна full read-only recovery на новом exact main. Следующий mutation path требует отдельного canonical gate; stale-STAGING terminalization contract нельзя применять к VALIDATED.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.

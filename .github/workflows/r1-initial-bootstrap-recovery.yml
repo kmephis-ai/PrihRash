@@ -432,7 +432,8 @@ jobs:
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-invoke.log"
           evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-recovery-evidence"
           mkdir -p "$evidence_dir"
-          npm run initial-bootstrap-recovery:invoke | tee "$tmp"
+          diagnostics="$RUNNER_TEMP/r1-recovery-diagnostics.log"
+          npm run initial-bootstrap-recovery:invoke 2> >(tee "$diagnostics" >&2) | tee "$tmp"
           tail -n 1 "$tmp" | jq -c -e '
             select(
               type == "object"
@@ -444,12 +445,21 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_RECOVERY_EVIDENCE_INVALID'
             exit 1
           }
-          rm -f "$tmp"
+          if jq -e '.reason == "VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY"' "$evidence_dir/classification.json" >/dev/null; then
+            source_evidence="$(sed -n 's/^R1_VALIDATED_SOURCE_EVIDENCE=//p' "$diagnostics")"
+            case "$source_evidence" in
+              AUTHORITATIVE_SNAPSHOT_MATCH|AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH|AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED|AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY|AUTHORITATIVE_ROW_COUNT_MISMATCH|AUTHORITATIVE_BINDING_MISMATCH|VALIDATED_METADATA_INVALID|VALIDATED_SOURCE_DIAGNOSTIC_FAILED) ;;
+              *) echo INITIAL_BOOTSTRAP_VALIDATED_SOURCE_EVIDENCE_INVALID; exit 1 ;;
+            esac
+            jq -cn --arg evidence "$source_evidence" '{validatedSourceEvidence:$evidence}' > "$evidence_dir/validated-source.json"
+            cat "$evidence_dir/validated-source.json"
+          fi
+          rm -f "$tmp" "$diagnostics"
 
       - name: Publish enum-only recovery evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-initial-bootstrap-recovery-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/r1-initial-bootstrap-recovery-evidence/classification.json
+          path: ${{ runner.temp }}/r1-initial-bootstrap-recovery-evidence/*.json
           if-no-files-found: error
           retention-days: 30
