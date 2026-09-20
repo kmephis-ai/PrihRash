@@ -114,6 +114,8 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.match(workflow, /ABSENT/);
   assert.match(workflow, /bootstrapPhase/);
   assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
+  const reconciliationGuards = workflow.match(/\.bootstrapPhase \| IN\([^)]*"RECONCILIATION_READ"/g) ?? [];
+  assert.equal(reconciliationGuards.length, 2);
   assert.match(workflow, /MODULE_LOAD_FAILED[\s\S]*HANDLER_UNCAUGHT/);
   assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_ACCEPTED/);
   assert.doesNotMatch(workflow, /Record provider repair-only evidence/);

@@ -81,6 +81,14 @@ A synchronous response is accepted as success only when the exact bounded result
 
 For a non-200 synchronous response, the invoker does not read or publish the response body, provider error message or stack. It records only the bounded HTTP enum plus whether the provider response contains the `X-Function-Error` header as `functionError=PRESENT|ABSENT`. This distinguishes a provider-marked function-code failure from an HTTP failure without that signal while keeping private/error payloads out of Actions artifacts. The header classification is diagnostic evidence only and never authorizes replay by itself.
 
+### Live WU7 one-shot on `24f16aee433aecdf014165f58bea7ef498bb1b29`
+
+Owner-authorized controlled run `35542663922` consumed its one-shot authority after fresh recovery `35542444650` proved the exact resumable `STAGING_RUN_PRESENT` surface and readiness `35542581731` returned `READINESS_READY`. The workflow passed authority, exact-main, prerequisite and private/trigger-free provider gates, deployed the reviewed controlled handler, rechecked exact main immediately before invocation and issued exactly one synchronous invoke. The bounded workflow result was `INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID`; temporary phase evidence was unavailable as `INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE / LOG_READ_FAILED`. The authority Issue #703 was then closed as consumed and no replay occurred.
+
+Mandatory read-only recovery `35542815879` subsequently proved the durable state had not advanced: `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, both revision evidence diagnostics remained `COMPLETE_CURRENT_RUN_ONLY`, verified current remained empty, source decoding had no blocker, and exact revision evidence remained `EXACT_CURRENT_RUN_MATCH`. Therefore neither swap nor `COMMITTED` is proven, and the failed invoke cannot be replayed under the consumed authority.
+
+Repository inspection found one diagnostics-contract mismatch at a reachable pre-write continuation phase: while a durable `STAGING` controlled continuation performs `RECONCILIATION_READ` inside controlled `PREPARATION`, the Function sanitizer can safely emit `APPLICATION_FAILED / PREPARATION / RECONCILIATION_READ`, but the controlled invoker and workflow result guard did not allow that exact `bootstrapPhase`. They consequently collapsed such a bounded runtime failure into `INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID`. The repository correction only aligns this enum allowlist and regression coverage. It does not change financial semantics, resource caps, provider IAM, writer authority or durable state, and does not arm another controlled rebuild attempt.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:

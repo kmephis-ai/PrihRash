@@ -150,6 +150,23 @@ test('controlled rebuild malformed application result fails closed without echo'
   }
 });
 
+test('controlled rebuild preserves bounded reconciliation-read bootstrap failure', async () => {
+  assert.deepEqual(
+    await execute(new InitialControlledRebuildJobError(
+      'APPLICATION_FAILED',
+      'PREPARATION',
+      'RECONCILIATION_READ',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+    },
+  );
+});
+
 test('controlled rebuild runtime errors retain only job code and controlled phase', async () => {
   assert.deepEqual(
     await execute(new InitialControlledRebuildJobError('APPLICATION_FAILED', 'SWAP_MUTATION')),
