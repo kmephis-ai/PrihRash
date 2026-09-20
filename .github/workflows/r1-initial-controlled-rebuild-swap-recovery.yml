@@ -1,0 +1,161 @@
+name: R1 initial controlled rebuild swap recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      tracking_issue:
+        description: Open R1 WU7 authority Issue number
+        required: true
+        type: string
+      expected_main_sha:
+        description: Exact main SHA authorized for diagnostic
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  id-token: write
+
+concurrency:
+  group: r1-initial-controlled-rebuild-swap-recovery
+  cancel-in-progress: false
+
+jobs:
+  swap-recovery:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Verify exact-main read-only diagnostic authority
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          TRACKING_ISSUE: ${{ inputs.tracking_issue }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA"
+          [[ "$TRACKING_ISSUE" =~ ^[1-9][0-9]*$ ]]
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_API_TOKEN}"
+          tmp="$RUNNER_TEMP/swap-recovery-gates"; mkdir -p "$tmp"
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/branches/main" -o "$tmp/main.json"
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha == $sha and .protected == true' "$tmp/main.json" >/dev/null || { echo SWAP_RECOVERY_MAIN_GATE_NOT_READY; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" -o "$tmp/issue.json"
+          jq -e '.state == "open" and (.title|startswith("R1 WU7:")) and (.body|contains("Provider-Authority: WU7_CONTROLLED_REBUILD")) and (.body|contains("Authority-Scope: PRODUCTION_YDB_INITIAL_SHADOW_ONLY")) and (.body|contains("Google-Authority: PRESERVED")) and (.body|contains("Blind-Replay: FORBIDDEN"))' "$tmp/issue.json" >/dev/null || { echo SWAP_RECOVERY_AUTHORITY_MISSING; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" -o "$tmp/ci.json"
+          jq -e --arg sha "$GITHUB_SHA" '.workflow_runs|any(.head_sha==$sha and .conclusion=="success")' "$tmp/ci.json" >/dev/null || { echo SWAP_RECOVERY_EXACT_SHA_CI_MISSING; exit 1; }
+          curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/actions/runs?per_page=100" -o "$tmp/runs.json"
+          jq -e --argjson self "$GITHUB_RUN_ID" '[.workflow_runs[]|select(.id!=$self)|select(.status=="queued" or .status=="in_progress")|select(.name=="R1 initial shadow bootstrap" or .name=="R1 initial bootstrap orchestrator" or .name=="R1 initial controlled rebuild")]|length==0' "$tmp/runs.json" >/dev/null || { echo SWAP_RECOVERY_WRITER_CONFLICT; exit 1; }
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Restore verified exact-source artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
+      - name: Build diagnostic package
+        run: npm run package:initial-controlled-rebuild:from-build
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/yc"
+          curl --fail --silent --show-error --location https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz -o "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$RUNNER_TEMP/yc"
+          yc_bin="$(find "$RUNNER_TEMP/yc" -type f -name yc -perm -u+x -print -quit)"; test -n "$yc_bin"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+
+      - name: Exchange exact GitHub OIDC token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/swap-recovery-auth"; mkdir -p "$tmp"
+          aud="$(jq -rn --arg v "$OIDC_AUDIENCE" '$v|@uri')"
+          curl --fail --silent --show-error -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${aud}" -o "$tmp/oidc.json"
+          oidc="$(jq -er '.value|select(type=="string" and length>0)' "$tmp/oidc.json")"; echo "::add-mask::$oidc"
+          payload="${oidc#*.}"; payload="${payload%%.*}"; payload="${payload//-/+}"; payload="${payload//_/\/}"
+          case "$((${#payload}%4))" in 2) payload="${payload}==";; 3) payload="${payload}=";; 0);; *) exit 1;; esac
+          printf %s "$payload" | base64 --decode > "$tmp/claims.json"
+          jq -e --arg iss "$OIDC_ISSUER" --arg aud "$OIDC_AUDIENCE" --arg sub "$OIDC_SUBJECT" '.iss==$iss and .aud==$aud and .sub==$sub' "$tmp/claims.json" >/dev/null || { echo SWAP_RECOVERY_OIDC_CLAIMS_INVALID; exit 1; }
+          curl --fail --silent --show-error -X POST https://auth.yandex.cloud/oauth/token -H 'Content-Type: application/x-www-form-urlencoded' --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" --data-urlencode "subject_token=${oidc}" --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' -o "$tmp/iam.json"
+          token="$(jq -er '.access_token|select(type=="string" and length>0)' "$tmp/iam.json")"; echo "::add-mask::$token"; echo "YC_IAM_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Resolve private diagnostic deployment boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/swap-recovery-provider"; mkdir -p "$tmp"
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output > "$tmp/fn.json"
+          fid="$(jq -er '.id' "$tmp/fn.json")"; echo "::add-mask::$fid"
+          yc serverless function list-access-bindings --id "$fid" --format json --retry 0 --no-user-output > "$tmp/bindings.json"
+          jq -e '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject.id]|any(.=="allUsers" or .=="allAuthenticatedUsers")|not' "$tmp/bindings.json" >/dev/null || { echo SWAP_RECOVERY_FUNCTION_PUBLIC; exit 1; }
+          jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '[.[]?|select((.role_id//.roleId)=="functions.functionInvoker")|.subject]|any(.type=="serviceAccount" and .id==$id)' "$tmp/bindings.json" >/dev/null || { echo SWAP_RECOVERY_WIF_INVOKER_MISSING; exit 1; }
+          sa="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output | jq -er '.id')"; echo "::add-mask::$sa"
+          curl --fail --silent --show-error -H "Authorization: Bearer ${YC_IAM_TOKEN}" "https://lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${YC_LOCKBOX_SECRET_ID}" -o "$tmp/secret.json"
+          ver="$(jq -er '.currentVersion.id' "$tmp/secret.json")"; echo "::add-mask::$ver"
+          echo "FID=$fid" >> "$GITHUB_ENV"; echo "RUNTIME_SA=$sa" >> "$GITHUB_ENV"; echo "LOCKBOX_VER=$ver" >> "$GITHUB_ENV"
+
+      - name: Re-verify exact main before diagnostic deployment
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(curl --fail --silent --show-error -H "Authorization: Bearer ${GH_API_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main"|jq -er '.commit.sha')"
+          test "$sha" = "$GITHUB_SHA" || { echo SWAP_RECOVERY_MAIN_MOVED; exit 1; }
+
+      - name: Deploy diagnostic-only Function version
+        shell: bash
+        run: |
+          set -euo pipefail
+          yc serverless function version create --function-id "$FID" --runtime nodejs22 --entrypoint index.initialControlledRebuildSwapRecoveryDiagnosticHandler --memory 1g --execution-timeout 120s --source-path .artifacts/yandex-initial-controlled-rebuild-function --service-account-id "$RUNTIME_SA" --tags r1-initial-controlled-rebuild-swap-recovery --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VER},key=ydb_connection_string" --format json --retry 0 --no-user-output >/dev/null
+
+      - name: Invoke read-only exact swap recovery diagnostic once
+        id: diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/swap-recovery-result.json"
+          yc serverless function invoke --id "$FID" --tag r1-initial-controlled-rebuild-swap-recovery --data '{}' --format json --retry 0 --no-user-output > "$out"
+          result="$(jq -cer 'if type=="string" then fromjson else . end' "$out")"
+          printf '%s\n' "$result" | jq -e 'type=="object" and .code=="INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED" and (.verdict=="APPLIED" or .verdict=="NOT_APPLIED" or .verdict=="RECOVERY_REQUIRED")' >/dev/null || { echo SWAP_RECOVERY_RESULT_INVALID; exit 1; }
+          verdict="$(printf '%s' "$result"|jq -r '.verdict')"
+          status="$(printf '%s' "$result"|jq -r '.status')"
+          mkdir -p "$RUNNER_TEMP/swap-recovery-evidence"
+          jq -n --arg status "$status" --arg code INITIAL_CONTROLLED_REBUILD_SWAP_RECOVERY_CLASSIFIED --arg verdict "$verdict" '{status:$status,code:$code,verdict:$verdict}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+          echo "SWAP_RECOVERY_${verdict}"
+
+      - name: Upload privacy-safe diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-controlled-rebuild-swap-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/swap-recovery-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 7
