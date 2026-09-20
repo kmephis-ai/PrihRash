@@ -32,7 +32,11 @@ const requiredFiles = [
   'dist/migration/initialBootstrapStagingRevisionDiagnostic.js',
   'dist/migration/initialBootstrapReferenceReconciliation.js',
   'dist/migration/initialControlledRebuildValidatedRecoveryDiagnostic.js',
+  'dist/migration/initialStaleValidatedHistoricalSwapProof.js',
+  'dist/migration/initialStaleValidatedHistoricalCandidate.js',
+  'dist/migration/initialBootstrapPrivateEvidence.js',
   'dist/reference/initialBootstrapReferenceSemantics.js',
+  'dist/reference/ydbReferenceEvidenceReader.js',
 ];
 for (const required of requiredFiles) await access(resolve(ARTIFACT_ROOT, required));
 
@@ -91,6 +95,9 @@ for (const recoveryModule of [
   'initialBootstrapStagingRevisionDiagnostic.js',
   'initialBootstrapReferenceReconciliation.js',
   'initialControlledRebuildValidatedRecoveryDiagnostic.js',
+  'initialStaleValidatedHistoricalSwapProof.js',
+  'initialStaleValidatedHistoricalCandidate.js',
+  'initialBootstrapPrivateEvidence.js',
 ]) {
   const recoverySource = await readFile(resolve(ARTIFACT_ROOT, 'dist', 'migration', recoveryModule), 'utf8');
   if (recoverySource.includes('writeStatement(') || recoverySource.includes('.serializableReadWrite(')) {

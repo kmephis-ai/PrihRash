@@ -28,7 +28,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
   assert.match(workflow, /\.conclusion == "success"/);
 });
 
-test('orchestrator recovery boundary is read-only and excludes private bootstrap evidence', async () => {
+test('orchestrator recovery boundary stays read-only and includes historical proof evidence', async () => {
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
@@ -38,7 +38,7 @@ test('orchestrator recovery boundary is read-only and excludes private bootstrap
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/g);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
-  assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+  assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.doesNotMatch(workflow, /index\.initialBootstrapHandler/);
   assert.doesNotMatch(workflow, /npm run initial-bootstrap:invoke/);
 });

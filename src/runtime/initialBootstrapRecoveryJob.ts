@@ -12,6 +12,12 @@ import {
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
+import type { ReferenceResolver } from '../normalization/types.js';
+import { readYdbReferenceResolverSnapshot } from '../reference/ydbReferenceEvidenceReader.js';
+import {
+  parseInitialBootstrapPrivateHistoricalEvidence,
+  type InitialBootstrapPrivateHistoricalEvidence,
+} from '../migration/initialBootstrapPrivateEvidence.js';
 import {
   diagnoseValidatedControlledRebuildState,
   type InitialValidatedControlledRebuildRecoveryReason,
@@ -44,6 +50,10 @@ import {
   evaluateInitialStaleValidatedRecoveryGate,
   type InitialStaleValidatedRecoveryGateResult,
 } from '../migration/initialStaleValidatedRecoveryGate.js';
+import {
+  diagnoseInitialStaleValidatedHistoricalSwapProof,
+  type InitialStaleValidatedHistoricalSwapProofResult,
+} from '../migration/initialStaleValidatedHistoricalSwapProof.js';
 import {
   InitialBootstrapRecoveryJobError,
   readInitialBootstrapRecoveryJobConfig,
@@ -92,11 +102,19 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
 
 export interface InitialBootstrapRecoveryJobRuntime {
   createDigest(): Readonly<CanonicalSourceDigest>;
+  parseHistoricalEvidence(serialized: string): Readonly<InitialBootstrapPrivateHistoricalEvidence>;
   createSource(
     config: Readonly<InitialBootstrapRecoveryJobConfig>,
     digest: Readonly<CanonicalSourceDigest>,
   ): Readonly<InitialBootstrapRecoveryJobSource>;
   createYdbClient(config: Readonly<InitialBootstrapRecoveryJobConfig>): Promise<Readonly<InitialBootstrapRecoveryJobYdbClient>>;
+  readReferenceResolver(adapter: YdbAdapter): Promise<Readonly<ReferenceResolver>>;
+  diagnoseHistoricalSwapProof(
+    adapter: YdbAdapter,
+    scheme: YdbSchemeAdapter,
+    refs: ReferenceResolver,
+    historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+  ): Promise<Readonly<InitialStaleValidatedHistoricalSwapProofResult>>;
   diagnoseSurface(adapter: YdbAdapter): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
   reconcileReferenceState(
     adapter: YdbAdapter,
@@ -131,6 +149,7 @@ export interface InitialBootstrapRecoveryJobRuntime {
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
   createDigest: createCanonicalSourceDigest,
+  parseHistoricalEvidence: parseInitialBootstrapPrivateHistoricalEvidence,
   createSource(
     config: Readonly<InitialBootstrapRecoveryJobConfig>,
     digest: Readonly<CanonicalSourceDigest>,
@@ -152,6 +171,8 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
       poolMaxSize: 1,
     });
   },
+  readReferenceResolver: readYdbReferenceResolverSnapshot,
+  diagnoseHistoricalSwapProof: diagnoseInitialStaleValidatedHistoricalSwapProof,
   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
   diagnoseValidatedSourceEvidence: diagnoseInitialValidatedSourceEvidence,
@@ -189,6 +210,39 @@ function reconciliationFailed(): Readonly<InitialBootstrapRecoverySurfaceClassif
   });
 }
 
+function staleValidatedHistoricalEvidence(
+  result: Readonly<InitialStaleValidatedHistoricalSwapProofResult> | null,
+): Readonly<{
+  committedBaselinePresent: boolean;
+  uniqueValidatedRun: boolean;
+  validatedRunMetadataValid: boolean;
+  historicalContextProven: boolean;
+  currentStateEmpty: boolean;
+  stagingCandidateExact: boolean;
+  swapProvenNotApplied: boolean;
+}> {
+  if (result === null) {
+    return Object.freeze({
+      committedBaselinePresent: false,
+      uniqueValidatedRun: true,
+      validatedRunMetadataValid: true,
+      historicalContextProven: false,
+      currentStateEmpty: true,
+      stagingCandidateExact: false,
+      swapProvenNotApplied: false,
+    });
+  }
+  return Object.freeze({
+    committedBaselinePresent: result.status === 'STOP' && result.reason === 'COMMITTED_BASELINE_PRESENT',
+    uniqueValidatedRun: !(result.status === 'STOP' && result.reason === 'VALIDATED_RUN_NOT_UNIQUE'),
+    validatedRunMetadataValid: !(result.status === 'STOP' && result.reason === 'ADMISSION_EVIDENCE_INVALID'),
+    historicalContextProven: result.evidence.historicalContextProven,
+    currentStateEmpty: result.evidence.currentStateEmpty,
+    stagingCandidateExact: result.evidence.stagingCandidateExact,
+    swapProvenNotApplied: result.evidence.swapProvenNotApplied,
+  });
+}
+
 export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
@@ -205,10 +259,8 @@ export async function executeInitialBootstrapRecoveryJob(
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
       try {
         const schemeTransport = await ydbClient.createSchemeTransport();
-        const reason = await runtime.diagnoseValidatedControlledRebuildState(
-          adapter,
-          new YdbSchemeAdapter(schemeTransport),
-        );
+        const scheme = new YdbSchemeAdapter(schemeTransport);
+        const reason = await runtime.diagnoseValidatedControlledRebuildState(adapter, scheme);
         if (reason !== 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY') {
           return Object.freeze({ verdict: 'RECOVERY_REQUIRED' as const, reason });
         }
@@ -226,16 +278,35 @@ export async function executeInitialBootstrapRecoveryJob(
         } catch {
           validatedSourceEvidence = 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
         }
+
+        const sourceMetadataValid = validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
+          && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
+        let historicalSwapProof: Readonly<InitialStaleValidatedHistoricalSwapProofResult> | null = null;
+        if (
+          sourceMetadataValid
+          && validatedSourceEvidence === 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'
+          && validated.privateHistoricalEvidence !== undefined
+        ) {
+          try {
+            const historicalEvidence = runtime.parseHistoricalEvidence(validated.privateHistoricalEvidence);
+            const refs = await runtime.readReferenceResolver(adapter);
+            historicalSwapProof = await runtime.diagnoseHistoricalSwapProof(
+              adapter, scheme, refs, historicalEvidence,
+            );
+          } catch {
+            historicalSwapProof = null;
+          }
+        }
+        const historical = staleValidatedHistoricalEvidence(historicalSwapProof);
         const staleValidatedRecoveryGate = evaluateInitialStaleValidatedRecoveryGate({
-          committedBaselinePresent: false,
-          uniqueValidatedRun: true,
-          validatedRunMetadataValid: validatedSourceEvidence !== 'VALIDATED_METADATA_INVALID'
-            && validatedSourceEvidence !== 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+          committedBaselinePresent: historical.committedBaselinePresent,
+          uniqueValidatedRun: historical.uniqueValidatedRun,
+          validatedRunMetadataValid: sourceMetadataValid && historical.validatedRunMetadataValid,
           sourceEvidence: validatedSourceEvidence,
-          historicalContextProven: false,
-          currentStateEmpty: true,
-          stagingCandidateExact: false,
-          swapProvenNotApplied: false,
+          historicalContextProven: historical.historicalContextProven,
+          currentStateEmpty: historical.currentStateEmpty,
+          stagingCandidateExact: historical.stagingCandidateExact,
+          swapProvenNotApplied: historical.swapProvenNotApplied,
           inFlightProviderMutationAbsent: false,
           singleWriterExclusive: false,
         });

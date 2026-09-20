@@ -39,10 +39,6 @@ export type InitialStaleValidatedRecoveryGateResult =
 
 const SOURCE_DRIFT_EVIDENCE = new Set<InitialStaleValidatedSourceEvidence>([
   'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
-  'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',
-  'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
-  'AUTHORITATIVE_ROW_COUNT_MISMATCH',
-  'AUTHORITATIVE_BINDING_MISMATCH',
 ]);
 
 export function evaluateInitialStaleValidatedRecoveryGate(

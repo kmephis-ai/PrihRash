@@ -142,17 +142,17 @@ Full recovery для `VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` теперь д�
 
 Owner 2026-09-20 явно разрешил отдельный recovery contract для stale `VALIDATED` с сохранением audit/staging evidence. Нормативные predicates, marker-only transition и отдельный новый bootstrap определены в [MIGRATION_CONTRACT](MIGRATION_CONTRACT.md#stale-initial-validated-recovery-с-сохранением-auditstaging-evidence). Это решение разрешает разработку и доказательство gates; оно не вооружает production mutation или existing autocontinue.
 
-Последнее доказанное evidence: full read-only recovery [35507371844](https://github.com/kmephis-ai/PrihRash/actions/runs/35507371844) на `6c9d9f8a723dd530d8a7ae28a434a59db19ef54d` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY` и `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`. Оно доказывает source mismatch, но ещё не historical candidate reconstruction, exact staging reconciliation, завершение старой scheme operation или exclusion позднего writer.
+Последнее доказанное evidence до wiring historical proof в recovery surface: full read-only recovery [35516186419](https://github.com/kmephis-ai/PrihRash/actions/runs/35516186419) на `f07522512866477df50fab13da828f53264e1461` — `RECOVERY_REQUIRED / VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY`, `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH` и Gate A blocker `HISTORICAL_CONTEXT_NOT_PROVEN`. Оно не разрешает mutation/replay и подтверждает, что следующий repository step должен использовать уже реализованные historical reconstruction + exact staging/NOT_APPLIED primitives внутри того же read-only recovery surface.
 
 Текущая готовность нового contract:
 
 | Gate | Требование | Статус |
 | --- | --- | --- |
-| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | НЕ ДОКАЗАН; implementation/evidence отсутствуют |
+| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | ЧАСТИЧНО РЕАЛИЗОВАН: historical reconstruction и exact staging/NOT_APPLIED подключены к read-only recovery; production proof и predicates in-flight/single-writer ещё обязательны |
 | B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
 | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
 
-Следующий bounded implementation unit закрывает Gate A через существующие read-only reconstruction/reconciliation primitives и synthetic fixtures. Если исходный context или завершение provider operation нельзя доказать, сохраняется `RECOVERY_REQUIRED`; переход к B запрещён. Не запускать повторный swap diagnostic только из-за merge этого contract: runtime пока не изменён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
 
 ## Setup and staging recovery
 

@@ -42,13 +42,10 @@ for (const sourceEvidence of [
   'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
   'AUTHORITATIVE_ROW_COUNT_MISMATCH',
   'AUTHORITATIVE_BINDING_MISMATCH',
+  'AUTHORITATIVE_SNAPSHOT_MATCH',
+  'VALIDATED_METADATA_INVALID',
+  'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
 ]) {
-  test(`accepts ${sourceEvidence} as source drift evidence but keeps remaining predicates mandatory`, () => {
-    assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'READY_FOR_MARKER_ONLY' });
-  });
-}
-
-for (const sourceEvidence of ['AUTHORITATIVE_SNAPSHOT_MATCH', 'VALIDATED_METADATA_INVALID', 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED']) {
   test(`rejects ${sourceEvidence} as stale drift proof`, () => {
     assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' });
   });

@@ -15,6 +15,7 @@ const config = Object.freeze({
   googleServiceAccountEmail: 'synthetic@example.test',
   googleServiceAccountPrivateKey: 'synthetic-private-key',
   ydbConnectionString: 'grpcs://synthetic.example.test/?database=/synthetic',
+  privateHistoricalEvidence: '{\"synthetic\":true}',
 });
 
 function lease() {
@@ -55,6 +56,9 @@ function runtime(overrides = {}) {
   let stagingRetirementDiagnosticCalls = 0;
   let stagingExactRevisionDiagnosticCalls = 0;
   let closes = 0;
+  let historicalEvidenceParses = 0;
+  let referenceReads = 0;
+  let historicalProofCalls = 0;
   const result = {
     runtime: {
       createDigest() {
@@ -62,6 +66,11 @@ function runtime(overrides = {}) {
           digestCanonicalSnapshot: () => 'synthetic-snapshot-digest',
           digestCanonicalRow: () => 'synthetic-row-digest',
         });
+      },
+      parseHistoricalEvidence(serialized) {
+        historicalEvidenceParses += 1;
+        assert.equal(serialized, config.privateHistoricalEvidence);
+        return Object.freeze({ synthetic: true });
       },
       createSource() {
         return Object.freeze({
@@ -86,6 +95,22 @@ function runtime(overrides = {}) {
             });
           },
           async close() { closes += 1; },
+        });
+      },
+      async readReferenceResolver() {
+        referenceReads += 1;
+        return Object.freeze({ synthetic: true });
+      },
+      async diagnoseHistoricalSwapProof() {
+        historicalProofCalls += 1;
+        return Object.freeze({
+          status: 'PROVEN_NOT_APPLIED',
+          evidence: Object.freeze({
+            historicalContextProven: true,
+            currentStateEmpty: true,
+            stagingCandidateExact: true,
+            swapProvenNotApplied: true,
+          }),
         });
       },
       async diagnoseSurface() {
@@ -139,6 +164,9 @@ function runtime(overrides = {}) {
       stagingDurableDiagnosticCalls,
       stagingRetirementDiagnosticCalls,
       stagingExactRevisionDiagnosticCalls,
+      historicalEvidenceParses,
+      referenceReads,
+      historicalProofCalls,
       closes,
     }),
   };
@@ -159,6 +187,9 @@ test('recovery job reads fresh authoritative source only for residual reference 
     stagingDurableDiagnosticCalls: 0,
     stagingRetirementDiagnosticCalls: 0,
     stagingExactRevisionDiagnosticCalls: 0,
+    historicalEvidenceParses: 0,
+    referenceReads: 0,
+    historicalProofCalls: 0,
     closes: 1,
   });
 });
@@ -205,6 +236,9 @@ test('surface-only recovery classifies STAGING without Google or per-revision re
     stagingDurableDiagnosticCalls: 0,
     stagingRetirementDiagnosticCalls: 0,
     stagingExactRevisionDiagnosticCalls: 0,
+    historicalEvidenceParses: 0,
+    referenceReads: 0,
+    historicalProofCalls: 0,
     closes: 1,
   });
 });
@@ -292,20 +326,66 @@ test('recovery job preserves VALIDATED structure and compares source read-only',
     async diagnoseValidatedSourceEvidence(_adapter, digest, observations) {
       assert.equal(digest, 'synthetic-digest');
       assert.deepEqual(observations, [{ sourceOrdinal: 0, rowHint: 2, digest: 'synthetic-row-digest' }]);
-      return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY';
+      return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH';
     },
   });
   assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
     verdict: 'RECOVERY_REQUIRED',
     reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
-    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
-    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' },
+    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN' },
   });
   assert.equal(controlledDiagnosticCalls, 1);
   assert.equal(fixture.counters().sourceReads, 1);
   assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
   assert.equal(fixture.counters().reconcileCalls, 0);
+  assert.equal(fixture.counters().historicalEvidenceParses, 1);
+  assert.equal(fixture.counters().referenceReads, 1);
+  assert.equal(fixture.counters().historicalProofCalls, 1);
   assert.equal(fixture.counters().closes, 1);
+});
+
+test('recovery job rejects non-exact source drift before historical reconstruction', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
+    async diagnoseValidatedControlledRebuildState() { return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'; },
+    async diagnoseValidatedSourceEvidence() { return 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY'; },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' },
+  });
+  assert.equal(fixture.counters().historicalEvidenceParses, 0);
+  assert.equal(fixture.counters().referenceReads, 0);
+  assert.equal(fixture.counters().historicalProofCalls, 0);
+});
+
+test('recovery job maps historical proof failure to the next exact Gate A blocker', async () => {
+  const fixture = runtime({
+    async diagnoseSurface() { return { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' }; },
+    async diagnoseValidatedControlledRebuildState() { return 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'; },
+    async diagnoseValidatedSourceEvidence() { return 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH'; },
+    async diagnoseHistoricalSwapProof() {
+      return Object.freeze({
+        status: 'STOP',
+        reason: 'CURRENT_STATE_NOT_EMPTY',
+        evidence: Object.freeze({
+          historicalContextProven: true,
+          currentStateEmpty: false,
+          stagingCandidateExact: false,
+          swapProvenNotApplied: false,
+        }),
+      });
+    },
+  });
+  assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime), {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY',
+    validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'CURRENT_STATE_NOT_EMPTY' },
+  });
 });
 
 test('recovery job preserves non-reference classification without touching Google', async () => {
@@ -374,11 +454,19 @@ test('recovery config requires read-only Google credentials plus YDB connection'
     PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
     PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
     PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
+    PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE: config.privateHistoricalEvidence,
   }), config);
   assert.throws(
     () => readInitialBootstrapRecoveryJobConfig({ PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString }),
     (error) => error?.code === 'INVALID_SPREADSHEET_ID',
   );
+  const { privateHistoricalEvidence: _privateHistoricalEvidence, ...baseConfig } = config;
+  assert.deepEqual(readInitialBootstrapRecoveryJobConfig({
+    PRIHRASH_GOOGLE_SPREADSHEET_ID: config.spreadsheetId,
+    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
+    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
+    PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
+  }), baseConfig);
 });
 
 
