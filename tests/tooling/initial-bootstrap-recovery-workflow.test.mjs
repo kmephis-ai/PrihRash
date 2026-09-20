@@ -31,7 +31,7 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
 
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
-  assert.match(workflow, /--memory 256m/);
+  assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 150s/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);

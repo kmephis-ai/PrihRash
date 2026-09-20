@@ -35,6 +35,8 @@ test('orchestrator recovery boundary stays read-only and includes historical pro
   assert.doesNotMatch(workflow, /npm run package:initial-bootstrap-recovery/);
   assert.match(workflow, /index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
+  assert.match(workflow, /--memory 1g/);
+  assert.match(workflow, /--execution-timeout 150s/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/g);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
