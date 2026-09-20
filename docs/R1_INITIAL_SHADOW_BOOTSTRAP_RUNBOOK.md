@@ -168,6 +168,12 @@ Owner separately authorized one production Gate C attempt under Issue authority 
 
 This one-shot Gate C authority still does **not** authorize timer/scheduled sync activation, cutover, YDB-authoritative production Writer, cap increase, cleanup/retirement or Google mutation. A non-success/unknown live result becomes a recovery boundary; any later write-capable attempt requires a new explicit authority decision.
 
+##### Live Gate C result on `bc511f61176ae7d7cb89cf0c6ae1ccbf2bde06e3`
+
+Gate C run `35540608663` consumed the one-shot authority after fresh readiness `35540630148` and all exact-main/private-trigger-free checks passed. The only live invoke returned `STOP / INITIAL_BOOTSTRAP_CONTROLLED_REBUILD_REQUIRED`; no second invoke or replay occurred and Issue #699 was closed as consumed. The application reaches this enum only after the fresh STAGING claim and revision-evidence writes have completed successfully, but before the `VALIDATED` transition or current promotion.
+
+Read-only recovery `35541085684` then returned `RECOVERY_REQUIRED / FAILED_RUN_PRESENT`. This did not prove a generic new failure: the generic recovery probe counted the already-proven Gate B `FAILED / INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT` marker as an unsafe failed run before it could expose the active Gate C run. The bounded successor is therefore read-only classification only: distinguish that exact terminal history from unknown FAILED rows and re-run recovery. No controlled rebuild, Gate C replay, cleanup, timer, cutover or production Writer follows from this diagnostic correction.
+
 This mechanism does not prove Gate A condition 6 and does not by itself complete condition 7 or authorize marker terminalization. Gate B already used the shared writer lock continuously from fresh Gate A preflight through terminal marker read-back. The ordinary guard plus dedicated Gate C admission prevent queued/late bootstrap execution from crossing the B→C boundary without the separate Gate C path and authority gate.
 
 ### Temporary read-only recovery autocontinue
