@@ -4,7 +4,7 @@ import { ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestam
 import type { MigrationRun } from './migrationRunState.js';
 import type { PreparedMigrationRunLifecycleWrite } from './migrationRunPersistence.js';
 
-interface MigrationRunLifecycleReadRow {
+export interface MigrationRunLifecycleReadRow {
   readonly state?: unknown;
   readonly finished_at?: unknown;
   readonly error_code?: unknown;
@@ -41,7 +41,10 @@ function nullableTextMatches(value: unknown, expected: string | null): boolean {
   return expected === null ? value === null : value === expected;
 }
 
-function rowMatches(row: MigrationRunLifecycleReadRow, expected: MigrationRun): boolean {
+export function migrationRunLifecycleRowMatches(
+  row: MigrationRunLifecycleReadRow,
+  expected: MigrationRun,
+): boolean {
   return (
     row.state === expected.state
     && ydbTimestampReadbackMatches(row.finished_at, expected.finishedAt)
@@ -55,7 +58,7 @@ function rowMatches(row: MigrationRunLifecycleReadRow, expected: MigrationRun): 
   );
 }
 
-function migrationRunLifecycleReadBack(expectedRun: MigrationRun) {
+export function migrationRunLifecycleReadBack(expectedRun: MigrationRun) {
   return readStatement(
     'SELECT state, finished_at, error_code, CAST(source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
       + 'rows_seen, rows_new, rows_changed, rows_missing, rows_ambiguous FROM migration_runs WHERE id = $id',
@@ -77,7 +80,7 @@ export async function executeMigrationRunLifecycleWriteInTransaction(
     throw new MigrationRunLifecycleExecutorError('RUN_RESULT_AMBIGUOUS_AFTER_TRANSITION');
   }
   const row = result.rows[0];
-  if (row === undefined || !rowMatches(row, expectedRun)) {
+  if (row === undefined || !migrationRunLifecycleRowMatches(row, expectedRun)) {
     throw new MigrationRunLifecycleExecutorError('RUN_TRANSITION_EVIDENCE_MISMATCH');
   }
   return Object.freeze({ ...expectedRun });
