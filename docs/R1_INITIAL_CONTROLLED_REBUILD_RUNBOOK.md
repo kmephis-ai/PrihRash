@@ -171,7 +171,6 @@ Investigation 2026-09-20 зафиксировало реальную грани�
 
 Для будущих write attempts этот gap должен предотвращаться до mutation: recovery contract обязан сохранять durable provider correlation/completion evidence, которое реально можно read-only проверить после transport loss. Это future protocol hardening и не является retroactive proof для `35469651936`.
 
-
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
