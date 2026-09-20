@@ -1,0 +1,35 @@
+name: Local Git Publish Patch
+
+on:
+  push:
+    branches:
+      - transport/r1-630-publish-15f5bea
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact locally verified patch
+        shell: bash
+        env:
+          SOURCE_SHA: f07522512866477df50fab13da828f53264e1461
+          EXPECTED_COMMIT: 15f5beac0899f41473df92ea962fee7a47970cbf
+          TARGET_BRANCH: agent/r1-630-wire-historical-gate-a-proof
+        run: |
+          set -euo pipefail
+          cat .github/publish/r1-630/part-*.patch > /tmp/change.patch
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git config user.name "kmephis-ai"
+          git config user.email "kmephis@gmail.com"
+          git checkout -q -B local-publish-source "$SOURCE_SHA"
+          git am --committer-date-is-author-date /tmp/change.patch
+          test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
