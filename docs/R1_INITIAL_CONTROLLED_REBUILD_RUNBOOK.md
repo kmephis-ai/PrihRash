@@ -150,11 +150,13 @@ Owner также явно разрешил узкое ослабление Gate 
 
 | Gate | Требование | Статус |
 | --- | --- | --- |
-| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | БЛОКИРОВАН НА CONDITION 6: live recovery `35519549022` доказал historical reconstruction + exact `NOT_APPLIED`, но retained/provider evidence не доказывает завершение старой SchemeShard mutation; condition 7 single-writer отдельно ещё не закрыт |
+| A | Historical candidate + exact NOT_APPLIED + завершение in-flight mutations + single-writer exclusion | БЛОКИРОВАН НА CONDITION 6; condition 7 ЧАСТИЧНО РЕАЛИЗОВАН: shared writer group + post-lock Gate C guard закрывают queued late-bootstrap, но будущий Gate B ещё должен удерживать тот же lock непрерывно от fresh preflight до terminalization read-back |
 | B | Exact marker-only VALIDATED → FAILED с fixed error code и unknown-outcome recovery | НЕ РЕАЛИЗОВАН; live dispatch не разрешён |
 | C | Fresh bootstrap с новыми identities при сохранении старых audit/staging tables | НЕ РАЗРЕШЁН до отдельного gate после B |
 
 После merge этого bounded unit допустима только fresh exact-main **read-only** recovery для проверки historical layer. Даже если она докажет historical candidate + exact `NOT_APPLIED`, Gate A обязан остановиться на `IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN`, пока отдельный bounded proof не исключит старую/позднюю provider mutation; затем отдельно доказывается cross-process single-writer exclusion. До выполнения обоих predicates переход к B запрещён. Existing STAGING retirement workflow не принимает VALIDATED как alias. Cleanup старого evidence, увеличение cap и promotion старого candidate не входят в Owner decision.
+
+Condition 7 закрывается не одним workflow lock. Standalone recovery, initial bootstrap, controlled rebuild и swap-recovery execution share `r1-initial-bootstrap-writer`; competing run может только ждать. После возможной Gate B terminalization queued ordinary bootstrap, получив lock, повторно читает durable marker и fail-closed останавливается на `STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C`, поэтому не может самовольно превратиться в Gate C. Controlled rebuild после terminalization также не имеет допустимого incomplete continuation run. Но отдельный read-only recovery release lock до будущего Gate B, поэтому condition 7 ещё не считается полностью доказанным: Gate B implementation должен сам занять тот же group и внутри него заново выполнить final Gate A preflight, marker-only transaction и terminal read-back до release. Это не влияет на condition 6.
 
 ### Historical provider-completion evidence gap — Gate A condition 6
 
