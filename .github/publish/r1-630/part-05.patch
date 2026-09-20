@@ -1,0 +1,83 @@
+     () => readInitialBootstrapRecoveryJobConfig({ PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString }),
+     (error) => error?.code === 'INVALID_SPREADSHEET_ID',
+   );
++  const { privateHistoricalEvidence: _privateHistoricalEvidence, ...baseConfig } = config;
++  assert.deepEqual(readInitialBootstrapRecoveryJobConfig({
++    PRIHRASH_GOOGLE_SPREADSHEET_ID: config.spreadsheetId,
++    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
++    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
++    PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
++  }), baseConfig);
+ });
+ 
+ 
+diff --git a/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs b/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
+index aa8af89..ba46691 100644
+--- a/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
++++ b/tests/migration-simulation/initial-stale-validated-recovery-gate.test.mjs
+@@ -42,13 +42,10 @@ for (const sourceEvidence of [
+   'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+   'AUTHORITATIVE_ROW_COUNT_MISMATCH',
+   'AUTHORITATIVE_BINDING_MISMATCH',
++  'AUTHORITATIVE_SNAPSHOT_MATCH',
++  'VALIDATED_METADATA_INVALID',
++  'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
+ ]) {
+-  test(`accepts ${sourceEvidence} as source drift evidence but keeps remaining predicates mandatory`, () => {
+-    assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'READY_FOR_MARKER_ONLY' });
+-  });
+-}
+-
+-for (const sourceEvidence of ['AUTHORITATIVE_SNAPSHOT_MATCH', 'VALIDATED_METADATA_INVALID', 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED']) {
+   test(`rejects ${sourceEvidence} as stale drift proof`, () => {
+     assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...base, sourceEvidence }), { status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' });
+   });
+diff --git a/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs b/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+index 44e22bc..1e0c21c 100644
+--- a/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
++++ b/tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+@@ -39,7 +39,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
+-  assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
++  assert.match(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
+ });
+ 
+@@ -74,6 +74,10 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
+   assert.match(verifier, /initialBootstrapResidualSurface\.js/);
+   assert.match(verifier, /initialBootstrapReferenceReconciliation\.js/);
+   assert.match(verifier, /initialBootstrapReferenceSemantics\.js/);
++  assert.match(verifier, /initialStaleValidatedHistoricalSwapProof\.js/);
++  assert.match(verifier, /initialStaleValidatedHistoricalCandidate\.js/);
++  assert.match(verifier, /initialBootstrapPrivateEvidence\.js/);
++  assert.match(verifier, /ydbReferenceEvidenceReader\.js/);
+   assert.match(verifier, /recovery module contains a write-capable statement or transaction call/);
+   assert.match(verifier, /dist\/runtime\/yandexCloudInitialBootstrapFunction\.js/);
+   assert.match(verifier, /dist\/runtime\/scheduledSyncJob\.js/);
+diff --git a/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs b/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+index 1821d76..fb106ce 100644
+--- a/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
++++ b/tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+@@ -28,7 +28,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
+   assert.match(workflow, /\.conclusion == "success"/);
+ });
+ 
+-test('orchestrator recovery boundary is read-only and excludes private bootstrap evidence', async () => {
++test('orchestrator recovery boundary stays read-only and includes historical proof evidence', async () => {
+   const workflow = await text(WORKFLOW);
+ 
+   assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
+@@ -38,7 +38,7 @@ test('orchestrator recovery boundary is read-only and excludes private bootstrap
+   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/g);
+   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
+   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
+-  assert.doesNotMatch(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
++  assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+   assert.doesNotMatch(workflow, /index\.initialBootstrapHandler/);
+   assert.doesNotMatch(workflow, /npm run initial-bootstrap:invoke/);
+ });
+-- 
+2.47.3
+
