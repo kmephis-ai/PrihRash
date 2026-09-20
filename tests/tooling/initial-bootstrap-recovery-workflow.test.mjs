@@ -80,12 +80,15 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
 });
 
 
-test('VALIDATED source evidence is stored separately and remains allowlisted', async () => {
+test('VALIDATED source and Gate A blocker evidence are stored separately and remain allowlisted', async () => {
   const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery.yml', 'utf8');
   assert.match(workflow, /R1_VALIDATED_SOURCE_EVIDENCE=/);
   assert.match(workflow, /VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY/);
   assert.match(workflow, /AUTHORITATIVE_SNAPSHOT_MATCH\|AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH\|AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED\|AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_VALIDATED_SOURCE_EVIDENCE_INVALID; exit 1/);
   assert.match(workflow, /validated-source\.json/);
+  assert.match(workflow, /R1_STALE_VALIDATED_GATE_BLOCKER=/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_STALE_VALIDATED_GATE_BLOCKER_INVALID; exit 1/);
+  assert.match(workflow, /gate-a\.json/);
   assert.ok(workflow.includes('r1-initial-bootstrap-recovery-evidence/*.json'));
 });

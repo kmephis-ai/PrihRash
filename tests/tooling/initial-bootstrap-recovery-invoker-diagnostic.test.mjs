@@ -173,7 +173,10 @@ test('recovery invoker accepts validated controlled structure reasons with the c
       verdict: 'RECOVERY_REQUIRED',
       reason,
       ...(reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'
-        ? { validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY' } : {}),
+        ? {
+            validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY',
+            staleValidatedRecoveryGate: { status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' },
+          } : {}),
     });
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
@@ -194,7 +197,9 @@ test('recovery invoker accepts validated controlled structure reasons with the c
       reason,
     });
     assert.equal(stderr, reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'
-      ? 'R1_VALIDATED_SOURCE_EVIDENCE=AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY\n' : '');
+      ? 'R1_VALIDATED_SOURCE_EVIDENCE=AUTHORITATIVE_SNAPSHOT_INSERTIONS_ONLY\n'
+        + 'R1_STALE_VALIDATED_GATE_BLOCKER=HISTORICAL_CONTEXT_NOT_PROVEN\n'
+      : '');
   }
 });
 

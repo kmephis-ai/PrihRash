@@ -29,6 +29,18 @@ const VALIDATED_SOURCE_EVIDENCE = new Set([
   'VALIDATED_METADATA_INVALID',
   'VALIDATED_SOURCE_DIAGNOSTIC_FAILED',
 ]);
+const STALE_VALIDATED_GATE_BLOCKERS = new Set([
+  'COMMITTED_BASELINE_PRESENT',
+  'VALIDATED_RUN_NOT_UNIQUE',
+  'VALIDATED_RUN_METADATA_INVALID',
+  'SOURCE_DRIFT_NOT_PROVEN',
+  'HISTORICAL_CONTEXT_NOT_PROVEN',
+  'CURRENT_STATE_NOT_EMPTY',
+  'STAGING_CANDIDATE_NOT_EXACT',
+  'SWAP_NOT_PROVEN_NOT_APPLIED',
+  'IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN',
+  'SINGLE_WRITER_EXCLUSION_NOT_PROVEN',
+]);
 
 const STAGING_REVISION_EVIDENCE = new Set([
   'NO_REVISION_EVIDENCE',
@@ -226,9 +238,14 @@ function parseExactResult(stdout, surfaceOnly = false) {
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
     const validatedSourceEvidence = result.validatedSourceEvidence;
+    const staleValidatedRecoveryGate = result.staleValidatedRecoveryGate;
     const validDiagnosticShape = result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
-      ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence'])
+      ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
         && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
+        && record(staleValidatedRecoveryGate) !== null
+        && exactKeys(staleValidatedRecoveryGate, ['status', 'blocker'])
+        && staleValidatedRecoveryGate.status === 'BLOCKED'
+        && STALE_VALIDATED_GATE_BLOCKERS.has(staleValidatedRecoveryGate.blocker)
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
       : result.reason === 'STAGING_RUN_PRESENT'
@@ -267,6 +284,9 @@ function parseExactResult(stdout, surfaceOnly = false) {
         reason: result.reason,
       }),
       validatedSourceEvidence: result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' ? validatedSourceEvidence ?? null : null,
+      staleValidatedRecoveryGate: result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY'
+        ? staleValidatedRecoveryGate ?? null
+        : null,
       stagingRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT' ? stagingRevisionEvidence ?? null : null,
       stagingDurableRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingDurableRevisionEvidence ?? null
@@ -290,6 +310,7 @@ function parseExactResult(stdout, surfaceOnly = false) {
     return Object.freeze({
       result: Object.freeze({ status: 'FAIL', code: result.code }),
       stagingRevisionEvidence: null,
+      staleValidatedRecoveryGate: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
@@ -306,6 +327,7 @@ async function invokeRecovery(environment = process.env) {
     return Object.freeze({
       result: SAFE_CONFIG_FAILURE,
       stagingRevisionEvidence: null,
+      staleValidatedRecoveryGate: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
@@ -328,6 +350,7 @@ async function invokeRecovery(environment = process.env) {
     return parseExactResult(stdout, environment.RECOVERY_SURFACE_ONLY === '1') ?? Object.freeze({
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
+      staleValidatedRecoveryGate: null,
       stagingDurableRevisionEvidence: null,
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
@@ -348,6 +371,9 @@ async function invokeRecovery(environment = process.env) {
 const invocation = await invokeRecovery();
 if (invocation.validatedSourceEvidence != null) {
   process.stderr.write(`R1_VALIDATED_SOURCE_EVIDENCE=${invocation.validatedSourceEvidence}\n`);
+}
+if (invocation.staleValidatedRecoveryGate != null) {
+  process.stderr.write(`R1_STALE_VALIDATED_GATE_BLOCKER=${invocation.staleValidatedRecoveryGate.blocker}\n`);
 }
 if (invocation.stagingRevisionEvidence !== null) {
   process.stderr.write(`R1_STAGING_REVISION_EVIDENCE=${invocation.stagingRevisionEvidence}\n`);
