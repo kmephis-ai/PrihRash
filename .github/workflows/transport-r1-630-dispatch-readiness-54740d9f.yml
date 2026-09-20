@@ -1,4 +1,4 @@
-name: R1 630 Dispatch Readiness 54740d9f
+name: R1 630 Dispatch Recovery 54740d9f
 
 on:
   push:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Dispatch exact-main readiness
+      - name: Dispatch exact-main recovery
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,5 +26,7 @@ jobs:
           accept="Accept: application/vnd.github+json"
           current="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/commits/main" | jq -er '.sha')"
           test "$current" = "$EXPECTED_MAIN_SHA"
-          curl --fail --silent --show-error --request POST             --header "$auth" --header "$accept" --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-yandex-readiness.yml/dispatches"             --data '{"ref":"main"}'
-          echo R1_630_READINESS_DISPATCHED
+          active="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs?branch=main&status=in_progress&per_page=100" | jq '[.workflow_runs[] | select(.name | test("^R1 "))] | length')"
+          test "$active" = "0"
+          curl --fail --silent --show-error --request POST             --header "$auth" --header "$accept" --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             --data '{"ref":"main","inputs":{"surface_only":"false"}}'
+          echo R1_630_RECOVERY_DISPATCHED
