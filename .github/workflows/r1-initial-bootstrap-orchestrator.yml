@@ -332,6 +332,7 @@ jobs:
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_email" \
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
+            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err" || {
               echo 'R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_DEPLOY_FAILED'
               exit 1

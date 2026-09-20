@@ -39,7 +39,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
-  assert.doesNotMatch(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+  assert.match(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
 });
 
@@ -74,6 +74,10 @@ test('initial bootstrap recovery package excludes write-capable runtime entrypoi
   assert.match(verifier, /initialBootstrapResidualSurface\.js/);
   assert.match(verifier, /initialBootstrapReferenceReconciliation\.js/);
   assert.match(verifier, /initialBootstrapReferenceSemantics\.js/);
+  assert.match(verifier, /initialStaleValidatedHistoricalSwapProof\.js/);
+  assert.match(verifier, /initialStaleValidatedHistoricalCandidate\.js/);
+  assert.match(verifier, /initialBootstrapPrivateEvidence\.js/);
+  assert.match(verifier, /ydbReferenceEvidenceReader\.js/);
   assert.match(verifier, /recovery module contains a write-capable statement or transaction call/);
   assert.match(verifier, /dist\/runtime\/yandexCloudInitialBootstrapFunction\.js/);
   assert.match(verifier, /dist\/runtime\/scheduledSyncJob\.js/);

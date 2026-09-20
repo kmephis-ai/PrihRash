@@ -3,6 +3,7 @@ export const INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV = Object.freeze({
   googleServiceAccountEmail: 'PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL',
   googleServiceAccountPrivateKey: 'PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
   ydbConnectionString: 'PRIHRASH_YDB_CONNECTION_STRING',
+  privateHistoricalEvidence: 'PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE',
 });
 
 export type InitialBootstrapRecoveryJobEnvironment = Readonly<Record<string, string | undefined>>;
@@ -12,6 +13,7 @@ export interface InitialBootstrapRecoveryJobConfig {
   readonly googleServiceAccountEmail: string;
   readonly googleServiceAccountPrivateKey: string;
   readonly ydbConnectionString: string;
+  readonly privateHistoricalEvidence?: string;
 }
 
 export type InitialBootstrapRecoveryJobErrorCode =
@@ -19,6 +21,7 @@ export type InitialBootstrapRecoveryJobErrorCode =
   | 'INVALID_GOOGLE_SERVICE_ACCOUNT_EMAIL'
   | 'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'
   | 'INVALID_YDB_CONNECTION_STRING'
+  | 'INVALID_PRIVATE_HISTORICAL_EVIDENCE'
   | 'YDB_CLIENT_CLOSE_FAILED';
 
 export class InitialBootstrapRecoveryJobError extends Error {
@@ -48,6 +51,7 @@ function requiredSecret(value: unknown, code: InitialBootstrapRecoveryJobErrorCo
 export function validateInitialBootstrapRecoveryConfig(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
 ): Readonly<InitialBootstrapRecoveryJobConfig> {
+  const privateHistoricalEvidence = config.privateHistoricalEvidence;
   return Object.freeze({
     spreadsheetId: requiredValue(config.spreadsheetId, 'INVALID_SPREADSHEET_ID'),
     googleServiceAccountEmail: requiredValue(
@@ -59,16 +63,26 @@ export function validateInitialBootstrapRecoveryConfig(
       'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY',
     ),
     ydbConnectionString: requiredValue(config.ydbConnectionString, 'INVALID_YDB_CONNECTION_STRING'),
+    ...(privateHistoricalEvidence === undefined
+      ? {}
+      : {
+          privateHistoricalEvidence: requiredSecret(
+            privateHistoricalEvidence,
+            'INVALID_PRIVATE_HISTORICAL_EVIDENCE',
+          ),
+        }),
   });
 }
 
 export function readInitialBootstrapRecoveryJobConfig(
   environment: InitialBootstrapRecoveryJobEnvironment,
 ): Readonly<InitialBootstrapRecoveryJobConfig> {
+  const privateHistoricalEvidence = environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.privateHistoricalEvidence];
   return validateInitialBootstrapRecoveryConfig({
     spreadsheetId: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.spreadsheetId] ?? '',
     googleServiceAccountEmail: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.googleServiceAccountEmail] ?? '',
     googleServiceAccountPrivateKey: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.googleServiceAccountPrivateKey] ?? '',
     ydbConnectionString: environment[INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV.ydbConnectionString] ?? '',
+    ...(privateHistoricalEvidence === undefined ? {} : { privateHistoricalEvidence }),
   });
 }
