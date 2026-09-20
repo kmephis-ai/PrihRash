@@ -43,7 +43,11 @@ test('stale VALIDATED recovery holds the shared writer boundary and queued boots
   assert.match(gateCGuard, /INITIAL_BOOTSTRAP_STALE_VALIDATED_SNAPSHOT/);
   assert.match(gateCGuard, /FROM migration_runs WHERE state = 'FAILED' AND error_code =/);
   assert.match(bootstrapApplication, /STALE_VALIDATED_TERMINALIZATION_REQUIRES_GATE_C/);
-  assert.match(bootstrapApplication, /incomplete === null && await hasInitialBootstrapGateCBlocker/);
+  assert.match(bootstrapApplication, /admissionMode === 'STALE_VALIDATED_GATE_C'/);
+  assert.match(bootstrapApplication, /readInitialBootstrapGateCBlockerCount/);
+  assert.match(bootstrapApplication, /blockerCount !== 1/);
+  assert.match(bootstrapApplication, /else if \(await hasInitialBootstrapGateCBlocker/);
+  assert.match(bootstrapApplication, /runInitialBootstrapGateCApplication/);
 });
 
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
