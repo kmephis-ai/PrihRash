@@ -303,7 +303,9 @@ export async function executeInitialBootstrapRecoveryJob(
           uniqueValidatedRun: historical.uniqueValidatedRun,
           validatedRunMetadataValid: sourceMetadataValid && historical.validatedRunMetadataValid,
           sourceEvidence: validatedSourceEvidence,
-          historicalContextProven: historical.historicalContextProven,
+          historicalContextEvidence: historical.historicalContextProven
+            ? 'RECONSTRUCTED_EXACT'
+            : 'NOT_PROVEN',
           currentStateEmpty: historical.currentStateEmpty,
           stagingCandidateExact: historical.stagingCandidateExact,
           swapProvenNotApplied: historical.swapProvenNotApplied,

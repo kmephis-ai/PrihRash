@@ -8,7 +8,7 @@ const base = Object.freeze({
   uniqueValidatedRun: true,
   validatedRunMetadataValid: true,
   sourceEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
-  historicalContextProven: true,
+  historicalContextEvidence: 'RECONSTRUCTED_EXACT',
   currentStateEmpty: true,
   stagingCandidateExact: true,
   swapProvenNotApplied: true,
@@ -24,7 +24,7 @@ for (const [field, expected] of [
   ['committedBaselinePresent', 'COMMITTED_BASELINE_PRESENT'],
   ['uniqueValidatedRun', 'VALIDATED_RUN_NOT_UNIQUE'],
   ['validatedRunMetadataValid', 'VALIDATED_RUN_METADATA_INVALID'],
-  ['historicalContextProven', 'HISTORICAL_CONTEXT_NOT_PROVEN'],
+  ['historicalContextEvidence', 'HISTORICAL_CONTEXT_NOT_PROVEN'],
   ['currentStateEmpty', 'CURRENT_STATE_NOT_EMPTY'],
   ['stagingCandidateExact', 'STAGING_CANDIDATE_NOT_EXACT'],
   ['swapProvenNotApplied', 'SWAP_NOT_PROVEN_NOT_APPLIED'],
@@ -32,10 +32,28 @@ for (const [field, expected] of [
   ['singleWriterExclusive', 'SINGLE_WRITER_EXCLUSION_NOT_PROVEN'],
 ]) {
   test(`blocks when ${field} is not proven`, () => {
-    const evidence = { ...base, [field]: field === 'committedBaselinePresent' ? true : false };
+    const evidence = {
+      ...base,
+      [field]: field === 'committedBaselinePresent'
+        ? true
+        : field === 'historicalContextEvidence'
+        ? 'NOT_PROVEN'
+        : false,
+    };
     assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate(evidence), { status: 'BLOCKED', blocker: expected });
   });
 }
+
+test('accepts explicitly authorized temporal corroboration only together with exact NOT_APPLIED', () => {
+  const temporal = {
+    ...base,
+    historicalContextEvidence: 'TEMPORALLY_CORROBORATED_WITH_EXACT_NOT_APPLIED',
+  };
+  assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate(temporal), { status: 'READY_FOR_MARKER_ONLY' });
+  assert.deepEqual(evaluateInitialStaleValidatedRecoveryGate({ ...temporal, swapProvenNotApplied: false }), {
+    status: 'BLOCKED', blocker: 'SWAP_NOT_PROVEN_NOT_APPLIED',
+  });
+});
 
 for (const sourceEvidence of [
   'AUTHORITATIVE_SNAPSHOT_PREFIX_PRESERVED',

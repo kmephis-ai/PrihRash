@@ -20,12 +20,17 @@ export type InitialStaleValidatedRecoveryBlocker =
   | 'IN_FLIGHT_PROVIDER_MUTATION_UNKNOWN'
   | 'SINGLE_WRITER_EXCLUSION_NOT_PROVEN';
 
+export type InitialStaleValidatedHistoricalContextEvidence =
+  | 'RECONSTRUCTED_EXACT'
+  | 'TEMPORALLY_CORROBORATED_WITH_EXACT_NOT_APPLIED'
+  | 'NOT_PROVEN';
+
 export interface InitialStaleValidatedRecoveryEvidence {
   readonly committedBaselinePresent: boolean;
   readonly uniqueValidatedRun: boolean;
   readonly validatedRunMetadataValid: boolean;
   readonly sourceEvidence: InitialStaleValidatedSourceEvidence;
-  readonly historicalContextProven: boolean;
+  readonly historicalContextEvidence: InitialStaleValidatedHistoricalContextEvidence;
   readonly currentStateEmpty: boolean;
   readonly stagingCandidateExact: boolean;
   readonly swapProvenNotApplied: boolean;
@@ -48,7 +53,9 @@ export function evaluateInitialStaleValidatedRecoveryGate(
   if (!evidence.uniqueValidatedRun) return Object.freeze({ status: 'BLOCKED', blocker: 'VALIDATED_RUN_NOT_UNIQUE' });
   if (!evidence.validatedRunMetadataValid) return Object.freeze({ status: 'BLOCKED', blocker: 'VALIDATED_RUN_METADATA_INVALID' });
   if (!SOURCE_DRIFT_EVIDENCE.has(evidence.sourceEvidence)) return Object.freeze({ status: 'BLOCKED', blocker: 'SOURCE_DRIFT_NOT_PROVEN' });
-  if (!evidence.historicalContextProven) return Object.freeze({ status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' });
+  if (evidence.historicalContextEvidence === 'NOT_PROVEN') {
+    return Object.freeze({ status: 'BLOCKED', blocker: 'HISTORICAL_CONTEXT_NOT_PROVEN' });
+  }
   if (!evidence.currentStateEmpty) return Object.freeze({ status: 'BLOCKED', blocker: 'CURRENT_STATE_NOT_EMPTY' });
   if (!evidence.stagingCandidateExact) return Object.freeze({ status: 'BLOCKED', blocker: 'STAGING_CANDIDATE_NOT_EXACT' });
   if (!evidence.swapProvenNotApplied) return Object.freeze({ status: 'BLOCKED', blocker: 'SWAP_NOT_PROVEN_NOT_APPLIED' });
