@@ -19,7 +19,7 @@ jobs:
         with:
           persist-credentials: true
 
-      - name: Materialize exact reviewed new files and retire transport
+      - name: Materialize exact reviewed files to non-workflow transport path
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -30,8 +30,13 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = 'agent/r1-699-production-gate-c'
+          if test -f transport/r1-initial-bootstrap-gate-c.yml             && test "$(git hash-object transport/r1-initial-bootstrap-gate-c.yml)" = "$WORKFLOW_BLOB"             && test -f tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs             && test "$(git hash-object tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs)" = "$TEST_BLOB"; then
+            echo R1_699_TRANSPORT_ALREADY_MATERIALIZED
+            exit 0
+          fi
+
           tmp="$RUNNER_TEMP/r1-699-transport"
-          mkdir -p "$tmp"
+          mkdir -p "$tmp" transport
           curl --fail --silent --show-error             -H "Authorization: Bearer ${GH_TOKEN}"             -H 'Accept: application/vnd.github+json'             "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}"             -o "$tmp/comment.json"
           jq -er '.body' "$tmp/comment.json"             | sed -n '/^PAYLOAD-BEGIN$/,/^PAYLOAD-END$/p'             | sed '1d;$d'             | tr -d '\n'             | base64 --decode > "$tmp/payload.tgz"
           test "$(sha256sum "$tmp/payload.tgz" | awk '{print $1}')" = "$ARCHIVE_SHA256"
@@ -41,15 +46,14 @@ jobs:
           test "${entries[0]}" = '.github/workflows/r1-initial-bootstrap-gate-c.yml'
           test "${entries[1]}" = 'tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs'
           tar -xzf "$tmp/payload.tgz"
-
           test "$(git hash-object .github/workflows/r1-initial-bootstrap-gate-c.yml)" = "$WORKFLOW_BLOB"
           test "$(git hash-object tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs)" = "$TEST_BLOB"
 
-          rm .github/workflows/r1-699-transport-new-files.yml
-          git add .github/workflows/r1-699-transport-new-files.yml             .github/workflows/r1-initial-bootstrap-gate-c.yml             tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs
-          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = '.github/workflows/r1-699-transport-new-files.yml .github/workflows/r1-initial-bootstrap-gate-c.yml tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs '
+          mv .github/workflows/r1-initial-bootstrap-gate-c.yml transport/r1-initial-bootstrap-gate-c.yml
+          git add transport/r1-initial-bootstrap-gate-c.yml tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs
+          test "$(git diff --cached --name-only | sort | tr '\n' ' ')" = 'tests/tooling/r1-initial-bootstrap-gate-c-workflow.test.mjs transport/r1-initial-bootstrap-gate-c.yml '
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'R1 #699: publish exact Gate C workflow and regression guard'
+          git commit -m 'R1 #699: materialize exact Gate C files for connector publication'
           git push origin "HEAD:${GITHUB_REF_NAME}"
