@@ -63,7 +63,7 @@ test('controlled rebuild invoker accepts only exact COMMITTED PASS', async () =>
 
 test('controlled rebuild invoker preserves bounded STOP and runtime enum results', async () => {
   const values = [
-    ...['RESUME_IDENTITY_MANIFEST_READ', 'RESUME_SNAPSHOT_READ'].map((bootstrapPhase) => ({
+    ...['RESUME_IDENTITY_MANIFEST_READ', 'RESUME_SNAPSHOT_READ', 'RECONCILIATION_READ'].map((bootstrapPhase) => ({
       status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
       jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase,
     })),
