@@ -67,6 +67,16 @@ test('controlled rebuild invoker preserves bounded STOP and runtime enum results
       status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
       jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase,
     })),
+    {
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase: 'RECONCILIATION_READ',
+      applicationFailureCode: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
+    },
+    {
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase: 'RECONCILIATION_READ',
+      applicationFailureCode: 'REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH',
+    },
     { status: 'NOOP', code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' },
     { status: 'STOP', code: 'INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED', recoveryReason: 'SWAP_OUTCOME_AMBIGUOUS' },
     {
@@ -129,6 +139,22 @@ test('controlled rebuild invoker rejects extra/private fields and unknown enums 
       jobCode: 'APPLICATION_FAILED',
       phase: 'PREPARATION',
       bootstrapPhase: 'PRIVATE_PHASE',
+    }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+      applicationFailureCode: PRIVATE_LOOKING,
+    }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'CURRENT_WRITE_PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+      applicationFailureCode: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
     }),
   ]) {
     const result = await runInvoker({ body });
