@@ -46,6 +46,10 @@ export function initialControlledRebuildHandler(event, context) {
 export function initialControlledRebuildSwapRecoveryDiagnosticHandler(event, context) {
   return invokeRuntimeHandler('initialControlledRebuildSwapRecoveryDiagnosticHandler', event, context);
 }
+
+export function initialControlledRebuildPreparationDiagnosticHandler(event, context) {
+  return invokeRuntimeHandler('initialControlledRebuildPreparationDiagnosticHandler', event, context);
+}
 `;
 
 const fail = (message) => { throw new Error(`YANDEX_INITIAL_CONTROLLED_REBUILD_PACKAGE_INVALID: ${message}`); };
@@ -78,6 +82,9 @@ try {
   if (typeof runtimeModule.initialControlledRebuildHandler !== 'function') fail('runtime handler export is missing');
   if (typeof runtimeModule.initialControlledRebuildSwapRecoveryDiagnosticHandler !== 'function') {
     fail('runtime swap recovery diagnostic handler export is missing');
+  }
+  if (typeof runtimeModule.initialControlledRebuildPreparationDiagnosticHandler !== 'function') {
+    fail('runtime preparation diagnostic handler export is missing');
   }
 } catch {
   fail('runtime module import failed');
