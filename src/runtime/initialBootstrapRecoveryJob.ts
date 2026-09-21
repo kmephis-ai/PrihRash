@@ -136,10 +136,33 @@ export type InitialBootstrapControlledPreparationQueryErrorEvidence =
   | 'OTHER'
   | 'DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationGrpcStatusEvidence =
+  | 'UNOBSERVED'
+  | 'CANCELLED'
+  | 'UNKNOWN'
+  | 'INVALID_ARGUMENT'
+  | 'DEADLINE_EXCEEDED'
+  | 'NOT_FOUND'
+  | 'ALREADY_EXISTS'
+  | 'PERMISSION_DENIED'
+  | 'RESOURCE_EXHAUSTED'
+  | 'FAILED_PRECONDITION'
+  | 'ABORTED'
+  | 'OUT_OF_RANGE'
+  | 'UNIMPLEMENTED'
+  | 'INTERNAL'
+  | 'UNAVAILABLE'
+  | 'DATA_LOSS'
+  | 'UNAUTHENTICATED'
+  | 'NON_GRPC'
+  | 'UNRECOGNIZED'
+  | 'DIAGNOSTIC_FAILED';
+
 export interface InitialBootstrapControlledPreparationResult {
   readonly preparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
   readonly retryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
   readonly queryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence;
+  readonly grpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
@@ -153,6 +176,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
   readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryEvidence;
   readonly stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapControlledPreparationQueryErrorEvidence;
+  readonly stagingControlledPreparationGrpcStatusEvidence?: InitialBootstrapControlledPreparationGrpcStatusEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -254,6 +278,7 @@ interface InitialBootstrapControlledPreparationQueryErrorTracker {
   observeErrorContext(context: unknown): void;
   markDiagnosticFailed(): void;
   evidence(): InitialBootstrapControlledPreparationQueryErrorEvidence;
+  grpcStatusEvidence(): InitialBootstrapControlledPreparationGrpcStatusEvidence;
 }
 
 function stableErrorClassName(error: unknown): string | null {
@@ -297,8 +322,41 @@ export function classifyInitialBootstrapControlledPreparationQueryError(
   }
 }
 
+export function classifyInitialBootstrapControlledPreparationGrpcStatus(
+  error: unknown,
+): InitialBootstrapControlledPreparationGrpcStatusEvidence {
+  try {
+    const className = stableErrorClassName(error);
+    if (className !== 'ClientError') return 'NON_GRPC';
+    const code = numericErrorCode(error);
+    if (code === null) return 'DIAGNOSTIC_FAILED';
+    switch (code) {
+      case 1: return 'CANCELLED';
+      case 2: return 'UNKNOWN';
+      case 3: return 'INVALID_ARGUMENT';
+      case 4: return 'DEADLINE_EXCEEDED';
+      case 5: return 'NOT_FOUND';
+      case 6: return 'ALREADY_EXISTS';
+      case 7: return 'PERMISSION_DENIED';
+      case 8: return 'RESOURCE_EXHAUSTED';
+      case 9: return 'FAILED_PRECONDITION';
+      case 10: return 'ABORTED';
+      case 11: return 'OUT_OF_RANGE';
+      case 12: return 'UNIMPLEMENTED';
+      case 13: return 'INTERNAL';
+      case 14: return 'UNAVAILABLE';
+      case 15: return 'DATA_LOSS';
+      case 16: return 'UNAUTHENTICATED';
+      default: return 'UNRECOGNIZED';
+    }
+  } catch {
+    return 'DIAGNOSTIC_FAILED';
+  }
+}
+
 export function createInitialBootstrapControlledPreparationQueryErrorTracker(): InitialBootstrapControlledPreparationQueryErrorTracker {
   let latest: InitialBootstrapControlledPreparationQueryErrorEvidence = 'UNOBSERVED';
+  let latestGrpcStatus: InitialBootstrapControlledPreparationGrpcStatusEvidence = 'UNOBSERVED';
   let diagnosticFailed = false;
 
   return Object.freeze({
@@ -319,7 +377,13 @@ export function createInitialBootstrapControlledPreparationQueryErrorTracker(): 
           diagnosticFailed = true;
           return;
         }
+        const grpcStatus = classifyInitialBootstrapControlledPreparationGrpcStatus(error);
+        if (grpcStatus === 'DIAGNOSTIC_FAILED') {
+          diagnosticFailed = true;
+          return;
+        }
         latest = classified;
+        latestGrpcStatus = grpcStatus;
       } catch {
         diagnosticFailed = true;
       }
@@ -329,6 +393,9 @@ export function createInitialBootstrapControlledPreparationQueryErrorTracker(): 
     },
     evidence() {
       return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : latest;
+    },
+    grpcStatusEvidence() {
+      return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : latestGrpcStatus;
     },
   });
 }
@@ -518,6 +585,7 @@ async function diagnoseStagingControlledPreparation(
       preparationEvidence: 'PRIVATE_EVIDENCE_FAILURE' as const,
       retryEvidence: 'UNOBSERVED' as const,
       queryErrorEvidence: 'UNOBSERVED' as const,
+      grpcStatusEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -535,12 +603,14 @@ async function diagnoseStagingControlledPreparation(
       preparationEvidence: classifyInitialBootstrapControlledPreparationFailure(error),
       retryEvidence: 'UNOBSERVED' as const,
       queryErrorEvidence: 'UNOBSERVED' as const,
+      grpcStatusEvidence: 'UNOBSERVED' as const,
     });
   }
 
   let preparationEvidence: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
   let retryEvidence: InitialBootstrapControlledPreparationRetryEvidence = 'UNOBSERVED';
   let queryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence = 'UNOBSERVED';
+  let grpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
   let queryErrorTracker: InitialBootstrapControlledPreparationQueryErrorTracker | null = null;
   let stopRetryObservation: (() => void) | null = null;
@@ -592,7 +662,10 @@ async function diagnoseStagingControlledPreparation(
   } finally {
     if (stopQueryErrorObservation !== null) stopQueryErrorObservation();
     if (stopRetryObservation !== null) stopRetryObservation();
-    if (queryErrorTracker !== null) queryErrorEvidence = queryErrorTracker.evidence();
+    if (queryErrorTracker !== null) {
+      queryErrorEvidence = queryErrorTracker.evidence();
+      grpcStatusEvidence = queryErrorTracker.grpcStatusEvidence();
+    }
     if (retryTracker !== null) retryEvidence = retryTracker.evidence();
   }
 
@@ -601,7 +674,7 @@ async function diagnoseStagingControlledPreparation(
   } catch {
     preparationEvidence = 'DIAGNOSTIC_FAILED';
   }
-  return Object.freeze({ preparationEvidence, retryEvidence, queryErrorEvidence });
+  return Object.freeze({ preparationEvidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence });
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -723,6 +796,7 @@ export async function executeInitialBootstrapRecoveryJob(
       let stagingControlledPreparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
       let stagingControlledPreparationRetryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
       let stagingControlledPreparationQueryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence;
+      let stagingControlledPreparationGrpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
@@ -734,16 +808,19 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationEvidence = diagnostic.preparationEvidence;
         stagingControlledPreparationRetryEvidence = diagnostic.retryEvidence;
         stagingControlledPreparationQueryErrorEvidence = diagnostic.queryErrorEvidence;
+        stagingControlledPreparationGrpcStatusEvidence = diagnostic.grpcStatusEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationQueryErrorEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationGrpcStatusEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
         stagingControlledPreparationEvidence,
         stagingControlledPreparationRetryEvidence,
         stagingControlledPreparationQueryErrorEvidence,
+        stagingControlledPreparationGrpcStatusEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {

@@ -283,6 +283,14 @@ callback/subscription/unsubscription evidence fails closed as `DIAGNOSTIC_FAILED
 not change query/retry behavior, the exact `10s/21s/25s` runtime envelope, financial authority or the
 ban on a third controlled rebuild attempt.
 
+Issue #721 narrows only the already-proven `GRPC_STATUS` branch. For an actual `ClientError`, the
+runtime converts its numeric gRPC code immediately to the corresponding standard status name and
+publishes only that name. The numeric code itself, `message`, `details`, `metadata`, stack and all
+query/session/provider context remain private. Allowed evidence is the standard non-OK gRPC status
+set plus `UNOBSERVED | NON_GRPC | UNRECOGNIZED | DIAGNOSTIC_FAILED`. This is observational telemetry
+inside the same `controlled_preparation_only` scope; it does not alter retries, deadlines, resource
+limits, financial state or provider authority.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
