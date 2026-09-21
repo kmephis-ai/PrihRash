@@ -23,6 +23,7 @@ import {
 import {
   InitialBootstrapApplicationError,
   prepareInitialControlledRebuildContinuation,
+  type InitialBootstrapObservation,
 } from '../migration/initialBootstrapApplication.js';
 import {
   createInitialBootstrapDurableReconciliation,
@@ -73,7 +74,6 @@ import {
   type InitialBootstrapRecoveryJobConfig,
   type InitialBootstrapRecoveryJobEnvironment,
 } from './initialBootstrapRecoveryConfig.js';
-import { buildInitialBootstrapObservation } from './initialBootstrapJob.js';
 
 export {
   INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV,
@@ -179,6 +179,26 @@ export interface InitialBootstrapRecoveryJobRuntime {
 }
 
 
+function buildControlledPreparationObservation(
+  lease: Readonly<GoogleSheetsFullSnapshotLease>,
+  digest: Readonly<CanonicalSourceDigest>,
+  historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+  capturedAt: string,
+): Readonly<InitialBootstrapObservation> {
+  const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
+  historicalEvidence.assertCompatibleRowCount(projected.rows.length);
+  return Object.freeze({
+    capturedAt,
+    snapshotDigest: lease.snapshotDigest,
+    rows: Object.freeze(projected.rows.map((row, sourceOrdinal) => Object.freeze({
+      rowHint: row.rowHint,
+      digest: row.digest,
+      rawPayload: row.rawPayload,
+      aggregatePeriodMonth: historicalEvidence.aggregatePeriodMonthForSourceOrdinal(sourceOrdinal),
+    }))),
+  });
+}
+
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
@@ -232,7 +252,7 @@ async function diagnoseStagingControlledPreparation(
       config.privateHistoricalEvidence,
     );
     const primitives = createNodeInitialBootstrapRuntimePrimitives();
-    const observation = buildInitialBootstrapObservation(
+    const observation = buildControlledPreparationObservation(
       lease,
       digest,
       historicalEvidence,
