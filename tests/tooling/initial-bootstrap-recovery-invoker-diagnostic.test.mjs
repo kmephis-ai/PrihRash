@@ -250,3 +250,67 @@ test('VALIDATED source invoker rejects missing, unknown, extra and wrong-state e
     }), (error) => error.code === 2 && !error.stdout.includes('private text') && !error.stderr.includes('private text'));
   }
 });
+
+
+test('controlled-preparation-only invoker preserves only allowlisted enum evidence', async () => {
+  const base = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  };
+  for (const evidence of ['READY', 'YDB_QUERY_TIMEOUT', 'DURABLE_RECONCILIATION_FAILURE']) {
+    const yc = await fakeYc({ ...base, stagingControlledPreparationEvidence: evidence });
+    const result = await execFileAsync(
+      process.execPath,
+      ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+          PRIHRASH_YC_BIN: yc,
+          RECOVERY_CONTROLLED_PREPARATION_ONLY: '1',
+        },
+      },
+    );
+    assert.deepEqual(JSON.parse(result.stdout), base);
+    assert.equal(result.stderr, `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=${evidence}\n`);
+  }
+});
+
+test('controlled preparation evidence is rejected outside its mode and unknown enums fail closed', async () => {
+  const base = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  };
+  for (const { payload, mode } of [
+    { payload: { ...base, stagingControlledPreparationEvidence: 'READY' }, mode: '0' },
+    { payload: { ...base, stagingControlledPreparationEvidence: 'PRIVATE_ENUM' }, mode: '1' },
+  ]) {
+    const yc = await fakeYc(payload);
+    await assert.rejects(
+      execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+          PRIHRASH_YC_BIN: yc,
+          RECOVERY_CONTROLLED_PREPARATION_ONLY: mode,
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 2);
+        assert.deepEqual(JSON.parse(error.stdout), {
+          status: 'FAIL',
+          code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
+        });
+        assert.equal(error.stdout.includes('PRIVATE_ENUM'), false);
+        assert.equal(error.stderr.includes('PRIVATE_ENUM'), false);
+        return true;
+      },
+    );
+  }
+});

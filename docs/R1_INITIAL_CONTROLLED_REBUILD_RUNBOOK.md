@@ -207,6 +207,40 @@ Condition 6 may be reconsidered only if the returned provider evidence binds to 
 
 Provider support evidence остаётся предпочтительным способом полностью закрыть historical uncertainty, но после explicit Owner risk acceptance оно больше не является prerequisite для marker-only Gate B **только** по `35469651936`. Для других ambiguous provider writes этот support/provider-completion path остаётся обязательным при отсутствии durable correlation evidence.
 
+## Second bounded attempt and read-only controlled-preparation diagnostic
+
+The second explicit Owner authority (#706) was consumed by controlled run `35559851439` on exact
+`b831c24a8a6b2c4de069ce5a2d18cd16a2ecff9c`. Fresh recovery `35559600514` and readiness
+`35559762343` were successful before the single invoke. The bounded runtime result was:
+
+`FAIL / INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED / APPLICATION_FAILED / PREPARATION / RECONCILIATION_READ`.
+
+Mandatory post-attempt recovery `35559986097` proved that durable state did not advance:
+`STAGING_RUN_PRESENT`, both revision-evidence diagnostics remained `COMPLETE_CURRENT_RUN_ONLY`,
+verified current remained empty, source decoding had no blocker and exact revision evidence remained
+`EXACT_CURRENT_RUN_MATCH`. Therefore no STAGING→VALIDATED transition, scheme setup, staging
+materialization, swap or COMMITTED baseline is proven, and the consumed attempt must not be replayed.
+
+The controlled runtime uses a 10 s YDB ready timeout, 21 s per-read timeout and 25 s transaction
+timeout. The failure at `RECONCILIATION_READ` makes the 21 s read boundary a bounded hypothesis,
+not proof. Increasing that timeout or any resource cap is not authorized by the diagnostic.
+
+Issue #709 therefore adds a **read-only** mode to the existing recovery-only Function. It is valid
+only after the recovery surface itself proves `STAGING_RUN_PRESENT`. The mode reuses the same
+authoritative source observation and immutable historical evidence, opens a separate YDB client with
+the exact controlled `10s/21s/25s` timeout envelope and calls only
+`prepareInitialControlledRebuildContinuation`. It stops before lifecycle transition, scheme setup,
+staging/current mutation, swap, commit marker or cleanup.
+
+The diagnostic publishes only
+`R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=<ENUM>`, where the enum is allowlisted to:
+`READY | BASELINE_EXISTS | VALIDATION_BLOCKED | YDB_QUERY_TIMEOUT | YDB_DATA_FAILURE |
+DURABLE_RECONCILIATION_FAILURE | REVISION_EVIDENCE_FAILURE | PRIVATE_EVIDENCE_FAILURE |
+APPLICATION_FAILURE | DIAGNOSTIC_FAILED`.
+
+This diagnostic does not arm a third controlled rebuild, does not change the 21 s timeout, and does
+not expand provider authority. Google remains authoritative and YDB remains shadow.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.

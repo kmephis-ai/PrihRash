@@ -8,6 +8,11 @@ on:
         required: false
         type: boolean
         default: false
+      controlled_preparation_only:
+        description: Re-run controlled preparation read-only under the exact controlled YDB timeout envelope
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,6 +31,7 @@ jobs:
     env:
       FUNCTION_NAME: prihrash-r1-initial-bootstrap
       RECOVERY_SURFACE_ONLY: ${{ inputs.surface_only && '1' || '0' }}
+      RECOVERY_CONTROLLED_PREPARATION_ONLY: ${{ inputs.controlled_preparation_only && '1' || '0' }}
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -51,6 +57,10 @@ jobs:
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           test -n "$YC_LOCKBOX_SECRET_ID"
+          if [ "$RECOVERY_SURFACE_ONLY" = "1" ] && [ "$RECOVERY_CONTROLLED_PREPARATION_ONLY" = "1" ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT'
+            exit 1
+          fi
 
       - name: Setup Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -365,6 +375,7 @@ jobs:
             --memory 1g \
             --execution-timeout 150s \
             --environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=${RECOVERY_SURFACE_ONLY}" \
+            --environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=${RECOVERY_CONTROLLED_PREPARATION_ONLY}" \
             --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-bootstrap-recovery \
@@ -462,6 +473,15 @@ jobs:
             jq -cn --arg blocker "$gate_blocker" '{staleValidatedRecoveryGate:{status:"BLOCKED",blocker:$blocker}}' > "$evidence_dir/gate-a.json"
             cat "$evidence_dir/validated-source.json"
             cat "$evidence_dir/gate-a.json"
+          fi
+          if [ "$RECOVERY_CONTROLLED_PREPARATION_ONLY" = "1" ]; then
+            prep_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=//p' "$diagnostics")"
+            case "$prep_evidence" in
+              READY|BASELINE_EXISTS|VALIDATION_BLOCKED|YDB_QUERY_TIMEOUT|YDB_DATA_FAILURE|DURABLE_RECONCILIATION_FAILURE|REVISION_EVIDENCE_FAILURE|PRIVATE_EVIDENCE_FAILURE|APPLICATION_FAILURE|DIAGNOSTIC_FAILED) ;;
+              *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_EVIDENCE_INVALID; exit 1 ;;
+            esac
+            jq -cn --arg evidence "$prep_evidence" '{stagingControlledPreparationEvidence:$evidence}' > "$evidence_dir/controlled-preparation.json"
+            cat "$evidence_dir/controlled-preparation.json"
           fi
           rm -f "$tmp" "$diagnostics"
 

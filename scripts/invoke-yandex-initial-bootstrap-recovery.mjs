@@ -98,6 +98,19 @@ const STAGING_EXACT_REVISION_EVIDENCE = new Set([
   'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_EVIDENCE = new Set([
+  'READY',
+  'BASELINE_EXISTS',
+  'VALIDATION_BLOCKED',
+  'YDB_QUERY_TIMEOUT',
+  'YDB_DATA_FAILURE',
+  'DURABLE_RECONCILIATION_FAILURE',
+  'REVISION_EVIDENCE_FAILURE',
+  'PRIVATE_EVIDENCE_FAILURE',
+  'APPLICATION_FAILURE',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -213,7 +226,7 @@ function validPair(verdict, reason) {
     && reason !== 'EMPTY_DURABLE_STATE';
 }
 
-function parseExactResult(stdout, surfaceOnly = false) {
+function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly = false) {
   let value;
   try {
     value = JSON.parse(stdout.trim());
@@ -237,17 +250,40 @@ function parseExactResult(stdout, surfaceOnly = false) {
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
+    const stagingControlledPreparationEvidence = result.stagingControlledPreparationEvidence;
     const validatedSourceEvidence = result.validatedSourceEvidence;
     const staleValidatedRecoveryGate = result.staleValidatedRecoveryGate;
-    const validDiagnosticShape = result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
+    const noStagingDiagnostics = stagingRevisionEvidence === undefined
+      && stagingDurableRevisionEvidence === undefined
+      && stagingRetirementEvidence === undefined
+      && stagingSourceDecodeEvidence === undefined
+      && stagingExactRevisionEvidence === undefined;
+    const validDiagnosticShape = controlledPreparationOnly
+      ? result.reason === 'STAGING_RUN_PRESENT'
+        ? exactKeys(result, [
+            'status',
+            'code',
+            'verdict',
+            'reason',
+            'stagingControlledPreparationEvidence',
+          ])
+          && noStagingDiagnostics
+          && typeof stagingControlledPreparationEvidence === 'string'
+          && STAGING_CONTROLLED_PREPARATION_EVIDENCE.has(stagingControlledPreparationEvidence)
+        : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+          && noStagingDiagnostics
+          && stagingControlledPreparationEvidence === undefined
+      : result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
         && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
         && record(staleValidatedRecoveryGate) !== null
         && exactKeys(staleValidatedRecoveryGate, ['status', 'blocker'])
         && staleValidatedRecoveryGate.status === 'BLOCKED'
         && STALE_VALIDATED_GATE_BLOCKERS.has(staleValidatedRecoveryGate.blocker)
+        && stagingControlledPreparationEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+        && stagingControlledPreparationEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -269,12 +305,10 @@ function parseExactResult(stdout, surfaceOnly = false) {
         && validSourceDecodeEvidence(stagingSourceDecodeEvidence)
         && typeof stagingExactRevisionEvidence === 'string'
         && STAGING_EXACT_REVISION_EVIDENCE.has(stagingExactRevisionEvidence)
+        && stagingControlledPreparationEvidence === undefined
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
-        && stagingRevisionEvidence === undefined
-        && stagingDurableRevisionEvidence === undefined
-        && stagingRetirementEvidence === undefined
-        && stagingSourceDecodeEvidence === undefined
-        && stagingExactRevisionEvidence === undefined;
+        && noStagingDiagnostics
+        && stagingControlledPreparationEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -300,6 +334,9 @@ function parseExactResult(stdout, surfaceOnly = false) {
       stagingExactRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingExactRevisionEvidence ?? null
         : null,
+      stagingControlledPreparationEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingControlledPreparationEvidence ?? null
+        : null,
     });
   }
   if (
@@ -315,6 +352,7 @@ function parseExactResult(stdout, surfaceOnly = false) {
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
       stagingExactRevisionEvidence: null,
+      stagingControlledPreparationEvidence: null,
     });
   }
   return null;
@@ -332,6 +370,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
       stagingExactRevisionEvidence: null,
+      stagingControlledPreparationEvidence: null,
     });
   }
 
@@ -347,7 +386,11 @@ async function invokeRecovery(environment = process.env) {
         windowsHide: true,
       },
     );
-    return parseExactResult(stdout, environment.RECOVERY_SURFACE_ONLY === '1') ?? Object.freeze({
+    return parseExactResult(
+      stdout,
+      environment.RECOVERY_SURFACE_ONLY === '1',
+      environment.RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
+    ) ?? Object.freeze({
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
       staleValidatedRecoveryGate: null,
@@ -355,6 +398,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
       stagingExactRevisionEvidence: null,
+      stagingControlledPreparationEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -364,6 +408,7 @@ async function invokeRecovery(environment = process.env) {
       stagingRetirementEvidence: null,
       stagingSourceDecodeEvidence: null,
       stagingExactRevisionEvidence: null,
+      stagingControlledPreparationEvidence: null,
     });
   }
 }
@@ -394,6 +439,11 @@ if (invocation.stagingSourceDecodeEvidence !== null) {
 if (invocation.stagingExactRevisionEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_EXACT_REVISION_EVIDENCE=${invocation.stagingExactRevisionEvidence}\n`,
+  );
+}
+if (invocation.stagingControlledPreparationEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=${invocation.stagingControlledPreparationEvidence}\n`,
   );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);

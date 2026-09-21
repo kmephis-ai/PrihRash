@@ -22,6 +22,7 @@ export type InitialBootstrapRecoveryJobErrorCode =
   | 'INVALID_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY'
   | 'INVALID_YDB_CONNECTION_STRING'
   | 'INVALID_PRIVATE_HISTORICAL_EVIDENCE'
+  | 'INVALID_RECOVERY_MODE'
   | 'YDB_CLIENT_CLOSE_FAILED';
 
 export class InitialBootstrapRecoveryJobError extends Error {
