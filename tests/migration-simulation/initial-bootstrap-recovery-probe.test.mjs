@@ -353,6 +353,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
       },
     );
+  }
 
   for (const invalidReadStageEvidence of [undefined, 'PRIVATE_READ_STAGE']) {
     assert.deepEqual(
@@ -379,6 +380,5 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
       },
     );
-  }
   }
 });
