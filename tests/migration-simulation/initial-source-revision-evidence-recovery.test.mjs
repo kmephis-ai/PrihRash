@@ -83,6 +83,7 @@ test('restart after partial revision evidence separates run-scoped payload verif
     revision(SOURCE_ID_2, 3, 'synthetic-row-b', 'Synthetic B'),
   ];
   const statements = [];
+  const readStages = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader(
       (statement) => {
@@ -95,8 +96,14 @@ test('restart after partial revision evidence separates run-scoped payload verif
       (statement) => statements.push(statement),
     ),
     expected,
+    (stage) => readStages.push(stage),
   );
 
+  assert.deepEqual(readStages, [
+    'REVISION_METADATA_SCAN',
+    'REVISION_PAYLOAD_BATCH',
+    'REVISION_COLLISION_READ',
+  ]);
   assert.equal(statements.length, 3);
   assert.match(statements[0].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
   assert.doesNotMatch(statements[0].text, /raw_payload|AS_TABLE/);
@@ -125,6 +132,22 @@ test('restart after partial revision evidence separates run-scoped payload verif
   assert.equal(writes.length, 1);
   assert.match(writes[0].statement.text, /^INSERT INTO source_record_revisions /);
   assert.equal(writes[0].statement.parameters.source_record_id.value, SOURCE_ID_2);
+});
+
+test('revision read-stage observer cannot alter recovery semantics when it throws', async () => {
+  const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
+  const seen = [];
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader(expected.map(providerRow)),
+    expected,
+    (stage) => {
+      seen.push(stage);
+      throw new Error('diagnostic observer failure');
+    },
+  );
+  assert.deepEqual(seen, ['REVISION_METADATA_SCAN', 'REVISION_PAYLOAD_BATCH']);
+  assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
+  assert.deepEqual(resume.missingRevisions, []);
 });
 
 test('primary-key collision from another migration run fails closed instead of planning a conflicting INSERT', async () => {
