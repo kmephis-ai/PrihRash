@@ -524,10 +524,12 @@ jobs:
               type == "object"
               and (
                 (
-                  (keys | sort) == ["code","databaseDiscovery","enableThrottlingRcuLimit","mode","provisionedRcuLimit","status","throttlingRcuLimit"]
+                  (keys | sort) == ["code","databaseDiscovery","enableThrottlingRcuLimit","failureStage","mode","provisionedRcuLimit","status","throttlingRcuLimit"]
                   and .status == "PASS"
                   and .code == "YDB_RESOURCE_LIMITS_CLASSIFIED"
                   and (.databaseDiscovery | IN("SINGLE","NONE","AMBIGUOUS","READ_FAILED"))
+                  and (.failureStage | IN("NONE","TARGET_CONFIG_INVALID","TRANSPORT_FAILED","UNAUTHORIZED","FORBIDDEN","NOT_FOUND","RATE_LIMITED","PROVIDER_5XX","UNEXPECTED_STATUS","MALFORMED_JSON","IDENTITY_MISMATCH","LIMITS_MALFORMED"))
+                  and (if .databaseDiscovery == "READ_FAILED" then .failureStage != "NONE" else .failureStage == "NONE" end)
                   and (.mode | IN("SERVERLESS","DEDICATED","UNKNOWN"))
                   and (
                     if .databaseDiscovery == "SINGLE" and .mode == "SERVERLESS" then

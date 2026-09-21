@@ -31,11 +31,15 @@ function parseProviderOutput(stdout) {
   }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return SAFE_OUTPUT_INVALID;
   const keys = Object.keys(value).sort();
-  const expected = ['code', 'databaseDiscovery', 'enableThrottlingRcuLimit', 'mode', 'provisionedRcuLimit', 'status', 'throttlingRcuLimit'];
+  const expected = ['code', 'databaseDiscovery', 'enableThrottlingRcuLimit', 'failureStage', 'mode', 'provisionedRcuLimit', 'status', 'throttlingRcuLimit'];
   if (JSON.stringify(keys) !== JSON.stringify(expected)) return SAFE_OUTPUT_INVALID;
   if (value.status !== 'PASS' || value.code !== 'YDB_RESOURCE_LIMITS_CLASSIFIED') return SAFE_OUTPUT_INVALID;
   if (!['SINGLE', 'NONE', 'AMBIGUOUS', 'READ_FAILED'].includes(value.databaseDiscovery)) return SAFE_OUTPUT_INVALID;
+  if (!['NONE', 'TARGET_CONFIG_INVALID', 'TRANSPORT_FAILED', 'UNAUTHORIZED', 'FORBIDDEN', 'NOT_FOUND', 'RATE_LIMITED', 'PROVIDER_5XX', 'UNEXPECTED_STATUS', 'MALFORMED_JSON', 'IDENTITY_MISMATCH', 'LIMITS_MALFORMED'].includes(value.failureStage)) return SAFE_OUTPUT_INVALID;
   if (!['SERVERLESS', 'DEDICATED', 'UNKNOWN'].includes(value.mode)) return SAFE_OUTPUT_INVALID;
+  if (value.databaseDiscovery === 'READ_FAILED') {
+    if (value.failureStage === 'NONE') return SAFE_OUTPUT_INVALID;
+  } else if (value.failureStage !== 'NONE') return SAFE_OUTPUT_INVALID;
   if (value.databaseDiscovery === 'SINGLE' && value.mode === 'SERVERLESS') {
     if (typeof value.enableThrottlingRcuLimit !== 'boolean') return SAFE_OUTPUT_INVALID;
     if (!nonnegativeSafeInteger(value.throttlingRcuLimit) || !nonnegativeSafeInteger(value.provisionedRcuLimit)) return SAFE_OUTPUT_INVALID;

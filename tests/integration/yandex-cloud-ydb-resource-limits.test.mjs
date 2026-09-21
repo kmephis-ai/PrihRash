@@ -24,11 +24,12 @@ function response(body, status = 200) {
   });
 }
 
-function safeUnknown(discovery = 'READ_FAILED') {
+function safeUnknown(discovery = 'READ_FAILED', failureStage = discovery === 'READ_FAILED' ? 'TARGET_CONFIG_INVALID' : 'NONE') {
   return {
     status: 'PASS',
     code: 'YDB_RESOURCE_LIMITS_CLASSIFIED',
     databaseDiscovery: discovery,
+    failureStage,
     mode: 'UNKNOWN',
     enableThrottlingRcuLimit: null,
     throttlingRcuLimit: null,
@@ -96,6 +97,7 @@ test('runtime-SA resource limits probe performs one exact Database.Get and expos
     status: 'PASS',
     code: 'YDB_RESOURCE_LIMITS_CLASSIFIED',
     databaseDiscovery: 'SINGLE',
+    failureStage: 'NONE',
     mode: 'SERVERLESS',
     enableThrottlingRcuLimit: true,
     throttlingRcuLimit: 42,
@@ -135,20 +137,20 @@ test('runtime-SA exact Database.Get classifies dedicated and unknown without pro
 
 test('runtime-SA exact Database.Get fails closed for invalid target, malformed limits, context and provider responses', async () => {
   const malformedBodies = [
-    null,
-    {},
-    database({ id: 'otherdatabaseid' }),
-    database({ folderId: 'otherfolderid' }),
-    database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '-1', provisionedRcuLimit: '7' } }),
-    database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '9007199254740992', provisionedRcuLimit: '7' } }),
-    database({ serverlessDatabase: { enableThrottlingRcuLimit: 'true', throttlingRcuLimit: '1', provisionedRcuLimit: '1' } }),
-    database({ serverlessDatabase: {}, dedicatedDatabase: {} }),
+    [null, 'IDENTITY_MISMATCH'],
+    [{}, 'IDENTITY_MISMATCH'],
+    [database({ id: 'otherdatabaseid' }), 'IDENTITY_MISMATCH'],
+    [database({ folderId: 'otherfolderid' }), 'IDENTITY_MISMATCH'],
+    [database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '-1', provisionedRcuLimit: '7' } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '9007199254740992', provisionedRcuLimit: '7' } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: { enableThrottlingRcuLimit: 'true', throttlingRcuLimit: '1', provisionedRcuLimit: '1' } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: {}, dedicatedDatabase: {} }), 'LIMITS_MALFORMED'],
   ];
 
-  for (const body of malformedBodies) {
+  for (const [body, failureStage] of malformedBodies) {
     assert.deepEqual(
       await readYdbResourceLimitsWithRuntimeServiceAccount(ENVIRONMENT, CONTEXT, async () => response(body)),
-      safeUnknown(),
+      safeUnknown('READ_FAILED', failureStage),
     );
   }
 
@@ -165,21 +167,36 @@ test('runtime-SA exact Database.Get fails closed for invalid target, malformed l
   ]) {
     assert.deepEqual(
       await readYdbResourceLimitsWithRuntimeServiceAccount(environment, context, mustNotRun),
-      safeUnknown(),
+      safeUnknown('READ_FAILED', 'TARGET_CONFIG_INVALID'),
     );
   }
   assert.equal(calls, 0);
 
   assert.deepEqual(
     await readYdbResourceLimitsWithRuntimeServiceAccount(ENVIRONMENT, CONTEXT, async () => { throw new Error(PRIVATE_LOOKING); }),
-    safeUnknown(),
+    safeUnknown('READ_FAILED', 'TRANSPORT_FAILED'),
   );
-  assert.deepEqual(
-    await readYdbResourceLimitsWithRuntimeServiceAccount(ENVIRONMENT, CONTEXT, async () => response({ detail: PRIVATE_LOOKING }, 403)),
-    safeUnknown(),
-  );
+
+  for (const [status, failureStage] of [
+    [401, 'UNAUTHORIZED'],
+    [403, 'FORBIDDEN'],
+    [404, 'NOT_FOUND'],
+    [429, 'RATE_LIMITED'],
+    [503, 'PROVIDER_5XX'],
+    [418, 'UNEXPECTED_STATUS'],
+  ]) {
+    assert.deepEqual(
+      await readYdbResourceLimitsWithRuntimeServiceAccount(
+        ENVIRONMENT,
+        CONTEXT,
+        async () => response({ detail: PRIVATE_LOOKING }, status),
+      ),
+      safeUnknown('READ_FAILED', failureStage),
+    );
+  }
+
   assert.deepEqual(
     await readYdbResourceLimitsWithRuntimeServiceAccount(ENVIRONMENT, CONTEXT, async () => new Response(PRIVATE_LOOKING, { status: 200 })),
-    safeUnknown(),
+    safeUnknown('READ_FAILED', 'MALFORMED_JSON'),
   );
 });
