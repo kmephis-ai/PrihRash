@@ -20,13 +20,14 @@ async function runInvoker({
   token = true,
   invokeMode = 'sync',
   functionError = false,
+  tag = 'r1-initial-controlled-rebuild',
 } = {}) {
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
     PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
-    PRIHRASH_TEST_FUNCTION_TAG: 'r1-initial-controlled-rebuild',
+    PRIHRASH_TEST_FUNCTION_TAG: tag,
     PRIHRASH_TEST_FUNCTION_INTEGRATION: invokeMode === 'async' ? 'async' : 'raw',
     PRIHRASH_TEST_FETCH_BODY: body,
     PRIHRASH_TEST_FETCH_STATUS: String(status),
@@ -35,6 +36,7 @@ async function runInvoker({
     ...(functionId ? { PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID: FUNCTION_ID } : {}),
     ...(token ? { YC_IAM_TOKEN: 'synthetic-short-lived-iam-token' } : {}),
     PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE: invokeMode,
+    PRIHRASH_INITIAL_CONTROLLED_REBUILD_TAG: tag,
   };
   try {
     const result = await execFileAsync(process.execPath, [INVOKER], { cwd: ROOT, env, encoding: 'utf8' });
@@ -91,6 +93,43 @@ test('controlled rebuild invoker preserves bounded STOP and runtime enum results
     assert.equal(result.exitCode, 2);
     assertSafe(result, value);
   }
+});
+
+test('controlled rebuild invoker preserves exact preparation diagnostic enums on dedicated tag', async () => {
+  const ready = {
+    status: 'PASS',
+    code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY',
+  };
+  const readyResult = await runInvoker({
+    tag: 'r1-initial-controlled-rebuild-preparation-diagnostic',
+    body: JSON.stringify(ready),
+  });
+  assert.equal(readyResult.exitCode, 0);
+  assertSafe(readyResult, ready);
+
+  const failed = {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED',
+    bootstrapPhase: 'RECONCILIATION_READ',
+    failureCode: 'YDB_QUERY_EXECUTION_YDB_TIMEOUT',
+  };
+  const failedResult = await runInvoker({
+    tag: 'r1-initial-controlled-rebuild-preparation-diagnostic',
+    body: JSON.stringify(failed),
+  });
+  assert.equal(failedResult.exitCode, 2);
+  assertSafe(failedResult, failed);
+
+  const unknown = await runInvoker({
+    tag: 'r1-initial-controlled-rebuild-preparation-diagnostic',
+    body: JSON.stringify({ ...failed, failureCode: PRIVATE_LOOKING }),
+  });
+  assert.equal(unknown.exitCode, 2);
+  assertSafe(unknown, { status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID' });
+
+  const badTag = await runInvoker({ tag: 'private-arbitrary-tag', body: JSON.stringify(ready) });
+  assert.equal(badTag.exitCode, 2);
+  assertSafe(badTag, { status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_INVOKER_CONFIG_INVALID' });
 });
 
 test('controlled rebuild invoker accepts async dispatch only on HTTP 202 and never treats it as COMMITTED', async () => {
