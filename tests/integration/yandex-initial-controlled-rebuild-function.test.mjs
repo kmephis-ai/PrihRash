@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
+import { InitialBootstrapDurableReconciliationError } from '../../dist/migration/initialBootstrapDurableReconciliation.js';
 import { InitialBootstrapPrivateEvidenceError } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
+import { InitialSourceRevisionEvidenceRecoveryError } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
 import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob.js';
-import { InitialControlledRebuildJobError } from '../../dist/runtime/initialControlledRebuildJob.js';
+import {
+  classifyInitialControlledRebuildApplicationFailureCode,
+  InitialControlledRebuildJobError,
+} from '../../dist/runtime/initialControlledRebuildJob.js';
 import {
   executeYandexInitialControlledRebuildFunction,
   executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction,
@@ -15,6 +21,31 @@ test('controlled rebuild phase marker is bounded to a single enum token', () => 
   assert.equal(
     formatInitialControlledRebuildPhaseMarker('BOOTSTRAP_RECONCILIATION_READ'),
     'R1_CONTROLLED_PHASE:BOOTSTRAP_RECONCILIATION_READ',
+  );
+});
+
+test('controlled reconciliation failure classifier exposes only bounded existing enums', () => {
+  assert.equal(
+    classifyInitialControlledRebuildApplicationFailureCode(
+      new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_TIMEOUT'),
+    ),
+    'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
+  );
+  assert.equal(
+    classifyInitialControlledRebuildApplicationFailureCode(
+      new InitialBootstrapDurableReconciliationError('DURABLE_RAW_PAYLOAD_INVALID'),
+    ),
+    'DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID',
+  );
+  assert.equal(
+    classifyInitialControlledRebuildApplicationFailureCode(
+      new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH'),
+    ),
+    'REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH',
+  );
+  assert.equal(
+    classifyInitialControlledRebuildApplicationFailureCode(new Error('private provider text')),
+    null,
   );
 });
 async function execute(value) {
@@ -156,6 +187,7 @@ test('controlled rebuild preserves bounded reconciliation-read bootstrap failure
       'APPLICATION_FAILED',
       'PREPARATION',
       'RECONCILIATION_READ',
+      'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
     )),
     {
       status: 'FAIL',
@@ -163,6 +195,7 @@ test('controlled rebuild preserves bounded reconciliation-read bootstrap failure
       jobCode: 'APPLICATION_FAILED',
       phase: 'PREPARATION',
       bootstrapPhase: 'RECONCILIATION_READ',
+      applicationFailureCode: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
     },
   );
 });
