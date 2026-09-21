@@ -19,6 +19,7 @@ export interface YandexFunctionServiceAccountContext {
 
 export interface YdbResourceLimitsEnvironment {
   readonly PRIHRASH_YC_FOLDER_ID?: string;
+  readonly PRIHRASH_YDB_CONNECTION_STRING?: string;
 }
 
 export interface YdbResourceLimitsFetch {
@@ -106,21 +107,71 @@ function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEv
   });
 }
 
+function providerPathSegment(value: string): boolean {
+  return /^[a-z0-9-]+$/u.test(value);
+}
+
+export function parseYdbDatabaseIdFromConnectionString(
+  connectionString: unknown,
+  expectedFolderId: unknown,
+): string | null {
+  if (!nonBlank(connectionString) || !nonBlank(expectedFolderId)) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(connectionString);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== 'grpcs:'
+    || parsed.username.length > 0
+    || parsed.password.length > 0
+    || parsed.hash.length > 0
+  ) {
+    return null;
+  }
+
+  const databaseValues = parsed.searchParams.getAll('database');
+  if (databaseValues.length !== 1) return null;
+  const databasePath = databaseValues[0];
+  if (!nonBlank(databasePath)) return null;
+
+  const segments = databasePath.split('/');
+  if (segments.length !== 4 || segments[0] !== '') return null;
+  const region = segments[1];
+  const folderId = segments[2];
+  const databaseId = segments[3];
+  if (
+    !nonBlank(region)
+    || !providerPathSegment(region)
+    || folderId !== expectedFolderId
+    || !nonBlank(databaseId)
+    || !providerPathSegment(databaseId)
+  ) {
+    return null;
+  }
+  return databaseId;
+}
+
 export async function readYdbResourceLimitsWithRuntimeServiceAccount(
   environment: YdbResourceLimitsEnvironment,
   context: YandexFunctionServiceAccountContext | unknown,
   fetchImpl: YdbResourceLimitsFetch = (input, init) => fetch(input, init),
 ): Promise<Readonly<YdbResourceLimitsEvidence>> {
   const folderId = environment.PRIHRASH_YC_FOLDER_ID;
+  const databaseId = parseYdbDatabaseIdFromConnectionString(
+    environment.PRIHRASH_YDB_CONNECTION_STRING,
+    folderId,
+  );
   const contextRecord = record(context);
   const token = contextRecord === null ? null : record(contextRecord.token);
   const accessToken = token?.access_token;
-  if (!nonBlank(folderId) || !nonBlank(accessToken)) return emptyEvidence('READ_FAILED');
+  if (databaseId === null || !nonBlank(folderId) || !nonBlank(accessToken)) {
+    return emptyEvidence('READ_FAILED');
+  }
 
-  const url = new URL(YANDEX_YDB_DATABASES_API);
-  url.searchParams.set('folderId', folderId);
-  url.searchParams.set('pageSize', '2');
-
+  const url = new URL(`${YANDEX_YDB_DATABASES_API}/${encodeURIComponent(databaseId)}`);
   let response: Response;
   try {
     response = await fetchImpl(url, {
@@ -142,13 +193,13 @@ export async function readYdbResourceLimitsWithRuntimeServiceAccount(
   } catch {
     return emptyEvidence('READ_FAILED');
   }
-  const body = record(payload);
-  if (body === null || !Array.isArray(body.databases)) return emptyEvidence('READ_FAILED');
-
-  const nextPageToken = body.nextPageToken;
-  if (nextPageToken !== undefined && typeof nextPageToken !== 'string') return emptyEvidence('READ_FAILED');
-  if (typeof nextPageToken === 'string' && nextPageToken.length > 0) return emptyEvidence('AMBIGUOUS');
-  if (body.databases.length === 0) return emptyEvidence('NONE');
-  if (body.databases.length !== 1) return emptyEvidence('AMBIGUOUS');
-  return classifySingleDatabase(body.databases[0]);
+  const database = record(payload);
+  if (
+    database === null
+    || database.id !== databaseId
+    || database.folderId !== folderId
+  ) {
+    return emptyEvidence('READ_FAILED');
+  }
+  return classifySingleDatabase(database);
 }

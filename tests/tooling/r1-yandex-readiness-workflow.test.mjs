@@ -9,6 +9,7 @@ const RUNBOOK = resolve(ROOT, 'docs/R1_YANDEX_READINESS_RUNBOOK.md');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-readiness.mjs');
 const READINESS_PROBE = resolve(ROOT, 'src/runtime/scheduledSyncReadinessProbe.ts');
 const YDB_DATA_TRANSPORT = resolve(ROOT, 'src/integration/ydb/ydbJsV6DataTransport.ts');
+const RESOURCE_LIMITS_PROBE = resolve(ROOT, 'src/runtime/yandexCloudYdbResourceLimits.ts');
 
 async function text(path) {
   return readFile(path, 'utf8');
@@ -88,7 +89,20 @@ test('R1 readiness resource-limits-only mode uses existing runtime SA without IA
     workflow.indexOf('- name: Deploy resource-limits read-only function version'),
     workflow.indexOf('- name: Fail closed if provider boundary is unsafe'),
   );
-  assert.doesNotMatch(resourceDeploy, /--secret\b|PRIHRASH_GOOGLE_|PRIHRASH_YDB_CONNECTION_STRING/);
+  assert.match(resourceDeploy, /--secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,[^\n]*key=ydb_connection_string"/);
+  assert.doesNotMatch(resourceDeploy, /PRIHRASH_GOOGLE_/);
+  assert.equal((resourceDeploy.match(/--secret /g) ?? []).length, 1);
+
+  const probe = await text(RESOURCE_LIMITS_PROBE);
+  assert.match(probe, /parseYdbDatabaseIdFromConnectionString/);
+  assert.match(probe, /parsed\.protocol !== 'grpcs:'/);
+  assert.match(probe, /parsed\.searchParams\.getAll\('database'\)/);
+  assert.match(probe, /folderId !== expectedFolderId/);
+  assert.match(probe, /new URL\(`\$\{YANDEX_YDB_DATABASES_API\}\/\$\{encodeURIComponent\(databaseId\)\}`\)/);
+  assert.match(probe, /database\.id !== databaseId/);
+  assert.match(probe, /database\.folderId !== folderId/);
+  assert.doesNotMatch(probe, /searchParams\.set\('folderId'/);
+  assert.doesNotMatch(probe, /pageSize/);
 });
 
 test('R1 readiness persists only allowlisted enum-only evidence while preserving invoke failure', async () => {
