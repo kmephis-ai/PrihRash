@@ -154,6 +154,9 @@ function runtime(overrides = {}) {
         assert.equal(typeof observations[0].rawPayload, 'object');
         return 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH';
       },
+      async diagnoseStagingControlledPreparation() {
+        return 'READY';
+      },
       ...overrides,
     },
     counters: () => ({
@@ -496,4 +499,46 @@ test('other VALIDATED structures and surface-only mode never read the authoritat
     assert.deepEqual(await executeInitialBootstrapRecoveryJob(config, fixture.runtime, true), { verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_RUN_PRESENT' });
     assert.equal(fixture.counters().sourceReads, 0);
   }
+});
+
+
+test('controlled-preparation-only recovery stays read-only and exposes one bounded enum', async () => {
+  let controlledPreparationCalls = 0;
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+    async diagnoseStagingControlledPreparation(_config, receivedLease, digest) {
+      controlledPreparationCalls += 1;
+      assert.equal(receivedLease.snapshotDigest, 'synthetic-digest');
+      assert.equal(typeof digest.digestCanonicalSnapshot, 'function');
+      return 'YDB_QUERY_TIMEOUT';
+    },
+  });
+  assert.deepEqual(
+    await executeInitialBootstrapRecoveryJob(config, fixture.runtime, false, true),
+    {
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
+    },
+  );
+  assert.equal(controlledPreparationCalls, 1);
+  assert.equal(fixture.counters().sourceReads, 1);
+  assert.equal(fixture.counters().stagingDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingDurableDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingExactRevisionDiagnosticCalls, 0);
+  assert.equal(fixture.counters().closes, 1);
+});
+
+test('recovery rejects conflicting surface-only and controlled-preparation-only modes before provider access', async () => {
+  const fixture = runtime();
+  await assert.rejects(
+    () => executeInitialBootstrapRecoveryJob(config, fixture.runtime, true, true),
+    (error) => error?.code === 'INVALID_RECOVERY_MODE',
+  );
+  assert.equal(fixture.counters().diagnoseCalls, 0);
+  assert.equal(fixture.counters().sourceReads, 0);
+  assert.equal(fixture.counters().closes, 0);
 });
