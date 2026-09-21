@@ -202,6 +202,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
     stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
     stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
+    stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -247,6 +248,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
         }),
       ),
       {
@@ -267,6 +269,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidRetryEvidence === undefined
             ? {}
             : { stagingControlledPreparationRetryEvidence: invalidRetryEvidence }),
@@ -290,6 +293,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidQueryErrorEvidence === undefined
             ? {}
             : { stagingControlledPreparationQueryErrorEvidence: invalidQueryErrorEvidence }),
@@ -313,6 +317,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidGrpcStatusEvidence === undefined
             ? {}
             : { stagingControlledPreparationGrpcStatusEvidence: invalidGrpcStatusEvidence }),
@@ -337,6 +342,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidPhaseEvidence === undefined
             ? {}
             : { stagingControlledPreparationPhaseEvidence: invalidPhaseEvidence }),
@@ -347,5 +353,32 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
       },
     );
+
+  for (const invalidReadStageEvidence of [undefined, 'PRIVATE_READ_STAGE']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: 'READY',
+          stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+          stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+          stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+          stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
+          ...(invalidReadStageEvidence === undefined
+            ? {}
+            : {
+                stagingControlledPreparationReconciliationReadStageEvidence:
+                  invalidReadStageEvidence,
+              }),
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
   }
 });
