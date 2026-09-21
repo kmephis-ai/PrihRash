@@ -13,8 +13,10 @@ import {
 import {
   InitialControlledRebuildJobError,
   runInitialControlledRebuildJobFromEnvironment,
+  runInitialControlledRebuildPreparationDiagnosticJobFromEnvironment,
   runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment,
   type InitialControlledRebuildJobErrorCode,
+  type InitialControlledRebuildPreparationDiagnosticFailureCategory,
   type InitialControlledRebuildJobObserver,
   type InitialControlledRebuildRuntimePhase,
 } from './initialControlledRebuildJob.js';
@@ -48,6 +50,19 @@ export type YandexInitialControlledRebuildFunctionResult =
       status: 'STOP';
       code: 'INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED';
       recoveryReason: InitialControlledRebuildRecoveryReason;
+    }>
+  | YandexInitialControlledRebuildRuntimeFailure;
+
+export type YandexInitialControlledRebuildPreparationDiagnosticFunctionResult =
+  | Readonly<{ status: 'PASS'; code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY' }>
+  | Readonly<{ status: 'NOOP'; code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' }>
+  | Readonly<{ status: 'STOP'; code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_VALIDATION_BLOCKED' }>
+  | Readonly<{
+      status: 'FAIL';
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED';
+      category: InitialControlledRebuildPreparationDiagnosticFailureCategory;
+      errorCode: string | null;
+      bootstrapPhase: InitialBootstrapApplicationPhase | null;
     }>
   | YandexInitialControlledRebuildRuntimeFailure;
 
@@ -92,6 +107,61 @@ function yandexPhaseObserver(): Readonly<InitialControlledRebuildJobObserver> {
     },
   });
 }
+
+const PREPARATION_BOOTSTRAP_PHASES = new Set<InitialBootstrapApplicationPhase>([
+  'ADMISSION_READ',
+  'RESUME_CONTEXT_READ',
+  'RESUME_IDENTITY_MANIFEST_READ',
+  'RESUME_SNAPSHOT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'LINEAGE_PREPARATION',
+  'RECONCILIATION_READ',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+]);
+const PREPARATION_YDB_TRANSPORT_ERROR_CODES = new Set([
+  'SDK_SHAPE_INVALID',
+  'PARAMETER_VALUE_INVALID',
+  'PARAMETER_TYPE_UNSUPPORTED',
+  'TIMESTAMP_PRECISION_UNSUPPORTED',
+  'QUERY_EXECUTION_FAILED',
+  'QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'QUERY_EXECUTION_YDB_ABORTED',
+  'QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'QUERY_EXECUTION_YDB_OVERLOADED',
+  'QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'QUERY_EXECUTION_YDB_TIMEOUT',
+  'QUERY_EXECUTION_YDB_BAD_SESSION',
+  'QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'QUERY_EXECUTION_YDB_NOT_FOUND',
+  'QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'QUERY_EXECUTION_YDB_CANCELLED',
+  'QUERY_EXECUTION_YDB_UNDETERMINED',
+  'QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'CLIENT_CONFIG_INVALID',
+]);
+const PREPARATION_DURABLE_RECONCILIATION_ERROR_CODES = new Set([
+  'DURABLE_REVISION_EVIDENCE_INCOMPLETE',
+  'DURABLE_RAW_PAYLOAD_INVALID',
+  'EXPECTED_RECONCILIATION_NOT_AVAILABLE',
+  'INVALID_EXPECTED_REVISION',
+  'MIXED_EXPECTED_RUN',
+  'MALFORMED_EXISTING_REVISION',
+  'DUPLICATE_EXISTING_REVISION',
+  'EXTRA_EXISTING_REVISION',
+  'EXISTING_REVISION_MISMATCH',
+  'UNSUPPORTED_TRANSACTION_TYPE',
+  'INVALID_TRANSACTION_SHAPE',
+  'INVALID_TRANSACTION_AMOUNT',
+  'INVALID_SOURCE_CLASSIFICATION',
+]);
 
 const SWAP_RECOVERY_REASONS = new Set<InitialControlledRebuildSwapRecoveryReason>([
   'DURABLE_RUN_NOT_VALIDATED',
@@ -177,6 +247,82 @@ function validationBlockers(value: unknown): readonly Readonly<YandexInitialCont
     blockers.push(parsed);
   }
   return Object.freeze(blockers);
+}
+
+function sanitizePreparationDiagnosticResult(
+  value: unknown,
+): Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult> {
+  const result = record(value);
+  if (result === null || typeof result.status !== 'string') return runtimeFailure('UNCAUGHT');
+
+  if (result.status === 'READY') {
+    return Object.freeze({
+      status: 'PASS' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY' as const,
+    });
+  }
+  if (result.status === 'BASELINE_EXISTS') {
+    return Object.freeze({
+      status: 'NOOP' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' as const,
+    });
+  }
+  if (result.status === 'VALIDATION_BLOCKED') {
+    return Object.freeze({
+      status: 'STOP' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_VALIDATION_BLOCKED' as const,
+    });
+  }
+  if (result.status !== 'FAILED') return runtimeFailure('UNCAUGHT');
+
+  const bootstrapPhase = result.bootstrapPhase === null
+    ? null
+    : (
+        typeof result.bootstrapPhase === 'string'
+        && PREPARATION_BOOTSTRAP_PHASES.has(result.bootstrapPhase as InitialBootstrapApplicationPhase)
+          ? result.bootstrapPhase as InitialBootstrapApplicationPhase
+          : undefined
+      );
+  if (bootstrapPhase === undefined || typeof result.category !== 'string') {
+    return runtimeFailure('UNCAUGHT');
+  }
+
+  if (
+    result.category === 'YDB_TRANSPORT'
+    && typeof result.errorCode === 'string'
+    && PREPARATION_YDB_TRANSPORT_ERROR_CODES.has(result.errorCode)
+  ) {
+    return Object.freeze({
+      status: 'FAIL' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED' as const,
+      category: 'YDB_TRANSPORT' as const,
+      errorCode: result.errorCode,
+      bootstrapPhase,
+    });
+  }
+  if (
+    result.category === 'DURABLE_RECONCILIATION'
+    && typeof result.errorCode === 'string'
+    && PREPARATION_DURABLE_RECONCILIATION_ERROR_CODES.has(result.errorCode)
+  ) {
+    return Object.freeze({
+      status: 'FAIL' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED' as const,
+      category: 'DURABLE_RECONCILIATION' as const,
+      errorCode: result.errorCode,
+      bootstrapPhase,
+    });
+  }
+  if (result.category === 'UNKNOWN' && result.errorCode === null) {
+    return Object.freeze({
+      status: 'FAIL' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED' as const,
+      category: 'UNKNOWN' as const,
+      errorCode: null,
+      bootstrapPhase,
+    });
+  }
+  return runtimeFailure('UNCAUGHT');
 }
 
 function sanitizeSwapRecoveryDiagnosticResult(
@@ -280,6 +426,34 @@ export async function initialControlledRebuildHandler(
   return executeYandexInitialControlledRebuildFunction(
     process.env,
     (environment) => runInitialControlledRebuildJobFromEnvironment(environment, observer),
+  );
+}
+
+export async function executeYandexInitialControlledRebuildPreparationDiagnosticFunction(
+  environment: InitialBootstrapJobEnvironment,
+  runJob: YandexInitialControlledRebuildJob,
+): Promise<Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult>> {
+  try {
+    return sanitizePreparationDiagnosticResult(await runJob(environment));
+  } catch (error) {
+    if (error instanceof InitialControlledRebuildJobError) {
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+    }
+    if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
+      return runtimeFailure('CONFIG_INVALID');
+    }
+    return runtimeFailure('UNCAUGHT');
+  }
+}
+
+export async function initialControlledRebuildPreparationDiagnosticHandler(
+  _event: unknown,
+  _context: unknown,
+): Promise<Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult>> {
+  const observer = yandexPhaseObserver();
+  return executeYandexInitialControlledRebuildPreparationDiagnosticFunction(
+    process.env,
+    (environment) => runInitialControlledRebuildPreparationDiagnosticJobFromEnvironment(environment, observer),
   );
 }
 
