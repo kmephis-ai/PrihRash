@@ -14,6 +14,7 @@ import {
   InitialControlledRebuildJobError,
   runInitialControlledRebuildJobFromEnvironment,
   runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment,
+  type InitialControlledRebuildApplicationFailureCode,
   type InitialControlledRebuildJobErrorCode,
   type InitialControlledRebuildJobObserver,
   type InitialControlledRebuildRuntimePhase,
@@ -34,6 +35,7 @@ export type YandexInitialControlledRebuildRuntimeFailure = Readonly<{
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT';
   phase: InitialControlledRebuildApplicationPhase | null;
   bootstrapPhase: InitialBootstrapApplicationPhase | null;
+  readonly applicationFailureCode?: InitialControlledRebuildApplicationFailureCode;
 }>;
 
 export type YandexInitialControlledRebuildFunctionResult =
@@ -138,6 +140,7 @@ function runtimeFailure(
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT',
   phase: InitialControlledRebuildApplicationPhase | null = null,
   bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
+  applicationFailureCode: InitialControlledRebuildApplicationFailureCode | null = null,
 ): Readonly<YandexInitialControlledRebuildRuntimeFailure> {
   return Object.freeze({
     status: 'FAIL' as const,
@@ -145,6 +148,7 @@ function runtimeFailure(
     jobCode,
     phase,
     bootstrapPhase,
+    ...(applicationFailureCode === null ? {} : { applicationFailureCode }),
   });
 }
 
@@ -263,7 +267,7 @@ export async function executeYandexInitialControlledRebuildFunction(
     return sanitizeApplicationResult(await runJob(environment));
   } catch (error) {
     if (error instanceof InitialControlledRebuildJobError) {
-      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase, error.applicationFailureCode);
     }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');
@@ -291,7 +295,7 @@ export async function executeYandexInitialControlledRebuildSwapRecoveryDiagnosti
     return sanitizeSwapRecoveryDiagnosticResult(await runJob(environment));
   } catch (error) {
     if (error instanceof InitialControlledRebuildJobError) {
-      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase, error.applicationFailureCode);
     }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');
