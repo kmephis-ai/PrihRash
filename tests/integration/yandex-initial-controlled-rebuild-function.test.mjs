@@ -167,6 +167,40 @@ test('controlled rebuild preserves bounded reconciliation-read bootstrap failure
   );
 });
 
+test('controlled rebuild exposes only allowlisted typed YDB subtype', async () => {
+  assert.deepEqual(
+    await execute(new InitialControlledRebuildJobError(
+      'APPLICATION_FAILED',
+      'PREPARATION',
+      'RECONCILIATION_READ',
+      'QUERY_EXECUTION_YDB_UNAVAILABLE',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+      ydbDataFailureCode: 'QUERY_EXECUTION_YDB_UNAVAILABLE',
+    },
+  );
+  assert.deepEqual(
+    await execute(new InitialControlledRebuildJobError(
+      'APPLICATION_FAILED',
+      'PREPARATION',
+      'RECONCILIATION_READ',
+      'PRIVATE_YDB_FAILURE',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+    },
+  );
+});
+
 test('controlled rebuild runtime errors retain only job code and controlled phase', async () => {
   assert.deepEqual(
     await execute(new InitialControlledRebuildJobError('APPLICATION_FAILED', 'SWAP_MUTATION')),
