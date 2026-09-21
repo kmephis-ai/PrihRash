@@ -62,38 +62,33 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
 });
 
 
-test('R1 readiness resource-limits-only mode is metadata-only, fail-closed and privacy-safe', async () => {
+test('R1 readiness resource-limits-only mode uses existing runtime SA without IAM widening or YDB mutation', async () => {
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /resource_limits_only:/);
   assert.match(workflow, /RESOURCE_LIMITS_ONLY: \${{ inputs\.resource_limits_only/);
-  assert.match(workflow, /env\.RESOURCE_LIMITS_ONLY == '1'/);
-  for (const step of [
-    'Setup Node.js 22',
-    'Install exact-source invoke dependencies',
-    'Restore verified exact-source artifact',
-    'Fail closed if provider boundary is unsafe',
-    'Deploy readiness-only function version',
-    'Re-verify private trigger-free boundary',
-    'Invoke exact readiness tag',
-  ]) {
-    const guardedStep = `- name: ${step}` + "\n        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}";
-    assert.equal(workflow.includes(guardedStep), true);
-  }
-  assert.match(workflow, /yc ydb database list --folder-id "\$YC_FOLDER_ID"/);
-  assert.match(workflow, /yc ydb database get --id "\$database_id"/);
-  assert.match(workflow, /--format json-rest --retry 0 --no-user-output/);
-  assert.match(workflow, /databaseDiscovery:"SINGLE"/);
-  assert.match(workflow, /SINGLE.*NONE.*AMBIGUOUS.*READ_FAILED/s);
-  assert.match(workflow, /mode:"SERVERLESS"/);
-  assert.match(workflow, /SERVERLESS.*DEDICATED.*UNKNOWN/s);
-  assert.match(workflow, /enableThrottlingRcuLimit/);
-  assert.match(workflow, /throttlingRcuLimit/);
-  assert.match(workflow, /provisionedRcuLimit/);
+  assert.match(workflow, /Fail closed if resource-limits runtime boundary is unsafe/);
+  assert.match(workflow, /YDB_RESOURCE_LIMITS_MAIN_MOVED_BEFORE_DEPLOY/);
+  assert.match(workflow, /YDB_RESOURCE_LIMITS_MAIN_MOVED_BEFORE_INVOKE/);
+  assert.match(workflow, /RUNTIME_SERVICE_ACCOUNT_NAME:\s*prihrash-backend/);
+  assert.match(workflow, /--service-account-id "\$PRIHRASH_YC_FUNCTION_SA_ID"/);
+  assert.match(workflow, /--entrypoint index\.resourceLimitsHandler/);
+  assert.match(workflow, /--tags r1-ydb-resource-limits/);
+  assert.match(workflow, /--environment "PRIHRASH_YC_FOLDER_ID=\${YC_FOLDER_ID}"/);
+  assert.match(workflow, /--metadata-options gce-http-endpoint=disabled,aws-v1-http-endpoint=disabled/);
+  assert.match(workflow, /npm run resource-limits:invoke \| tee "\$tmp"/);
   assert.match(workflow, /r1-ydb-resource-limits-evidence-\$\{\{ github\.run_id \}\}/);
-  assert.doesNotMatch(workflow, /yc ydb database (?:update|create|delete|move)\b/);
-  assert.doesNotMatch(workflow, /cat .*database(?:s)?\.json/);
-  assert.doesNotMatch(workflow, /echo .*\$database_id/);
+  assert.match(workflow, /YDB_RESOURCE_LIMITS_CLASSIFIED/);
+  assert.match(workflow, /SINGLE.*NONE.*AMBIGUOUS.*READ_FAILED/s);
+  assert.match(workflow, /SERVERLESS.*DEDICATED.*UNKNOWN/s);
+  assert.doesNotMatch(workflow, /yc ydb database (?:list|get|update|create|delete|move)\b/);
+  assert.doesNotMatch(workflow, /(?:add|set)-access-binding|allow-unauthenticated-invoke/);
+
+  const resourceDeploy = workflow.slice(
+    workflow.indexOf('- name: Deploy resource-limits read-only function version'),
+    workflow.indexOf('- name: Fail closed if provider boundary is unsafe'),
+  );
+  assert.doesNotMatch(resourceDeploy, /--secret\b|PRIHRASH_GOOGLE_|PRIHRASH_YDB_CONNECTION_STRING/);
 });
 
 test('R1 readiness persists only allowlisted enum-only evidence while preserving invoke failure', async () => {
@@ -155,8 +150,8 @@ test('R1 readiness workflow proves the exact WIF service account can invoke whil
   const workflow = await text(WORKFLOW);
 
   assert.equal((workflow.match(/READINESS_PROVIDER_INVOKER_BINDING_MISSING/g) ?? []).length, 2);
-  assert.equal((workflow.match(/--arg expected "\$YC_WIF_SERVICE_ACCOUNT_ID"/g) ?? []).length, 2);
-  assert.equal((workflow.match(/\.type == "serviceAccount" and \.id == \$expected/g) ?? []).length, 2);
+  assert.equal((workflow.match(/--arg expected "\$YC_WIF_SERVICE_ACCOUNT_ID"/g) ?? []).length, 3);
+  assert.equal((workflow.match(/\.type == "serviceAccount" and \.id == \$expected/g) ?? []).length, 3);
   assert.match(workflow, /allUsers/);
   assert.match(workflow, /allAuthenticatedUsers/);
   assert.doesNotMatch(workflow, /add-access-binding|set-access-bindings|allow-unauthenticated-invoke/);

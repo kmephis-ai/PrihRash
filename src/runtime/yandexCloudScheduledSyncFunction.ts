@@ -4,6 +4,10 @@ import {
 } from './scheduledSyncJob.js';
 import type { ScheduledSyncInvocationResult } from '../migration/scheduledSyncInvocation.js';
 import {
+  readYdbResourceLimitsWithRuntimeServiceAccount,
+  type YdbResourceLimitsEvidence,
+} from './yandexCloudYdbResourceLimits.js';
+import {
   ScheduledSyncReadinessError,
   runScheduledSyncReadinessProbeFromEnvironment,
   type ScheduledSyncReadinessErrorCode,
@@ -104,4 +108,11 @@ export async function readinessHandler(
     process.env,
     runScheduledSyncReadinessProbeFromEnvironment,
   );
+}
+
+export async function resourceLimitsHandler(
+  _event: unknown,
+  context: unknown,
+): Promise<Readonly<YdbResourceLimitsEvidence>> {
+  return readYdbResourceLimitsWithRuntimeServiceAccount(process.env, context);
 }
