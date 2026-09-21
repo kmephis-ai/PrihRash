@@ -172,6 +172,15 @@ const STAGING_CONTROLLED_PREPARATION_EVIDENCE = new Set<NonNullable<InitialBoots
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationRetryEvidence']>>([
+  'UNOBSERVED',
+  'NO_RETRY',
+  'RETRIED',
+  'NON_RETRYABLE',
+  'EXHAUSTED',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -264,10 +273,12 @@ function validClassification(
   const sourceDecodeDiagnostic = value.stagingSourceDecodeEvidence;
   const exactRevisionDiagnostic = value.stagingExactRevisionEvidence;
   const controlledPreparationDiagnostic = value.stagingControlledPreparationEvidence;
+  const controlledPreparationRetryDiagnostic = value.stagingControlledPreparationRetryEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
       || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
-      || controlledPreparationDiagnostic !== undefined) return false;
+      || controlledPreparationDiagnostic !== undefined
+      || controlledPreparationRetryDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
       diagnostic !== undefined
@@ -277,6 +288,8 @@ function validClassification(
       || exactRevisionDiagnostic !== undefined
       || controlledPreparationDiagnostic === undefined
       || !STAGING_CONTROLLED_PREPARATION_EVIDENCE.has(controlledPreparationDiagnostic)
+      || controlledPreparationRetryDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE.has(controlledPreparationRetryDiagnostic)
     ) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
@@ -284,7 +297,10 @@ function validClassification(
     if (retirementDiagnostic === undefined || !STAGING_RETIREMENT_EVIDENCE.has(retirementDiagnostic)) return false;
     if (sourceDecodeDiagnostic === undefined || !validSourceDecodeEvidence(sourceDecodeDiagnostic)) return false;
     if (exactRevisionDiagnostic === undefined || !STAGING_EXACT_REVISION_EVIDENCE.has(exactRevisionDiagnostic)) return false;
-    if (controlledPreparationDiagnostic !== undefined) return false;
+    if (
+      controlledPreparationDiagnostic !== undefined
+      || controlledPreparationRetryDiagnostic !== undefined
+    ) return false;
   } else if (
     diagnostic !== undefined
     || durableDiagnostic !== undefined
@@ -292,6 +308,7 @@ function validClassification(
     || sourceDecodeDiagnostic !== undefined
     || exactRevisionDiagnostic !== undefined
     || controlledPreparationDiagnostic !== undefined
+    || controlledPreparationRetryDiagnostic !== undefined
   ) {
     return false;
   }
@@ -345,6 +362,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingControlledPreparationEvidence === undefined
         ? {}
         : { stagingControlledPreparationEvidence: classification.stagingControlledPreparationEvidence }),
+      ...(classification.stagingControlledPreparationRetryEvidence === undefined
+        ? {}
+        : { stagingControlledPreparationRetryEvidence: classification.stagingControlledPreparationRetryEvidence }),
     });
   } catch (error) {
     if (
