@@ -8,8 +8,9 @@ import {
 } from '../../dist/runtime/yandexCloudYdbResourceLimits.js';
 
 const FOLDER_ID = 'syntheticfolderid';
+const PROVIDER_SCOPE = 'syntheticcloudid';
 const DATABASE_ID = 'syntheticdatabaseid';
-const CONNECTION_STRING = `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}`;
+const CONNECTION_STRING = `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}`;
 const ENVIRONMENT = Object.freeze({
   PRIHRASH_YC_FOLDER_ID: FOLDER_ID,
   PRIHRASH_YDB_CONNECTION_STRING: CONNECTION_STRING,
@@ -45,12 +46,17 @@ function database(overrides = {}) {
   };
 }
 
-test('connection parser derives exact database id only from canonical managed-YDB path in the expected folder', () => {
-  assert.equal(parseYdbDatabaseIdFromConnectionString(CONNECTION_STRING, FOLDER_ID), DATABASE_ID);
+test('connection parser derives exact database id from current managed-YDB path without treating provider scope as folder id', () => {
+  assert.equal(parseYdbDatabaseIdFromConnectionString(CONNECTION_STRING), DATABASE_ID);
   assert.equal(
     parseYdbDatabaseIdFromConnectionString(
-      `grpcs://synthetic.invalid:2135/?database=%2Fru-central1%2F${FOLDER_ID}%2F${DATABASE_ID}`,
-      FOLDER_ID,
+      `grpcs://synthetic.invalid:2135/?database=%2Fru-central1%2F${PROVIDER_SCOPE}%2F${DATABASE_ID}`,
+    ),
+    DATABASE_ID,
+  );
+  assert.equal(
+    parseYdbDatabaseIdFromConnectionString(
+      `grpcs://synthetic.invalid:2135/?database=/ru-central1/differentcloudid/${DATABASE_ID}`,
     ),
     DATABASE_ID,
   );
@@ -60,18 +66,17 @@ test('connection parser derives exact database id only from canonical managed-YD
     '',
     ' synthetic ',
     'not-a-url',
-    `grpc://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}`,
-    `grpcs://user@synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}/extra`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/foreignfolder/${DATABASE_ID}`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}&database=/ru-central1/${FOLDER_ID}/otherdb`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/bad%2Fid`,
-    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${FOLDER_ID}/${DATABASE_ID}#private`,
+    `grpc://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}`,
+    `grpcs://user@synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}/extra`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1//${DATABASE_ID}`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}&database=/ru-central1/${PROVIDER_SCOPE}/otherdb`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/bad%2Fid`,
+    `grpcs://synthetic.invalid:2135/?database=/ru-central1/${PROVIDER_SCOPE}/${DATABASE_ID}#private`,
   ]) {
-    assert.equal(parseYdbDatabaseIdFromConnectionString(value, FOLDER_ID), null);
+    assert.equal(parseYdbDatabaseIdFromConnectionString(value), null);
   }
-  assert.equal(parseYdbDatabaseIdFromConnectionString(CONNECTION_STRING, ' foreign '), null);
 });
 
 test('runtime-SA resource limits probe performs one exact Database.Get and exposes only safe serverless limits', async () => {

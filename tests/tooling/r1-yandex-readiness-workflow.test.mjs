@@ -99,7 +99,8 @@ test('R1 readiness resource-limits-only mode uses existing runtime SA without IA
   assert.match(probe, /parseYdbDatabaseIdFromConnectionString/);
   assert.match(probe, /parsed\.protocol !== 'grpcs:'/);
   assert.match(probe, /parsed\.searchParams\.getAll\('database'\)/);
-  assert.match(probe, /folderId !== expectedFolderId/);
+  assert.match(probe, /const providerScope = segments\[2\]/);
+  assert.doesNotMatch(probe, /expectedFolderId/);
   assert.match(probe, /new URL\(`\$\{YANDEX_YDB_DATABASES_API\}\/\$\{encodeURIComponent\(databaseId\)\}`\)/);
   assert.match(probe, /database\.id !== databaseId/);
   assert.match(probe, /database\.folderId !== folderId/);

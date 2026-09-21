@@ -134,9 +134,8 @@ function providerPathSegment(value: string): boolean {
 
 export function parseYdbDatabaseIdFromConnectionString(
   connectionString: unknown,
-  expectedFolderId: unknown,
 ): string | null {
-  if (!nonBlank(connectionString) || !nonBlank(expectedFolderId)) return null;
+  if (!nonBlank(connectionString)) return null;
 
   let parsed: URL;
   try {
@@ -161,12 +160,13 @@ export function parseYdbDatabaseIdFromConnectionString(
   const segments = databasePath.split('/');
   if (segments.length !== 4 || segments[0] !== '') return null;
   const region = segments[1];
-  const folderId = segments[2];
+  const providerScope = segments[2];
   const databaseId = segments[3];
   if (
     !nonBlank(region)
     || !providerPathSegment(region)
-    || folderId !== expectedFolderId
+    || !nonBlank(providerScope)
+    || !providerPathSegment(providerScope)
     || !nonBlank(databaseId)
     || !providerPathSegment(databaseId)
   ) {
@@ -183,7 +183,6 @@ export async function readYdbResourceLimitsWithRuntimeServiceAccount(
   const folderId = environment.PRIHRASH_YC_FOLDER_ID;
   const databaseId = parseYdbDatabaseIdFromConnectionString(
     environment.PRIHRASH_YDB_CONNECTION_STRING,
-    folderId,
   );
   const contextRecord = record(context);
   const token = contextRecord === null ? null : record(contextRecord.token);
