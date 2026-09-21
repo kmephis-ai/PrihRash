@@ -79,6 +79,44 @@ test('connection parser derives exact database id from current managed-YDB path 
   }
 });
 
+test('serverless resource limits apply proto3 implicit defaults only when scalar fields are omitted', async () => {
+  const omitted = await readYdbResourceLimitsWithRuntimeServiceAccount(
+    ENVIRONMENT,
+    CONTEXT,
+    async () => response(database({ serverlessDatabase: {} })),
+  );
+  assert.deepEqual(omitted, {
+    status: 'PASS',
+    code: 'YDB_RESOURCE_LIMITS_CLASSIFIED',
+    databaseDiscovery: 'SINGLE',
+    failureStage: 'NONE',
+    mode: 'SERVERLESS',
+    enableThrottlingRcuLimit: false,
+    throttlingRcuLimit: 0,
+    provisionedRcuLimit: 0,
+  });
+
+  const mixed = await readYdbResourceLimitsWithRuntimeServiceAccount(
+    ENVIRONMENT,
+    CONTEXT,
+    async () => response(database({
+      serverlessDatabase: {
+        throttlingRcuLimit: '42',
+      },
+    })),
+  );
+  assert.deepEqual(mixed, {
+    status: 'PASS',
+    code: 'YDB_RESOURCE_LIMITS_CLASSIFIED',
+    databaseDiscovery: 'SINGLE',
+    failureStage: 'NONE',
+    mode: 'SERVERLESS',
+    enableThrottlingRcuLimit: false,
+    throttlingRcuLimit: 42,
+    provisionedRcuLimit: 0,
+  });
+});
+
 test('runtime-SA resource limits probe performs one exact Database.Get and exposes only safe serverless limits', async () => {
   const calls = [];
   const result = await readYdbResourceLimitsWithRuntimeServiceAccount(
@@ -149,6 +187,9 @@ test('runtime-SA exact Database.Get fails closed for invalid target, malformed l
     [database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '-1', provisionedRcuLimit: '7' } }), 'LIMITS_MALFORMED'],
     [database({ serverlessDatabase: { enableThrottlingRcuLimit: true, throttlingRcuLimit: '9007199254740992', provisionedRcuLimit: '7' } }), 'LIMITS_MALFORMED'],
     [database({ serverlessDatabase: { enableThrottlingRcuLimit: 'true', throttlingRcuLimit: '1', provisionedRcuLimit: '1' } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: { enableThrottlingRcuLimit: null, throttlingRcuLimit: '1', provisionedRcuLimit: '1' } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: { throttlingRcuLimit: null } }), 'LIMITS_MALFORMED'],
+    [database({ serverlessDatabase: { provisionedRcuLimit: null } }), 'LIMITS_MALFORMED'],
     [database({ serverlessDatabase: {}, dedicatedDatabase: {} }), 'LIMITS_MALFORMED'],
   ];
 

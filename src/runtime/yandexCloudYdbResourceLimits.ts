@@ -76,6 +76,16 @@ function parseNonnegativeSafeInteger(value: unknown): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function parseProto3ImplicitBoolean(value: unknown): boolean | null {
+  if (value === undefined) return false;
+  return typeof value === 'boolean' ? value : null;
+}
+
+function parseProto3ImplicitNonnegativeSafeInteger(value: unknown): number | null {
+  if (value === undefined) return 0;
+  return parseNonnegativeSafeInteger(value);
+}
+
 function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEvidence> {
   const value = record(database);
   if (value === null) return emptyEvidence('READ_FAILED', 'MALFORMED_JSON');
@@ -85,10 +95,10 @@ function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEv
   if (serverless !== null && dedicated !== null) return emptyEvidence('READ_FAILED', 'LIMITS_MALFORMED');
 
   if (serverless !== null) {
-    const enabled = serverless.enableThrottlingRcuLimit;
-    const throttling = parseNonnegativeSafeInteger(serverless.throttlingRcuLimit);
-    const provisioned = parseNonnegativeSafeInteger(serverless.provisionedRcuLimit);
-    if (typeof enabled !== 'boolean' || throttling === null || provisioned === null) {
+    const enabled = parseProto3ImplicitBoolean(serverless.enableThrottlingRcuLimit);
+    const throttling = parseProto3ImplicitNonnegativeSafeInteger(serverless.throttlingRcuLimit);
+    const provisioned = parseProto3ImplicitNonnegativeSafeInteger(serverless.provisionedRcuLimit);
+    if (enabled === null || throttling === null || provisioned === null) {
       return emptyEvidence('READ_FAILED', 'LIMITS_MALFORMED');
     }
     return Object.freeze({
