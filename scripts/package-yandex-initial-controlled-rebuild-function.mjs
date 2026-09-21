@@ -66,6 +66,10 @@ export function initialControlledRebuildHandler(event, context) {
 export function initialControlledRebuildSwapRecoveryDiagnosticHandler(event, context) {
   return invokeRuntimeHandler('initialControlledRebuildSwapRecoveryDiagnosticHandler', event, context);
 }
+
+export function initialControlledRebuildPreparationDiagnosticHandler(event, context) {
+  return invokeRuntimeHandler('initialControlledRebuildPreparationDiagnosticHandler', event, context);
+}
 `;
 
 await rm(ARTIFACT_ROOT, { recursive: true, force: true });
