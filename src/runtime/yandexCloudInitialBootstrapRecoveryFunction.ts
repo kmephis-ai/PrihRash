@@ -24,6 +24,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingRetirementEvidence?: InitialBootstrapRecoveryJobResult['stagingRetirementEvidence'];
       stagingSourceDecodeEvidence?: InitialBootstrapRecoveryJobResult['stagingSourceDecodeEvidence'];
       stagingExactRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingExactRevisionEvidence'];
+      stagingControlledPreparationEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -124,6 +125,19 @@ const STAGING_EXACT_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapReco
   'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence']>>([
+  'READY',
+  'BASELINE_EXISTS',
+  'VALIDATION_BLOCKED',
+  'YDB_QUERY_TIMEOUT',
+  'YDB_DATA_FAILURE',
+  'DURABLE_RECONCILIATION_FAILURE',
+  'REVISION_EVIDENCE_FAILURE',
+  'PRIVATE_EVIDENCE_FAILURE',
+  'APPLICATION_FAILURE',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -201,7 +215,11 @@ const RECOVERY_REQUIRED_REASONS = new Set<InitialBootstrapRecoverySurfaceReason>
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
 
-function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>, surfaceOnly = false): boolean {
+function validClassification(
+  value: Readonly<InitialBootstrapRecoveryJobResult>,
+  surfaceOnly = false,
+  controlledPreparationOnly = false,
+): boolean {
   if (value.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly) {
     if (value.validatedSourceEvidence === undefined || !VALIDATED_SOURCE_EVIDENCE.has(value.validatedSourceEvidence)) return false;
     if (!validStaleValidatedRecoveryGate(value.staleValidatedRecoveryGate)) return false;
@@ -211,21 +229,35 @@ function validClassification(value: Readonly<InitialBootstrapRecoveryJobResult>,
   const retirementDiagnostic = value.stagingRetirementEvidence;
   const sourceDecodeDiagnostic = value.stagingSourceDecodeEvidence;
   const exactRevisionDiagnostic = value.stagingExactRevisionEvidence;
+  const controlledPreparationDiagnostic = value.stagingControlledPreparationEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
-      || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined) return false;
+      || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
+      || controlledPreparationDiagnostic !== undefined) return false;
+  } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
+    if (
+      diagnostic !== undefined
+      || durableDiagnostic !== undefined
+      || retirementDiagnostic !== undefined
+      || sourceDecodeDiagnostic !== undefined
+      || exactRevisionDiagnostic !== undefined
+      || controlledPreparationDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_EVIDENCE.has(controlledPreparationDiagnostic)
+    ) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
     if (durableDiagnostic === undefined || !STAGING_DURABLE_REVISION_EVIDENCE.has(durableDiagnostic)) return false;
     if (retirementDiagnostic === undefined || !STAGING_RETIREMENT_EVIDENCE.has(retirementDiagnostic)) return false;
     if (sourceDecodeDiagnostic === undefined || !validSourceDecodeEvidence(sourceDecodeDiagnostic)) return false;
     if (exactRevisionDiagnostic === undefined || !STAGING_EXACT_REVISION_EVIDENCE.has(exactRevisionDiagnostic)) return false;
+    if (controlledPreparationDiagnostic !== undefined) return false;
   } else if (
     diagnostic !== undefined
     || durableDiagnostic !== undefined
     || retirementDiagnostic !== undefined
     || sourceDecodeDiagnostic !== undefined
     || exactRevisionDiagnostic !== undefined
+    || controlledPreparationDiagnostic !== undefined
   ) {
     return false;
   }
@@ -240,7 +272,11 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
 ): Promise<Readonly<YandexInitialBootstrapRecoveryFunctionResult>> {
   try {
     const classification = await runJob(environment);
-    if (!validClassification(classification, environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1')) {
+    if (!validClassification(
+      classification,
+      environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
+      environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
+    )) {
       return Object.freeze({
         status: 'FAIL' as const,
         code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' as const,
@@ -272,6 +308,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingExactRevisionEvidence === undefined
         ? {}
         : { stagingExactRevisionEvidence: classification.stagingExactRevisionEvidence }),
+      ...(classification.stagingControlledPreparationEvidence === undefined
+        ? {}
+        : { stagingControlledPreparationEvidence: classification.stagingControlledPreparationEvidence }),
     });
   } catch (error) {
     if (
