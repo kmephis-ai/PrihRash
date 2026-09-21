@@ -5,6 +5,7 @@ import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6Dat
 import { InitialBootstrapApplicationError } from '../../dist/migration/initialBootstrapApplication.js';
 import {
   classifyInitialBootstrapControlledPreparationFailure,
+  classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
   createInitialBootstrapControlledPreparationQueryErrorTracker,
   createInitialBootstrapControlledPreparationRetryTracker,
@@ -154,9 +155,61 @@ test('controlled preparation query-error classifier exposes only bounded error c
   assert.equal(classifyInitialBootstrapControlledPreparationQueryError(malformed), 'DIAGNOSTIC_FAILED');
 });
 
+test('controlled preparation gRPC classifier exposes only standard status names', () => {
+  class ClientError extends Error {
+    constructor(code) {
+      super('private');
+      this.code = code;
+      Object.defineProperty(this, 'details', {
+        get() { throw new Error('details must not be read'); },
+      });
+      Object.defineProperty(this, 'metadata', {
+        get() { throw new Error('metadata must not be read'); },
+      });
+    }
+  }
+  const cases = [
+    [1, 'CANCELLED'],
+    [2, 'UNKNOWN'],
+    [3, 'INVALID_ARGUMENT'],
+    [4, 'DEADLINE_EXCEEDED'],
+    [5, 'NOT_FOUND'],
+    [6, 'ALREADY_EXISTS'],
+    [7, 'PERMISSION_DENIED'],
+    [8, 'RESOURCE_EXHAUSTED'],
+    [9, 'FAILED_PRECONDITION'],
+    [10, 'ABORTED'],
+    [11, 'OUT_OF_RANGE'],
+    [12, 'UNIMPLEMENTED'],
+    [13, 'INTERNAL'],
+    [14, 'UNAVAILABLE'],
+    [15, 'DATA_LOSS'],
+    [16, 'UNAUTHENTICATED'],
+  ];
+  for (const [code, expected] of cases) {
+    assert.equal(classifyInitialBootstrapControlledPreparationGrpcStatus(new ClientError(code)), expected);
+  }
+  assert.equal(classifyInitialBootstrapControlledPreparationGrpcStatus(new ClientError(99)), 'UNRECOGNIZED');
+  assert.equal(classifyInitialBootstrapControlledPreparationGrpcStatus(new Error('private')), 'NON_GRPC');
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationGrpcStatus({ name: 'ClientError', code: 14 }),
+    'NON_GRPC',
+  );
+
+  class MalformedClientError extends Error {
+    get code() { throw new Error('private code access failure'); }
+  }
+  Object.defineProperty(MalformedClientError, 'name', { value: 'ClientError' });
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationGrpcStatus(new MalformedClientError()),
+    'DIAGNOSTIC_FAILED',
+  );
+});
+
 test('controlled preparation query-error tracker reads only context.error and fails closed', () => {
   const tracker = createInitialBootstrapControlledPreparationQueryErrorTracker();
   assert.equal(tracker.evidence(), 'UNOBSERVED');
+  assert.equal(tracker.grpcStatusEvidence(), 'UNOBSERVED');
 
   class YDBError extends Error {
     constructor() {
@@ -176,16 +229,36 @@ test('controlled preparation query-error tracker reads only context.error and fa
   };
   assert.doesNotThrow(() => tracker.observeErrorContext(context));
   assert.equal(tracker.evidence(), 'YDB_STATUS');
+  assert.equal(tracker.grpcStatusEvidence(), 'NON_GRPC');
+
+  class ClientError extends Error {
+    constructor() {
+      super('private');
+      this.code = 14;
+      Object.defineProperty(this, 'details', {
+        get() { throw new Error('details must not be read'); },
+      });
+      Object.defineProperty(this, 'metadata', {
+        get() { throw new Error('metadata must not be read'); },
+      });
+    }
+  }
+  tracker.observeErrorContext({ error: new ClientError() });
+  assert.equal(tracker.evidence(), 'GRPC_STATUS');
+  assert.equal(tracker.grpcStatusEvidence(), 'UNAVAILABLE');
 
   const timeoutError = new Error('private');
   timeoutError.name = 'TimeoutError';
   tracker.observeErrorContext({ error: timeoutError });
   assert.equal(tracker.evidence(), 'ABORT_TIMEOUT');
+  assert.equal(tracker.grpcStatusEvidence(), 'NON_GRPC');
 
   tracker.observeErrorContext({});
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+  assert.equal(tracker.grpcStatusEvidence(), 'DIAGNOSTIC_FAILED');
   tracker.observeErrorContext({ error: new Error('later event cannot clear fail-closed state') });
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+  assert.equal(tracker.grpcStatusEvidence(), 'DIAGNOSTIC_FAILED');
 });
 
 const config = Object.freeze({
@@ -337,6 +410,7 @@ function runtime(overrides = {}) {
           preparationEvidence: 'READY',
           retryEvidence: 'UNOBSERVED',
           queryErrorEvidence: 'UNOBSERVED',
+        grpcStatusEvidence: 'UNOBSERVED',
         });
       },
       ...overrides,
@@ -698,6 +772,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         preparationEvidence: 'YDB_QUERY_TIMEOUT',
         retryEvidence: 'RETRIED',
         queryErrorEvidence: 'YDB_STATUS',
+        grpcStatusEvidence: 'NON_GRPC',
       });
     },
   });
@@ -709,6 +784,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
       stagingControlledPreparationRetryEvidence: 'RETRIED',
       stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
+      stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
     },
   );
   assert.equal(controlledPreparationCalls, 1);

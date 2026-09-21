@@ -79,6 +79,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE=/);
+  assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE=/);
   assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_FAILED/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE/);
@@ -97,9 +98,14 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_RETRY_EVIDENCE_INVALID/);
   assert.match(workflow, /UNOBSERVED\|ABORT_TIMEOUT\|YDB_STATUS\|GRPC_STATUS\|CLIENT_ERROR\|OTHER\|DIAGNOSTIC_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE_INVALID/);
+  assert.match(workflow, /CANCELLED\|UNKNOWN\|INVALID_ARGUMENT\|DEADLINE_EXCEEDED\|NOT_FOUND/);
+  assert.match(workflow, /PERMISSION_DENIED\|RESOURCE_EXHAUSTED\|FAILED_PRECONDITION\|ABORTED/);
+  assert.match(workflow, /INTERNAL\|UNAVAILABLE\|DATA_LOSS\|UNAUTHENTICATED\|NON_GRPC\|UNRECOGNIZED\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation\.json/);
   assert.match(workflow, /controlled-preparation-retry\.json/);
   assert.match(workflow, /controlled-preparation-query-error\.json/);
+  assert.match(workflow, /controlled-preparation-grpc-status\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
 
@@ -161,6 +167,11 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.match(runtime, /queryErrorChannel\.subscribe\(onQueryError\)/);
   assert.match(runtime, /queryErrorChannel\.unsubscribe\(onQueryError\)/);
   assert.doesNotMatch(runtime, /Reflect\.get\(candidate, '(?:text|query|parameters|sessionId|nodeId|txId|driver|database|address)'\)/);
+  assert.doesNotMatch(runtime, /Reflect\.get\(candidate, '(?:message|details|metadata|stack)'\)/);
+  assert.match(runtime, /case 4: return 'DEADLINE_EXCEEDED'/);
+  assert.match(runtime, /case 8: return 'RESOURCE_EXHAUSTED'/);
+  assert.match(runtime, /case 14: return 'UNAVAILABLE'/);
+  assert.match(runtime, /case 16: return 'UNAUTHENTICATED'/);
   assert.match(runtime, /\.subscribe\(onAttemptCompleted\)/);
   assert.match(runtime, /\.unsubscribe\(onAttemptCompleted\)/);
   assert.match(runtime, /\.subscribe\(onExhausted\)/);
