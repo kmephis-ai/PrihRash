@@ -1,3 +1,5 @@
+import { channel } from 'node:diagnostics_channel';
+
 import { createCanonicalSourceDigest, type CanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
 import type { AdapterKey } from '../integration/google/sourceSchema.js';
 import {
@@ -117,6 +119,19 @@ export type InitialBootstrapControlledPreparationDiagnostic =
   | `APPLICATION_${InitialBootstrapApplicationErrorCode}`
   | 'DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationRetryEvidence =
+  | 'UNOBSERVED'
+  | 'NO_RETRY'
+  | 'RETRIED'
+  | 'NON_RETRYABLE'
+  | 'EXHAUSTED'
+  | 'DIAGNOSTIC_FAILED';
+
+export interface InitialBootstrapControlledPreparationResult {
+  readonly preparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
+  readonly retryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
+}
+
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly validatedSourceEvidence?: InitialValidatedSourceDiagnostic;
   readonly staleValidatedRecoveryGate?: InitialStaleValidatedRecoveryGateResult;
@@ -126,6 +141,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
   readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
   readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
+  readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -177,7 +193,7 @@ export interface InitialBootstrapRecoveryJobRuntime {
     config: Readonly<InitialBootstrapRecoveryJobConfig>,
     lease: Readonly<GoogleSheetsFullSnapshotLease>,
     digest: Readonly<CanonicalSourceDigest>,
-  ): Promise<InitialBootstrapControlledPreparationDiagnostic>;
+  ): Promise<Readonly<InitialBootstrapControlledPreparationResult>>;
 }
 
 
@@ -204,6 +220,143 @@ function buildControlledPreparationObservation(
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
+const YDB_RETRY_ATTEMPT_COMPLETED_CHANNEL = 'ydb:retry.attempt.completed' as const;
+const YDB_RETRY_EXHAUSTED_CHANNEL = 'ydb:retry.exhausted' as const;
+const YDB_RETRY_OUTCOMES = new Set(['success', 'retried', 'non_retryable', 'exhausted']);
+
+interface InitialBootstrapControlledPreparationRetryTracker {
+  observeAttemptCompleted(message: unknown): void;
+  observeExhausted(message: unknown): void;
+  markDiagnosticFailed(): void;
+  evidence(): InitialBootstrapControlledPreparationRetryEvidence;
+}
+
+function retryRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+export function createInitialBootstrapControlledPreparationRetryTracker(): InitialBootstrapControlledPreparationRetryTracker {
+  let observed = false;
+  let retried = false;
+  let nonRetryable = false;
+  let exhausted = false;
+  let diagnosticFailed = false;
+
+  return Object.freeze({
+    observeAttemptCompleted(message: unknown) {
+      try {
+        const candidate = retryRecord(message);
+        if (candidate === null) {
+          diagnosticFailed = true;
+          return;
+        }
+        const attempt = Reflect.get(candidate, 'attempt');
+        const idempotent = Reflect.get(candidate, 'idempotent');
+        const outcome = Reflect.get(candidate, 'outcome');
+        if (
+          typeof attempt !== 'number'
+          || !Number.isSafeInteger(attempt)
+          || attempt < 1
+          || typeof idempotent !== 'boolean'
+          || typeof outcome !== 'string'
+          || !YDB_RETRY_OUTCOMES.has(outcome)
+        ) {
+          diagnosticFailed = true;
+          return;
+        }
+        observed = true;
+        if (outcome === 'exhausted') exhausted = true;
+        if (outcome === 'non_retryable') nonRetryable = true;
+        if (outcome === 'retried' || attempt > 1) retried = true;
+      } catch {
+        diagnosticFailed = true;
+      }
+    },
+    observeExhausted(message: unknown) {
+      try {
+        const candidate = retryRecord(message);
+        if (candidate === null) {
+          diagnosticFailed = true;
+          return;
+        }
+        const attempts = Reflect.get(candidate, 'attempts');
+        const totalDuration = Reflect.get(candidate, 'totalDuration');
+        if (
+          typeof attempts !== 'number'
+          || !Number.isSafeInteger(attempts)
+          || attempts < 1
+          || typeof totalDuration !== 'number'
+          || !Number.isFinite(totalDuration)
+          || totalDuration < 0
+        ) {
+          diagnosticFailed = true;
+          return;
+        }
+        observed = true;
+        exhausted = true;
+      } catch {
+        diagnosticFailed = true;
+      }
+    },
+    markDiagnosticFailed() {
+      diagnosticFailed = true;
+    },
+    evidence() {
+      if (diagnosticFailed) return 'DIAGNOSTIC_FAILED';
+      if (exhausted) return 'EXHAUSTED';
+      if (nonRetryable) return 'NON_RETRYABLE';
+      if (retried) return 'RETRIED';
+      if (observed) return 'NO_RETRY';
+      return 'UNOBSERVED';
+    },
+  });
+}
+
+function subscribeInitialBootstrapControlledPreparationRetryEvidence(
+  tracker: InitialBootstrapControlledPreparationRetryTracker,
+): () => void {
+  let attemptChannel: ReturnType<typeof channel> | null = null;
+  let exhaustedChannel: ReturnType<typeof channel> | null = null;
+  let attemptSubscribed = false;
+  let exhaustedSubscribed = false;
+  const onAttemptCompleted = (message: unknown) => tracker.observeAttemptCompleted(message);
+  const onExhausted = (message: unknown) => tracker.observeExhausted(message);
+
+  try {
+    attemptChannel = channel(YDB_RETRY_ATTEMPT_COMPLETED_CHANNEL);
+    attemptChannel.subscribe(onAttemptCompleted);
+    attemptSubscribed = true;
+  } catch {
+    tracker.markDiagnosticFailed();
+  }
+  try {
+    exhaustedChannel = channel(YDB_RETRY_EXHAUSTED_CHANNEL);
+    exhaustedChannel.subscribe(onExhausted);
+    exhaustedSubscribed = true;
+  } catch {
+    tracker.markDiagnosticFailed();
+  }
+
+  return () => {
+    if (attemptSubscribed && attemptChannel !== null) {
+      try {
+        attemptChannel.unsubscribe(onAttemptCompleted);
+      } catch {
+        tracker.markDiagnosticFailed();
+      }
+    }
+    if (exhaustedSubscribed && exhaustedChannel !== null) {
+      try {
+        exhaustedChannel.unsubscribe(onExhausted);
+      } catch {
+        tracker.markDiagnosticFailed();
+      }
+    }
+  };
+}
 
 export function classifyInitialBootstrapControlledPreparationFailure(
   error: unknown,
@@ -232,8 +385,13 @@ async function diagnoseStagingControlledPreparation(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   lease: Readonly<GoogleSheetsFullSnapshotLease>,
   digest: Readonly<CanonicalSourceDigest>,
-): Promise<InitialBootstrapControlledPreparationDiagnostic> {
-  if (config.privateHistoricalEvidence === undefined) return 'PRIVATE_EVIDENCE_FAILURE';
+): Promise<Readonly<InitialBootstrapControlledPreparationResult>> {
+  if (config.privateHistoricalEvidence === undefined) {
+    return Object.freeze({
+      preparationEvidence: 'PRIVATE_EVIDENCE_FAILURE' as const,
+      retryEvidence: 'UNOBSERVED' as const,
+    });
+  }
 
   let client: Readonly<YdbJsDataClient>;
   try {
@@ -245,10 +403,16 @@ async function diagnoseStagingControlledPreparation(
       transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
     });
   } catch (error) {
-    return classifyInitialBootstrapControlledPreparationFailure(error);
+    return Object.freeze({
+      preparationEvidence: classifyInitialBootstrapControlledPreparationFailure(error),
+      retryEvidence: 'UNOBSERVED' as const,
+    });
   }
 
-  let result: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
+  let preparationEvidence: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
+  let retryEvidence: InitialBootstrapControlledPreparationRetryEvidence = 'UNOBSERVED';
+  let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
+  let stopRetryObservation: (() => void) | null = null;
   try {
     const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(
       config.privateHistoricalEvidence,
@@ -261,6 +425,8 @@ async function diagnoseStagingControlledPreparation(
       primitives.clock.now(),
     );
     const adapter = new YdbAdapter(client.transport);
+    retryTracker = createInitialBootstrapControlledPreparationRetryTracker();
+    stopRetryObservation = subscribeInitialBootstrapControlledPreparationRetryEvidence(retryTracker);
     const refs = await readYdbReferenceResolverSnapshot(adapter);
     const projectionContext = Object.freeze({
       granularityEvidence: historicalEvidence.granularityEvidence,
@@ -282,21 +448,24 @@ async function diagnoseStagingControlledPreparation(
         clock: primitives.clock,
       }),
     );
-    result = prepared.status === 'READY'
+    preparationEvidence = prepared.status === 'READY'
       ? 'READY'
       : prepared.status === 'BASELINE_EXISTS'
         ? 'BASELINE_EXISTS'
         : 'VALIDATION_BLOCKED';
   } catch (error) {
-    result = classifyInitialBootstrapControlledPreparationFailure(error);
+    preparationEvidence = classifyInitialBootstrapControlledPreparationFailure(error);
+  } finally {
+    if (stopRetryObservation !== null) stopRetryObservation();
+    if (retryTracker !== null) retryEvidence = retryTracker.evidence();
   }
 
   try {
     await client.close();
   } catch {
-    return 'DIAGNOSTIC_FAILED';
+    preparationEvidence = 'DIAGNOSTIC_FAILED';
   }
-  return result;
+  return Object.freeze({ preparationEvidence, retryEvidence });
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -416,20 +585,25 @@ export async function executeInitialBootstrapRecoveryJob(
     if (controlledPreparationOnly) {
       if (before.reason !== 'STAGING_RUN_PRESENT') return before;
       let stagingControlledPreparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
+      let stagingControlledPreparationRetryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
-        stagingControlledPreparationEvidence = await runtime.diagnoseStagingControlledPreparation(
+        const diagnostic = await runtime.diagnoseStagingControlledPreparation(
           validated,
           lease,
           digest,
         );
+        stagingControlledPreparationEvidence = diagnostic.preparationEvidence;
+        stagingControlledPreparationRetryEvidence = diagnostic.retryEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
         stagingControlledPreparationEvidence,
+        stagingControlledPreparationRetryEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
