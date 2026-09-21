@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
+import { InitialBootstrapApplicationError } from '../../dist/migration/initialBootstrapApplication.js';
 import {
   classifyInitialBootstrapControlledPreparationFailure,
   diagnoseInitialBootstrapSourceDecodeEvidence,
@@ -30,6 +31,18 @@ test('controlled preparation classifier preserves exact existing YDB transport e
       new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_UNAVAILABLE'),
     ),
     'YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
+      new InitialBootstrapApplicationError('BOOTSTRAP_OBSERVATION_INVALID'),
+    ),
+    'APPLICATION_BOOTSTRAP_OBSERVATION_INVALID',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
+      new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED'),
+    ),
+    'APPLICATION_CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED',
   );
   assert.equal(
     classifyInitialBootstrapControlledPreparationFailure(new Error('private provider text')),
