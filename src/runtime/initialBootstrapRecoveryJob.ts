@@ -1,3 +1,5 @@
+import { channel } from 'node:diagnostics_channel';
+
 import { createCanonicalSourceDigest, type CanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
 import type { AdapterKey } from '../integration/google/sourceSchema.js';
 import {
@@ -105,6 +107,14 @@ export type InitialBootstrapSourceDecodeDiagnostic =
   | readonly Readonly<InitialBootstrapSourceDecodeFailureEvidence>[]
   | 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationRetryDiagnostic =
+  | 'UNOBSERVED'
+  | 'NO_RETRY'
+  | 'RETRIED'
+  | 'NON_RETRYABLE'
+  | 'EXHAUSTED'
+  | 'DIAGNOSTIC_FAILED';
+
 export type InitialBootstrapControlledPreparationDiagnostic =
   | 'READY'
   | 'BASELINE_EXISTS'
@@ -126,6 +136,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
   readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
   readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
+  readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -177,7 +188,10 @@ export interface InitialBootstrapRecoveryJobRuntime {
     config: Readonly<InitialBootstrapRecoveryJobConfig>,
     lease: Readonly<GoogleSheetsFullSnapshotLease>,
     digest: Readonly<CanonicalSourceDigest>,
-  ): Promise<InitialBootstrapControlledPreparationDiagnostic>;
+  ): Promise<Readonly<{
+    evidence: InitialBootstrapControlledPreparationDiagnostic;
+    retryEvidence: InitialBootstrapControlledPreparationRetryDiagnostic;
+  }>>;
 }
 
 
@@ -204,6 +218,123 @@ function buildControlledPreparationObservation(
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
+export interface InitialBootstrapRetryDiagnosticChannel {
+  subscribe(listener: (message: unknown) => void): void;
+  unsubscribe(listener: (message: unknown) => void): void;
+}
+
+type RetryOutcome = 'success' | 'retried' | 'non_retryable' | 'exhausted';
+
+function retryMessage(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+export async function observeInitialBootstrapRetryEvidence<T>(
+  work: () => Promise<T>,
+  attemptChannel: InitialBootstrapRetryDiagnosticChannel = channel('ydb:retry.attempt.completed'),
+  exhaustedChannel: InitialBootstrapRetryDiagnosticChannel = channel('ydb:retry.exhausted'),
+): Promise<
+  | Readonly<{ ok: true; value: T; retryEvidence: InitialBootstrapControlledPreparationRetryDiagnostic }>
+  | Readonly<{ ok: false; error: unknown; retryEvidence: InitialBootstrapControlledPreparationRetryDiagnostic }>
+> {
+  let sawAttempt = false;
+  let sawRetried = false;
+  let sawNonRetryable = false;
+  let sawExhausted = false;
+  let diagnosticFailed = false;
+  let attemptSubscribed = false;
+  let exhaustedSubscribed = false;
+
+  const onAttempt = (message: unknown) => {
+    try {
+      const candidate = retryMessage(message);
+      const attempt = candidate?.attempt;
+      const outcome = candidate?.outcome;
+      if (
+        candidate === null
+        || typeof attempt !== 'number'
+        || !Number.isSafeInteger(attempt)
+        || attempt < 1
+        || (outcome !== 'success'
+          && outcome !== 'retried'
+          && outcome !== 'non_retryable'
+          && outcome !== 'exhausted')
+      ) {
+        diagnosticFailed = true;
+        return;
+      }
+      sawAttempt = true;
+      if (attempt > 1 || outcome === 'retried') sawRetried = true;
+      if (outcome === 'non_retryable') sawNonRetryable = true;
+      if (outcome === 'exhausted') sawExhausted = true;
+    } catch {
+      diagnosticFailed = true;
+    }
+  };
+
+  const onExhausted = (message: unknown) => {
+    try {
+      const candidate = retryMessage(message);
+      const attempts = candidate?.attempts;
+      const totalDuration = candidate?.totalDuration;
+      if (
+        candidate === null
+        || typeof attempts !== 'number'
+        || !Number.isSafeInteger(attempts)
+        || attempts < 1
+        || typeof totalDuration !== 'number'
+        || !Number.isFinite(totalDuration)
+        || totalDuration < 0
+      ) {
+        diagnosticFailed = true;
+        return;
+      }
+      // lastError is intentionally ignored: it is neither inspected nor published.
+      sawExhausted = true;
+    } catch {
+      diagnosticFailed = true;
+    }
+  };
+
+  const classify = (): InitialBootstrapControlledPreparationRetryDiagnostic => {
+    if (diagnosticFailed) return 'DIAGNOSTIC_FAILED';
+    if (sawExhausted) return 'EXHAUSTED';
+    if (sawNonRetryable) return 'NON_RETRYABLE';
+    if (sawRetried) return 'RETRIED';
+    if (sawAttempt) return 'NO_RETRY';
+    return 'UNOBSERVED';
+  };
+
+  try {
+    attemptChannel.subscribe(onAttempt);
+    attemptSubscribed = true;
+    exhaustedChannel.subscribe(onExhausted);
+    exhaustedSubscribed = true;
+  } catch {
+    diagnosticFailed = true;
+  }
+
+  let outcome: Readonly<{ ok: true; value: T }> | Readonly<{ ok: false; error: unknown }>;
+  try {
+    outcome = Object.freeze({ ok: true as const, value: await work() });
+  } catch (error) {
+    outcome = Object.freeze({ ok: false as const, error });
+  } finally {
+    try {
+      if (exhaustedSubscribed) exhaustedChannel.unsubscribe(onExhausted);
+      if (attemptSubscribed) attemptChannel.unsubscribe(onAttempt);
+    } catch {
+      diagnosticFailed = true;
+    }
+  }
+
+  return outcome.ok
+    ? Object.freeze({ ...outcome, retryEvidence: classify() })
+    : Object.freeze({ ...outcome, retryEvidence: classify() });
+}
 
 export function classifyInitialBootstrapControlledPreparationFailure(
   error: unknown,
@@ -232,8 +363,16 @@ async function diagnoseStagingControlledPreparation(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   lease: Readonly<GoogleSheetsFullSnapshotLease>,
   digest: Readonly<CanonicalSourceDigest>,
-): Promise<InitialBootstrapControlledPreparationDiagnostic> {
-  if (config.privateHistoricalEvidence === undefined) return 'PRIVATE_EVIDENCE_FAILURE';
+): Promise<Readonly<{
+  evidence: InitialBootstrapControlledPreparationDiagnostic;
+  retryEvidence: InitialBootstrapControlledPreparationRetryDiagnostic;
+}>> {
+  if (config.privateHistoricalEvidence === undefined) {
+    return Object.freeze({
+      evidence: 'PRIVATE_EVIDENCE_FAILURE' as const,
+      retryEvidence: 'UNOBSERVED' as const,
+    });
+  }
 
   let client: Readonly<YdbJsDataClient>;
   try {
@@ -245,13 +384,15 @@ async function diagnoseStagingControlledPreparation(
       transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
     });
   } catch (error) {
-    return classifyInitialBootstrapControlledPreparationFailure(error);
+    return Object.freeze({
+      evidence: classifyInitialBootstrapControlledPreparationFailure(error),
+      retryEvidence: 'UNOBSERVED' as const,
+    });
   }
 
-  let result: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
-  try {
+  const observed = await observeInitialBootstrapRetryEvidence(async () => {
     const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(
-      config.privateHistoricalEvidence,
+      config.privateHistoricalEvidence!,
     );
     const primitives = createNodeInitialBootstrapRuntimePrimitives();
     const observation = buildControlledPreparationObservation(
@@ -271,7 +412,7 @@ async function diagnoseStagingControlledPreparation(
       projectionContext,
       historicalEvidence,
     );
-    const prepared = await prepareInitialControlledRebuildContinuation(
+    return prepareInitialControlledRebuildContinuation(
       observation,
       Object.freeze({
         adapter,
@@ -282,21 +423,31 @@ async function diagnoseStagingControlledPreparation(
         clock: primitives.clock,
       }),
     );
-    result = prepared.status === 'READY'
+  });
+
+  let evidence: InitialBootstrapControlledPreparationDiagnostic;
+  if (observed.ok) {
+    evidence = observed.value.status === 'READY'
       ? 'READY'
-      : prepared.status === 'BASELINE_EXISTS'
+      : observed.value.status === 'BASELINE_EXISTS'
         ? 'BASELINE_EXISTS'
         : 'VALIDATION_BLOCKED';
-  } catch (error) {
-    result = classifyInitialBootstrapControlledPreparationFailure(error);
+  } else {
+    evidence = classifyInitialBootstrapControlledPreparationFailure(observed.error);
   }
 
   try {
     await client.close();
   } catch {
-    return 'DIAGNOSTIC_FAILED';
+    return Object.freeze({
+      evidence: 'DIAGNOSTIC_FAILED' as const,
+      retryEvidence: 'DIAGNOSTIC_FAILED' as const,
+    });
   }
-  return result;
+  return Object.freeze({
+    evidence,
+    retryEvidence: observed.retryEvidence,
+  });
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -416,20 +567,25 @@ export async function executeInitialBootstrapRecoveryJob(
     if (controlledPreparationOnly) {
       if (before.reason !== 'STAGING_RUN_PRESENT') return before;
       let stagingControlledPreparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
+      let stagingControlledPreparationRetryEvidence: InitialBootstrapControlledPreparationRetryDiagnostic;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
-        stagingControlledPreparationEvidence = await runtime.diagnoseStagingControlledPreparation(
+        const controlledPreparation = await runtime.diagnoseStagingControlledPreparation(
           validated,
           lease,
           digest,
         );
+        stagingControlledPreparationEvidence = controlledPreparation.evidence;
+        stagingControlledPreparationRetryEvidence = controlledPreparation.retryEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
         stagingControlledPreparationEvidence,
+        stagingControlledPreparationRetryEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
