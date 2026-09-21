@@ -2,11 +2,25 @@ export const YANDEX_YDB_DATABASES_API = 'https://ydb.api.cloud.yandex.net/ydb/v1
 
 export type YdbResourceLimitsDatabaseDiscovery = 'SINGLE' | 'NONE' | 'AMBIGUOUS' | 'READ_FAILED';
 export type YdbResourceLimitsMode = 'SERVERLESS' | 'DEDICATED' | 'UNKNOWN';
+export type YdbResourceLimitsFailureStage =
+  | 'NONE'
+  | 'TARGET_CONFIG_INVALID'
+  | 'TRANSPORT_FAILED'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'RATE_LIMITED'
+  | 'PROVIDER_5XX'
+  | 'UNEXPECTED_STATUS'
+  | 'MALFORMED_JSON'
+  | 'IDENTITY_MISMATCH'
+  | 'LIMITS_MALFORMED';
 
 export interface YdbResourceLimitsEvidence {
   readonly status: 'PASS';
   readonly code: 'YDB_RESOURCE_LIMITS_CLASSIFIED';
   readonly databaseDiscovery: YdbResourceLimitsDatabaseDiscovery;
+  readonly failureStage: YdbResourceLimitsFailureStage;
   readonly mode: YdbResourceLimitsMode;
   readonly enableThrottlingRcuLimit: boolean | null;
   readonly throttlingRcuLimit: number | null;
@@ -37,11 +51,15 @@ function nonBlank(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim();
 }
 
-function emptyEvidence(databaseDiscovery: YdbResourceLimitsDatabaseDiscovery): Readonly<YdbResourceLimitsEvidence> {
+function emptyEvidence(
+  databaseDiscovery: YdbResourceLimitsDatabaseDiscovery,
+  failureStage: YdbResourceLimitsFailureStage,
+): Readonly<YdbResourceLimitsEvidence> {
   return Object.freeze({
     status: 'PASS' as const,
     code: 'YDB_RESOURCE_LIMITS_CLASSIFIED' as const,
     databaseDiscovery,
+    failureStage,
     mode: 'UNKNOWN' as const,
     enableThrottlingRcuLimit: null,
     throttlingRcuLimit: null,
@@ -60,23 +78,24 @@ function parseNonnegativeSafeInteger(value: unknown): number | null {
 
 function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEvidence> {
   const value = record(database);
-  if (value === null) return emptyEvidence('READ_FAILED');
+  if (value === null) return emptyEvidence('READ_FAILED', 'MALFORMED_JSON');
 
   const serverless = record(value.serverlessDatabase);
   const dedicated = record(value.dedicatedDatabase);
-  if (serverless !== null && dedicated !== null) return emptyEvidence('READ_FAILED');
+  if (serverless !== null && dedicated !== null) return emptyEvidence('READ_FAILED', 'LIMITS_MALFORMED');
 
   if (serverless !== null) {
     const enabled = serverless.enableThrottlingRcuLimit;
     const throttling = parseNonnegativeSafeInteger(serverless.throttlingRcuLimit);
     const provisioned = parseNonnegativeSafeInteger(serverless.provisionedRcuLimit);
     if (typeof enabled !== 'boolean' || throttling === null || provisioned === null) {
-      return emptyEvidence('READ_FAILED');
+      return emptyEvidence('READ_FAILED', 'LIMITS_MALFORMED');
     }
     return Object.freeze({
       status: 'PASS' as const,
       code: 'YDB_RESOURCE_LIMITS_CLASSIFIED' as const,
       databaseDiscovery: 'SINGLE' as const,
+      failureStage: 'NONE' as const,
       mode: 'SERVERLESS' as const,
       enableThrottlingRcuLimit: enabled,
       throttlingRcuLimit: throttling,
@@ -89,6 +108,7 @@ function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEv
       status: 'PASS' as const,
       code: 'YDB_RESOURCE_LIMITS_CLASSIFIED' as const,
       databaseDiscovery: 'SINGLE' as const,
+      failureStage: 'NONE' as const,
       mode: 'DEDICATED' as const,
       enableThrottlingRcuLimit: null,
       throttlingRcuLimit: null,
@@ -100,6 +120,7 @@ function classifySingleDatabase(database: unknown): Readonly<YdbResourceLimitsEv
     status: 'PASS' as const,
     code: 'YDB_RESOURCE_LIMITS_CLASSIFIED' as const,
     databaseDiscovery: 'SINGLE' as const,
+    failureStage: 'NONE' as const,
     mode: 'UNKNOWN' as const,
     enableThrottlingRcuLimit: null,
     throttlingRcuLimit: null,
@@ -168,7 +189,7 @@ export async function readYdbResourceLimitsWithRuntimeServiceAccount(
   const token = contextRecord === null ? null : record(contextRecord.token);
   const accessToken = token?.access_token;
   if (databaseId === null || !nonBlank(folderId) || !nonBlank(accessToken)) {
-    return emptyEvidence('READ_FAILED');
+    return emptyEvidence('READ_FAILED', 'TARGET_CONFIG_INVALID');
   }
 
   const url = new URL(`${YANDEX_YDB_DATABASES_API}/${encodeURIComponent(databaseId)}`);
@@ -183,15 +204,22 @@ export async function readYdbResourceLimitsWithRuntimeServiceAccount(
       redirect: 'error',
     });
   } catch {
-    return emptyEvidence('READ_FAILED');
+    return emptyEvidence('READ_FAILED', 'TRANSPORT_FAILED');
   }
-  if (!response.ok) return emptyEvidence('READ_FAILED');
+  if (!response.ok) {
+    if (response.status === 401) return emptyEvidence('READ_FAILED', 'UNAUTHORIZED');
+    if (response.status === 403) return emptyEvidence('READ_FAILED', 'FORBIDDEN');
+    if (response.status === 404) return emptyEvidence('READ_FAILED', 'NOT_FOUND');
+    if (response.status === 429) return emptyEvidence('READ_FAILED', 'RATE_LIMITED');
+    if (response.status >= 500 && response.status <= 599) return emptyEvidence('READ_FAILED', 'PROVIDER_5XX');
+    return emptyEvidence('READ_FAILED', 'UNEXPECTED_STATUS');
+  }
 
   let payload: unknown;
   try {
     payload = await response.json();
   } catch {
-    return emptyEvidence('READ_FAILED');
+    return emptyEvidence('READ_FAILED', 'MALFORMED_JSON');
   }
   const database = record(payload);
   if (
@@ -199,7 +227,7 @@ export async function readYdbResourceLimitsWithRuntimeServiceAccount(
     || database.id !== databaseId
     || database.folderId !== folderId
   ) {
-    return emptyEvidence('READ_FAILED');
+    return emptyEvidence('READ_FAILED', 'IDENTITY_MISMATCH');
   }
   return classifySingleDatabase(database);
 }

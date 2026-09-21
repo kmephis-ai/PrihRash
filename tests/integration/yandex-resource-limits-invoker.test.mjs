@@ -58,12 +58,12 @@ if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.
 if (process.env.PRIHRASH_YANDEX_READINESS_FUNCTION_ID !== undefined) process.exit(92);
 if (process.env.SYNTHETIC_PRIVATE_VALUE !== undefined) process.exit(93);
 if (process.env.YC_IAM_TOKEN !== 'synthetic-short-lived-iam-token') process.exit(94);
-process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLASSIFIED',databaseDiscovery:'SINGLE',mode:'SERVERLESS',enableThrottlingRcuLimit:true,throttlingRcuLimit:42,provisionedRcuLimit:7}));
+process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLASSIFIED',databaseDiscovery:'SINGLE',failureStage:'NONE',mode:'SERVERLESS',enableThrottlingRcuLimit:true,throttlingRcuLimit:42,provisionedRcuLimit:7}));
 ` });
 
   assert.equal(result.exitCode, 0);
   assertSafe(result, {
-    status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', mode: 'SERVERLESS',
+    status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', failureStage: 'NONE', mode: 'SERVERLESS',
     enableThrottlingRcuLimit: true, throttlingRcuLimit: 42, provisionedRcuLimit: 7,
   });
 });
@@ -71,11 +71,11 @@ process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLA
 test('resource limits invoker accepts fail-closed READ_FAILED evidence without exposing provider detail', async () => {
   const result = await runInvoker({ fakeSource: `
 process.stderr.write('');
-process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLASSIFIED',databaseDiscovery:'READ_FAILED',mode:'UNKNOWN',enableThrottlingRcuLimit:null,throttlingRcuLimit:null,provisionedRcuLimit:null}));
+process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLASSIFIED',databaseDiscovery:'READ_FAILED',failureStage:'FORBIDDEN',mode:'UNKNOWN',enableThrottlingRcuLimit:null,throttlingRcuLimit:null,provisionedRcuLimit:null}));
 ` });
   assert.equal(result.exitCode, 0);
   assertSafe(result, {
-    status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'READ_FAILED', mode: 'UNKNOWN',
+    status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'READ_FAILED', failureStage: 'FORBIDDEN', mode: 'UNKNOWN',
     enableThrottlingRcuLimit: null, throttlingRcuLimit: null, provisionedRcuLimit: null,
   });
 });
@@ -83,8 +83,8 @@ process.stdout.write(JSON.stringify({status:'PASS',code:'YDB_RESOURCE_LIMITS_CLA
 test('resource limits invoker rejects malformed success output and never echoes it', async () => {
   for (const output of [
     PRIVATE_LOOKING,
-    JSON.stringify({ status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', mode: 'SERVERLESS', enableThrottlingRcuLimit: true, throttlingRcuLimit: -1, provisionedRcuLimit: 7 }),
-    JSON.stringify({ status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', mode: 'SERVERLESS', enableThrottlingRcuLimit: true, throttlingRcuLimit: 1, provisionedRcuLimit: 7, private: PRIVATE_LOOKING }),
+    JSON.stringify({ status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', failureStage: 'NONE', mode: 'SERVERLESS', enableThrottlingRcuLimit: true, throttlingRcuLimit: -1, provisionedRcuLimit: 7 }),
+    JSON.stringify({ status: 'PASS', code: 'YDB_RESOURCE_LIMITS_CLASSIFIED', databaseDiscovery: 'SINGLE', failureStage: 'NONE', mode: 'SERVERLESS', enableThrottlingRcuLimit: true, throttlingRcuLimit: 1, provisionedRcuLimit: 7, private: PRIVATE_LOOKING }),
   ]) {
     const result = await runInvoker({ fakeSource: `process.stdout.write(${JSON.stringify(output)});` });
     assert.equal(result.exitCode, 2);

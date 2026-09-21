@@ -80,6 +80,8 @@ test('R1 readiness resource-limits-only mode uses existing runtime SA without IA
   assert.match(workflow, /npm run resource-limits:invoke \| tee "\$tmp"/);
   assert.match(workflow, /r1-ydb-resource-limits-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /YDB_RESOURCE_LIMITS_CLASSIFIED/);
+  assert.match(workflow, /failureStage/);
+  assert.match(workflow, /TARGET_CONFIG_INVALID.*TRANSPORT_FAILED.*UNAUTHORIZED.*FORBIDDEN.*NOT_FOUND.*RATE_LIMITED.*PROVIDER_5XX.*UNEXPECTED_STATUS.*MALFORMED_JSON.*IDENTITY_MISMATCH.*LIMITS_MALFORMED/s);
   assert.match(workflow, /SINGLE.*NONE.*AMBIGUOUS.*READ_FAILED/s);
   assert.match(workflow, /SERVERLESS.*DEDICATED.*UNKNOWN/s);
   assert.doesNotMatch(workflow, /yc ydb database (?:list|get|update|create|delete|move)\b/);
