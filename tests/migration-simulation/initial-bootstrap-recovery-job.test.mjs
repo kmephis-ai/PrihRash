@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
+  classifyInitialBootstrapControlledPreparationFailure,
   diagnoseInitialBootstrapSourceDecodeEvidence,
   executeInitialBootstrapRecoveryJob,
   readInitialBootstrapRecoveryJobConfig,
@@ -9,6 +11,31 @@ import {
 
 const S = (value) => ({ stringValue: value });
 const N = (value) => ({ numberValue: Number(value) });
+
+test('controlled preparation classifier preserves exact existing YDB transport enums', () => {
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
+      new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_TIMEOUT'),
+    ),
+    'YDB_QUERY_TIMEOUT',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
+      new YdbJsV6DataTransportError('QUERY_EXECUTION_FAILED'),
+    ),
+    'YDB_DATA_QUERY_EXECUTION_FAILED',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
+      new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_UNAVAILABLE'),
+    ),
+    'YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(new Error('private provider text')),
+    'DIAGNOSTIC_FAILED',
+  );
+});
 
 const config = Object.freeze({
   spreadsheetId: 'synthetic-spreadsheet',
