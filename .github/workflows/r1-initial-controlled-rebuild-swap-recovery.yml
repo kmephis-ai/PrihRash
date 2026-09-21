@@ -245,16 +245,26 @@ jobs:
                   or .bootstrapPhase=="RESUME_SNAPSHOT_READ"
                   or .bootstrapPhase=="RESUME_CONTEXT_PREPARATION"
                   or .bootstrapPhase=="LINEAGE_PREPARATION"
+                  or .bootstrapPhase=="RECONCILIATION_READ"
                   or .bootstrapPhase=="VALIDATION_EVALUATION"
                   or .bootstrapPhase=="CURRENT_PLAN_PREPARATION"
                   or .bootstrapPhase=="CURRENT_WRITE_PREPARATION"
                 )
               )
             )
-            and (keys|sort)==["bootstrapPhase","code","jobCode","phase","status"]
+            and (
+              (keys|sort)==["bootstrapPhase","code","jobCode","phase","status"]
+              or (
+                (keys|sort)==["applicationFailureCode","bootstrapPhase","code","jobCode","phase","status"]
+                and .jobCode=="APPLICATION_FAILED"
+                and .phase=="PREPARATION"
+                and .bootstrapPhase=="RECONCILIATION_READ"
+                and (.applicationFailureCode | IN("YDB_DATA_SDK_SHAPE_INVALID","YDB_DATA_PARAMETER_VALUE_INVALID","YDB_DATA_PARAMETER_TYPE_UNSUPPORTED","YDB_DATA_TIMESTAMP_PRECISION_UNSUPPORTED","YDB_DATA_QUERY_EXECUTION_FAILED","YDB_DATA_QUERY_EXECUTION_YDB_BAD_REQUEST","YDB_DATA_QUERY_EXECUTION_YDB_UNAUTHORIZED","YDB_DATA_QUERY_EXECUTION_YDB_INTERNAL_ERROR","YDB_DATA_QUERY_EXECUTION_YDB_ABORTED","YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE","YDB_DATA_QUERY_EXECUTION_YDB_OVERLOADED","YDB_DATA_QUERY_EXECUTION_YDB_SCHEME_ERROR","YDB_DATA_QUERY_EXECUTION_YDB_GENERIC_ERROR","YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT","YDB_DATA_QUERY_EXECUTION_YDB_BAD_SESSION","YDB_DATA_QUERY_EXECUTION_YDB_PRECONDITION_FAILED","YDB_DATA_QUERY_EXECUTION_YDB_ALREADY_EXISTS","YDB_DATA_QUERY_EXECUTION_YDB_NOT_FOUND","YDB_DATA_QUERY_EXECUTION_YDB_SESSION_EXPIRED","YDB_DATA_QUERY_EXECUTION_YDB_CANCELLED","YDB_DATA_QUERY_EXECUTION_YDB_UNDETERMINED","YDB_DATA_QUERY_EXECUTION_YDB_UNSUPPORTED","YDB_DATA_QUERY_EXECUTION_YDB_SESSION_BUSY","YDB_DATA_QUERY_EXECUTION_YDB_EXTERNAL_ERROR","YDB_DATA_CLIENT_CONFIG_INVALID","DURABLE_RECONCILIATION_DURABLE_REVISION_EVIDENCE_INCOMPLETE","DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID","DURABLE_RECONCILIATION_EXPECTED_RECONCILIATION_NOT_AVAILABLE","REVISION_EVIDENCE_INVALID_EXPECTED_REVISION","REVISION_EVIDENCE_MIXED_EXPECTED_RUN","REVISION_EVIDENCE_MALFORMED_EXISTING_REVISION","REVISION_EVIDENCE_DUPLICATE_EXISTING_REVISION","REVISION_EVIDENCE_EXTRA_EXISTING_REVISION","REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH"))
+              )
+            )
           ' >/dev/null; then
             mkdir -p "$RUNNER_TEMP/swap-recovery-evidence"
-            printf '%s\n' "$result" | jq -c '{status,code,jobCode,phase,bootstrapPhase}' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
+            printf '%s\n' "$result" | jq -c '{status,code,jobCode,phase,bootstrapPhase} + (if has("applicationFailureCode") then {applicationFailureCode} else {} end)' > "$RUNNER_TEMP/swap-recovery-evidence/classification.json"
             job_code="$(printf '%s' "$result"|jq -r '.jobCode')"
             phase_value="$(printf '%s' "$result"|jq -r '.phase // "NONE"')"
             bootstrap_phase_value="$(printf '%s' "$result"|jq -r '.bootstrapPhase // "NONE"')"
