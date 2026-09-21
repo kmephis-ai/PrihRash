@@ -11,6 +11,7 @@ import {
   createYdbJsV6MetadataDataClient,
   YdbJsV6DataTransportError,
   type YdbJsDataClient,
+  type YdbJsV6DataTransportErrorCode,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import type { ReferenceResolver } from '../normalization/types.js';
@@ -108,7 +109,7 @@ export type InitialBootstrapControlledPreparationDiagnostic =
   | 'BASELINE_EXISTS'
   | 'VALIDATION_BLOCKED'
   | 'YDB_QUERY_TIMEOUT'
-  | 'YDB_DATA_FAILURE'
+  | `YDB_DATA_${YdbJsV6DataTransportErrorCode}`
   | 'DURABLE_RECONCILIATION_FAILURE'
   | 'REVISION_EVIDENCE_FAILURE'
   | 'PRIVATE_EVIDENCE_FAILURE'
@@ -203,13 +204,13 @@ const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000 as c
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000 as const;
 const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
 
-function classifyControlledPreparationFailure(
+export function classifyInitialBootstrapControlledPreparationFailure(
   error: unknown,
 ): InitialBootstrapControlledPreparationDiagnostic {
   if (error instanceof YdbJsV6DataTransportError) {
     return error.code === 'QUERY_EXECUTION_YDB_TIMEOUT'
       ? 'YDB_QUERY_TIMEOUT'
-      : 'YDB_DATA_FAILURE';
+      : `YDB_DATA_${error.code}`;
   }
   if (error instanceof InitialBootstrapDurableReconciliationError) {
     return 'DURABLE_RECONCILIATION_FAILURE';
@@ -243,7 +244,7 @@ async function diagnoseStagingControlledPreparation(
       transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
     });
   } catch (error) {
-    return classifyControlledPreparationFailure(error);
+    return classifyInitialBootstrapControlledPreparationFailure(error);
   }
 
   let result: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
@@ -286,7 +287,7 @@ async function diagnoseStagingControlledPreparation(
         ? 'BASELINE_EXISTS'
         : 'VALIDATION_BLOCKED';
   } catch (error) {
-    result = classifyControlledPreparationFailure(error);
+    result = classifyInitialBootstrapControlledPreparationFailure(error);
   }
 
   try {
