@@ -17,6 +17,9 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /surface_only:/);
   assert.match(workflow, /RECOVERY_SURFACE_ONLY: \$\{\{ inputs\.surface_only/);
+  assert.match(workflow, /controlled_preparation_only:/);
+  assert.match(workflow, /RECOVERY_CONTROLLED_PREPARATION_ONLY: \$\{\{ inputs\.controlled_preparation_only/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);
@@ -55,6 +58,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 150s/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
+  assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=\$\{RECOVERY_CONTROLLED_PREPARATION_ONLY\}"/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
@@ -72,6 +76,9 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /actions\/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02/);
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /classification\.json/);
+  assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=/);
+  assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT\|YDB_DATA_FAILURE\|DURABLE_RECONCILIATION_FAILURE\|REVISION_EVIDENCE_FAILURE\|PRIVATE_EVIDENCE_FAILURE\|APPLICATION_FAILURE\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /controlled-preparation\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
 
@@ -116,4 +123,18 @@ test('VALIDATED source and Gate A blocker evidence are stored separately and rem
   assert.match(workflow, /INITIAL_BOOTSTRAP_STALE_VALIDATED_GATE_BLOCKER_INVALID; exit 1/);
   assert.match(workflow, /gate-a\.json/);
   assert.ok(workflow.includes('r1-initial-bootstrap-recovery-evidence/*.json'));
+});
+
+
+test('controlled preparation recovery diagnostic preserves the controlled timeout envelope without write authority', async () => {
+  const runtime = await readFile('src/runtime/initialBootstrapRecoveryJob.ts', 'utf8');
+  assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000/);
+  assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000/);
+  assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000/);
+  assert.match(runtime, /prepareInitialControlledRebuildContinuation/);
+  assert.doesNotMatch(runtime, /runInitialControlledRebuildApplication/);
+  assert.doesNotMatch(runtime, /executeMigrationRunLifecycleWrite/);
+  assert.doesNotMatch(runtime, /executeInitialControlledRebuildSetup/);
+  assert.doesNotMatch(runtime, /executeControlledInitialSwap/);
+  assert.doesNotMatch(workflow, /initial-controlled-rebuild:invoke/);
 });
