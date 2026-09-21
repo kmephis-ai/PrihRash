@@ -77,7 +77,13 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=/);
-  assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT\|YDB_DATA_FAILURE\|DURABLE_RECONCILIATION_FAILURE\|REVISION_EVIDENCE_FAILURE\|PRIVATE_EVIDENCE_FAILURE\|APPLICATION_FAILURE\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT\|YDB_DATA_QUERY_EXECUTION_FAILED/);
+  assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE/);
+  assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_OVERLOADED/);
+  assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_BAD_SESSION/);
+  assert.match(workflow, /DURABLE_RECONCILIATION_FAILURE\|REVISION_EVIDENCE_FAILURE\|PRIVATE_EVIDENCE_FAILURE\|APPLICATION_FAILURE\|DIAGNOSTIC_FAILED/);
+  assert.doesNotMatch(workflow, /YDB_DATA_FAILURE\|/);
+  assert.doesNotMatch(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT/);
   assert.match(workflow, /controlled-preparation\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
