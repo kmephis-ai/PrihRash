@@ -13,8 +13,10 @@ import {
 import {
   InitialControlledRebuildJobError,
   runInitialControlledRebuildJobFromEnvironment,
+  runInitialControlledRebuildPreparationDiagnosticJobFromEnvironment,
   runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironment,
   type InitialControlledRebuildJobErrorCode,
+  type InitialControlledRebuildPreparationDiagnosticFailureCode,
   type InitialControlledRebuildJobObserver,
   type InitialControlledRebuildRuntimePhase,
 } from './initialControlledRebuildJob.js';
@@ -48,6 +50,22 @@ export type YandexInitialControlledRebuildFunctionResult =
       status: 'STOP';
       code: 'INITIAL_CONTROLLED_REBUILD_RECOVERY_REQUIRED';
       recoveryReason: InitialControlledRebuildRecoveryReason;
+    }>
+  | YandexInitialControlledRebuildRuntimeFailure;
+
+export type YandexInitialControlledRebuildPreparationDiagnosticFunctionResult =
+  | Readonly<{ status: 'PASS'; code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY' }>
+  | Readonly<{ status: 'NOOP'; code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' }>
+  | Readonly<{
+      status: 'STOP';
+      code: 'INITIAL_CONTROLLED_REBUILD_VALIDATION_BLOCKED';
+      blockers: readonly Readonly<YandexInitialControlledRebuildValidationBlocker>[];
+    }>
+  | Readonly<{
+      status: 'FAIL';
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED';
+      bootstrapPhase: InitialBootstrapApplicationPhase | null;
+      failureCode: InitialControlledRebuildPreparationDiagnosticFailureCode;
     }>
   | YandexInitialControlledRebuildRuntimeFailure;
 
@@ -113,6 +131,75 @@ const RECOVERY_REASONS = new Set<InitialControlledRebuildRecoveryReason>([
   'POST_SWAP_VERIFICATION_MISMATCH',
   'POST_COMMIT_VERIFICATION_MISMATCH',
 ]);
+const PREPARATION_BOOTSTRAP_PHASES = new Set<InitialBootstrapApplicationPhase>([
+  'ADMISSION_READ',
+  'RESUME_CONTEXT_READ',
+  'RESUME_IDENTITY_MANIFEST_READ',
+  'RESUME_SNAPSHOT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'LINEAGE_PREPARATION',
+  'RECONCILIATION_READ',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+]);
+const PREPARATION_FAILURE_CODES = new Set<InitialControlledRebuildPreparationDiagnosticFailureCode>([
+  'YDB_SDK_SHAPE_INVALID',
+  'YDB_PARAMETER_VALUE_INVALID',
+  'YDB_PARAMETER_TYPE_UNSUPPORTED',
+  'YDB_TIMESTAMP_PRECISION_UNSUPPORTED',
+  'YDB_QUERY_EXECUTION_FAILED',
+  'YDB_QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'YDB_QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'YDB_QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_ABORTED',
+  'YDB_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'YDB_QUERY_EXECUTION_YDB_OVERLOADED',
+  'YDB_QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_TIMEOUT',
+  'YDB_QUERY_EXECUTION_YDB_BAD_SESSION',
+  'YDB_QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'YDB_QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'YDB_QUERY_EXECUTION_YDB_NOT_FOUND',
+  'YDB_QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'YDB_QUERY_EXECUTION_YDB_CANCELLED',
+  'YDB_QUERY_EXECUTION_YDB_UNDETERMINED',
+  'YDB_QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'YDB_QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'YDB_QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'YDB_CLIENT_CONFIG_INVALID',
+  'DURABLE_RECONCILIATION_DURABLE_REVISION_EVIDENCE_INCOMPLETE',
+  'DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID',
+  'DURABLE_RECONCILIATION_EXPECTED_RECONCILIATION_NOT_AVAILABLE',
+  'REVISION_EVIDENCE_INVALID_EXPECTED_REVISION',
+  'REVISION_EVIDENCE_MIXED_EXPECTED_RUN',
+  'REVISION_EVIDENCE_MALFORMED_EXISTING_REVISION',
+  'REVISION_EVIDENCE_DUPLICATE_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXTRA_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH',
+  'CONTROLLED_RECONCILIATION_UNSUPPORTED_TRANSACTION_TYPE',
+  'CONTROLLED_RECONCILIATION_INVALID_TRANSACTION_SHAPE',
+  'CONTROLLED_RECONCILIATION_INVALID_TRANSACTION_AMOUNT',
+  'CONTROLLED_RECONCILIATION_INVALID_SOURCE_CLASSIFICATION',
+  'PROJECTION_INVALID_SOURCE_ORDINAL',
+  'PROJECTION_DUPLICATE_SOURCE_ORDINAL',
+  'PROJECTION_DUPLICATE_SOURCE_RECORD_ID',
+  'APPLICATION_MULTIPLE_INCOMPLETE_RUNS',
+  'APPLICATION_BOOTSTRAP_OBSERVATION_INVALID',
+  'APPLICATION_RESUME_RUN_COUNTERS_MISMATCH',
+  'APPLICATION_RESUME_COUNTER_REFINEMENT_CONFLICT',
+  'APPLICATION_SNAPSHOT_EVIDENCE_MISSING',
+  'APPLICATION_SNAPSHOT_EVIDENCE_AMBIGUOUS',
+  'APPLICATION_SNAPSHOT_EVIDENCE_MISMATCH',
+  'APPLICATION_CURRENT_STATE_NOT_EMPTY',
+  'APPLICATION_PROMOTION_PREFLIGHT_DRIFT',
+  'APPLICATION_CONTROLLED_CONTINUATION_RUN_MISSING',
+  'APPLICATION_CONTROLLED_CONTINUATION_RUN_STATE_INVALID',
+  'APPLICATION_CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED',
+  'UNKNOWN',
+]);
+
 const VALIDATION_BLOCKER_CODES = new Set<InitialValidationBlockerCode>([
   'RUN_NOT_STAGING',
   'INITIAL_RUN_COUNTERS_INCONSISTENT',
@@ -177,6 +264,48 @@ function validationBlockers(value: unknown): readonly Readonly<YandexInitialCont
     blockers.push(parsed);
   }
   return Object.freeze(blockers);
+}
+
+function sanitizePreparationDiagnosticResult(
+  value: unknown,
+): Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult> {
+  const result = record(value);
+  if (result === null || typeof result.status !== 'string') return runtimeFailure('UNCAUGHT');
+
+  if (result.status === 'READY') {
+    return Object.freeze({
+      status: 'PASS' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY' as const,
+    });
+  }
+  if (result.status === 'BASELINE_EXISTS') {
+    return Object.freeze({ status: 'NOOP' as const, code: 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' as const });
+  }
+  if (result.status === 'VALIDATION_BLOCKED') {
+    const blockers = validationBlockers(result.blockers);
+    if (blockers === null) return runtimeFailure('UNCAUGHT');
+    return Object.freeze({
+      status: 'STOP' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_VALIDATION_BLOCKED' as const,
+      blockers,
+    });
+  }
+  if (
+    result.status === 'FAILED'
+    && (result.bootstrapPhase === null
+      || (typeof result.bootstrapPhase === 'string'
+        && PREPARATION_BOOTSTRAP_PHASES.has(result.bootstrapPhase as InitialBootstrapApplicationPhase)))
+    && typeof result.failureCode === 'string'
+    && PREPARATION_FAILURE_CODES.has(result.failureCode as InitialControlledRebuildPreparationDiagnosticFailureCode)
+  ) {
+    return Object.freeze({
+      status: 'FAIL' as const,
+      code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED' as const,
+      bootstrapPhase: result.bootstrapPhase as InitialBootstrapApplicationPhase | null,
+      failureCode: result.failureCode as InitialControlledRebuildPreparationDiagnosticFailureCode,
+    });
+  }
+  return runtimeFailure('UNCAUGHT');
 }
 
 function sanitizeSwapRecoveryDiagnosticResult(
@@ -280,6 +409,34 @@ export async function initialControlledRebuildHandler(
   return executeYandexInitialControlledRebuildFunction(
     process.env,
     (environment) => runInitialControlledRebuildJobFromEnvironment(environment, observer),
+  );
+}
+
+export async function executeYandexInitialControlledRebuildPreparationDiagnosticFunction(
+  environment: InitialBootstrapJobEnvironment,
+  runJob: YandexInitialControlledRebuildJob,
+): Promise<Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult>> {
+  try {
+    return sanitizePreparationDiagnosticResult(await runJob(environment));
+  } catch (error) {
+    if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
+      return runtimeFailure('CONFIG_INVALID');
+    }
+    if (error instanceof InitialControlledRebuildJobError) {
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+    }
+    return runtimeFailure('UNCAUGHT');
+  }
+}
+
+export async function initialControlledRebuildPreparationDiagnosticHandler(
+  _event: unknown,
+  _context: unknown,
+): Promise<Readonly<YandexInitialControlledRebuildPreparationDiagnosticFunctionResult>> {
+  const observer = yandexPhaseObserver();
+  return executeYandexInitialControlledRebuildPreparationDiagnosticFunction(
+    process.env,
+    (environment) => runInitialControlledRebuildPreparationDiagnosticJobFromEnvironment(environment, observer),
   );
 }
 
