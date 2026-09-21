@@ -199,6 +199,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     reason: 'STAGING_RUN_PRESENT',
     stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_FAILED',
     stagingControlledPreparationRetryEvidence: 'RETRIED',
+    stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -241,6 +242,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           reason: 'STAGING_RUN_PRESENT',
           stagingControlledPreparationEvidence: invalidEvidence,
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+          stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
         }),
       ),
       {
@@ -258,9 +260,31 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           verdict: 'RECOVERY_REQUIRED',
           reason: 'STAGING_RUN_PRESENT',
           stagingControlledPreparationEvidence: 'READY',
+          stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           ...(invalidRetryEvidence === undefined
             ? {}
             : { stagingControlledPreparationRetryEvidence: invalidRetryEvidence }),
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
+
+  for (const invalidQueryErrorEvidence of [undefined, 'PRIVATE_QUERY_ERROR_ENUM']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: 'READY',
+          stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+          ...(invalidQueryErrorEvidence === undefined
+            ? {}
+            : { stagingControlledPreparationQueryErrorEvidence: invalidQueryErrorEvidence }),
         }),
       ),
       {
