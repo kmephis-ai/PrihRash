@@ -137,7 +137,7 @@ YC_R1_WIF_SERVICE_ACCOUNT_ID
 .github/workflows/r1-yandex-readiness.yml
 ```
 
-Он обязан:
+В обычном readiness-режиме он обязан:
 
 1. подтвердить `github.repository == kmephis-ai/PrihRash` и `github.ref == refs/heads/main`;
 2. checkout exact `GITHUB_SHA` без persisted GitHub credentials;
@@ -152,6 +152,12 @@ YC_R1_WIF_SERVICE_ACCOUNT_ID
 11. вызвать только tag `r1-readiness` через privacy-safe wrapper `npm run readiness:invoke`.
 
 Workflow не имеет `push`, `pull_request`, `schedule` или `repository_dispatch` trigger.
+
+### Read-only YDB resource-limits diagnostic
+
+Для R1 recovery blocker `RESOURCE_EXHAUSTED` workflow имеет manual-only input `resource_limits_only=true`. Этот режим переиспользует exact-main OIDC/WIF boundary, но **не** устанавливает Node dependencies, не восстанавливает Function artifact, не читает Lockbox metadata/payload, не deploy/invoke readiness Function и не выполняет YDB data/scheme writes. Он использует только `yc ydb database list/get --retry 0` в target folder.
+
+Discovery fail-closed: продолжение к database metadata допускается только при ровно одной accessible database; `NONE`, `AMBIGUOUS` и provider read failure публикуются как bounded classification без угадывания target. Provider/database IDs, names, endpoint/path и raw `yc` stdout/stderr не входят в evidence. Для единственной serverless DB public evidence содержит только `enableThrottlingRcuLimit`, `throttlingRcuLimit` и `provisionedRcuLimit`; для dedicated/unknown эти поля `null`. Любые `yc ydb database update/create/delete/move`, quota/cap mutation и resource-limit increase этим режимом запрещены. После устранения R1 provider blocker этот temporary diagnostic mode подлежит retirement вместе с одноразовой R1 provider surface.
 
 ## Exact package and version
 
