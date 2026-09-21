@@ -1,0 +1,64 @@
+name: R1 727 Runtime Resource Limits Dispatch Transport
+
+on:
+  push:
+    branches:
+      - transport/r1-727-runtime-resource-limits-dispatch-20260921
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+env:
+  SOURCE_SHA: 20326f76694e273cae955e55ebfcc59a9c43d45b
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch exactly one guarded runtime-SA resource-limits read
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          auth="Authorization: Bearer $GH_API_TOKEN"
+          accept="Accept: application/vnd.github+json"
+
+          main_sha="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/branches/main" | jq -er '.commit.sha')"
+          if [ "$main_sha" != "$SOURCE_SHA" ]; then
+            echo 'R1_727_TRANSPORT_MAIN_MOVED'
+            exit 1
+          fi
+
+          issue_state="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/issues/727" | jq -er '.state')"
+          if [ "$issue_state" != 'open' ]; then
+            echo 'R1_727_TRANSPORT_ISSUE_INACTIVE'
+            exit 1
+          fi
+
+          active="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs?branch=main&status=in_progress&per_page=100")"
+          queued="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/runs?branch=main&status=queued&per_page=100")"
+          if [ "$(jq '.workflow_runs | length' <<<"$active")" -ne 0 ] || [ "$(jq '.workflow_runs | length' <<<"$queued")" -ne 0 ]; then
+            echo 'R1_727_TRANSPORT_MAIN_RUN_ACTIVE'
+            exit 1
+          fi
+
+          existing="$(curl --fail --silent --show-error --header "$auth" --header "$accept" "$api/actions/workflows/r1-yandex-readiness.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          if jq -e --arg sha "$SOURCE_SHA" '.workflow_runs[]? | select(.head_sha == $sha)' <<<"$existing" >/dev/null; then
+            echo 'R1_727_TRANSPORT_ALREADY_DISPATCHED'
+            exit 0
+          fi
+
+          payload='{"ref":"main","inputs":{"resource_limits_only":"true"}}'
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "$auth" \
+            --header "$accept" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "$api/actions/workflows/r1-yandex-readiness.yml/dispatches" \
+            --data "$payload"
+          echo 'R1_727_TRANSPORT_DISPATCHED'
