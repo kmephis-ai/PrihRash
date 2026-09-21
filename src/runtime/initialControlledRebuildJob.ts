@@ -5,7 +5,9 @@ import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
 import { YdbSchemeAdapter, type YdbSchemeTransport } from '../integration/ydb/scheme.js';
 import {
   createYdbJsV6MetadataDataClient,
+  YdbJsV6DataTransportError,
   type YdbJsDataClient,
+  type YdbJsV6DataTransportErrorCode,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
   diagnoseInitialControlledRebuildSwapRecovery,
@@ -14,10 +16,25 @@ import {
   type InitialControlledRebuildApplicationResult,
   type InitialControlledRebuildSwapRecoveryDiagnosticResult,
 } from '../migration/initialControlledRebuildApplication.js';
-import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
-import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
+import {
+  createInitialBootstrapDurableReconciliation,
+  InitialBootstrapDurableReconciliationError,
+  type InitialBootstrapDurableReconciliationErrorCode,
+} from '../migration/initialBootstrapDurableReconciliation.js';
+import {
+  prepareInitialControlledRebuildContinuation,
+  type InitialBootstrapApplicationPhase,
+} from '../migration/initialBootstrapApplication.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../migration/initialBootstrapPrivateEvidence.js';
+import {
+  InitialControlledRebuildReconciliationError,
+  type InitialControlledRebuildReconciliationErrorCode,
+} from '../migration/initialControlledRebuildReconciliation.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
+import {
+  InitialSourceRevisionEvidenceRecoveryError,
+  type InitialSourceRevisionEvidenceRecoveryErrorCode,
+} from '../migration/initialSourceRevisionEvidenceRecovery.js';
 import type { InitialSnapshotProjectionContext } from '../migration/initialSnapshotProjection.js';
 import { INITIAL_RECONCILIATION_CHECKS, type InitialReconciliationEvidence } from '../migration/initialValidationGate.js';
 import { readYdbReferenceResolverSnapshot } from '../reference/ydbReferenceEvidenceReader.js';
@@ -31,6 +48,30 @@ import {
 export const INITIAL_CONTROLLED_REBUILD_YDB_READY_TIMEOUT_MS = 10_000 as const;
 export const INITIAL_CONTROLLED_REBUILD_YDB_READ_TIMEOUT_MS = 21_000 as const;
 export const INITIAL_CONTROLLED_REBUILD_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
+export type InitialControlledRebuildPreparationDiagnosticFailureCategory =
+  | 'YDB_TRANSPORT'
+  | 'DURABLE_RECONCILIATION'
+  | 'UNKNOWN';
+
+export type InitialControlledRebuildPreparationDiagnosticErrorCode =
+  | YdbJsV6DataTransportErrorCode
+  | InitialBootstrapDurableReconciliationErrorCode
+  | InitialSourceRevisionEvidenceRecoveryErrorCode
+  | InitialControlledRebuildReconciliationErrorCode
+  | null;
+
+export type InitialControlledRebuildPreparationDiagnosticResult =
+  | Readonly<{ status: 'READY' }>
+  | Readonly<{ status: 'BASELINE_EXISTS' }>
+  | Readonly<{ status: 'VALIDATION_BLOCKED' }>
+  | Readonly<{
+      status: 'FAILED';
+      category: InitialControlledRebuildPreparationDiagnosticFailureCategory;
+      errorCode: InitialControlledRebuildPreparationDiagnosticErrorCode;
+      bootstrapPhase: InitialBootstrapApplicationPhase | null;
+    }>;
+
 
 export type InitialControlledRebuildJobErrorCode =
   | 'SOURCE_READ_FAILED'
@@ -104,6 +145,38 @@ function reconciliationMatched(evidence: Readonly<InitialReconciliationEvidence>
     && INITIAL_RECONCILIATION_CHECKS.every((check) => evidence.checks[check] === 'MATCHED');
 }
 
+function preparationDiagnosticFailure(
+  error: unknown,
+  bootstrapPhase: InitialBootstrapApplicationPhase | null,
+): Readonly<InitialControlledRebuildPreparationDiagnosticResult> {
+  if (error instanceof YdbJsV6DataTransportError) {
+    return Object.freeze({
+      status: 'FAILED' as const,
+      category: 'YDB_TRANSPORT' as const,
+      errorCode: error.code,
+      bootstrapPhase,
+    });
+  }
+  if (
+    error instanceof InitialBootstrapDurableReconciliationError
+    || error instanceof InitialSourceRevisionEvidenceRecoveryError
+    || error instanceof InitialControlledRebuildReconciliationError
+  ) {
+    return Object.freeze({
+      status: 'FAILED' as const,
+      category: 'DURABLE_RECONCILIATION' as const,
+      errorCode: error.code,
+      bootstrapPhase,
+    });
+  }
+  return Object.freeze({
+    status: 'FAILED' as const,
+    category: 'UNKNOWN' as const,
+    errorCode: null,
+    bootstrapPhase,
+  });
+}
+
 async function readInitialControlledRebuildObservation(
   config: Readonly<InitialBootstrapJobConfig>,
   historicalEvidence: ReturnType<typeof parseInitialBootstrapPrivateHistoricalEvidence>,
@@ -145,11 +218,20 @@ export function runInitialControlledRebuildJob(
   observer: Readonly<InitialControlledRebuildJobObserver>,
   mode: 'SWAP_RECOVERY_DIAGNOSTIC',
 ): Promise<InitialControlledRebuildSwapRecoveryDiagnosticResult>;
+export function runInitialControlledRebuildJob(
+  config: Readonly<InitialBootstrapJobConfig>,
+  observer: Readonly<InitialControlledRebuildJobObserver>,
+  mode: 'PREPARATION_DIAGNOSTIC',
+): Promise<InitialControlledRebuildPreparationDiagnosticResult>;
 export async function runInitialControlledRebuildJob(
   config: Readonly<InitialBootstrapJobConfig>,
   observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
-  mode: 'CONTROLLED' | 'SWAP_RECOVERY_DIAGNOSTIC' = 'CONTROLLED',
-): Promise<InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult> {
+  mode: 'CONTROLLED' | 'SWAP_RECOVERY_DIAGNOSTIC' | 'PREPARATION_DIAGNOSTIC' = 'CONTROLLED',
+): Promise<
+  InitialControlledRebuildApplicationResult
+  | InitialControlledRebuildSwapRecoveryDiagnosticResult
+  | InitialControlledRebuildPreparationDiagnosticResult
+> {
   const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(config.privateHistoricalEvidence);
   const primitives = createNodeInitialBootstrapRuntimePrimitives();
 
@@ -181,15 +263,18 @@ export async function runInitialControlledRebuildJob(
     observeRuntimePhase(observer, 'SOURCE_READ_DONE');
     const adapter = new YdbAdapter(ydbClient.transport);
 
-    let schemeTransport: YdbSchemeTransport;
-    observeRuntimePhase(observer, 'SCHEME_CLIENT_CREATE_START');
-    try {
-      schemeTransport = await ydbClient.createSchemeTransport();
-      observeRuntimePhase(observer, 'SCHEME_CLIENT_READY');
-    } catch {
-      throw new InitialControlledRebuildJobError('SCHEME_CLIENT_CREATE_FAILED');
+    let scheme: YdbSchemeAdapter | null = null;
+    if (mode !== 'PREPARATION_DIAGNOSTIC') {
+      let schemeTransport: YdbSchemeTransport;
+      observeRuntimePhase(observer, 'SCHEME_CLIENT_CREATE_START');
+      try {
+        schemeTransport = await ydbClient.createSchemeTransport();
+        observeRuntimePhase(observer, 'SCHEME_CLIENT_READY');
+      } catch {
+        throw new InitialControlledRebuildJobError('SCHEME_CLIENT_CREATE_FAILED');
+      }
+      scheme = new YdbSchemeAdapter(schemeTransport);
     }
-    const scheme = new YdbSchemeAdapter(schemeTransport);
 
     let refs;
     observeRuntimePhase(observer, 'REFERENCE_READ_START');
@@ -209,11 +294,8 @@ export async function runInitialControlledRebuildJob(
       historicalEvidence,
     );
 
-    let result: InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult;
-    observeRuntimePhase(observer, 'APPLICATION_START');
-    const applicationDependencies = Object.freeze({
+    const bootstrapDependencies = Object.freeze({
       adapter,
-      scheme,
       identityAllocator: primitives.identityAllocator,
       projectionContext,
       historicalEvidence,
@@ -223,6 +305,37 @@ export async function runInitialControlledRebuildJob(
         bootstrapPhase = nextPhase;
         observeRuntimePhase(observer, `BOOTSTRAP_${nextPhase}`);
       },
+    });
+
+    if (mode === 'PREPARATION_DIAGNOSTIC') {
+      controlledPhase = 'PREPARATION';
+      observeRuntimePhase(observer, 'CONTROLLED_PREPARATION');
+      observeRuntimePhase(observer, 'APPLICATION_START');
+      try {
+        const prepared = await prepareInitialControlledRebuildContinuation(
+          observation,
+          bootstrapDependencies,
+        );
+        observeRuntimePhase(observer, 'APPLICATION_DONE');
+        if (prepared.status === 'READY') return Object.freeze({ status: 'READY' as const });
+        if (prepared.status === 'BASELINE_EXISTS') {
+          return Object.freeze({ status: 'BASELINE_EXISTS' as const });
+        }
+        return Object.freeze({ status: 'VALIDATION_BLOCKED' as const });
+      } catch (error) {
+        return preparationDiagnosticFailure(error, bootstrapPhase);
+      }
+    }
+
+    if (scheme === null) {
+      throw new InitialControlledRebuildJobError('SCHEME_CLIENT_CREATE_FAILED');
+    }
+
+    let result: InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult;
+    observeRuntimePhase(observer, 'APPLICATION_START');
+    const applicationDependencies = Object.freeze({
+      ...bootstrapDependencies,
+      scheme,
       observeControlledPhase(nextPhase: InitialControlledRebuildApplicationPhase) {
         controlledPhase = nextPhase;
         if (nextPhase !== 'PREPARATION') bootstrapPhase = null;
@@ -280,5 +393,16 @@ export function runInitialControlledRebuildSwapRecoveryDiagnosticJobFromEnvironm
     readInitialBootstrapJobConfig(environment),
     observer,
     'SWAP_RECOVERY_DIAGNOSTIC',
+  );
+}
+
+export function runInitialControlledRebuildPreparationDiagnosticJobFromEnvironment(
+  environment: InitialBootstrapJobEnvironment = process.env,
+  observer: Readonly<InitialControlledRebuildJobObserver> = Object.freeze({}),
+): Promise<InitialControlledRebuildPreparationDiagnosticResult> {
+  return runInitialControlledRebuildJob(
+    readInitialBootstrapJobConfig(environment),
+    observer,
+    'PREPARATION_DIAGNOSTIC',
   );
 }
