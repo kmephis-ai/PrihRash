@@ -155,9 +155,11 @@ Workflow не имеет `push`, `pull_request`, `schedule` или `repository_d
 
 ### Read-only YDB resource-limits diagnostic
 
-Для R1 recovery blocker `RESOURCE_EXHAUSTED` workflow имеет manual-only input `resource_limits_only=true`. Этот режим переиспользует exact-main OIDC/WIF boundary, но **не** устанавливает Node dependencies, не восстанавливает Function artifact, не читает Lockbox metadata/payload, не deploy/invoke readiness Function и не выполняет YDB data/scheme writes. Он использует только `yc ydb database list/get --retry 0` в target folder.
+Для R1 recovery blocker `RESOURCE_EXHAUSTED` workflow имеет manual-only input `resource_limits_only=true`. Первоначальный direct-WIF metadata path доказал fail-closed `READ_FAILED`: dedicated GitHub deploy identity намеренно не получает YDB read authority. Поэтому canonical diagnostic не расширяет IAM, а переиспользует existing private readiness Function и existing runtime service account `prihrash-backend`, у которого уже есть `ydb.viewer` на target YDB.
 
-Discovery fail-closed: продолжение к database metadata допускается только при ровно одной accessible database; `NONE`, `AMBIGUOUS` и provider read failure публикуются как bounded classification без угадывания target. Provider/database IDs, names, endpoint/path и raw `yc` stdout/stderr не входят в evidence. Для единственной serverless DB public evidence содержит только `enableThrottlingRcuLimit`, `throttlingRcuLimit` и `provisionedRcuLimit`; для dedicated/unknown эти поля `null`. Любые `yc ydb database update/create/delete/move`, quota/cap mutation и resource-limit increase этим режимом запрещены. После устранения R1 provider blocker этот temporary diagnostic mode подлежит retirement вместе с одноразовой R1 provider surface.
+Resource-only режим выполняет обычные exact-source package/YC CLI/OIDC prerequisites, fail-closed проверяет exact current `main`, private Function, exact WIF invoker binding и `triggers=0`, после чего создаёт только отдельную version с entrypoint `index.resourceLimitsHandler`, tag `r1-ydb-resource-limits`, logging disabled и **без Lockbox secrets**. В version server-side передаётся только masked target folder locator; handler берёт short-lived IAM token прикреплённого `prihrash-backend` из Yandex Function invocation context и делает один read-only Managed YDB `Database.List` GET с `pageSize=2`. GitHub deploy identity не получает `ydb.viewer`, новый access binding не создаётся.
+
+Discovery fail-closed: продолжение к resource evidence допускается только при ровно одной accessible database без pagination; `NONE`, `AMBIGUOUS`, malformed/provider/auth failure публикуются как bounded classification без угадывания target. Provider/database IDs, names, endpoint/path, IAM token и raw provider response не входят в evidence. Для единственной serverless DB public evidence содержит только `enableThrottlingRcuLimit`, `throttlingRcuLimit` и `provisionedRcuLimit`; для dedicated/unknown эти поля `null`. YDB data/scheme writes, `Database.Update/Create/Delete/Move`, quota/cap mutation, IAM widening, Google reads и Lockbox payload access этим режимом запрещены. Перед deploy и перед единственным private invoke workflow повторно доказывает exact current `main`; после устранения R1 provider blocker temporary diagnostic handler/tag подлежит retirement.
 
 ## Exact package and version
 
@@ -167,7 +169,7 @@ Deploy source:
 .artifacts/yandex-scheduled-sync-function
 ```
 
-`index.js` экспортирует `readinessHandler`; entrypoint version должен быть ровно:
+`index.js` экспортирует `readinessHandler` и diagnostic-only `resourceLimitsHandler`; обычный readiness entrypoint должен быть ровно:
 
 ```text
 index.readinessHandler
@@ -182,6 +184,19 @@ execution timeout: 45s
 tag: r1-readiness
 logging: disabled
 runtime service account: prihrash-backend
+```
+
+Resource-limits diagnostic version использует тот же package и runtime SA, но отдельный bounded entrypoint/config:
+
+```text
+entrypoint: index.resourceLimitsHandler
+runtime: nodejs22
+memory: 128m
+execution timeout: 20s
+tag: r1-ydb-resource-limits
+logging: disabled
+Lockbox secrets: none
+metadata endpoints: disabled
 ```
 
 Operational timeout layering для readiness: application deadline: 20s, YDB Driver ready cancellation: 10s, bounded YDB close timeout: 2s, Function execution timeout: 45s, invoker transport timeout: 60s. `Driver.ready()` получает AbortSignal только в readiness client creation path; если startup не завершился в 10s, failed creation best-effort закрывает Driver, чтобы gRPC/event-loop lifecycle не переживал application failure. Read-only query timeout 21s остаётся native SDK backstop, но глобальный 20s application deadline по-прежнему первичен. Внешние 45s/60s — только provider/transport headroom и не расширяют read-only application budget. Invoker отключает встроенные CLI retries через `--retry 0`, но после privacy-safe classification `READINESS_INVOKE_NONZERO_UNCLASSIFIED` либо `READINESS_INVOKE_FUNCTION_TIMEOUT` допускает ровно один собственный bounded повтор того же read-only readiness invoke с короткой задержкой. Второй non-success является terminal FAIL; никаких writes, authority expansion или неограниченных retries это не разрешает.
