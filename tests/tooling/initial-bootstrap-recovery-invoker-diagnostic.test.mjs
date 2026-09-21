@@ -259,14 +259,18 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const evidence of [
-    'READY',
-    'YDB_QUERY_TIMEOUT',
-    'YDB_DATA_QUERY_EXECUTION_FAILED',
-    'YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE',
-    'DURABLE_RECONCILIATION_FAILURE',
+  for (const [evidence, retryEvidence] of [
+    ['READY', 'NO_RETRY'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED'],
   ]) {
-    const yc = await fakeYc({ ...base, stagingControlledPreparationEvidence: evidence });
+    const yc = await fakeYc({
+      ...base,
+      stagingControlledPreparationEvidence: evidence,
+      stagingControlledPreparationRetryEvidence: retryEvidence,
+    });
     const result = await execFileAsync(
       process.execPath,
       ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
@@ -281,7 +285,11 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
       },
     );
     assert.deepEqual(JSON.parse(result.stdout), base);
-    assert.equal(result.stderr, `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=${evidence}\n`);
+    assert.equal(
+      result.stderr,
+      `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=${evidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=${retryEvidence}\n`,
+    );
   }
 });
 
@@ -293,10 +301,50 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
     reason: 'STAGING_RUN_PRESENT',
   };
   for (const { payload, mode } of [
-    { payload: { ...base, stagingControlledPreparationEvidence: 'READY' }, mode: '0' },
-    { payload: { ...base, stagingControlledPreparationEvidence: 'PRIVATE_ENUM' }, mode: '1' },
-    { payload: { ...base, stagingControlledPreparationEvidence: 'YDB_DATA_FAILURE' }, mode: '1' },
-    { payload: { ...base, stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT' }, mode: '1' },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+      },
+      mode: '0',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'PRIVATE_ENUM',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'YDB_DATA_FAILURE',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'PRIVATE_RETRY_ENUM',
+      },
+      mode: '1',
+    },
+    {
+      payload: { ...base, stagingControlledPreparationEvidence: 'READY' },
+      mode: '1',
+    },
   ]) {
     const yc = await fakeYc(payload);
     await assert.rejects(
