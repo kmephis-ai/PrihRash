@@ -197,7 +197,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
   const base = {
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
+    stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_FAILED',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -230,4 +230,20 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
       code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
     },
   );
+  for (const invalidEvidence of ['YDB_DATA_FAILURE', 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: invalidEvidence,
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
 });

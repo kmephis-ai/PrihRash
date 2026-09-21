@@ -259,7 +259,13 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const evidence of ['READY', 'YDB_QUERY_TIMEOUT', 'DURABLE_RECONCILIATION_FAILURE']) {
+  for (const evidence of [
+    'READY',
+    'YDB_QUERY_TIMEOUT',
+    'YDB_DATA_QUERY_EXECUTION_FAILED',
+    'YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE',
+    'DURABLE_RECONCILIATION_FAILURE',
+  ]) {
     const yc = await fakeYc({ ...base, stagingControlledPreparationEvidence: evidence });
     const result = await execFileAsync(
       process.execPath,
@@ -289,6 +295,8 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
   for (const { payload, mode } of [
     { payload: { ...base, stagingControlledPreparationEvidence: 'READY' }, mode: '0' },
     { payload: { ...base, stagingControlledPreparationEvidence: 'PRIVATE_ENUM' }, mode: '1' },
+    { payload: { ...base, stagingControlledPreparationEvidence: 'YDB_DATA_FAILURE' }, mode: '1' },
+    { payload: { ...base, stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT' }, mode: '1' },
   ]) {
     const yc = await fakeYc(payload);
     await assert.rejects(
