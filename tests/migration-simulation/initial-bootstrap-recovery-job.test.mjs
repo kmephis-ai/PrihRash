@@ -5,6 +5,7 @@ import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6Dat
 import { InitialBootstrapApplicationError } from '../../dist/migration/initialBootstrapApplication.js';
 import {
   classifyInitialBootstrapControlledPreparationFailure,
+  createInitialBootstrapControlledPreparationRetryTracker,
   diagnoseInitialBootstrapSourceDecodeEvidence,
   executeInitialBootstrapRecoveryJob,
   readInitialBootstrapRecoveryJobConfig,
@@ -48,6 +49,68 @@ test('controlled preparation classifier preserves exact existing YDB transport e
     classifyInitialBootstrapControlledPreparationFailure(new Error('private provider text')),
     'DIAGNOSTIC_FAILED',
   );
+});
+
+test('controlled preparation retry tracker reduces only bounded retry outcomes', () => {
+  const cases = [
+    {
+      messages: [],
+      expected: 'UNOBSERVED',
+    },
+    {
+      messages: [{ type: 'attempt', value: { attempt: 1, idempotent: true, outcome: 'success' } }],
+      expected: 'NO_RETRY',
+    },
+    {
+      messages: [{ type: 'attempt', value: { attempt: 1, idempotent: true, outcome: 'retried' } }],
+      expected: 'RETRIED',
+    },
+    {
+      messages: [{ type: 'attempt', value: { attempt: 2, idempotent: true, outcome: 'success' } }],
+      expected: 'RETRIED',
+    },
+    {
+      messages: [{ type: 'attempt', value: { attempt: 1, idempotent: false, outcome: 'non_retryable' } }],
+      expected: 'NON_RETRYABLE',
+    },
+    {
+      messages: [{ type: 'exhausted', value: { attempts: 3, totalDuration: 125 } }],
+      expected: 'EXHAUSTED',
+    },
+  ];
+  for (const { messages, expected } of cases) {
+    const tracker = createInitialBootstrapControlledPreparationRetryTracker();
+    for (const message of messages) {
+      if (message.type === 'attempt') tracker.observeAttemptCompleted(message.value);
+      else tracker.observeExhausted(message.value);
+    }
+    assert.equal(tracker.evidence(), expected);
+  }
+});
+
+test('controlled preparation retry tracker is non-throwing, fail-closed and ignores lastError', () => {
+  const malformed = createInitialBootstrapControlledPreparationRetryTracker();
+  assert.doesNotThrow(() => malformed.observeAttemptCompleted({ attempt: 0, idempotent: true, outcome: 'success' }));
+  assert.equal(malformed.evidence(), 'DIAGNOSTIC_FAILED');
+
+  const ignoredLastError = createInitialBootstrapControlledPreparationRetryTracker();
+  const exhausted = {
+    attempts: 2,
+    totalDuration: 50,
+    get lastError() {
+      throw new Error('private provider error must not be read');
+    },
+  };
+  assert.doesNotThrow(() => ignoredLastError.observeExhausted(exhausted));
+  assert.equal(ignoredLastError.evidence(), 'EXHAUSTED');
+
+  const priority = createInitialBootstrapControlledPreparationRetryTracker();
+  priority.observeAttemptCompleted({ attempt: 2, idempotent: true, outcome: 'retried' });
+  priority.observeAttemptCompleted({ attempt: 3, idempotent: true, outcome: 'non_retryable' });
+  priority.observeExhausted({ attempts: 3, totalDuration: 75 });
+  assert.equal(priority.evidence(), 'EXHAUSTED');
+  priority.markDiagnosticFailed();
+  assert.equal(priority.evidence(), 'DIAGNOSTIC_FAILED');
 });
 
 const config = Object.freeze({
@@ -195,7 +258,7 @@ function runtime(overrides = {}) {
         return 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH';
       },
       async diagnoseStagingControlledPreparation() {
-        return 'READY';
+        return Object.freeze({ preparationEvidence: 'READY', retryEvidence: 'UNOBSERVED' });
       },
       ...overrides,
     },
@@ -552,7 +615,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       controlledPreparationCalls += 1;
       assert.equal(receivedLease.snapshotDigest, 'synthetic-digest');
       assert.equal(typeof digest.digestCanonicalSnapshot, 'function');
-      return 'YDB_QUERY_TIMEOUT';
+      return Object.freeze({ preparationEvidence: 'YDB_QUERY_TIMEOUT', retryEvidence: 'RETRIED' });
     },
   });
   assert.deepEqual(
@@ -561,6 +624,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       verdict: 'RECOVERY_REQUIRED',
       reason: 'STAGING_RUN_PRESENT',
       stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
+      stagingControlledPreparationRetryEvidence: 'RETRIED',
     },
   );
   assert.equal(controlledPreparationCalls, 1);
