@@ -77,6 +77,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$\{\{ github\.run_id \}\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=/);
+  assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=/);
   assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_FAILED/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE/);
@@ -91,7 +92,10 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.doesNotMatch(workflow, /\|APPLICATION_FAILURE\|/);
   assert.doesNotMatch(workflow, /YDB_DATA_FAILURE\|/);
   assert.doesNotMatch(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT/);
+  assert.match(workflow, /UNOBSERVED\|NO_RETRY\|RETRIED\|NON_RETRYABLE\|EXHAUSTED\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_RETRY_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation\.json/);
+  assert.match(workflow, /controlled-preparation-retry\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
 
@@ -145,6 +149,15 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000/);
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000/);
   assert.match(runtime, /prepareInitialControlledRebuildContinuation/);
+  assert.match(runtime, /node:diagnostics_channel/);
+  assert.match(runtime, /ydb:retry\.attempt\.completed/);
+  assert.match(runtime, /ydb:retry\.exhausted/);
+  assert.match(runtime, /\.subscribe\(onAttemptCompleted\)/);
+  assert.match(runtime, /\.unsubscribe\(onAttemptCompleted\)/);
+  assert.match(runtime, /\.subscribe\(onExhausted\)/);
+  assert.match(runtime, /\.unsubscribe\(onExhausted\)/);
+  assert.doesNotMatch(runtime, /lastError/);
+  assert.doesNotMatch(runtime, /@ydbjs\/retry/);
   assert.doesNotMatch(runtime, /runInitialControlledRebuildApplication/);
   assert.doesNotMatch(runtime, /executeMigrationRunLifecycleWrite/);
   assert.doesNotMatch(runtime, /executeInitialControlledRebuildSetup/);
