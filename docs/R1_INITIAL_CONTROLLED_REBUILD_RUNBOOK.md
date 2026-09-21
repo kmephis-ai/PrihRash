@@ -330,3 +330,9 @@ All other outcomes are NOOP/STOP/FAIL and remain non-success at the workflow bou
 GitHub output/artifacts may contain only exact SHA/run IDs from GitHub and bounded enum-only provider classifications. They must not contain real financial rows, amounts, descriptions/notes, raw Google snapshots, private reconciliation totals, provider identifiers, connection strings or credentials.
 
 After independently proven COMMITTED current state, the temporary WU7 write authority is retired at a natural boundary. The private Function may remain only as trigger-free inert scaffold if canonical cleanup says so. Timer, scheduled sync and cutover remain separately gated.
+
+### #738 read-only reconciliation read-stage evidence
+
+После доказанного serverless throttling `10 RU/s` fresh long-idle controlled-preparation diagnostic снова воспроизвёл `RESOURCE_EXHAUSTED`, но application phase дошла до `RECONCILIATION_READ`. Для этого слоя recovery-only surface может публиковать только последний достигнутый enum `UNOBSERVED | REVISION_METADATA_SCAN | REVISION_PAYLOAD_BATCH | REVISION_COLLISION_READ | DIAGNOSTIC_FAILED`.
+
+Observer отмечается непосредственно перед уже существующими revision metadata scan, byte-bounded exact payload batch read и conditional collision read. Он не добавляет YDB request, не меняет SQL/parameters/order/batch size, retry/timeout/RCU/cap/IAM и не разрешает controlled rebuild replay. Query text, parameters, rows, provider IDs и financial payload в evidence не входят.

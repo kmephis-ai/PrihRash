@@ -26,6 +26,15 @@ export interface InitialSourceRevisionResumePlan {
   readonly missingRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[];
 }
 
+export type InitialSourceRevisionEvidenceReadStage =
+  | 'REVISION_METADATA_SCAN'
+  | 'REVISION_PAYLOAD_BATCH'
+  | 'REVISION_COLLISION_READ';
+
+export type InitialSourceRevisionEvidenceReadObserver = (
+  stage: InitialSourceRevisionEvidenceReadStage,
+) => void;
+
 export type InitialSourceRevisionEvidenceRecoveryErrorCode =
   | 'INVALID_EXPECTED_REVISION'
   | 'MIXED_EXPECTED_RUN'
@@ -55,6 +64,18 @@ const TEXT_ENCODER = new TextEncoder();
 // batching is derived from the expected payload bytes and preserves full raw-payload verification.
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
+
+function observeReadStage(
+  observer: InitialSourceRevisionEvidenceReadObserver | undefined,
+  stage: InitialSourceRevisionEvidenceReadStage,
+): void {
+  if (observer === undefined) return;
+  try {
+    observer(stage);
+  } catch {
+    // Diagnostics must never alter recovery semantics or provider request count.
+  }
+}
 
 function malformed(): never {
   throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
@@ -274,6 +295,7 @@ function sourceKeyReadStatement(
 export async function planInitialSourceRevisionEvidenceResume(
   reader: YdbReadScope,
   expectedRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+  observeReadStageEvidence?: InitialSourceRevisionEvidenceReadObserver,
 ): Promise<Readonly<InitialSourceRevisionResumePlan>> {
   const expected = expectedMap(expectedRevisions);
   if (expected.runId === null) {
@@ -284,6 +306,7 @@ export async function planInitialSourceRevisionEvidenceResume(
   }
 
   const existingSourceIds = new Set<string>();
+  observeReadStage(observeReadStageEvidence, 'REVISION_METADATA_SCAN');
   const runResult = await reader.read<ExistingInitialRevisionRow>(
     runRevisionReadStatement(expected.runId),
   );
@@ -302,6 +325,7 @@ export async function planInitialSourceRevisionEvidenceResume(
   });
   const payloadVerifiedSourceIds = new Set<string>();
   for (const batch of planRevisionReadBatches(existingRevisions)) {
+    observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
       exactPayloadRangeReadStatement(expected.runId, batch),
     );
@@ -317,6 +341,7 @@ export async function planInitialSourceRevisionEvidenceResume(
     (revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()),
   );
   if (missingRevisions.length > 0) {
+    observeReadStage(observeReadStageEvidence, 'REVISION_COLLISION_READ');
     const collisionResult = await reader.read<ExistingInitialRevisionRow>(
       sourceKeyReadStatement(missingRevisions),
     );
