@@ -48,12 +48,12 @@ jobs:
           printf '%s' "$PATCH_B64" | base64 -d | gzip -d > "$RUNNER_TEMP/change.patch"
           git apply --check "$RUNNER_TEMP/change.patch"
           git apply "$RUNNER_TEMP/change.patch"
-          test "$(git write-tree)" = "$EXPECTED_TREE"
           test "$(git status --short | wc -l | tr -d ' ')" = "9"
+          git add -A
+          test "$(git write-tree)" = "$EXPECTED_TREE"
 
           git config user.name "kmephis-ai"
           git config user.email "kmephis@gmail.com"
-          git add -A
           git commit -m "R1 #723: expose controlled preparation phase evidence"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
 
