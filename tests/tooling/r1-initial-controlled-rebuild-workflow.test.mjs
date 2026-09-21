@@ -113,6 +113,10 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.match(workflow, /PRESENT/);
   assert.match(workflow, /ABSENT/);
   assert.match(workflow, /bootstrapPhase/);
+  assert.match(workflow, /applicationFailureCode/);
+  assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT/);
+  assert.match(workflow, /DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID/);
+  assert.match(workflow, /REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH/);
   assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
   const reconciliationGuards = workflow.match(/\.bootstrapPhase \| IN\([^)]*"RECONCILIATION_READ"/g) ?? [];
   assert.equal(reconciliationGuards.length, 2);
