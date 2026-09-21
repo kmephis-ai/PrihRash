@@ -5,7 +5,9 @@ import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
 import { YdbSchemeAdapter, type YdbSchemeTransport } from '../integration/ydb/scheme.js';
 import {
   createYdbJsV6MetadataDataClient,
+  YdbJsV6DataTransportError,
   type YdbJsDataClient,
+  type YdbJsV6DataTransportErrorCode,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
   diagnoseInitialControlledRebuildSwapRecovery,
@@ -14,9 +16,17 @@ import {
   type InitialControlledRebuildApplicationResult,
   type InitialControlledRebuildSwapRecoveryDiagnosticResult,
 } from '../migration/initialControlledRebuildApplication.js';
-import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
+import {
+  createInitialBootstrapDurableReconciliation,
+  InitialBootstrapDurableReconciliationError,
+  type InitialBootstrapDurableReconciliationErrorCode,
+} from '../migration/initialBootstrapDurableReconciliation.js';
 import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../migration/initialBootstrapPrivateEvidence.js';
+import {
+  InitialSourceRevisionEvidenceRecoveryError,
+  type InitialSourceRevisionEvidenceRecoveryErrorCode,
+} from '../migration/initialSourceRevisionEvidenceRecovery.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
 import type { InitialSnapshotProjectionContext } from '../migration/initialSnapshotProjection.js';
 import { INITIAL_RECONCILIATION_CHECKS, type InitialReconciliationEvidence } from '../migration/initialValidationGate.js';
@@ -41,21 +51,42 @@ export type InitialControlledRebuildJobErrorCode =
   | 'POST_COMMIT_RECONCILIATION_MISMATCH'
   | 'YDB_CLIENT_CLOSE_FAILED';
 
+export type InitialControlledRebuildApplicationFailureCode =
+  | `YDB_DATA_${YdbJsV6DataTransportErrorCode}`
+  | `DURABLE_RECONCILIATION_${InitialBootstrapDurableReconciliationErrorCode}`
+  | `REVISION_EVIDENCE_${InitialSourceRevisionEvidenceRecoveryErrorCode}`;
+
+export function classifyInitialControlledRebuildApplicationFailureCode(
+  error: unknown,
+): InitialControlledRebuildApplicationFailureCode | null {
+  if (error instanceof YdbJsV6DataTransportError) return `YDB_DATA_${error.code}`;
+  if (error instanceof InitialBootstrapDurableReconciliationError) {
+    return `DURABLE_RECONCILIATION_${error.code}`;
+  }
+  if (error instanceof InitialSourceRevisionEvidenceRecoveryError) {
+    return `REVISION_EVIDENCE_${error.code}`;
+  }
+  return null;
+}
+
 export class InitialControlledRebuildJobError extends Error {
   readonly code: InitialControlledRebuildJobErrorCode;
   readonly phase: InitialControlledRebuildApplicationPhase | null;
   readonly bootstrapPhase: InitialBootstrapApplicationPhase | null;
+  readonly applicationFailureCode: InitialControlledRebuildApplicationFailureCode | null;
 
   constructor(
     code: InitialControlledRebuildJobErrorCode,
     phase: InitialControlledRebuildApplicationPhase | null = null,
     bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
+    applicationFailureCode: InitialControlledRebuildApplicationFailureCode | null = null,
   ) {
     super(code);
     this.name = 'InitialControlledRebuildJobError';
     this.code = code;
     this.phase = phase;
     this.bootstrapPhase = bootstrapPhase;
+    this.applicationFailureCode = applicationFailureCode;
   }
 }
 
@@ -233,8 +264,15 @@ export async function runInitialControlledRebuildJob(
       result = mode === 'SWAP_RECOVERY_DIAGNOSTIC'
         ? await diagnoseInitialControlledRebuildSwapRecovery(observation, applicationDependencies)
         : await runInitialControlledRebuildApplication(observation, applicationDependencies);
-    } catch {
-      throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase, bootstrapPhase);
+    } catch (error) {
+      throw new InitialControlledRebuildJobError(
+        'APPLICATION_FAILED',
+        controlledPhase,
+        bootstrapPhase,
+        bootstrapPhase === 'RECONCILIATION_READ'
+          ? classifyInitialControlledRebuildApplicationFailureCode(error)
+          : null,
+      );
     }
     observeRuntimePhase(observer, 'APPLICATION_DONE');
 
