@@ -247,7 +247,17 @@ Issue #711 therefore tightens only this diagnostic enum. Direct
 `YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT`, unknown values and private exception text are rejected
 fail-closed. Non-YDB diagnostics remain bounded to
 `READY | BASELINE_EXISTS | VALIDATION_BLOCKED | DURABLE_RECONCILIATION_FAILURE |
-REVISION_EVIDENCE_FAILURE | PRIVATE_EVIDENCE_FAILURE | APPLICATION_FAILURE | DIAGNOSTIC_FAILED`.
+REVISION_EVIDENCE_FAILURE | PRIVATE_EVIDENCE_FAILURE |
+APPLICATION_<InitialBootstrapApplicationErrorCode> | DIAGNOSTIC_FAILED`.
+The application token preserves only the already-defined bounded application enum and never exposes
+messages, stack traces, row data, query text or provider identifiers.
+
+On exact `6bf5c19cd9491f92a81daf98cbd2f4f47337ca10`, fresh read-only preparation probes
+`35596737446` and `35597160968` returned respectively
+`YDB_DATA_QUERY_EXECUTION_FAILED` and the older aggregate `APPLICATION_FAILURE`, while the prior
+exact-envelope probe `35585891033` had returned `READY`. This proves the preparation boundary is
+not a single deterministic 21 s timeout/data-shape failure. Issue #715 narrows only the second
+aggregate diagnostic to its exact existing application enum; no third controlled attempt is armed.
 
 This diagnostic does not arm a third controlled rebuild, does not change the 21 s timeout, and does
 not expand write/provider authority. Google remains authoritative and YDB remains shadow.
