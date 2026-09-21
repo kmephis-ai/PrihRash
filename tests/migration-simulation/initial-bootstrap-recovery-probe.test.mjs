@@ -198,6 +198,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
     stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_FAILED',
+    stagingControlledPreparationRetryEvidence: 'RETRIED',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -223,6 +224,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
       async () => ({
         ...base,
         stagingControlledPreparationEvidence: 'PRIVATE_ENUM',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
       }),
     ),
     {
@@ -238,6 +240,27 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           verdict: 'RECOVERY_REQUIRED',
           reason: 'STAGING_RUN_PRESENT',
           stagingControlledPreparationEvidence: invalidEvidence,
+          stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
+
+  for (const invalidRetryEvidence of [undefined, 'PRIVATE_RETRY_ENUM']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: 'READY',
+          ...(invalidRetryEvidence === undefined
+            ? {}
+            : { stagingControlledPreparationRetryEvidence: invalidRetryEvidence }),
         }),
       ),
       {
