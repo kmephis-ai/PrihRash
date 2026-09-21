@@ -26,6 +26,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingExactRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingExactRevisionEvidence'];
       stagingControlledPreparationEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence'];
       stagingControlledPreparationRetryEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationRetryEvidence'];
+      stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -182,6 +183,16 @@ const STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE = new Set<NonNullable<Initia
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence']>>([
+  'UNOBSERVED',
+  'ABORT_TIMEOUT',
+  'YDB_STATUS',
+  'GRPC_STATUS',
+  'CLIENT_ERROR',
+  'OTHER',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -275,11 +286,13 @@ function validClassification(
   const exactRevisionDiagnostic = value.stagingExactRevisionEvidence;
   const controlledPreparationDiagnostic = value.stagingControlledPreparationEvidence;
   const controlledPreparationRetryDiagnostic = value.stagingControlledPreparationRetryEvidence;
+  const controlledPreparationQueryErrorDiagnostic = value.stagingControlledPreparationQueryErrorEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
       || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
       || controlledPreparationDiagnostic !== undefined
-      || controlledPreparationRetryDiagnostic !== undefined) return false;
+      || controlledPreparationRetryDiagnostic !== undefined
+      || controlledPreparationQueryErrorDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
       diagnostic !== undefined
@@ -291,6 +304,8 @@ function validClassification(
       || !STAGING_CONTROLLED_PREPARATION_EVIDENCE.has(controlledPreparationDiagnostic)
       || controlledPreparationRetryDiagnostic === undefined
       || !STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE.has(controlledPreparationRetryDiagnostic)
+      || controlledPreparationQueryErrorDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE.has(controlledPreparationQueryErrorDiagnostic)
     ) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
@@ -298,7 +313,11 @@ function validClassification(
     if (retirementDiagnostic === undefined || !STAGING_RETIREMENT_EVIDENCE.has(retirementDiagnostic)) return false;
     if (sourceDecodeDiagnostic === undefined || !validSourceDecodeEvidence(sourceDecodeDiagnostic)) return false;
     if (exactRevisionDiagnostic === undefined || !STAGING_EXACT_REVISION_EVIDENCE.has(exactRevisionDiagnostic)) return false;
-    if (controlledPreparationDiagnostic !== undefined || controlledPreparationRetryDiagnostic !== undefined) return false;
+    if (
+      controlledPreparationDiagnostic !== undefined
+      || controlledPreparationRetryDiagnostic !== undefined
+      || controlledPreparationQueryErrorDiagnostic !== undefined
+    ) return false;
   } else if (
     diagnostic !== undefined
     || durableDiagnostic !== undefined
@@ -307,6 +326,7 @@ function validClassification(
     || exactRevisionDiagnostic !== undefined
     || controlledPreparationDiagnostic !== undefined
     || controlledPreparationRetryDiagnostic !== undefined
+    || controlledPreparationQueryErrorDiagnostic !== undefined
   ) {
     return false;
   }
@@ -363,6 +383,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingControlledPreparationRetryEvidence === undefined
         ? {}
         : { stagingControlledPreparationRetryEvidence: classification.stagingControlledPreparationRetryEvidence }),
+      ...(classification.stagingControlledPreparationQueryErrorEvidence === undefined
+        ? {}
+        : { stagingControlledPreparationQueryErrorEvidence: classification.stagingControlledPreparationQueryErrorEvidence }),
     });
   } catch (error) {
     if (

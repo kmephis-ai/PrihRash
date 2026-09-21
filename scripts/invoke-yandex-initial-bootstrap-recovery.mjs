@@ -154,6 +154,16 @@ const STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE = new Set([
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE = new Set([
+  'UNOBSERVED',
+  'ABORT_TIMEOUT',
+  'YDB_STATUS',
+  'GRPC_STATUS',
+  'CLIENT_ERROR',
+  'OTHER',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -295,6 +305,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
     const stagingControlledPreparationEvidence = result.stagingControlledPreparationEvidence;
     const stagingControlledPreparationRetryEvidence = result.stagingControlledPreparationRetryEvidence;
+    const stagingControlledPreparationQueryErrorEvidence = result.stagingControlledPreparationQueryErrorEvidence;
     const validatedSourceEvidence = result.validatedSourceEvidence;
     const staleValidatedRecoveryGate = result.staleValidatedRecoveryGate;
     const noStagingDiagnostics = stagingRevisionEvidence === undefined
@@ -311,16 +322,20 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
             'reason',
             'stagingControlledPreparationEvidence',
             'stagingControlledPreparationRetryEvidence',
+            'stagingControlledPreparationQueryErrorEvidence',
           ])
           && noStagingDiagnostics
           && typeof stagingControlledPreparationEvidence === 'string'
           && STAGING_CONTROLLED_PREPARATION_EVIDENCE.has(stagingControlledPreparationEvidence)
           && typeof stagingControlledPreparationRetryEvidence === 'string'
           && STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE.has(stagingControlledPreparationRetryEvidence)
+          && typeof stagingControlledPreparationQueryErrorEvidence === 'string'
+          && STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE.has(stagingControlledPreparationQueryErrorEvidence)
         : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
           && noStagingDiagnostics
           && stagingControlledPreparationEvidence === undefined
           && stagingControlledPreparationRetryEvidence === undefined
+          && stagingControlledPreparationQueryErrorEvidence === undefined
       : result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
         && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
@@ -330,10 +345,12 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && STALE_VALIDATED_GATE_BLOCKERS.has(staleValidatedRecoveryGate.blocker)
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -357,10 +374,12 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && STAGING_EXACT_REVISION_EVIDENCE.has(stagingExactRevisionEvidence)
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && noStagingDiagnostics
         && stagingControlledPreparationEvidence === undefined
-        && stagingControlledPreparationRetryEvidence === undefined;
+        && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -392,6 +411,9 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationRetryEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingControlledPreparationRetryEvidence ?? null
         : null,
+      stagingControlledPreparationQueryErrorEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingControlledPreparationQueryErrorEvidence ?? null
+        : null,
     });
   }
   if (
@@ -409,6 +431,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingExactRevisionEvidence: null,
       stagingControlledPreparationEvidence: null,
       stagingControlledPreparationRetryEvidence: null,
+      stagingControlledPreparationQueryErrorEvidence: null,
     });
   }
   return null;
@@ -428,6 +451,7 @@ async function invokeRecovery(environment = process.env) {
       stagingExactRevisionEvidence: null,
       stagingControlledPreparationEvidence: null,
       stagingControlledPreparationRetryEvidence: null,
+      stagingControlledPreparationQueryErrorEvidence: null,
     });
   }
 
@@ -457,6 +481,7 @@ async function invokeRecovery(environment = process.env) {
       stagingExactRevisionEvidence: null,
       stagingControlledPreparationEvidence: null,
       stagingControlledPreparationRetryEvidence: null,
+      stagingControlledPreparationQueryErrorEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -468,6 +493,7 @@ async function invokeRecovery(environment = process.env) {
       stagingExactRevisionEvidence: null,
       stagingControlledPreparationEvidence: null,
       stagingControlledPreparationRetryEvidence: null,
+      stagingControlledPreparationQueryErrorEvidence: null,
     });
   }
 }
@@ -508,6 +534,11 @@ if (invocation.stagingControlledPreparationEvidence !== null) {
 if (invocation.stagingControlledPreparationRetryEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=${invocation.stagingControlledPreparationRetryEvidence}\n`,
+  );
+}
+if (invocation.stagingControlledPreparationQueryErrorEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE=${invocation.stagingControlledPreparationQueryErrorEvidence}\n`,
   );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);

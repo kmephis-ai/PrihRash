@@ -259,17 +259,18 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const [evidence, retryEvidence] of [
-    ['READY', 'NO_RETRY'],
-    ['YDB_QUERY_TIMEOUT', 'RETRIED'],
-    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE'],
-    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED'],
-    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED'],
+  for (const [evidence, retryEvidence, queryErrorEvidence] of [
+    ['READY', 'NO_RETRY', 'UNOBSERVED'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER'],
   ]) {
     const yc = await fakeYc({
       ...base,
       stagingControlledPreparationEvidence: evidence,
       stagingControlledPreparationRetryEvidence: retryEvidence,
+      stagingControlledPreparationQueryErrorEvidence: queryErrorEvidence,
     });
     const result = await execFileAsync(
       process.execPath,
@@ -288,7 +289,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     assert.equal(
       result.stderr,
       `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=${evidence}\n`
-        + `R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=${retryEvidence}\n`,
+        + `R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=${retryEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE=${queryErrorEvidence}\n`,
     );
   }
 });
@@ -306,6 +308,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         ...base,
         stagingControlledPreparationEvidence: 'READY',
         stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
       },
       mode: '0',
     },
@@ -314,6 +317,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         ...base,
         stagingControlledPreparationEvidence: 'PRIVATE_ENUM',
         stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
       },
       mode: '1',
     },
@@ -322,6 +326,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         ...base,
         stagingControlledPreparationEvidence: 'YDB_DATA_FAILURE',
         stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
       },
       mode: '1',
     },
@@ -330,6 +335,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         ...base,
         stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
         stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
       },
       mode: '1',
     },
@@ -338,11 +344,33 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         ...base,
         stagingControlledPreparationEvidence: 'READY',
         stagingControlledPreparationRetryEvidence: 'PRIVATE_RETRY_ENUM',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
       },
       mode: '1',
     },
     {
-      payload: { ...base, stagingControlledPreparationEvidence: 'READY' },
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'PRIVATE_QUERY_ERROR_ENUM',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+      },
       mode: '1',
     },
   ]) {

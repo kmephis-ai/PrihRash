@@ -273,6 +273,16 @@ This retry evidence is independent from
 `R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE`; it may explain a transient
 `YDB_DATA_QUERY_EXECUTION_FAILED` but never changes the preparation result or authorizes replay.
 
+Issue #719 adds one more independent observation to the same read-only scope: the runtime subscribes
+only to the `error` callback of `tracing:ydb:query.execute` and classifies the final observed
+ExecuteQuery error without publishing its status/code, message, stack, query, parameters,
+session/node/transaction identifiers, driver/database/address or attempt count. The bounded evidence is
+`UNOBSERVED | ABORT_TIMEOUT | YDB_STATUS | GRPC_STATUS | CLIENT_ERROR | OTHER | DIAGNOSTIC_FAILED`.
+The callback reads only `context.error`, is non-throwing and unsubscribes in `finally`; malformed
+callback/subscription/unsubscription evidence fails closed as `DIAGNOSTIC_FAILED`. This telemetry does
+not change query/retry behavior, the exact `10s/21s/25s` runtime envelope, financial authority or the
+ban on a third controlled rebuild attempt.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.

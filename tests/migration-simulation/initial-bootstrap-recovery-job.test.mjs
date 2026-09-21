@@ -5,6 +5,8 @@ import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6Dat
 import { InitialBootstrapApplicationError } from '../../dist/migration/initialBootstrapApplication.js';
 import {
   classifyInitialBootstrapControlledPreparationFailure,
+  classifyInitialBootstrapControlledPreparationQueryError,
+  createInitialBootstrapControlledPreparationQueryErrorTracker,
   createInitialBootstrapControlledPreparationRetryTracker,
   diagnoseInitialBootstrapSourceDecodeEvidence,
   executeInitialBootstrapRecoveryJob,
@@ -111,6 +113,79 @@ test('controlled preparation retry tracker is non-throwing, fail-closed and igno
   assert.equal(priority.evidence(), 'EXHAUSTED');
   priority.markDiagnosticFailed();
   assert.equal(priority.evidence(), 'DIAGNOSTIC_FAILED');
+});
+
+test('controlled preparation query-error classifier exposes only bounded error classes', () => {
+  const abortError = new Error('private');
+  abortError.name = 'AbortError';
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(abortError), 'ABORT_TIMEOUT');
+
+  const timeoutError = new Error('private');
+  timeoutError.name = 'TimeoutError';
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(timeoutError), 'ABORT_TIMEOUT');
+
+  class YDBError extends Error {
+    constructor() {
+      super('private');
+      this.code = 400000;
+    }
+  }
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(new YDBError()), 'YDB_STATUS');
+
+  class ClientError extends Error {
+    constructor() {
+      super('private');
+      this.code = 14;
+    }
+  }
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(new ClientError()), 'GRPC_STATUS');
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationQueryError({ name: 'ClientError', code: 14 }),
+    'CLIENT_ERROR',
+  );
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(new Error('private')), 'OTHER');
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError({ code: '14' }), 'OTHER');
+
+  const malformed = Object.create(null, {
+    name: {
+      get() { throw new Error('private getter must stay contained'); },
+    },
+  });
+  assert.equal(classifyInitialBootstrapControlledPreparationQueryError(malformed), 'DIAGNOSTIC_FAILED');
+});
+
+test('controlled preparation query-error tracker reads only context.error and fails closed', () => {
+  const tracker = createInitialBootstrapControlledPreparationQueryErrorTracker();
+  assert.equal(tracker.evidence(), 'UNOBSERVED');
+
+  class YDBError extends Error {
+    constructor() {
+      super('private');
+      this.code = 500000;
+    }
+  }
+  const context = {
+    error: new YDBError(),
+    get text() { throw new Error('query text must not be read'); },
+    get query() { throw new Error('query must not be read'); },
+    get parameters() { throw new Error('parameters must not be read'); },
+    get sessionId() { throw new Error('sessionId must not be read'); },
+    get nodeId() { throw new Error('nodeId must not be read'); },
+    get txId() { throw new Error('txId must not be read'); },
+    get driver() { throw new Error('driver must not be read'); },
+  };
+  assert.doesNotThrow(() => tracker.observeErrorContext(context));
+  assert.equal(tracker.evidence(), 'YDB_STATUS');
+
+  const timeoutError = new Error('private');
+  timeoutError.name = 'TimeoutError';
+  tracker.observeErrorContext({ error: timeoutError });
+  assert.equal(tracker.evidence(), 'ABORT_TIMEOUT');
+
+  tracker.observeErrorContext({});
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+  tracker.observeErrorContext({ error: new Error('later event cannot clear fail-closed state') });
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
 });
 
 const config = Object.freeze({
@@ -258,7 +333,11 @@ function runtime(overrides = {}) {
         return 'EXACT_CURRENT_RUN_CARDINALITY_MISMATCH';
       },
       async diagnoseStagingControlledPreparation() {
-        return Object.freeze({ preparationEvidence: 'READY', retryEvidence: 'UNOBSERVED' });
+        return Object.freeze({
+          preparationEvidence: 'READY',
+          retryEvidence: 'UNOBSERVED',
+          queryErrorEvidence: 'UNOBSERVED',
+        });
       },
       ...overrides,
     },
@@ -615,7 +694,11 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       controlledPreparationCalls += 1;
       assert.equal(receivedLease.snapshotDigest, 'synthetic-digest');
       assert.equal(typeof digest.digestCanonicalSnapshot, 'function');
-      return Object.freeze({ preparationEvidence: 'YDB_QUERY_TIMEOUT', retryEvidence: 'RETRIED' });
+      return Object.freeze({
+        preparationEvidence: 'YDB_QUERY_TIMEOUT',
+        retryEvidence: 'RETRIED',
+        queryErrorEvidence: 'YDB_STATUS',
+      });
     },
   });
   assert.deepEqual(
@@ -625,6 +708,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       reason: 'STAGING_RUN_PRESENT',
       stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
       stagingControlledPreparationRetryEvidence: 'RETRIED',
+      stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
     },
   );
   assert.equal(controlledPreparationCalls, 1);
