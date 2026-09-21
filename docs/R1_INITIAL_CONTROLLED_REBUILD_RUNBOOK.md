@@ -89,6 +89,20 @@ Mandatory read-only recovery `35542815879` subsequently proved the durable state
 
 Repository inspection found one diagnostics-contract mismatch at a reachable pre-write continuation phase: while a durable `STAGING` controlled continuation performs `RECONCILIATION_READ` inside controlled `PREPARATION`, the Function sanitizer can safely emit `APPLICATION_FAILED / PREPARATION / RECONCILIATION_READ`, but the controlled invoker and workflow result guard did not allow that exact `bootstrapPhase`. They consequently collapsed such a bounded runtime failure into `INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID`. The repository correction only aligns this enum allowlist and regression coverage. It does not change financial semantics, resource caps, provider IAM, writer authority or durable state, and does not arm another controlled rebuild attempt.
 
+### Second bounded WU7 attempt on `b831c24a8a6b2c4de069ce5a2d18cd16a2ecff9c`
+
+Owner-authorized Issue #706 armed one additional bounded attempt after the diagnostics correction. Fresh recovery `35559600514` again proved exact resumable `STAGING_RUN_PRESENT`; readiness `35559762343` returned `READINESS_READY`. Controlled run `35559851439` passed the same exact-main, authority, prerequisite and private/trigger-free provider gates and issued exactly one synchronous invoke.
+
+The corrected contract preserved the actual bounded failure:
+
+`FAIL / INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED / APPLICATION_FAILED / PREPARATION / RECONCILIATION_READ`.
+
+The authority was consumed and closed; no third dispatch or retry is authorized. Mandatory read-only recovery `35559986097` again proved the durable surface had not advanced: `STAGING_RUN_PRESENT`, both revision evidence diagnostics remained `COMPLETE_CURRENT_RUN_ONLY`, verified current remained empty, source decoding had no blocker, and exact revision evidence remained `EXACT_CURRENT_RUN_MATCH`. Therefore no `STAGING → VALIDATED` transition, staging materialization/swap or `COMMITTED` baseline is proven from this attempt.
+
+Issue #711 narrows the next repository diagnostic boundary without changing execution: at `PREPARATION / RECONCILIATION_READ`, the controlled runtime may now preserve one optional `applicationFailureCode` drawn only from existing allowlisted YDB data-transport, durable-reconciliation or revision-evidence error enums. Unknown exceptions remain unclassified and private error text/stack/provider payloads are never emitted. The field is absent outside that exact phase. Invoker and both controlled/swap-recovery workflow guards reject unknown or misplaced subtypes fail-closed.
+
+This diagnostic correction does **not** alter the 21-second YDB read timeout, Function memory/execution timeout, caps, financial semantics, writer authority or provider IAM, and it does not arm another controlled-rebuild attempt. Any live use requires a new explicit Owner authority and fresh exact-main recovery/readiness gates.
+
 ## Controlled path
 
 The runtime reuses existing WU7 primitives and the durable bootstrap identity/revision evidence:
