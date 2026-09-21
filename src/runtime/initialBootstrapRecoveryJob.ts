@@ -9,15 +9,27 @@ import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
 import { YdbSchemeAdapter, type YdbSchemeTransport } from '../integration/ydb/scheme.js';
 import {
   createYdbJsV6MetadataDataClient,
+  YdbJsV6DataTransportError,
   type YdbJsDataClient,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import type { ReferenceResolver } from '../normalization/types.js';
 import { readYdbReferenceResolverSnapshot } from '../reference/ydbReferenceEvidenceReader.js';
 import {
+  InitialBootstrapPrivateEvidenceError,
   parseInitialBootstrapPrivateHistoricalEvidence,
   type InitialBootstrapPrivateHistoricalEvidence,
 } from '../migration/initialBootstrapPrivateEvidence.js';
+import {
+  InitialBootstrapApplicationError,
+  prepareInitialControlledRebuildContinuation,
+} from '../migration/initialBootstrapApplication.js';
+import {
+  createInitialBootstrapDurableReconciliation,
+  InitialBootstrapDurableReconciliationError,
+} from '../migration/initialBootstrapDurableReconciliation.js';
+import { InitialSourceRevisionEvidenceRecoveryError } from '../migration/initialSourceRevisionEvidenceRecovery.js';
+import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
 import {
   diagnoseValidatedControlledRebuildState,
   type InitialValidatedControlledRebuildRecoveryReason,
@@ -61,6 +73,7 @@ import {
   type InitialBootstrapRecoveryJobConfig,
   type InitialBootstrapRecoveryJobEnvironment,
 } from './initialBootstrapRecoveryConfig.js';
+import { buildInitialBootstrapObservation } from './initialBootstrapJob.js';
 
 export {
   INITIAL_BOOTSTRAP_RECOVERY_JOB_ENV,
@@ -90,6 +103,18 @@ export type InitialBootstrapSourceDecodeDiagnostic =
   | readonly Readonly<InitialBootstrapSourceDecodeFailureEvidence>[]
   | 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationDiagnostic =
+  | 'READY'
+  | 'BASELINE_EXISTS'
+  | 'VALIDATION_BLOCKED'
+  | 'YDB_QUERY_TIMEOUT'
+  | 'YDB_DATA_FAILURE'
+  | 'DURABLE_RECONCILIATION_FAILURE'
+  | 'REVISION_EVIDENCE_FAILURE'
+  | 'PRIVATE_EVIDENCE_FAILURE'
+  | 'APPLICATION_FAILURE'
+  | 'DIAGNOSTIC_FAILED';
+
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
   readonly validatedSourceEvidence?: InitialValidatedSourceDiagnostic;
   readonly staleValidatedRecoveryGate?: InitialStaleValidatedRecoveryGateResult;
@@ -98,6 +123,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
   readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
+  readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -145,6 +171,110 @@ export interface InitialBootstrapRecoveryJobRuntime {
     adapter: YdbAdapter,
     scheme: YdbSchemeAdapter,
   ): Promise<InitialValidatedControlledRebuildRecoveryReason>;
+  diagnoseStagingControlledPreparation(
+    config: Readonly<InitialBootstrapRecoveryJobConfig>,
+    lease: Readonly<GoogleSheetsFullSnapshotLease>,
+    digest: Readonly<CanonicalSourceDigest>,
+  ): Promise<InitialBootstrapControlledPreparationDiagnostic>;
+}
+
+
+const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000 as const;
+const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000 as const;
+const INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000 as const;
+
+function classifyControlledPreparationFailure(
+  error: unknown,
+): InitialBootstrapControlledPreparationDiagnostic {
+  if (error instanceof YdbJsV6DataTransportError) {
+    return error.code === 'QUERY_EXECUTION_YDB_TIMEOUT'
+      ? 'YDB_QUERY_TIMEOUT'
+      : 'YDB_DATA_FAILURE';
+  }
+  if (error instanceof InitialBootstrapDurableReconciliationError) {
+    return 'DURABLE_RECONCILIATION_FAILURE';
+  }
+  if (error instanceof InitialSourceRevisionEvidenceRecoveryError) {
+    return 'REVISION_EVIDENCE_FAILURE';
+  }
+  if (error instanceof InitialBootstrapPrivateEvidenceError) {
+    return 'PRIVATE_EVIDENCE_FAILURE';
+  }
+  if (error instanceof InitialBootstrapApplicationError) {
+    return 'APPLICATION_FAILURE';
+  }
+  return 'DIAGNOSTIC_FAILED';
+}
+
+async function diagnoseStagingControlledPreparation(
+  config: Readonly<InitialBootstrapRecoveryJobConfig>,
+  lease: Readonly<GoogleSheetsFullSnapshotLease>,
+  digest: Readonly<CanonicalSourceDigest>,
+): Promise<InitialBootstrapControlledPreparationDiagnostic> {
+  if (config.privateHistoricalEvidence === undefined) return 'PRIVATE_EVIDENCE_FAILURE';
+
+  let client: Readonly<YdbJsDataClient>;
+  try {
+    client = await createYdbJsV6MetadataDataClient({
+      connectionString: config.ydbConnectionString,
+      poolMaxSize: 1,
+      readyTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS,
+      readTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS,
+      transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
+    });
+  } catch (error) {
+    return classifyControlledPreparationFailure(error);
+  }
+
+  let result: InitialBootstrapControlledPreparationDiagnostic = 'DIAGNOSTIC_FAILED';
+  try {
+    const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(
+      config.privateHistoricalEvidence,
+    );
+    const primitives = createNodeInitialBootstrapRuntimePrimitives();
+    const observation = buildInitialBootstrapObservation(
+      lease,
+      digest,
+      historicalEvidence,
+      primitives.clock.now(),
+    );
+    const adapter = new YdbAdapter(client.transport);
+    const refs = await readYdbReferenceResolverSnapshot(adapter);
+    const projectionContext = Object.freeze({
+      granularityEvidence: historicalEvidence.granularityEvidence,
+      refs,
+    });
+    const reconciliation = createInitialBootstrapDurableReconciliation(
+      adapter,
+      projectionContext,
+      historicalEvidence,
+    );
+    const prepared = await prepareInitialControlledRebuildContinuation(
+      observation,
+      Object.freeze({
+        adapter,
+        identityAllocator: primitives.identityAllocator,
+        projectionContext,
+        historicalEvidence,
+        reconciliation: reconciliation.port,
+        clock: primitives.clock,
+      }),
+    );
+    result = prepared.status === 'READY'
+      ? 'READY'
+      : prepared.status === 'BASELINE_EXISTS'
+        ? 'BASELINE_EXISTS'
+        : 'VALIDATION_BLOCKED';
+  } catch (error) {
+    result = classifyControlledPreparationFailure(error);
+  }
+
+  try {
+    await client.close();
+  } catch {
+    return 'DIAGNOSTIC_FAILED';
+  }
+  return result;
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -181,6 +311,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   diagnoseStagingExactRevisionEvidence: diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
   diagnoseValidatedControlledRebuildState,
+  diagnoseStagingControlledPreparation,
 });
 
 export function diagnoseInitialBootstrapSourceDecodeEvidence(
@@ -247,7 +378,11 @@ export async function executeInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
   surfaceOnly = false,
+  controlledPreparationOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
+  if (surfaceOnly && controlledPreparationOnly) {
+    throw new InitialBootstrapRecoveryJobError('INVALID_RECOVERY_MODE');
+  }
   const validated = validateInitialBootstrapRecoveryConfig(config);
   const ydbClient = await runtime.createYdbClient(validated);
   const adapter = new YdbAdapter(ydbClient.transport);
@@ -256,6 +391,25 @@ export async function executeInitialBootstrapRecoveryJob(
   try {
     const before = await runtime.diagnoseSurface(adapter);
     if (surfaceOnly) return before;
+    if (controlledPreparationOnly) {
+      if (before.reason !== 'STAGING_RUN_PRESENT') return before;
+      let stagingControlledPreparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
+      try {
+        const digest = runtime.createDigest();
+        const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
+        stagingControlledPreparationEvidence = await runtime.diagnoseStagingControlledPreparation(
+          validated,
+          lease,
+          digest,
+        );
+      } catch {
+        stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
+      }
+      return Object.freeze({
+        ...before,
+        stagingControlledPreparationEvidence,
+      });
+    }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
       try {
         const schemeTransport = await ydbClient.createSchemeTransport();
@@ -420,8 +574,14 @@ export async function executeInitialBootstrapRecoveryJob(
 export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   surfaceOnly = false,
+  controlledPreparationOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
-  return executeInitialBootstrapRecoveryJob(config, productionRuntime, surfaceOnly);
+  return executeInitialBootstrapRecoveryJob(
+    config,
+    productionRuntime,
+    surfaceOnly,
+    controlledPreparationOnly,
+  );
 }
 
 export function runInitialBootstrapRecoveryJobFromEnvironment(
@@ -430,5 +590,6 @@ export function runInitialBootstrapRecoveryJobFromEnvironment(
   return runInitialBootstrapRecoveryJob(
     readInitialBootstrapRecoveryJobConfig(environment),
     environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
+    environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
   );
 }
