@@ -291,6 +291,14 @@ set plus `UNOBSERVED | NON_GRPC | UNRECOGNIZED | DIAGNOSTIC_FAILED`. This is obs
 inside the same `controlled_preparation_only` scope; it does not alter retries, deadlines, resource
 limits, financial state or provider authority.
 
+Issue #723 reuses the already-existing `InitialBootstrapApplicationPhase` observer and publishes only
+the last allowlisted application phase reached by the same read-only controlled preparation. The
+bounded phase evidence is the existing application phase enum plus `UNOBSERVED | DIAGNOSTIC_FAILED`.
+No tracing/query context is inspected and no additional YDB/Google read is introduced: the observer is
+passed directly to `prepareInitialControlledRebuildContinuation`. This phase evidence is independent
+from preparation/retry/query-error/gRPC-status evidence and cannot authorize replay, timeout/resource
+changes or any lifecycle mutation.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.

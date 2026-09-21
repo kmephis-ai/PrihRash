@@ -27,6 +27,7 @@ import {
   InitialBootstrapApplicationError,
   prepareInitialControlledRebuildContinuation,
   type InitialBootstrapApplicationErrorCode,
+  type InitialBootstrapApplicationPhase,
   type InitialBootstrapObservation,
 } from '../migration/initialBootstrapApplication.js';
 import {
@@ -158,11 +159,17 @@ export type InitialBootstrapControlledPreparationGrpcStatusEvidence =
   | 'UNRECOGNIZED'
   | 'DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationPhaseEvidence =
+  | InitialBootstrapApplicationPhase
+  | 'UNOBSERVED'
+  | 'DIAGNOSTIC_FAILED';
+
 export interface InitialBootstrapControlledPreparationResult {
   readonly preparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
   readonly retryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
   readonly queryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence;
   readonly grpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence;
+  readonly phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
@@ -177,6 +184,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryEvidence;
   readonly stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapControlledPreparationQueryErrorEvidence;
   readonly stagingControlledPreparationGrpcStatusEvidence?: InitialBootstrapControlledPreparationGrpcStatusEvidence;
+  readonly stagingControlledPreparationPhaseEvidence?: InitialBootstrapControlledPreparationPhaseEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -260,6 +268,65 @@ const YDB_RETRY_ATTEMPT_COMPLETED_CHANNEL = 'ydb:retry.attempt.completed' as con
 const YDB_RETRY_EXHAUSTED_CHANNEL = 'ydb:retry.exhausted' as const;
 const YDB_QUERY_EXECUTE_TRACE_CHANNEL = 'tracing:ydb:query.execute' as const;
 const YDB_RETRY_OUTCOMES = new Set(['success', 'retried', 'non_retryable', 'exhausted']);
+
+const INITIAL_BOOTSTRAP_APPLICATION_PHASES = new Set<InitialBootstrapApplicationPhase>([
+  'ADMISSION_READ',
+  'CURRENT_STATE_PREFLIGHT',
+  'FRESH_CONTEXT_PREPARATION',
+  'FRESH_METADATA_PREPARATION',
+  'FRESH_CLAIM_WRITE',
+  'RESUME_CONTEXT_READ',
+  'RESUME_IDENTITY_MANIFEST_READ',
+  'RESUME_SNAPSHOT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'REVISION_EVIDENCE_PREPARATION',
+  'REVISION_EVIDENCE_WRITE',
+  'LINEAGE_PREPARATION',
+  'COUNTER_REFINEMENT_PREPARATION',
+  'COUNTER_REFINEMENT_WRITE',
+  'RECONCILIATION_READ',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+  'PRE_PROMOTION_PREFLIGHT',
+  'VALIDATION_WRITE_PREPARATION',
+  'VALIDATION_TRANSITION_WRITE',
+  'PROMOTION_WRITE',
+]);
+
+interface InitialBootstrapControlledPreparationPhaseTracker {
+  observePhase(phase: unknown): void;
+  markDiagnosticFailed(): void;
+  evidence(): InitialBootstrapControlledPreparationPhaseEvidence;
+}
+
+export function createInitialBootstrapControlledPreparationPhaseTracker(): InitialBootstrapControlledPreparationPhaseTracker {
+  let latest: InitialBootstrapControlledPreparationPhaseEvidence = 'UNOBSERVED';
+  let diagnosticFailed = false;
+
+  return Object.freeze({
+    observePhase(phase: unknown) {
+      try {
+        if (
+          typeof phase !== 'string'
+          || !INITIAL_BOOTSTRAP_APPLICATION_PHASES.has(phase as InitialBootstrapApplicationPhase)
+        ) {
+          diagnosticFailed = true;
+          return;
+        }
+        latest = phase as InitialBootstrapApplicationPhase;
+      } catch {
+        diagnosticFailed = true;
+      }
+    },
+    markDiagnosticFailed() {
+      diagnosticFailed = true;
+    },
+    evidence() {
+      return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : latest;
+    },
+  });
+}
 
 interface InitialBootstrapControlledPreparationRetryTracker {
   observeAttemptCompleted(message: unknown): void;
@@ -586,6 +653,7 @@ async function diagnoseStagingControlledPreparation(
       retryEvidence: 'UNOBSERVED' as const,
       queryErrorEvidence: 'UNOBSERVED' as const,
       grpcStatusEvidence: 'UNOBSERVED' as const,
+      phaseEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -604,6 +672,7 @@ async function diagnoseStagingControlledPreparation(
       retryEvidence: 'UNOBSERVED' as const,
       queryErrorEvidence: 'UNOBSERVED' as const,
       grpcStatusEvidence: 'UNOBSERVED' as const,
+      phaseEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -611,8 +680,10 @@ async function diagnoseStagingControlledPreparation(
   let retryEvidence: InitialBootstrapControlledPreparationRetryEvidence = 'UNOBSERVED';
   let queryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence = 'UNOBSERVED';
   let grpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence = 'UNOBSERVED';
+  let phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
   let queryErrorTracker: InitialBootstrapControlledPreparationQueryErrorTracker | null = null;
+  let phaseTracker: InitialBootstrapControlledPreparationPhaseTracker | null = null;
   let stopRetryObservation: (() => void) | null = null;
   let stopQueryErrorObservation: (() => void) | null = null;
   try {
@@ -641,6 +712,7 @@ async function diagnoseStagingControlledPreparation(
       projectionContext,
       historicalEvidence,
     );
+    phaseTracker = createInitialBootstrapControlledPreparationPhaseTracker();
     const prepared = await prepareInitialControlledRebuildContinuation(
       observation,
       Object.freeze({
@@ -650,6 +722,9 @@ async function diagnoseStagingControlledPreparation(
         historicalEvidence,
         reconciliation: reconciliation.port,
         clock: primitives.clock,
+        observePhase(nextPhase: InitialBootstrapApplicationPhase) {
+          phaseTracker?.observePhase(nextPhase);
+        },
       }),
     );
     preparationEvidence = prepared.status === 'READY'
@@ -666,6 +741,7 @@ async function diagnoseStagingControlledPreparation(
       queryErrorEvidence = queryErrorTracker.evidence();
       grpcStatusEvidence = queryErrorTracker.grpcStatusEvidence();
     }
+    if (phaseTracker !== null) phaseEvidence = phaseTracker.evidence();
     if (retryTracker !== null) retryEvidence = retryTracker.evidence();
   }
 
@@ -674,7 +750,13 @@ async function diagnoseStagingControlledPreparation(
   } catch {
     preparationEvidence = 'DIAGNOSTIC_FAILED';
   }
-  return Object.freeze({ preparationEvidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence });
+  return Object.freeze({
+    preparationEvidence,
+    retryEvidence,
+    queryErrorEvidence,
+    grpcStatusEvidence,
+    phaseEvidence,
+  });
 }
 
 const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.freeze({
@@ -797,6 +879,7 @@ export async function executeInitialBootstrapRecoveryJob(
       let stagingControlledPreparationRetryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
       let stagingControlledPreparationQueryErrorEvidence: InitialBootstrapControlledPreparationQueryErrorEvidence;
       let stagingControlledPreparationGrpcStatusEvidence: InitialBootstrapControlledPreparationGrpcStatusEvidence;
+      let stagingControlledPreparationPhaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
@@ -809,11 +892,13 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationRetryEvidence = diagnostic.retryEvidence;
         stagingControlledPreparationQueryErrorEvidence = diagnostic.queryErrorEvidence;
         stagingControlledPreparationGrpcStatusEvidence = diagnostic.grpcStatusEvidence;
+        stagingControlledPreparationPhaseEvidence = diagnostic.phaseEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationQueryErrorEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationGrpcStatusEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationPhaseEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
@@ -821,6 +906,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationRetryEvidence,
         stagingControlledPreparationQueryErrorEvidence,
         stagingControlledPreparationGrpcStatusEvidence,
+        stagingControlledPreparationPhaseEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {

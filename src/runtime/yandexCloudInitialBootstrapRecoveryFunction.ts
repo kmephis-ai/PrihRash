@@ -28,6 +28,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingControlledPreparationRetryEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationRetryEvidence'];
       stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence'];
       stagingControlledPreparationGrpcStatusEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationGrpcStatusEvidence'];
+      stagingControlledPreparationPhaseEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationPhaseEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -217,6 +218,33 @@ const STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE = new Set<NonNullable<
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationPhaseEvidence']>>([
+  'UNOBSERVED',
+  'ADMISSION_READ',
+  'CURRENT_STATE_PREFLIGHT',
+  'FRESH_CONTEXT_PREPARATION',
+  'FRESH_METADATA_PREPARATION',
+  'FRESH_CLAIM_WRITE',
+  'RESUME_CONTEXT_READ',
+  'RESUME_IDENTITY_MANIFEST_READ',
+  'RESUME_SNAPSHOT_READ',
+  'RESUME_CONTEXT_PREPARATION',
+  'REVISION_EVIDENCE_PREPARATION',
+  'REVISION_EVIDENCE_WRITE',
+  'LINEAGE_PREPARATION',
+  'COUNTER_REFINEMENT_PREPARATION',
+  'COUNTER_REFINEMENT_WRITE',
+  'RECONCILIATION_READ',
+  'VALIDATION_EVALUATION',
+  'CURRENT_PLAN_PREPARATION',
+  'CURRENT_WRITE_PREPARATION',
+  'PRE_PROMOTION_PREFLIGHT',
+  'VALIDATION_WRITE_PREPARATION',
+  'VALIDATION_TRANSITION_WRITE',
+  'PROMOTION_WRITE',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -312,13 +340,15 @@ function validClassification(
   const controlledPreparationRetryDiagnostic = value.stagingControlledPreparationRetryEvidence;
   const controlledPreparationQueryErrorDiagnostic = value.stagingControlledPreparationQueryErrorEvidence;
   const controlledPreparationGrpcStatusDiagnostic = value.stagingControlledPreparationGrpcStatusEvidence;
+  const controlledPreparationPhaseDiagnostic = value.stagingControlledPreparationPhaseEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
       || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
       || controlledPreparationDiagnostic !== undefined
       || controlledPreparationRetryDiagnostic !== undefined
       || controlledPreparationQueryErrorDiagnostic !== undefined
-      || controlledPreparationGrpcStatusDiagnostic !== undefined) return false;
+      || controlledPreparationGrpcStatusDiagnostic !== undefined
+      || controlledPreparationPhaseDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
       diagnostic !== undefined
@@ -334,6 +364,8 @@ function validClassification(
       || !STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE.has(controlledPreparationQueryErrorDiagnostic)
       || controlledPreparationGrpcStatusDiagnostic === undefined
       || !STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE.has(controlledPreparationGrpcStatusDiagnostic)
+      || controlledPreparationPhaseDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE.has(controlledPreparationPhaseDiagnostic)
     ) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
@@ -346,6 +378,7 @@ function validClassification(
       || controlledPreparationRetryDiagnostic !== undefined
       || controlledPreparationQueryErrorDiagnostic !== undefined
       || controlledPreparationGrpcStatusDiagnostic !== undefined
+      || controlledPreparationPhaseDiagnostic !== undefined
     ) return false;
   } else if (
     diagnostic !== undefined
@@ -357,6 +390,7 @@ function validClassification(
     || controlledPreparationRetryDiagnostic !== undefined
     || controlledPreparationQueryErrorDiagnostic !== undefined
     || controlledPreparationGrpcStatusDiagnostic !== undefined
+    || controlledPreparationPhaseDiagnostic !== undefined
   ) {
     return false;
   }
@@ -419,6 +453,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingControlledPreparationGrpcStatusEvidence === undefined
         ? {}
         : { stagingControlledPreparationGrpcStatusEvidence: classification.stagingControlledPreparationGrpcStatusEvidence }),
+      ...(classification.stagingControlledPreparationPhaseEvidence === undefined
+        ? {}
+        : { stagingControlledPreparationPhaseEvidence: classification.stagingControlledPreparationPhaseEvidence }),
     });
   } catch (error) {
     if (
