@@ -199,6 +199,21 @@ test('controlled rebuild exposes only allowlisted typed YDB subtype', async () =
       bootstrapPhase: 'RECONCILIATION_READ',
     },
   );
+  assert.deepEqual(
+    await execute(new InitialControlledRebuildJobError(
+      'SOURCE_READ_FAILED',
+      null,
+      null,
+      'QUERY_EXECUTION_YDB_UNAVAILABLE',
+    )),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'SOURCE_READ_FAILED',
+      phase: null,
+      bootstrapPhase: null,
+    },
+  );
 });
 
 test('controlled rebuild runtime errors retain only job code and controlled phase', async () => {
