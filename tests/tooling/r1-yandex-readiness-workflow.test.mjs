@@ -61,6 +61,41 @@ test('R1 readiness workflow is manual, main-only, OIDC-only and fail-closed', as
   assert.match(workflow, /npm run readiness:invoke/);
 });
 
+
+test('R1 readiness resource-limits-only mode is metadata-only, fail-closed and privacy-safe', async () => {
+  const workflow = await text(WORKFLOW);
+
+  assert.match(workflow, /resource_limits_only:/);
+  assert.match(workflow, /RESOURCE_LIMITS_ONLY: \${{ inputs\.resource_limits_only/);
+  assert.match(workflow, /env\.RESOURCE_LIMITS_ONLY == '1'/);
+  for (const step of [
+    'Setup Node.js 22',
+    'Install exact-source invoke dependencies',
+    'Restore verified exact-source artifact',
+    'Fail closed if provider boundary is unsafe',
+    'Deploy readiness-only function version',
+    'Re-verify private trigger-free boundary',
+    'Invoke exact readiness tag',
+  ]) {
+    const guardedStep = `- name: ${step}` + "\n        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}";
+    assert.equal(workflow.includes(guardedStep), true);
+  }
+  assert.match(workflow, /yc ydb database list --folder-id "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /yc ydb database get --id "\$database_id"/);
+  assert.match(workflow, /--format json-rest --retry 0 --no-user-output/);
+  assert.match(workflow, /databaseDiscovery:"SINGLE"/);
+  assert.match(workflow, /SINGLE.*NONE.*AMBIGUOUS.*READ_FAILED/s);
+  assert.match(workflow, /mode:"SERVERLESS"/);
+  assert.match(workflow, /SERVERLESS.*DEDICATED.*UNKNOWN/s);
+  assert.match(workflow, /enableThrottlingRcuLimit/);
+  assert.match(workflow, /throttlingRcuLimit/);
+  assert.match(workflow, /provisionedRcuLimit/);
+  assert.match(workflow, /r1-ydb-resource-limits-evidence-\$\{\{ github\.run_id \}\}/);
+  assert.doesNotMatch(workflow, /yc ydb database (?:update|create|delete|move)\b/);
+  assert.doesNotMatch(workflow, /cat .*database(?:s)?\.json/);
+  assert.doesNotMatch(workflow, /echo .*\$database_id/);
+});
+
 test('R1 readiness persists only allowlisted enum-only evidence while preserving invoke failure', async () => {
   const workflow = await text(WORKFLOW);
 

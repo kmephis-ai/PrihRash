@@ -2,6 +2,12 @@ name: R1 Yandex readiness
 
 on:
   workflow_dispatch:
+    inputs:
+      resource_limits_only:
+        description: Read only current YDB database resource limits; skip Function deploy/invoke
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,6 +32,7 @@ jobs:
       OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_WIF_SERVICE_ACCOUNT_ID }}
+      RESOURCE_LIMITS_ONLY: ${{ inputs.resource_limits_only && '1' || '0' }}
 
     steps:
       - name: Checkout exact main
@@ -44,18 +51,21 @@ jobs:
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
 
       - name: Setup Node.js 22
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
 
       - name: Install exact-source invoke dependencies
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         shell: bash
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Restore verified exact-source artifact
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         uses: ./.github/actions/restore-exact-source
         with:
           source-sha: ${{ github.sha }}
@@ -173,7 +183,145 @@ jobs:
           echo "::add-mask::${iam_token}"
           printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
 
+
+      - name: Read YDB resource limits only
+        id: ydb-resource-limits
+        if: ${{ env.RESOURCE_LIMITS_ONLY == '1' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-ydb-resource-limits"
+          evidence_dir="$RUNNER_TEMP/r1-ydb-resource-limits-evidence"
+          mkdir -p "$tmp" "$evidence_dir"
+
+          classify_non_single() {
+            jq -cn --arg discovery "$1" '{
+              status:"PASS",
+              code:"YDB_RESOURCE_LIMITS_CLASSIFIED",
+              databaseDiscovery:$discovery,
+              mode:"UNKNOWN",
+              enableThrottlingRcuLimit:null,
+              throttlingRcuLimit:null,
+              provisionedRcuLimit:null
+            }' >"$evidence_dir/classification.json"
+          }
+
+          if ! yc ydb database list --folder-id "$YC_FOLDER_ID" \
+            --format json-rest --retry 0 --no-user-output >"$tmp/databases.json" 2>"$tmp/databases.err"; then
+            classify_non_single READ_FAILED
+          elif ! jq -e 'type == "array"' "$tmp/databases.json" >/dev/null 2>&1; then
+            classify_non_single READ_FAILED
+          else
+            count="$(jq 'length' "$tmp/databases.json")"
+            if [ "$count" -eq 0 ]; then
+              classify_non_single NONE
+            elif [ "$count" -ne 1 ]; then
+              classify_non_single AMBIGUOUS
+            else
+              database_id="$(jq -er '.[0].id | select(type == "string" and length > 0)' "$tmp/databases.json")" || {
+                classify_non_single READ_FAILED
+                database_id=''
+              }
+              if [ -n "$database_id" ]; then
+                echo "::add-mask::${database_id}"
+                if ! yc ydb database get --id "$database_id" \
+                  --format json-rest --retry 0 --no-user-output >"$tmp/database.json" 2>"$tmp/database.err"; then
+                  classify_non_single READ_FAILED
+                elif jq -e '.serverlessDatabase | type == "object"' "$tmp/database.json" >/dev/null 2>&1; then
+                  if ! jq -ce '
+                    def nonnegative_int:
+                      if type == "number" and floor == . and . >= 0 then .
+                      elif type == "string" and test("^[0-9]+$") then tonumber
+                      else error("invalid integer")
+                      end;
+                    .serverlessDatabase as $s
+                    | ($s.enableThrottlingRcuLimit | select(type == "boolean")) as $enabled
+                    | ($s.throttlingRcuLimit | nonnegative_int) as $throttling
+                    | ($s.provisionedRcuLimit | nonnegative_int) as $provisioned
+                    | {
+                        status:"PASS",
+                        code:"YDB_RESOURCE_LIMITS_CLASSIFIED",
+                        databaseDiscovery:"SINGLE",
+                        mode:"SERVERLESS",
+                        enableThrottlingRcuLimit:$enabled,
+                        throttlingRcuLimit:$throttling,
+                        provisionedRcuLimit:$provisioned
+                      }
+                  ' "$tmp/database.json" >"$evidence_dir/classification.tmp"; then
+                    classify_non_single READ_FAILED
+                  else
+                    mv "$evidence_dir/classification.tmp" "$evidence_dir/classification.json"
+                  fi
+                elif jq -e '.dedicatedDatabase | type == "object"' "$tmp/database.json" >/dev/null 2>&1; then
+                  jq -cn '{
+                    status:"PASS",
+                    code:"YDB_RESOURCE_LIMITS_CLASSIFIED",
+                    databaseDiscovery:"SINGLE",
+                    mode:"DEDICATED",
+                    enableThrottlingRcuLimit:null,
+                    throttlingRcuLimit:null,
+                    provisionedRcuLimit:null
+                  }' >"$evidence_dir/classification.json"
+                else
+                  jq -cn '{
+                    status:"PASS",
+                    code:"YDB_RESOURCE_LIMITS_CLASSIFIED",
+                    databaseDiscovery:"SINGLE",
+                    mode:"UNKNOWN",
+                    enableThrottlingRcuLimit:null,
+                    throttlingRcuLimit:null,
+                    provisionedRcuLimit:null
+                  }' >"$evidence_dir/classification.json"
+                fi
+              fi
+            fi
+          fi
+
+          jq -e '
+            type == "object"
+            and (keys | sort) == [
+              "code",
+              "databaseDiscovery",
+              "enableThrottlingRcuLimit",
+              "mode",
+              "provisionedRcuLimit",
+              "status",
+              "throttlingRcuLimit"
+            ]
+            and .status == "PASS"
+            and .code == "YDB_RESOURCE_LIMITS_CLASSIFIED"
+            and (.databaseDiscovery | IN("SINGLE","NONE","AMBIGUOUS","READ_FAILED"))
+            and (.mode | IN("SERVERLESS","DEDICATED","UNKNOWN"))
+            and (
+              if .databaseDiscovery == "SINGLE" and .mode == "SERVERLESS" then
+                (.enableThrottlingRcuLimit | type) == "boolean"
+                and (.throttlingRcuLimit | type) == "number"
+                and (.throttlingRcuLimit as $v | $v >= 0 and ($v | floor) == $v)
+                and (.provisionedRcuLimit | type) == "number"
+                and (.provisionedRcuLimit as $v | $v >= 0 and ($v | floor) == $v)
+              else
+                .enableThrottlingRcuLimit == null
+                and .throttlingRcuLimit == null
+                and .provisionedRcuLimit == null
+              end
+            )
+          ' "$evidence_dir/classification.json" >/dev/null || {
+            rm -f "$evidence_dir/classification.json"
+            echo 'YDB_RESOURCE_LIMITS_EVIDENCE_INVALID'
+            exit 1
+          }
+
+      - name: Publish YDB resource limits evidence
+        if: ${{ env.RESOURCE_LIMITS_ONLY == '1' && always() && steps.ydb-resource-limits.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-ydb-resource-limits-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-ydb-resource-limits-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Fail closed if provider boundary is unsafe
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -277,6 +425,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Deploy readiness-only function version
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -303,6 +452,7 @@ jobs:
           fi
 
       - name: Re-verify private trigger-free boundary
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -337,6 +487,7 @@ jobs:
           fi
 
       - name: Invoke exact readiness tag
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}
         id: readiness-invoke
         shell: bash
         run: |
@@ -420,7 +571,7 @@ jobs:
           exit "$invoke_status"
 
       - name: Publish enum-only readiness evidence
-        if: ${{ always() && (steps.readiness-invoke.outcome == 'success' || steps.readiness-invoke.outcome == 'failure') }}
+        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' && always() && (steps.readiness-invoke.outcome == 'success' || steps.readiness-invoke.outcome == 'failure') }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-yandex-readiness-evidence-${{ github.run_id }}
