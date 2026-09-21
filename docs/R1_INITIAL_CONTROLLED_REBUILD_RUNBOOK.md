@@ -262,6 +262,17 @@ aggregate diagnostic to its exact existing application enum; no third controlled
 This diagnostic does not arm a third controlled rebuild, does not change the 21 s timeout, and does
 not expand write/provider authority. Google remains authoritative and YDB remains shadow.
 
+Issue #717 adds observational retry evidence to the same read-only controlled-preparation mode without
+changing SDK retry policy, timeout values or resource envelopes. During only the inner preparation YDB
+read scope, the runtime subscribes to the public `@ydbjs/retry@6.3.0`
+`ydb:retry.attempt.completed` and `ydb:retry.exhausted` diagnostics channels. Subscriber callbacks
+are non-throwing, unsubscribe in `finally`, ignore `lastError`, query text, session/node/provider
+identifiers and timing/count detail, and reduce the entire observation to exactly one enum:
+`UNOBSERVED | NO_RETRY | RETRIED | NON_RETRYABLE | EXHAUSTED | DIAGNOSTIC_FAILED`.
+This retry evidence is independent from
+`R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE`; it may explain a transient
+`YDB_DATA_QUERY_EXECUTION_FAILED` but never changes the preparation result or authorizes replay.
+
 ## Setup and staging recovery
 
 The exact run-scoped target is `rebuild/r_<run-id-without-hyphens>/{transactions|source_records}`. The runtime proves canonical current table presence, the optional `rebuild` parent directory, the exact run directory and the exact staging table pair before mutation. Foreign/wrong-kind/mixed run-scoped scheme evidence fails closed.
