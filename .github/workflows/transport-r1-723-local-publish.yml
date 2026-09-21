@@ -57,9 +57,7 @@ jobs:
           git commit -m "R1 #723: expose controlled preparation phase evidence"
           test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
 
-          credentials="$RUNNER_TEMP/git-credentials"
-          printf 'https://x-access-token:%s@github.com\\n' "$GH_TOKEN" > "$credentials"
-          chmod 600 "$credentials"
-          git -c credential.helper="store --file=$credentials" push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$TARGET_BRANCH"
-          rm -f "$credentials" "$RUNNER_TEMP/change.patch"
+          basic_auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $basic_auth" push "https://github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$TARGET_BRANCH"
+          rm -f "$RUNNER_TEMP/change.patch"
           echo "R1_723_LOCAL_TREE_PUBLISHED=$EXPECTED_TREE"
