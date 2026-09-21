@@ -12,7 +12,10 @@ import type {
 } from './initialBootstrapApplication.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
-import { planInitialSourceRevisionEvidenceResume } from './initialSourceRevisionEvidenceRecovery.js';
+import {
+  planInitialSourceRevisionEvidenceResume,
+  type InitialSourceRevisionEvidenceReadObserver,
+} from './initialSourceRevisionEvidenceRecovery.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
 import type { InitialReconciliationEvidence } from './initialValidationGate.js';
 
@@ -66,13 +69,18 @@ export function createInitialBootstrapDurableReconciliation(
   adapter: YdbAdapter,
   projectionContext: Readonly<InitialSnapshotProjectionContext>,
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+  observeRevisionReadStage?: InitialSourceRevisionEvidenceReadObserver,
 ): Readonly<InitialBootstrapDurableReconciliation> {
   let expectedCommittedSnapshot: Readonly<InitialControlledRebuildReconciliationSnapshot> | null = null;
 
   const port: InitialBootstrapReconciliationPort = Object.freeze({
     async reconcile(input: Readonly<InitialBootstrapReconciliationInput>) {
       historicalEvidence.assertCompatibleRowCount(input.lineage.revisions.length);
-      const persistence = await planInitialSourceRevisionEvidenceResume(adapter, input.lineage.revisions);
+      const persistence = await planInitialSourceRevisionEvidenceResume(
+        adapter,
+        input.lineage.revisions,
+        observeRevisionReadStage,
+      );
       if (
         persistence.missingRevisions.length !== 0
         || persistence.existingSourceRecordIds.length !== input.lineage.revisions.length
