@@ -554,6 +554,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   }
 
@@ -586,6 +587,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -600,6 +602,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   }
 }
