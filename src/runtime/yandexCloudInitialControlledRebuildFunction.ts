@@ -129,6 +129,33 @@ const VALIDATION_BLOCKER_CODES = new Set<InitialValidationBlockerCode>([
   'UNEXPLAINED_HIGH_IMPACT_MISMATCH',
 ]);
 const RECONCILIATION_CHECKS = new Set<InitialReconciliationCheck>(INITIAL_RECONCILIATION_CHECKS);
+const YDB_DATA_FAILURE_CODES = new Set<YdbJsV6DataTransportErrorCode>([
+  'SDK_SHAPE_INVALID',
+  'PARAMETER_VALUE_INVALID',
+  'PARAMETER_TYPE_UNSUPPORTED',
+  'TIMESTAMP_PRECISION_UNSUPPORTED',
+  'QUERY_EXECUTION_FAILED',
+  'QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'QUERY_EXECUTION_YDB_ABORTED',
+  'QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'QUERY_EXECUTION_YDB_OVERLOADED',
+  'QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'QUERY_EXECUTION_YDB_TIMEOUT',
+  'QUERY_EXECUTION_YDB_BAD_SESSION',
+  'QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'QUERY_EXECUTION_YDB_NOT_FOUND',
+  'QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'QUERY_EXECUTION_YDB_CANCELLED',
+  'QUERY_EXECUTION_YDB_UNDETERMINED',
+  'QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'CLIENT_CONFIG_INVALID',
+]);
 
 function record(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -149,9 +176,9 @@ function runtimeFailure(
     phase,
     bootstrapPhase,
   });
-  return ydbDataFailureCode === null
-    ? base
-    : Object.freeze({ ...base, ydbDataFailureCode });
+  return ydbDataFailureCode !== null && YDB_DATA_FAILURE_CODES.has(ydbDataFailureCode)
+    ? Object.freeze({ ...base, ydbDataFailureCode })
+    : base;
 }
 
 function validationBlocker(value: unknown): Readonly<YandexInitialControlledRebuildValidationBlocker> | null {
