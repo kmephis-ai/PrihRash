@@ -1,4 +1,6 @@
 const CONTROLLED_REBUILD_TAG = 'r1-initial-controlled-rebuild';
+const PREPARATION_DIAGNOSTIC_TAG = 'r1-initial-controlled-rebuild-preparation-diagnostic';
+const ALLOWED_TAGS = new Set([CONTROLLED_REBUILD_TAG, PREPARATION_DIAGNOSTIC_TAG]);
 const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const INVOKE_TIMEOUT_MS = 630_000;
@@ -41,6 +43,62 @@ const BOOTSTRAP_PHASES = new Set([
   'VALIDATION_EVALUATION',
   'CURRENT_PLAN_PREPARATION',
   'CURRENT_WRITE_PREPARATION',
+]);
+const PREPARATION_FAILURE_CODES = new Set([
+  'YDB_SDK_SHAPE_INVALID',
+  'YDB_PARAMETER_VALUE_INVALID',
+  'YDB_PARAMETER_TYPE_UNSUPPORTED',
+  'YDB_TIMESTAMP_PRECISION_UNSUPPORTED',
+  'YDB_QUERY_EXECUTION_FAILED',
+  'YDB_QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'YDB_QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'YDB_QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_ABORTED',
+  'YDB_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'YDB_QUERY_EXECUTION_YDB_OVERLOADED',
+  'YDB_QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'YDB_QUERY_EXECUTION_YDB_TIMEOUT',
+  'YDB_QUERY_EXECUTION_YDB_BAD_SESSION',
+  'YDB_QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'YDB_QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'YDB_QUERY_EXECUTION_YDB_NOT_FOUND',
+  'YDB_QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'YDB_QUERY_EXECUTION_YDB_CANCELLED',
+  'YDB_QUERY_EXECUTION_YDB_UNDETERMINED',
+  'YDB_QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'YDB_QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'YDB_QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'YDB_CLIENT_CONFIG_INVALID',
+  'DURABLE_RECONCILIATION_DURABLE_REVISION_EVIDENCE_INCOMPLETE',
+  'DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID',
+  'DURABLE_RECONCILIATION_EXPECTED_RECONCILIATION_NOT_AVAILABLE',
+  'REVISION_EVIDENCE_INVALID_EXPECTED_REVISION',
+  'REVISION_EVIDENCE_MIXED_EXPECTED_RUN',
+  'REVISION_EVIDENCE_MALFORMED_EXISTING_REVISION',
+  'REVISION_EVIDENCE_DUPLICATE_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXTRA_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH',
+  'CONTROLLED_RECONCILIATION_UNSUPPORTED_TRANSACTION_TYPE',
+  'CONTROLLED_RECONCILIATION_INVALID_TRANSACTION_SHAPE',
+  'CONTROLLED_RECONCILIATION_INVALID_TRANSACTION_AMOUNT',
+  'CONTROLLED_RECONCILIATION_INVALID_SOURCE_CLASSIFICATION',
+  'PROJECTION_INVALID_SOURCE_ORDINAL',
+  'PROJECTION_DUPLICATE_SOURCE_ORDINAL',
+  'PROJECTION_DUPLICATE_SOURCE_RECORD_ID',
+  'APPLICATION_MULTIPLE_INCOMPLETE_RUNS',
+  'APPLICATION_BOOTSTRAP_OBSERVATION_INVALID',
+  'APPLICATION_RESUME_RUN_COUNTERS_MISMATCH',
+  'APPLICATION_RESUME_COUNTER_REFINEMENT_CONFLICT',
+  'APPLICATION_SNAPSHOT_EVIDENCE_MISSING',
+  'APPLICATION_SNAPSHOT_EVIDENCE_AMBIGUOUS',
+  'APPLICATION_SNAPSHOT_EVIDENCE_MISMATCH',
+  'APPLICATION_CURRENT_STATE_NOT_EMPTY',
+  'APPLICATION_PROMOTION_PREFLIGHT_DRIFT',
+  'APPLICATION_CONTROLLED_CONTINUATION_RUN_MISSING',
+  'APPLICATION_CONTROLLED_CONTINUATION_RUN_STATE_INVALID',
+  'APPLICATION_CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED',
+  'UNKNOWN',
 ]);
 const JOB_CODES = new Set([
   'SOURCE_READ_FAILED',
@@ -113,6 +171,9 @@ function parseExactFunctionResult(stdout) {
   if (result.status === 'PASS' && result.code === 'INITIAL_CONTROLLED_REBUILD_COMMITTED' && exactKeys(result, ['status', 'code'])) {
     return Object.freeze({ status: result.status, code: result.code });
   }
+  if (result.status === 'PASS' && result.code === 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY' && exactKeys(result, ['status', 'code'])) {
+    return Object.freeze({ status: result.status, code: result.code });
+  }
   if (result.status === 'NOOP' && result.code === 'INITIAL_CONTROLLED_REBUILD_BASELINE_EXISTS' && exactKeys(result, ['status', 'code'])) {
     return Object.freeze({ status: result.status, code: result.code });
   }
@@ -134,6 +195,21 @@ function parseExactFunctionResult(stdout) {
     const blockers = result.blockers.map(validationBlocker);
     if (blockers.some((value) => value === null)) return null;
     return Object.freeze({ status: result.status, code: result.code, blockers: Object.freeze(blockers) });
+  }
+  if (
+    result.status === 'FAIL'
+    && result.code === 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED'
+    && exactKeys(result, ['status', 'code', 'bootstrapPhase', 'failureCode'])
+    && (result.bootstrapPhase === null || (typeof result.bootstrapPhase === 'string' && BOOTSTRAP_PHASES.has(result.bootstrapPhase)))
+    && typeof result.failureCode === 'string'
+    && PREPARATION_FAILURE_CODES.has(result.failureCode)
+  ) {
+    return Object.freeze({
+      status: result.status,
+      code: result.code,
+      bootstrapPhase: result.bootstrapPhase,
+      failureCode: result.failureCode,
+    });
   }
   if (
     result.status === 'FAIL'
@@ -209,14 +285,16 @@ async function invoke(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_CONTROLLED_REBUILD_FUNCTION_ID;
   const iamToken = environment.YC_IAM_TOKEN;
   const mode = environment.PRIHRASH_INITIAL_CONTROLLED_REBUILD_INVOKE_MODE ?? 'sync';
+  const tag = environment.PRIHRASH_INITIAL_CONTROLLED_REBUILD_TAG ?? CONTROLLED_REBUILD_TAG;
   if (
     !nonBlank(functionId)
     || !nonBlank(iamToken)
     || (mode !== 'sync' && mode !== 'async')
+    || !ALLOWED_TAGS.has(tag)
   ) return SAFE_CONFIG_FAILURE;
 
   const url = new URL(`${FUNCTIONS_ORIGIN}/${encodeURIComponent(functionId)}`);
-  url.searchParams.set('tag', CONTROLLED_REBUILD_TAG);
+  url.searchParams.set('tag', tag);
   url.searchParams.set('integration', mode === 'async' ? 'async' : 'raw');
   let response;
   try {
