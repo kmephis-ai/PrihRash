@@ -656,7 +656,23 @@ jobs:
                 or ($r.status == "FAIL" and $r.code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
                     and (
                       (
-                        (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                        (
+                          (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                          or (
+                            (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status","ydbDataFailureCode"]
+                            and .jobCode == "APPLICATION_FAILED"
+                            and (.ydbDataFailureCode | IN(
+                              "SDK_SHAPE_INVALID","PARAMETER_VALUE_INVALID","PARAMETER_TYPE_UNSUPPORTED","TIMESTAMP_PRECISION_UNSUPPORTED",
+                              "QUERY_EXECUTION_FAILED","QUERY_EXECUTION_YDB_BAD_REQUEST","QUERY_EXECUTION_YDB_UNAUTHORIZED",
+                              "QUERY_EXECUTION_YDB_INTERNAL_ERROR","QUERY_EXECUTION_YDB_ABORTED","QUERY_EXECUTION_YDB_UNAVAILABLE",
+                              "QUERY_EXECUTION_YDB_OVERLOADED","QUERY_EXECUTION_YDB_SCHEME_ERROR","QUERY_EXECUTION_YDB_GENERIC_ERROR",
+                              "QUERY_EXECUTION_YDB_TIMEOUT","QUERY_EXECUTION_YDB_BAD_SESSION","QUERY_EXECUTION_YDB_PRECONDITION_FAILED",
+                              "QUERY_EXECUTION_YDB_ALREADY_EXISTS","QUERY_EXECUTION_YDB_NOT_FOUND","QUERY_EXECUTION_YDB_SESSION_EXPIRED",
+                              "QUERY_EXECUTION_YDB_CANCELLED","QUERY_EXECUTION_YDB_UNDETERMINED","QUERY_EXECUTION_YDB_UNSUPPORTED",
+                              "QUERY_EXECUTION_YDB_SESSION_BUSY","QUERY_EXECUTION_YDB_EXTERNAL_ERROR","CLIENT_CONFIG_INVALID"
+                            ))
+                          )
+                        )
                         and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT"))
                         and (
                           .bootstrapPhase == null
@@ -790,7 +806,23 @@ jobs:
                 and .code == "INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED"
                 and (
                   (
-                    (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                    (
+                          (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status"]
+                          or (
+                            (keys | sort) == ["bootstrapPhase","code","jobCode","phase","status","ydbDataFailureCode"]
+                            and .jobCode == "APPLICATION_FAILED"
+                            and (.ydbDataFailureCode | IN(
+                              "SDK_SHAPE_INVALID","PARAMETER_VALUE_INVALID","PARAMETER_TYPE_UNSUPPORTED","TIMESTAMP_PRECISION_UNSUPPORTED",
+                              "QUERY_EXECUTION_FAILED","QUERY_EXECUTION_YDB_BAD_REQUEST","QUERY_EXECUTION_YDB_UNAUTHORIZED",
+                              "QUERY_EXECUTION_YDB_INTERNAL_ERROR","QUERY_EXECUTION_YDB_ABORTED","QUERY_EXECUTION_YDB_UNAVAILABLE",
+                              "QUERY_EXECUTION_YDB_OVERLOADED","QUERY_EXECUTION_YDB_SCHEME_ERROR","QUERY_EXECUTION_YDB_GENERIC_ERROR",
+                              "QUERY_EXECUTION_YDB_TIMEOUT","QUERY_EXECUTION_YDB_BAD_SESSION","QUERY_EXECUTION_YDB_PRECONDITION_FAILED",
+                              "QUERY_EXECUTION_YDB_ALREADY_EXISTS","QUERY_EXECUTION_YDB_NOT_FOUND","QUERY_EXECUTION_YDB_SESSION_EXPIRED",
+                              "QUERY_EXECUTION_YDB_CANCELLED","QUERY_EXECUTION_YDB_UNDETERMINED","QUERY_EXECUTION_YDB_UNSUPPORTED",
+                              "QUERY_EXECUTION_YDB_SESSION_BUSY","QUERY_EXECUTION_YDB_EXTERNAL_ERROR","CLIENT_CONFIG_INVALID"
+                            ))
+                          )
+                        )
                     and (.jobCode | IN("SOURCE_READ_FAILED","YDB_CLIENT_CREATE_FAILED","SCHEME_CLIENT_CREATE_FAILED","REFERENCE_READ_FAILED","APPLICATION_FAILED","POST_COMMIT_RECONCILIATION_MISMATCH","YDB_CLIENT_CLOSE_FAILED","CONFIG_INVALID","UNCAUGHT"))
                     and (
                       .bootstrapPhase == null

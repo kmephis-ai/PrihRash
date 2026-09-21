@@ -55,6 +55,33 @@ const JOB_CODES = new Set([
   'MODULE_LOAD_FAILED',
   'HANDLER_UNCAUGHT',
 ]);
+const YDB_DATA_FAILURE_CODES = new Set([
+  'SDK_SHAPE_INVALID',
+  'PARAMETER_VALUE_INVALID',
+  'PARAMETER_TYPE_UNSUPPORTED',
+  'TIMESTAMP_PRECISION_UNSUPPORTED',
+  'QUERY_EXECUTION_FAILED',
+  'QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'QUERY_EXECUTION_YDB_ABORTED',
+  'QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'QUERY_EXECUTION_YDB_OVERLOADED',
+  'QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'QUERY_EXECUTION_YDB_TIMEOUT',
+  'QUERY_EXECUTION_YDB_BAD_SESSION',
+  'QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'QUERY_EXECUTION_YDB_NOT_FOUND',
+  'QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'QUERY_EXECUTION_YDB_CANCELLED',
+  'QUERY_EXECUTION_YDB_UNDETERMINED',
+  'QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'CLIENT_CONFIG_INVALID',
+]);
 const VALIDATION_BLOCKER_CODES = new Set([
   'RUN_NOT_STAGING',
   'INITIAL_RUN_COUNTERS_INCONSISTENT',
@@ -148,6 +175,29 @@ function parseExactFunctionResult(stdout) {
       && result.phase === null
     ) {
       return Object.freeze({ status: result.status, code: result.code, jobCode: result.jobCode, phase: result.phase });
+    }
+    if (
+      exactKeys(result, ['status', 'code', 'jobCode', 'phase', 'bootstrapPhase', 'ydbDataFailureCode'])
+      && result.jobCode === 'APPLICATION_FAILED'
+      && typeof result.ydbDataFailureCode === 'string'
+      && YDB_DATA_FAILURE_CODES.has(result.ydbDataFailureCode)
+      && (
+        result.bootstrapPhase === null
+        || (
+          result.phase === 'PREPARATION'
+          && typeof result.bootstrapPhase === 'string'
+          && BOOTSTRAP_PHASES.has(result.bootstrapPhase)
+        )
+      )
+    ) {
+      return Object.freeze({
+        status: result.status,
+        code: result.code,
+        jobCode: result.jobCode,
+        phase: result.phase,
+        bootstrapPhase: result.bootstrapPhase,
+        ydbDataFailureCode: result.ydbDataFailureCode,
+      });
     }
     if (
       exactKeys(result, ['status', 'code', 'jobCode', 'phase', 'bootstrapPhase'])

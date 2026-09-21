@@ -5,7 +5,9 @@ import { YdbAdapter, type YdbTransport } from '../integration/ydb/adapter.js';
 import { YdbSchemeAdapter, type YdbSchemeTransport } from '../integration/ydb/scheme.js';
 import {
   createYdbJsV6MetadataDataClient,
+  YdbJsV6DataTransportError,
   type YdbJsDataClient,
+  type YdbJsV6DataTransportErrorCode,
 } from '../integration/ydb/ydbJsV6DataTransport.js';
 import {
   diagnoseInitialControlledRebuildSwapRecovery,
@@ -45,17 +47,20 @@ export class InitialControlledRebuildJobError extends Error {
   readonly code: InitialControlledRebuildJobErrorCode;
   readonly phase: InitialControlledRebuildApplicationPhase | null;
   readonly bootstrapPhase: InitialBootstrapApplicationPhase | null;
+  readonly ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null;
 
   constructor(
     code: InitialControlledRebuildJobErrorCode,
     phase: InitialControlledRebuildApplicationPhase | null = null,
     bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
+    ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null = null,
   ) {
     super(code);
     this.name = 'InitialControlledRebuildJobError';
     this.code = code;
     this.phase = phase;
     this.bootstrapPhase = bootstrapPhase;
+    this.ydbDataFailureCode = ydbDataFailureCode;
   }
 }
 
@@ -233,8 +238,13 @@ export async function runInitialControlledRebuildJob(
       result = mode === 'SWAP_RECOVERY_DIAGNOSTIC'
         ? await diagnoseInitialControlledRebuildSwapRecovery(observation, applicationDependencies)
         : await runInitialControlledRebuildApplication(observation, applicationDependencies);
-    } catch {
-      throw new InitialControlledRebuildJobError('APPLICATION_FAILED', controlledPhase, bootstrapPhase);
+    } catch (error) {
+      throw new InitialControlledRebuildJobError(
+        'APPLICATION_FAILED',
+        controlledPhase,
+        bootstrapPhase,
+        error instanceof YdbJsV6DataTransportError ? error.code : null,
+      );
     }
     observeRuntimePhase(observer, 'APPLICATION_DONE');
 

@@ -4,6 +4,7 @@ import type {
   InitialControlledRebuildSwapRecoveryReason,
 } from '../migration/initialControlledRebuildApplication.js';
 import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
+import type { YdbJsV6DataTransportErrorCode } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { InitialBootstrapPrivateEvidenceError } from '../migration/initialBootstrapPrivateEvidence.js';
 import {
   INITIAL_RECONCILIATION_CHECKS,
@@ -34,6 +35,7 @@ export type YandexInitialControlledRebuildRuntimeFailure = Readonly<{
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT';
   phase: InitialControlledRebuildApplicationPhase | null;
   bootstrapPhase: InitialBootstrapApplicationPhase | null;
+  ydbDataFailureCode?: YdbJsV6DataTransportErrorCode;
 }>;
 
 export type YandexInitialControlledRebuildFunctionResult =
@@ -127,6 +129,33 @@ const VALIDATION_BLOCKER_CODES = new Set<InitialValidationBlockerCode>([
   'UNEXPLAINED_HIGH_IMPACT_MISMATCH',
 ]);
 const RECONCILIATION_CHECKS = new Set<InitialReconciliationCheck>(INITIAL_RECONCILIATION_CHECKS);
+const YDB_DATA_FAILURE_CODES = new Set<YdbJsV6DataTransportErrorCode>([
+  'SDK_SHAPE_INVALID',
+  'PARAMETER_VALUE_INVALID',
+  'PARAMETER_TYPE_UNSUPPORTED',
+  'TIMESTAMP_PRECISION_UNSUPPORTED',
+  'QUERY_EXECUTION_FAILED',
+  'QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'QUERY_EXECUTION_YDB_ABORTED',
+  'QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'QUERY_EXECUTION_YDB_OVERLOADED',
+  'QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'QUERY_EXECUTION_YDB_TIMEOUT',
+  'QUERY_EXECUTION_YDB_BAD_SESSION',
+  'QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'QUERY_EXECUTION_YDB_NOT_FOUND',
+  'QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'QUERY_EXECUTION_YDB_CANCELLED',
+  'QUERY_EXECUTION_YDB_UNDETERMINED',
+  'QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'CLIENT_CONFIG_INVALID',
+]);
 
 function record(value: unknown): UnknownRecord | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -138,14 +167,20 @@ function runtimeFailure(
   jobCode: InitialControlledRebuildJobErrorCode | 'CONFIG_INVALID' | 'UNCAUGHT',
   phase: InitialControlledRebuildApplicationPhase | null = null,
   bootstrapPhase: InitialBootstrapApplicationPhase | null = null,
+  ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null = null,
 ): Readonly<YandexInitialControlledRebuildRuntimeFailure> {
-  return Object.freeze({
+  const base = Object.freeze({
     status: 'FAIL' as const,
     code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED' as const,
     jobCode,
     phase,
     bootstrapPhase,
   });
+  return jobCode === 'APPLICATION_FAILED'
+    && ydbDataFailureCode !== null
+    && YDB_DATA_FAILURE_CODES.has(ydbDataFailureCode)
+    ? Object.freeze({ ...base, ydbDataFailureCode })
+    : base;
 }
 
 function validationBlocker(value: unknown): Readonly<YandexInitialControlledRebuildValidationBlocker> | null {
@@ -263,7 +298,7 @@ export async function executeYandexInitialControlledRebuildFunction(
     return sanitizeApplicationResult(await runJob(environment));
   } catch (error) {
     if (error instanceof InitialControlledRebuildJobError) {
-      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase, error.ydbDataFailureCode);
     }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');
@@ -291,7 +326,7 @@ export async function executeYandexInitialControlledRebuildSwapRecoveryDiagnosti
     return sanitizeSwapRecoveryDiagnosticResult(await runJob(environment));
   } catch (error) {
     if (error instanceof InitialControlledRebuildJobError) {
-      return runtimeFailure(error.code, error.phase, error.bootstrapPhase);
+      return runtimeFailure(error.code, error.phase, error.bootstrapPhase, error.ydbDataFailureCode);
     }
     if (error instanceof InitialBootstrapPrivateEvidenceError || error instanceof InitialBootstrapJobError) {
       return runtimeFailure('CONFIG_INVALID');

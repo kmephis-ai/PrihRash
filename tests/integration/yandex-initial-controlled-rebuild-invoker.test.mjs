@@ -79,6 +79,11 @@ test('controlled rebuild invoker preserves bounded STOP and runtime enum results
     },
     {
       status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED', phase: 'PREPARATION', bootstrapPhase: 'RECONCILIATION_READ',
+      ydbDataFailureCode: 'QUERY_EXECUTION_YDB_UNAVAILABLE',
+    },
+    {
+      status: 'FAIL', code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
       jobCode: 'APPLICATION_FAILED', phase: 'SWAP_MUTATION', bootstrapPhase: null,
     },
     {
@@ -129,6 +134,14 @@ test('controlled rebuild invoker rejects extra/private fields and unknown enums 
       jobCode: 'APPLICATION_FAILED',
       phase: 'PREPARATION',
       bootstrapPhase: 'PRIVATE_PHASE',
+    }),
+    JSON.stringify({
+      status: 'FAIL',
+      code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+      jobCode: 'APPLICATION_FAILED',
+      phase: 'PREPARATION',
+      bootstrapPhase: 'RECONCILIATION_READ',
+      ydbDataFailureCode: 'PRIVATE_YDB_FAILURE',
     }),
   ]) {
     const result = await runInvoker({ body });

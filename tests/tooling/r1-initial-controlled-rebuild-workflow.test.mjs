@@ -113,6 +113,12 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.match(workflow, /PRESENT/);
   assert.match(workflow, /ABSENT/);
   assert.match(workflow, /bootstrapPhase/);
+  assert.match(workflow, /ydbDataFailureCode/);
+  assert.match(workflow, /QUERY_EXECUTION_YDB_UNAVAILABLE/);
+  assert.match(workflow, /QUERY_EXECUTION_YDB_TIMEOUT/);
+  const ydbSubtypeGuards = workflow.match(/ydbDataFailureCode/g) ?? [];
+  assert.equal(ydbSubtypeGuards.length >= 4, true);
+  assert.match(await read('src/runtime/initialControlledRebuildJob.ts'), /error instanceof YdbJsV6DataTransportError \? error\.code : null/);
   assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
   const reconciliationGuards = workflow.match(/\.bootstrapPhase \| IN\([^)]*"RECONCILIATION_READ"/g) ?? [];
   assert.equal(reconciliationGuards.length, 2);
