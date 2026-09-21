@@ -55,6 +55,42 @@ const JOB_CODES = new Set([
   'MODULE_LOAD_FAILED',
   'HANDLER_UNCAUGHT',
 ]);
+const APPLICATION_FAILURE_CODES = new Set([
+  'YDB_DATA_SDK_SHAPE_INVALID',
+  'YDB_DATA_PARAMETER_VALUE_INVALID',
+  'YDB_DATA_PARAMETER_TYPE_UNSUPPORTED',
+  'YDB_DATA_TIMESTAMP_PRECISION_UNSUPPORTED',
+  'YDB_DATA_QUERY_EXECUTION_FAILED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_BAD_REQUEST',
+  'YDB_DATA_QUERY_EXECUTION_YDB_UNAUTHORIZED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_INTERNAL_ERROR',
+  'YDB_DATA_QUERY_EXECUTION_YDB_ABORTED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE',
+  'YDB_DATA_QUERY_EXECUTION_YDB_OVERLOADED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_SCHEME_ERROR',
+  'YDB_DATA_QUERY_EXECUTION_YDB_GENERIC_ERROR',
+  'YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT',
+  'YDB_DATA_QUERY_EXECUTION_YDB_BAD_SESSION',
+  'YDB_DATA_QUERY_EXECUTION_YDB_PRECONDITION_FAILED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_ALREADY_EXISTS',
+  'YDB_DATA_QUERY_EXECUTION_YDB_NOT_FOUND',
+  'YDB_DATA_QUERY_EXECUTION_YDB_SESSION_EXPIRED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_CANCELLED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_UNDETERMINED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_UNSUPPORTED',
+  'YDB_DATA_QUERY_EXECUTION_YDB_SESSION_BUSY',
+  'YDB_DATA_QUERY_EXECUTION_YDB_EXTERNAL_ERROR',
+  'YDB_DATA_CLIENT_CONFIG_INVALID',
+  'DURABLE_RECONCILIATION_DURABLE_REVISION_EVIDENCE_INCOMPLETE',
+  'DURABLE_RECONCILIATION_DURABLE_RAW_PAYLOAD_INVALID',
+  'DURABLE_RECONCILIATION_EXPECTED_RECONCILIATION_NOT_AVAILABLE',
+  'REVISION_EVIDENCE_INVALID_EXPECTED_REVISION',
+  'REVISION_EVIDENCE_MIXED_EXPECTED_RUN',
+  'REVISION_EVIDENCE_MALFORMED_EXISTING_REVISION',
+  'REVISION_EVIDENCE_DUPLICATE_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXTRA_EXISTING_REVISION',
+  'REVISION_EVIDENCE_EXISTING_REVISION_MISMATCH',
+]);
 const VALIDATION_BLOCKER_CODES = new Set([
   'RUN_NOT_STAGING',
   'INITIAL_RUN_COUNTERS_INCONSISTENT',
@@ -149,8 +185,12 @@ function parseExactFunctionResult(stdout) {
     ) {
       return Object.freeze({ status: result.status, code: result.code, jobCode: result.jobCode, phase: result.phase });
     }
+    const baseKeys = ['status', 'code', 'jobCode', 'phase', 'bootstrapPhase'];
+    const diagnosticKeys = [...baseKeys, 'applicationFailureCode'];
+    const baseShape = exactKeys(result, baseKeys);
+    const diagnosticShape = exactKeys(result, diagnosticKeys);
     if (
-      exactKeys(result, ['status', 'code', 'jobCode', 'phase', 'bootstrapPhase'])
+      (baseShape || diagnosticShape)
       && (
         result.bootstrapPhase === null
         || (
@@ -160,6 +200,16 @@ function parseExactFunctionResult(stdout) {
           && BOOTSTRAP_PHASES.has(result.bootstrapPhase)
         )
       )
+      && (
+        baseShape
+        || (
+          result.jobCode === 'APPLICATION_FAILED'
+          && result.phase === 'PREPARATION'
+          && result.bootstrapPhase === 'RECONCILIATION_READ'
+          && typeof result.applicationFailureCode === 'string'
+          && APPLICATION_FAILURE_CODES.has(result.applicationFailureCode)
+        )
+      )
     ) {
       return Object.freeze({
         status: result.status,
@@ -167,6 +217,7 @@ function parseExactFunctionResult(stdout) {
         jobCode: result.jobCode,
         phase: result.phase,
         bootstrapPhase: result.bootstrapPhase,
+        ...(diagnosticShape ? { applicationFailureCode: result.applicationFailureCode } : {}),
       });
     }
   }
