@@ -233,13 +233,24 @@ the exact controlled `10s/21s/25s` timeout envelope and calls only
 staging/current mutation, swap, commit marker or cleanup.
 
 The diagnostic publishes only
-`R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=<ENUM>`, where the enum is allowlisted to:
-`READY | BASELINE_EXISTS | VALIDATION_BLOCKED | YDB_QUERY_TIMEOUT | YDB_DATA_FAILURE |
-DURABLE_RECONCILIATION_FAILURE | REVISION_EVIDENCE_FAILURE | PRIVATE_EVIDENCE_FAILURE |
-APPLICATION_FAILURE | DIAGNOSTIC_FAILED`.
+`R1_STAGING_CONTROLLED_PREPARATION_EVIDENCE=<ENUM>`. Live run `35583739017` on exact
+`326011d032a0d80cb21fd8472518493d3cd94275` completed successfully as a read-only diagnostic and
+returned `YDB_DATA_FAILURE`. This proves the controlled preparation failure is inside the existing
+YDB data-transport taxonomy, but it does not prove the direct YDB status `TIMEOUT` and does not by
+itself exclude a client-side deadline surfaced under another SDK error code.
+
+Issue #711 therefore tightens only this diagnostic enum. Direct
+`QUERY_EXECUTION_YDB_TIMEOUT` remains `YDB_QUERY_TIMEOUT`; every other recognized
+`YdbJsV6DataTransportErrorCode` is emitted as the exact privacy-safe token
+`YDB_DATA_<existing-code>`, for example `YDB_DATA_QUERY_EXECUTION_FAILED` or
+`YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE`. The old aggregate `YDB_DATA_FAILURE`, an impossible
+`YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT`, unknown values and private exception text are rejected
+fail-closed. Non-YDB diagnostics remain bounded to
+`READY | BASELINE_EXISTS | VALIDATION_BLOCKED | DURABLE_RECONCILIATION_FAILURE |
+REVISION_EVIDENCE_FAILURE | PRIVATE_EVIDENCE_FAILURE | APPLICATION_FAILURE | DIAGNOSTIC_FAILED`.
 
 This diagnostic does not arm a third controlled rebuild, does not change the 21 s timeout, and does
-not expand provider authority. Google remains authoritative and YDB remains shadow.
+not expand write/provider authority. Google remains authoritative and YDB remains shadow.
 
 ## Setup and staging recovery
 
