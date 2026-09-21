@@ -8,6 +8,7 @@ import {
   classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
   createInitialBootstrapControlledPreparationPhaseTracker,
+  createInitialBootstrapControlledPreparationReconciliationReadStageTracker,
   createInitialBootstrapControlledPreparationQueryErrorTracker,
   createInitialBootstrapControlledPreparationRetryTracker,
   diagnoseInitialBootstrapSourceDecodeEvidence,
@@ -154,6 +155,27 @@ test('controlled preparation phase tracker preserves only the existing applicati
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
 
   const explicitFailure = createInitialBootstrapControlledPreparationPhaseTracker();
+  explicitFailure.markDiagnosticFailed();
+  assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
+});
+
+test('controlled preparation reconciliation read-stage tracker is non-throwing and fail-closed', () => {
+  const tracker = createInitialBootstrapControlledPreparationReconciliationReadStageTracker();
+  assert.equal(tracker.evidence(), 'UNOBSERVED');
+  for (const stage of [
+    'REVISION_METADATA_SCAN',
+    'REVISION_PAYLOAD_BATCH',
+    'REVISION_COLLISION_READ',
+  ]) {
+    assert.doesNotThrow(() => tracker.observeStage(stage));
+    assert.equal(tracker.evidence(), stage);
+  }
+  assert.doesNotThrow(() => tracker.observeStage('PRIVATE_STAGE'));
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+  tracker.observeStage('REVISION_METADATA_SCAN');
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+
+  const explicitFailure = createInitialBootstrapControlledPreparationReconciliationReadStageTracker();
   explicitFailure.markDiagnosticFailed();
   assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
 });
@@ -817,6 +839,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         queryErrorEvidence: 'YDB_STATUS',
         grpcStatusEvidence: 'NON_GRPC',
         phaseEvidence: 'RESUME_CONTEXT_READ',
+        reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
       });
     },
   });
@@ -830,6 +853,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
       stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
       stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
+      stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
     },
   );
   assert.equal(controlledPreparationCalls, 1);
