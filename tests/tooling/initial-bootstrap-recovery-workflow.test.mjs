@@ -82,7 +82,13 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_OVERLOADED/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_BAD_SESSION/);
-  assert.match(workflow, /DURABLE_RECONCILIATION_FAILURE\|REVISION_EVIDENCE_FAILURE\|PRIVATE_EVIDENCE_FAILURE\|APPLICATION_FAILURE\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /DURABLE_RECONCILIATION_FAILURE\|REVISION_EVIDENCE_FAILURE\|PRIVATE_EVIDENCE_FAILURE/);
+  assert.match(workflow, /APPLICATION_BOOTSTRAP_OBSERVATION_INVALID/);
+  assert.match(workflow, /APPLICATION_RESUME_RUN_COUNTERS_MISMATCH/);
+  assert.match(workflow, /APPLICATION_SNAPSHOT_EVIDENCE_MISMATCH/);
+  assert.match(workflow, /APPLICATION_CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED/);
+  assert.match(workflow, /DIAGNOSTIC_FAILED/);
+  assert.doesNotMatch(workflow, /\|APPLICATION_FAILURE\|/);
   assert.doesNotMatch(workflow, /YDB_DATA_FAILURE\|/);
   assert.doesNotMatch(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT/);
   assert.match(workflow, /controlled-preparation\.json/);
