@@ -5,6 +5,7 @@ import { InitialBootstrapJobError } from '../../dist/runtime/initialBootstrapJob
 import { InitialControlledRebuildJobError } from '../../dist/runtime/initialControlledRebuildJob.js';
 import {
   executeYandexInitialControlledRebuildFunction,
+  executeYandexInitialControlledRebuildPreparationDiagnosticFunction,
   executeYandexInitialControlledRebuildSwapRecoveryDiagnosticFunction,
   formatInitialControlledRebuildPhaseMarker,
 } from '../../dist/runtime/yandexCloudInitialControlledRebuildFunction.js';
@@ -32,6 +33,47 @@ async function executeSwapDiagnostic(value) {
     return value;
   });
 }
+
+async function executePreparationDiagnostic(value) {
+  return executeYandexInitialControlledRebuildPreparationDiagnosticFunction(ENV, async (environment) => {
+    assert.equal(environment, ENV);
+    if (value instanceof Error) throw value;
+    return value;
+  });
+}
+
+test('controlled preparation diagnostic exposes only bounded read-only result', async () => {
+  assert.deepEqual(await executePreparationDiagnostic({
+    status: 'READY',
+    durableRun: { id: 'private' },
+    currentWrites: [{ amount: 'private' }],
+  }), {
+    status: 'PASS',
+    code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_READY',
+  });
+  assert.deepEqual(await executePreparationDiagnostic({
+    status: 'FAILED',
+    bootstrapPhase: 'RECONCILIATION_READ',
+    failureCode: 'YDB_QUERY_EXECUTION_YDB_TIMEOUT',
+    private: 'must-not-escape',
+  }), {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_PREPARATION_FAILED',
+    bootstrapPhase: 'RECONCILIATION_READ',
+    failureCode: 'YDB_QUERY_EXECUTION_YDB_TIMEOUT',
+  });
+  assert.deepEqual(await executePreparationDiagnostic({
+    status: 'FAILED',
+    bootstrapPhase: 'RECONCILIATION_READ',
+    failureCode: 'PRIVATE_PROVIDER_MESSAGE',
+  }), {
+    status: 'FAIL',
+    code: 'INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED',
+    jobCode: 'UNCAUGHT',
+    phase: null,
+    bootstrapPhase: null,
+  });
+});
 
 test('controlled swap recovery diagnostic exposes only bounded verdict', async () => {
   assert.deepEqual(await executeSwapDiagnostic({
