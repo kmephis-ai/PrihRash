@@ -350,8 +350,8 @@ interface InitialBootstrapControlledPreparationReconciliationReadStageTracker {
   evidence(): InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
 }
 
-export function createInitialBootstrapControlledPreparationReconciliationReadStageTracker():
-InitialBootstrapControlledPreparationReconciliationReadStageTracker {
+export function createInitialBootstrapControlledPreparationReconciliationReadStageTracker(
+): InitialBootstrapControlledPreparationReconciliationReadStageTracker {
   let latest: InitialBootstrapControlledPreparationReconciliationReadStageEvidence = 'UNOBSERVED';
   let diagnosticFailed = false;
 
