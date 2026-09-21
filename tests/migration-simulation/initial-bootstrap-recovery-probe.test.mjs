@@ -191,3 +191,43 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
   });
 });
+
+
+test('Yandex recovery handler accepts controlled preparation evidence only in diagnostic mode', async () => {
+  const base = {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingControlledPreparationEvidence: 'YDB_QUERY_TIMEOUT',
+  };
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction(
+      { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+      async () => base,
+    ),
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      ...base,
+    },
+  );
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction({}, async () => base),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+    },
+  );
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction(
+      { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+      async () => ({
+        ...base,
+        stagingControlledPreparationEvidence: 'PRIVATE_ENUM',
+      }),
+    ),
+    {
+      status: 'FAIL',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+    },
+  );
+});
