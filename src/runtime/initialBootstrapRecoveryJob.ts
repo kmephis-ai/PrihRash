@@ -24,6 +24,7 @@ import {
 import {
   InitialBootstrapApplicationError,
   prepareInitialControlledRebuildContinuation,
+  type InitialBootstrapApplicationErrorCode,
   type InitialBootstrapObservation,
 } from '../migration/initialBootstrapApplication.js';
 import {
@@ -113,7 +114,7 @@ export type InitialBootstrapControlledPreparationDiagnostic =
   | 'DURABLE_RECONCILIATION_FAILURE'
   | 'REVISION_EVIDENCE_FAILURE'
   | 'PRIVATE_EVIDENCE_FAILURE'
-  | 'APPLICATION_FAILURE'
+  | `APPLICATION_${InitialBootstrapApplicationErrorCode}`
   | 'DIAGNOSTIC_FAILED';
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
@@ -222,7 +223,7 @@ export function classifyInitialBootstrapControlledPreparationFailure(
     return 'PRIVATE_EVIDENCE_FAILURE';
   }
   if (error instanceof InitialBootstrapApplicationError) {
-    return 'APPLICATION_FAILURE';
+    return `APPLICATION_${error.code}`;
   }
   return 'DIAGNOSTIC_FAILED';
 }
