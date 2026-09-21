@@ -77,7 +77,8 @@ test('R1 readiness resource-limits-only mode is metadata-only, fail-closed and p
     'Re-verify private trigger-free boundary',
     'Invoke exact readiness tag',
   ]) {
-    assert.match(workflow, new RegExp(`name: ${step.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n\\s+if: \\$\{\\{ env\.RESOURCE_LIMITS_ONLY != '1' \\}\\}`));
+    const guardedStep = `- name: ${step}` + "\n        if: ${{ env.RESOURCE_LIMITS_ONLY != '1' }}";
+    assert.equal(workflow.includes(guardedStep), true);
   }
   assert.match(workflow, /yc ydb database list --folder-id "\$YC_FOLDER_ID"/);
   assert.match(workflow, /yc ydb database get --id "\$database_id"/);
