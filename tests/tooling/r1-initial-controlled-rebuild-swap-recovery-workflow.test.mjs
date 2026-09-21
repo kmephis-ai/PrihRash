@@ -46,7 +46,9 @@ test('swap recovery invokes once and emits enum-only tri-state or bounded runtim
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED/);
   assert.match(workflow, /SOURCE_READ_FAILED[\s\S]*APPLICATION_FAILED[\s\S]*YDB_CLIENT_CLOSE_FAILED/);
   assert.match(workflow, /PREPARATION[\s\S]*STAGING_RECONCILIATION[\s\S]*SWAP_DISCRIMINATION/);
-  assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*LINEAGE_PREPARATION[\s\S]*CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*LINEAGE_PREPARATION[\s\S]*RECONCILIATION_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /applicationFailureCode/);
+  assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_TIMEOUT/);
   assert.match(workflow, /\{status,code,jobCode,phase,bootstrapPhase\}/);
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /if-no-files-found: ignore/);
@@ -57,5 +59,6 @@ test('swap recovery runtime keeps bootstrap subphase only inside controlled PREP
   const source = await read('src/runtime/initialControlledRebuildJob.ts');
   assert.match(source, /bootstrapPhase = nextPhase;/);
   assert.match(source, /if \(nextPhase !== 'PREPARATION'\) bootstrapPhase = null;/);
-  assert.match(source, /InitialControlledRebuildJobError\('APPLICATION_FAILED', controlledPhase, bootstrapPhase\)/);
+  assert.match(source, /bootstrapPhase === 'RECONCILIATION_READ'/);
+  assert.match(source, /classifyInitialControlledRebuildApplicationFailureCode/);
 });
