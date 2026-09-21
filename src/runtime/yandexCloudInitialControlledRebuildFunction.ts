@@ -176,7 +176,9 @@ function runtimeFailure(
     phase,
     bootstrapPhase,
   });
-  return ydbDataFailureCode !== null && YDB_DATA_FAILURE_CODES.has(ydbDataFailureCode)
+  return jobCode === 'APPLICATION_FAILED'
+    && ydbDataFailureCode !== null
+    && YDB_DATA_FAILURE_CODES.has(ydbDataFailureCode)
     ? Object.freeze({ ...base, ydbDataFailureCode })
     : base;
 }
