@@ -7,6 +7,7 @@ import {
   classifyInitialBootstrapControlledPreparationFailure,
   classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
+  createInitialBootstrapControlledPreparationPhaseTracker,
   createInitialBootstrapControlledPreparationQueryErrorTracker,
   createInitialBootstrapControlledPreparationRetryTracker,
   diagnoseInitialBootstrapSourceDecodeEvidence,
@@ -114,6 +115,47 @@ test('controlled preparation retry tracker is non-throwing, fail-closed and igno
   assert.equal(priority.evidence(), 'EXHAUSTED');
   priority.markDiagnosticFailed();
   assert.equal(priority.evidence(), 'DIAGNOSTIC_FAILED');
+});
+
+test('controlled preparation phase tracker preserves only the existing application phase enum', () => {
+  const phases = [
+    'ADMISSION_READ',
+    'CURRENT_STATE_PREFLIGHT',
+    'FRESH_CONTEXT_PREPARATION',
+    'FRESH_METADATA_PREPARATION',
+    'FRESH_CLAIM_WRITE',
+    'RESUME_CONTEXT_READ',
+    'RESUME_IDENTITY_MANIFEST_READ',
+    'RESUME_SNAPSHOT_READ',
+    'RESUME_CONTEXT_PREPARATION',
+    'REVISION_EVIDENCE_PREPARATION',
+    'REVISION_EVIDENCE_WRITE',
+    'LINEAGE_PREPARATION',
+    'COUNTER_REFINEMENT_PREPARATION',
+    'COUNTER_REFINEMENT_WRITE',
+    'RECONCILIATION_READ',
+    'VALIDATION_EVALUATION',
+    'CURRENT_PLAN_PREPARATION',
+    'CURRENT_WRITE_PREPARATION',
+    'PRE_PROMOTION_PREFLIGHT',
+    'VALIDATION_WRITE_PREPARATION',
+    'VALIDATION_TRANSITION_WRITE',
+    'PROMOTION_WRITE',
+  ];
+  const tracker = createInitialBootstrapControlledPreparationPhaseTracker();
+  assert.equal(tracker.evidence(), 'UNOBSERVED');
+  for (const phase of phases) {
+    tracker.observePhase(phase);
+    assert.equal(tracker.evidence(), phase);
+  }
+  tracker.observePhase('PRIVATE_PHASE');
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+  tracker.observePhase('PROMOTION_WRITE');
+  assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
+
+  const explicitFailure = createInitialBootstrapControlledPreparationPhaseTracker();
+  explicitFailure.markDiagnosticFailed();
+  assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
 });
 
 test('controlled preparation query-error classifier exposes only bounded error classes', () => {
@@ -410,7 +452,8 @@ function runtime(overrides = {}) {
           preparationEvidence: 'READY',
           retryEvidence: 'UNOBSERVED',
           queryErrorEvidence: 'UNOBSERVED',
-        grpcStatusEvidence: 'UNOBSERVED',
+          grpcStatusEvidence: 'UNOBSERVED',
+          phaseEvidence: 'UNOBSERVED',
         });
       },
       ...overrides,
@@ -773,6 +816,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         retryEvidence: 'RETRIED',
         queryErrorEvidence: 'YDB_STATUS',
         grpcStatusEvidence: 'NON_GRPC',
+        phaseEvidence: 'RESUME_CONTEXT_READ',
       });
     },
   });
@@ -785,6 +829,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationRetryEvidence: 'RETRIED',
       stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
       stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+      stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
     },
   );
   assert.equal(controlledPreparationCalls, 1);

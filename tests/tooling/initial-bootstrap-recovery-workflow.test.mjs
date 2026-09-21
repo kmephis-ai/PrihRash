@@ -80,6 +80,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_RETRY_EVIDENCE=/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_QUERY_ERROR_EVIDENCE=/);
   assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE=/);
+  assert.match(workflow, /R1_STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE=/);
   assert.match(workflow, /READY\|BASELINE_EXISTS\|VALIDATION_BLOCKED\|YDB_QUERY_TIMEOUT/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_FAILED/);
   assert.match(workflow, /YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE/);
@@ -102,10 +103,15 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /PERMISSION_DENIED\|RESOURCE_EXHAUSTED\|FAILED_PRECONDITION\|ABORTED/);
   assert.match(workflow, /INTERNAL\|UNAVAILABLE\|DATA_LOSS\|UNAUTHENTICATED\|NON_GRPC\|UNRECOGNIZED\|DIAGNOSTIC_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE_INVALID/);
+  assert.match(workflow, /UNOBSERVED\|ADMISSION_READ\|CURRENT_STATE_PREFLIGHT\|FRESH_CONTEXT_PREPARATION/);
+  assert.match(workflow, /RESUME_CONTEXT_READ\|RESUME_IDENTITY_MANIFEST_READ\|RESUME_SNAPSHOT_READ/);
+  assert.match(workflow, /RECONCILIATION_READ\|VALIDATION_EVALUATION\|CURRENT_PLAN_PREPARATION\|CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_PHASE_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation\.json/);
   assert.match(workflow, /controlled-preparation-retry\.json/);
   assert.match(workflow, /controlled-preparation-query-error\.json/);
   assert.match(workflow, /controlled-preparation-grpc-status\.json/);
+  assert.match(workflow, /controlled-preparation-phase\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
 
@@ -172,6 +178,10 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.match(runtime, /case 8: return 'RESOURCE_EXHAUSTED'/);
   assert.match(runtime, /case 14: return 'UNAVAILABLE'/);
   assert.match(runtime, /case 16: return 'UNAUTHENTICATED'/);
+  assert.match(runtime, /createInitialBootstrapControlledPreparationPhaseTracker/);
+  assert.match(runtime, /observePhase\(nextPhase: InitialBootstrapApplicationPhase\)/);
+  assert.match(runtime, /phaseTracker\?\.observePhase\(nextPhase\)/);
+  assert.match(runtime, /INITIAL_BOOTSTRAP_APPLICATION_PHASES/);
   assert.match(runtime, /\.subscribe\(onAttemptCompleted\)/);
   assert.match(runtime, /\.unsubscribe\(onAttemptCompleted\)/);
   assert.match(runtime, /\.subscribe\(onExhausted\)/);

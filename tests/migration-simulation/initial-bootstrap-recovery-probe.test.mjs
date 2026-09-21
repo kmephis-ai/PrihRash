@@ -201,6 +201,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     stagingControlledPreparationRetryEvidence: 'RETRIED',
     stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
     stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+    stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -245,6 +246,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
+          stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         }),
       ),
       {
@@ -264,6 +266,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationEvidence: 'READY',
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
+          stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           ...(invalidRetryEvidence === undefined
             ? {}
             : { stagingControlledPreparationRetryEvidence: invalidRetryEvidence }),
@@ -286,6 +289,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationEvidence: 'READY',
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
+          stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           ...(invalidQueryErrorEvidence === undefined
             ? {}
             : { stagingControlledPreparationQueryErrorEvidence: invalidQueryErrorEvidence }),
@@ -308,9 +312,34 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationEvidence: 'READY',
           stagingControlledPreparationRetryEvidence: 'NO_RETRY',
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+          stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           ...(invalidGrpcStatusEvidence === undefined
             ? {}
             : { stagingControlledPreparationGrpcStatusEvidence: invalidGrpcStatusEvidence }),
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
+
+
+  for (const invalidPhaseEvidence of [undefined, 'PRIVATE_PHASE']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: 'READY',
+          stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+          stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+          stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+          ...(invalidPhaseEvidence === undefined
+            ? {}
+            : { stagingControlledPreparationPhaseEvidence: invalidPhaseEvidence }),
         }),
       ),
       {
