@@ -93,6 +93,32 @@ Live runs `35749648876` и `35750441003` на exact `main=b9ec60ba58df2a336b7d9f
 
 Этот diagnostic patch не расширяет IAM, не меняет dedicated resource bindings и не разрешает повторный provider dispatch сам по себе. Новый live attempt допустим только после merge/CI PASS и fresh exact-main reconciliation. Повторный rerun уже завершённых failed runs запрещён.
 
+### Scoped Lockbox lookup recovery
+
+После diagnostic patch #749 fresh runs на `main=a6fad24116bfae1538f39a32b7ac46d802a53bc3` стабильно вернули `SCHEMA_UPGRADE_004_LOCKBOX_NOT_FOUND` на global `secret get --id`, при этом:
+- WIF identity self-check PASS;
+- dedicated secret ACTIVE;
+- exact deploy SA имеет один direct `lockbox.viewer` binding на dedicated secret без condition;
+- локальная impersonation exact той же deploy SA читает secret metadata;
+- migration-003 использует тот же resource-scoped Lockbox pattern и ранее прошла успешно;
+- locator `YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID` был повторно установлен из exact current dedicated secret и подтверждён read-back по `updatedAt`;
+- deploy/invoke во всех этих failed runs были skipped, поэтому migration 004 и ledger version 4 не применялись.
+
+Yandex CLI различает lookup по ID (global resource lookup) и lookup по name (folder-scoped). Поэтому workflow сохраняет ID lookup как primary path, но при **exact `NOT_FOUND` только** допускает read-only fallback:
+
+```text
+secret get --id <locator>
+  NOT_FOUND only
+→ secret get --name prihrash-r1-schema-upgrade-004 --folder-id <exact folder>
+→ require returned id == locator
+→ require exact name + folder
+→ resolve current version
+```
+
+Fallback не разрешён для `FORBIDDEN`, `UNAUTHENTICATED`, rate-limit, transport или unclassified failure. Scoped lookup failure также STOP с privacy-safe enum. Raw stderr/provider IDs/payload не публикуются.
+
+Этот fallback не расширяет IAM, не читает payload, не меняет provider resources и не ослабляет exact-resource proof: дальнейший deploy разрешён только после exact ID/name/folder equality.
+
 ## Provider isolation
 
 Package `.artifacts/yandex-schema-upgrade-004-function` содержит только:
