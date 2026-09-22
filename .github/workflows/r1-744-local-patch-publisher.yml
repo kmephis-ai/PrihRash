@@ -11,7 +11,6 @@ permissions:
 env:
   SOURCE_SHA: a2287c9aeecfc93c33f09c231370d93ee2c62566
   EXPECTED_PATCH_SHA256: cbb4d2bdb29682618ee419dbc8ac4894d6db488d89a29c1c23e253b0f912cf2c
-  EXPECTED_TREE_SHA: d66189d2279d16f5e7b9d8090e7f3fc409ec27cb
   TARGET_BRANCH: agent/r1-744-metadata-scan-ru
 
 jobs:
@@ -23,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Apply exact locally verified patch
+      - name: Apply exact non-workflow portion of locally verified patch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -38,15 +37,22 @@ jobs:
           base64 --decode .github/r1-744-local.patch.gz.b64 > "$RUNNER_TEMP/r1-744.patch.gz"
           test "$(sha256sum "$RUNNER_TEMP/r1-744.patch.gz" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA256"
           gzip --decompress --stdout "$RUNNER_TEMP/r1-744.patch.gz" > "$RUNNER_TEMP/r1-744.patch"
-          git apply --check "$RUNNER_TEMP/r1-744.patch"
-          git apply "$RUNNER_TEMP/r1-744.patch"
+          git apply --check --exclude='.github/workflows/r1-initial-bootstrap-recovery.yml' "$RUNNER_TEMP/r1-744.patch"
+          git apply --exclude='.github/workflows/r1-initial-bootstrap-recovery.yml' "$RUNNER_TEMP/r1-744.patch"
 
-          rm -f .github/r1-744-local.patch.gz.b64 .github/workflows/r1-744-local-patch-publisher.yml
-          git add -A
+          test "$(git hash-object scripts/invoke-yandex-initial-bootstrap-recovery.mjs)" = 1e9a966fc62b49bd47f578fbb1d194e18e5bdd8d
+          test "$(git hash-object src/integration/ydb/ydbJsV6DataTransport.ts)" = c3280c7d5647a88a3c7e9ed9f87781f94084766d
+          test "$(git hash-object src/runtime/initialBootstrapRecoveryJob.ts)" = a1a3f6086cb87917fe2f296fe65aea05aed760bd
+          test "$(git hash-object src/runtime/yandexCloudInitialBootstrapRecoveryFunction.ts)" = 83df891b81c12bcb4be104d0f4047cb8bf1405c2
+          test "$(git hash-object tests/integration/ydb-js-v6-data-transport.test.mjs)" = 26eae13ecf27a3a3abb6ed1792e125b42e87a041
+          test "$(git hash-object tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs)" = 0def3eef86c16d50851378e9ce8e73b45f348eb5
+          test "$(git hash-object tests/migration-simulation/initial-bootstrap-recovery-probe.test.mjs)" = 9305ae8b77d8c5fddcf0a92819cba36056ac0085
+          test "$(git hash-object tests/tooling/initial-bootstrap-recovery-invoker-diagnostic.test.mjs)" = 58cecf3f562ccda268862a3c02d198f9fbf55379
+          test "$(git hash-object tests/tooling/initial-bootstrap-recovery-workflow.test.mjs)" = 484265c9490d4a2f780eee86fb0cd271da10f2df
+
+          git add             scripts/invoke-yandex-initial-bootstrap-recovery.mjs             src/integration/ydb/ydbJsV6DataTransport.ts             src/runtime/initialBootstrapRecoveryJob.ts             src/runtime/yandexCloudInitialBootstrapRecoveryFunction.ts             tests/integration/ydb-js-v6-data-transport.test.mjs             tests/migration-simulation/initial-bootstrap-recovery-job.test.mjs             tests/migration-simulation/initial-bootstrap-recovery-probe.test.mjs             tests/tooling/initial-bootstrap-recovery-invoker-diagnostic.test.mjs             tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
           git diff --cached --check
-          test "$(git write-tree)" = "$EXPECTED_TREE_SHA" || { echo R1_744_PUBLISH_TREE_MISMATCH; exit 1; }
-
           git config user.name 'OpenAI PrihRash Agent'
           git config user.email 'agent@openai.invalid'
-          git commit -m 'R1 #744: measure metadata scan RU'
+          git commit -m 'R1 #744: measure metadata scan RU (non-workflow)'
           git push origin "HEAD:$TARGET_BRANCH"
