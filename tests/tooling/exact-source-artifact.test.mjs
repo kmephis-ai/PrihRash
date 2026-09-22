@@ -68,6 +68,7 @@ const providerWorkflowPaths = [
   'r1-initial-controlled-rebuild.yml',
   'r1-ydb-schema-bootstrap.yml',
   'r1-ydb-schema-upgrade-003.yml',
+  'r1-ydb-schema-upgrade-004.yml',
 ];
 
 test('canonical CI publishes one exact-SHA provider artifact after the full check', async () => {

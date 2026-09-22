@@ -27,7 +27,7 @@
 
 ## Schema prerequisite
 
-Real initial bootstrap и subsequent scheduled sync используют exact financial schema version `3`: ledger versions `1..3`, migration-002 normalized source-label columns и physical `initial_bootstrap_identity_manifests`. Readiness проверяет это read-only. Scheduled runtime не применяет migrations и при отсутствии schema-v3 provider evidence не должен запускать financial mutation; migration `003` имеет отдельный one-shot gate `R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md`.
+Real initial bootstrap и subsequent scheduled sync используют exact financial schema version `4`: ledger versions `1..4`, migration-002 normalized source-label columns, physical `initial_bootstrap_identity_manifests` и synchronous `idx_source_record_revisions_run_revision`. Readiness проверяет это read-only, включая explicit `VIEW` probe индекса. Scheduled runtime не применяет migrations и при отсутствии schema-v4 provider evidence не должен запускать financial mutation; migrations `003` и `004` имеют отдельные one-shot gates `R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md` и `R1_YDB_SCHEMA_UPGRADE_004_RUNBOOK.md`.
 
 ## Fail-closed rules
 

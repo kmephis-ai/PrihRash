@@ -263,7 +263,7 @@ function runRevisionReadStatement(runId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
-      + 'FROM source_record_revisions '
+      + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
       + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
       + 'ORDER BY source_record_id',
     {

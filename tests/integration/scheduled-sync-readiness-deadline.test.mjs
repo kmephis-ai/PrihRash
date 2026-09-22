@@ -17,6 +17,7 @@ const validMigrationRows = Object.freeze([
   Object.freeze({ version: 1n, checksum: 'checksum-001', applied_at: new Date('2026-09-01T00:00:00.000Z') }),
   Object.freeze({ version: 2n, checksum: 'checksum-002', applied_at: new Date('2026-09-02T00:00:00.000Z') }),
   Object.freeze({ version: 3n, checksum: 'checksum-003', applied_at: new Date('2026-09-03T00:00:00.000Z') }),
+  Object.freeze({ version: 4n, checksum: 'checksum-004', applied_at: new Date('2026-09-04T00:00:00.000Z') }),
 ]);
 
 function neverResolves() {

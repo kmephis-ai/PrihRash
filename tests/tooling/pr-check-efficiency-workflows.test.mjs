@@ -17,6 +17,7 @@ const nonCancelableProviderWorkflows = [
   'r1-initial-bootstrap-recovery-autocontinue.yml',
   'r1-ydb-schema-bootstrap.yml',
   'r1-ydb-schema-upgrade-003.yml',
+  'r1-ydb-schema-upgrade-004.yml',
 ];
 
 async function workflow(name) {

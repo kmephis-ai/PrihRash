@@ -9,6 +9,7 @@ const packageScripts = [
   'package:function',
   'package:schema-bootstrap',
   'package:schema-upgrade-003',
+  'package:schema-upgrade-004',
   'package:initial-bootstrap',
   'package:initial-bootstrap-recovery',
 ];

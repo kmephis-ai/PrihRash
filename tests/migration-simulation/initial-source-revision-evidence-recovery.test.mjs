@@ -105,6 +105,7 @@ test('restart after partial revision evidence separates run-scoped payload verif
     'REVISION_COLLISION_READ',
   ]);
   assert.equal(statements.length, 3);
+  assert.match(statements[0].text, /FROM source_record_revisions VIEW idx_source_record_revisions_run_revision/);
   assert.match(statements[0].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
   assert.doesNotMatch(statements[0].text, /raw_payload|AS_TABLE/);
   assert.equal(statements[0].parameters.revision.value, 1n);

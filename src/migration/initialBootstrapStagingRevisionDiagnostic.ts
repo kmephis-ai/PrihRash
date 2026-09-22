@@ -360,7 +360,7 @@ function authoritativeBindingDiagnostic(
 function runRevisionEvidenceStatement(migrationRunId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest FROM source_record_revisions '
+      + 'CAST(row_digest AS Utf8) AS row_digest FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
       + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
       + 'ORDER BY source_record_id',
     {

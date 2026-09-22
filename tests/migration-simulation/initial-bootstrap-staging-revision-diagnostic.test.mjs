@@ -130,6 +130,7 @@ test('staging revision diagnostic distinguishes no, partial, complete and cross-
     await diagnoseInitialBootstrapStagingRevisionEvidence(complete, SNAPSHOT_DIGEST, sourceObservations),
     'COMPLETE_CURRENT_RUN_ONLY',
   );
+  assert.match(complete.calls[1].text, /FROM source_record_revisions VIEW idx_source_record_revisions_run_revision/);
 
   const collision = reader(sourceObservations, async (statement) => (
     statement.parameters.migration_run_id === undefined

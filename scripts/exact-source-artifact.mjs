@@ -8,6 +8,7 @@ export const EXACT_SOURCE_PACKAGE_DIRECTORIES = Object.freeze([
   'yandex-scheduled-sync-function',
   'yandex-schema-bootstrap-function',
   'yandex-schema-upgrade-003-function',
+  'yandex-schema-upgrade-004-function',
   'yandex-initial-bootstrap-function',
   'yandex-initial-bootstrap-recovery-function',
   'yandex-initial-controlled-rebuild-function',

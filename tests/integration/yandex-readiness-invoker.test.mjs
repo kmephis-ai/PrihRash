@@ -33,6 +33,7 @@ const SAFE_PROBE_FAILURES = Object.freeze([
   ['YDB_ACCOUNTS_SCHEMA_READ_FAILED', 'READINESS_YDB_ACCOUNTS_SCHEMA_READ_FAILED'],
   ['YDB_CATEGORIES_SCHEMA_READ_FAILED', 'READINESS_YDB_CATEGORIES_SCHEMA_READ_FAILED'],
   ['YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED', 'READINESS_YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED'],
+  ['YDB_SOURCE_RECORD_REVISION_RUN_INDEX_SCHEMA_READ_FAILED', 'READINESS_YDB_SOURCE_RECORD_REVISION_RUN_INDEX_SCHEMA_READ_FAILED'],
   ['MALFORMED_SCHEMA_MIGRATION_EVIDENCE', 'READINESS_MALFORMED_SCHEMA_MIGRATION_EVIDENCE'],
   ['MISSING_REQUIRED_SCHEMA_MIGRATION', 'READINESS_MISSING_REQUIRED_SCHEMA_MIGRATION'],
   ['UNEXPECTED_SCHEMA_MIGRATION', 'READINESS_UNEXPECTED_SCHEMA_MIGRATION'],
@@ -91,7 +92,7 @@ if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.
 if (process.env.PRIHRASH_YANDEX_READINESS_FUNCTION_ID !== undefined) process.exit(92);
 if (process.env.SYNTHETIC_PRIVATE_VALUE !== undefined) process.exit(93);
 if (process.env.YC_IAM_TOKEN !== 'synthetic-short-lived-iam-token') process.exit(94);
-process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:4}));
 `,
   });
 
@@ -120,7 +121,7 @@ fs.writeFileSync(state, String(attempt + 1));
 if (attempt === 0) {
   process.stdout.write(JSON.stringify({readinessFailure:'YDB_QUERY_HEALTH_READ_FAILED'}));
 } else {
-  process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+  process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:4}));
 }
 `,
   });
@@ -140,7 +141,7 @@ if (attempt === 0) {
   process.stderr.write(${JSON.stringify(`temporary provider failure\n${PRIVATE_LOOKING}`)});
   process.exit(17);
 }
-process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:4}));
 `,
   });
 
@@ -215,8 +216,8 @@ test('malformed or unexpected successful provider output is classified without e
   const outputs = [
     PRIVATE_LOOKING,
     JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY' }),
-    JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY', requiredMigrationVersion: 3, extra: PRIVATE_LOOKING }),
-    JSON.stringify({ googleSource: 'READY', ydbSchema: 'NOT_READY', requiredMigrationVersion: 3 }),
+    JSON.stringify({ googleSource: 'READY', ydbSchema: 'READY', requiredMigrationVersion: 4, extra: PRIVATE_LOOKING }),
+    JSON.stringify({ googleSource: 'READY', ydbSchema: 'NOT_READY', requiredMigrationVersion: 4 }),
     JSON.stringify({ readinessFailure: 'NOT_ALLOWLISTED' }),
     JSON.stringify({ readinessFailure: 'YDB_MIGRATION_EVIDENCE_READ_FAILED', extra: PRIVATE_LOOKING }),
   ];

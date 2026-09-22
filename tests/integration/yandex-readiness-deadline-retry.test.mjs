@@ -47,7 +47,7 @@ fs.writeFileSync(state, String(attempt + 1));
 if (attempt === 0) {
   process.stdout.write(JSON.stringify({readinessFailure:'DEADLINE_EXCEEDED'}));
 } else {
-  process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:3}));
+  process.stdout.write(JSON.stringify({googleSource:'READY',ydbSchema:'READY',requiredMigrationVersion:4}));
 }
 `);
 

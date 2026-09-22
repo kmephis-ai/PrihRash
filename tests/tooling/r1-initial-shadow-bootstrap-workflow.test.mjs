@@ -154,6 +154,7 @@ test('bootstrap package exports only dedicated bootstrap handlers and removes sc
   assert.match(verifier, /scheduledSyncJob\.js/);
   assert.match(verifier, /yandexCloudSchemaBootstrapFunction\.js/);
   assert.match(verifier, /yandexCloudSchemaUpgrade003Function\.js/);
+  assert.match(verifier, /yandexCloudSchemaUpgrade004Function\.js/);
   assert.match(verifier, /ydbJsV6SchemaBootstrapClient\.js/);
 });
 
