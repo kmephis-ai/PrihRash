@@ -154,6 +154,45 @@ exact current deploy SA
 - если fresh run снова останавливается до deploy/invoke, дальнейшее IAM widening запрещено; temporary folder-level `lockbox.viewer` остаётся отдельным known recovery state и должен быть revoked при abandonment/retirement;
 - raw IAM/provider IDs, Lockbox payload и financial data не публикуются.
 
+### Exact Lockbox version locator recovery
+
+Temporary folder-level `lockbox.viewer` и полная синхронизация GitHub locators не устранили WIF anomaly: fresh exact-main run `35770005675` на `main=5bcd8d06a933e02e48ade1cb8c096609ea3b1bd4` после обновления `YC_R1_FOLDER_ID`, WIF SA locator и Lockbox secret locator снова завершился `SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND` до deploy/invoke. Следовательно stale folder/SA/secret locator, resource folder mismatch и conditional binding исключены.
+
+Дальнейшее IAM widening запрещено. Вместо этого canonical provider boundary использует owner-side exact read-only reconciliation для immutable deployment locators:
+
+```text
+exact current folder
++ exact dedicated secret name
++ exact dedicated secret id
++ exact current secret version id
++ exact runtime SA with dedicated-secret lockbox.payloadViewer
+→ set GitHub locator secrets:
+  YC_R1_FOLDER_ID
+  YC_R1_SCHEMA_UPGRADE_004_WIF_SERVICE_ACCOUNT_ID
+  YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID
+  YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_VERSION_ID
+→ workflow validates all locators are present/syntactically safe
+→ workflow does NOT read Lockbox metadata/payload as deploy SA
+→ Cloud Functions version create receives exact secret id + version id + runtime SA
+→ provider deploy failure = STOP before migration invoke
+```
+
+`YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_VERSION_ID` — provider locator, не secret payload. Он не публикуется в logs/evidence и маскируется в workflow так же, как secret ID.
+
+Безопасность сохраняется:
+- deploy SA не получает `lockbox.payloadViewer`;
+- runtime SA остаётся единственным account с payload access к dedicated migration-004 secret;
+- Cloud Functions contract проверяет secret/version/runtime-SA при создании новой Function version; failure не допускает migration invoke;
+- exact secret name/folder/current version доказываются owner-side read-only перед установкой locators;
+- temporary folder-level `lockbox.viewer`, добавленный как diagnostic workaround, должен быть отозван до fresh locator-based live attempt; direct secret-level metadata binding может оставаться только если он требуется provider deploy и в любом случае retires после schema-v4 readiness;
+- никакой Google/YDB financial mutation, cap increase, timer/cutover или controlled-rebuild authority этим recovery не добавляется.
+
+После merge и green canonical verification допустим один fresh live attempt только после:
+1. fresh exact-main/no-active-writer reconciliation;
+2. owner-side read-only proof exact dedicated secret/folder/current version/runtime payload binding;
+3. установки всех четырёх non-credential locators;
+4. retirement temporary folder-level `lockbox.viewer`.
+
 ## Provider isolation
 
 Package `.artifacts/yandex-schema-upgrade-004-function` содержит только:
