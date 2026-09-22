@@ -291,6 +291,14 @@ const REASONS = new Set([
   'COMMITTED_SOURCE_RECORD_COUNT_MISMATCH',
   'COMMITTED_SOURCE_RECORD_REVISION_COUNT_MISMATCH',
 ]);
+const STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE = new Set([
+  'UNOBSERVED',
+  'ACCOUNTS_READ',
+  'CATEGORIES_READ',
+  'VIKA_MEMBER_READ',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE = new Set([
   'UNOBSERVED',
   'REVISION_METADATA_SCAN',
@@ -366,6 +374,8 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
     const stagingControlledPreparationQueryErrorEvidence = result.stagingControlledPreparationQueryErrorEvidence;
     const stagingControlledPreparationGrpcStatusEvidence = result.stagingControlledPreparationGrpcStatusEvidence;
     const stagingControlledPreparationPhaseEvidence = result.stagingControlledPreparationPhaseEvidence;
+    const stagingControlledPreparationReferenceReadStageEvidence =
+      result.stagingControlledPreparationReferenceReadStageEvidence;
     const stagingControlledPreparationReconciliationReadStageEvidence =
       result.stagingControlledPreparationReconciliationReadStageEvidence;
     const validatedSourceEvidence = result.validatedSourceEvidence;
@@ -387,6 +397,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
             'stagingControlledPreparationQueryErrorEvidence',
             'stagingControlledPreparationGrpcStatusEvidence',
             'stagingControlledPreparationPhaseEvidence',
+            'stagingControlledPreparationReferenceReadStageEvidence',
             'stagingControlledPreparationReconciliationReadStageEvidence',
           ])
           && noStagingDiagnostics
@@ -400,6 +411,10 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           && STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE.has(stagingControlledPreparationGrpcStatusEvidence)
           && typeof stagingControlledPreparationPhaseEvidence === 'string'
           && STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE.has(stagingControlledPreparationPhaseEvidence)
+          && typeof stagingControlledPreparationReferenceReadStageEvidence === 'string'
+          && STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE.has(
+            stagingControlledPreparationReferenceReadStageEvidence,
+          )
           && typeof stagingControlledPreparationReconciliationReadStageEvidence === 'string'
           && STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE.has(
             stagingControlledPreparationReconciliationReadStageEvidence,
@@ -411,6 +426,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           && stagingControlledPreparationQueryErrorEvidence === undefined
           && stagingControlledPreparationGrpcStatusEvidence === undefined
           && stagingControlledPreparationPhaseEvidence === undefined
+          && stagingControlledPreparationReferenceReadStageEvidence === undefined
           && stagingControlledPreparationReconciliationReadStageEvidence === undefined
       : result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
@@ -424,6 +440,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationQueryErrorEvidence === undefined
         && stagingControlledPreparationGrpcStatusEvidence === undefined
         && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
@@ -432,6 +449,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationQueryErrorEvidence === undefined
         && stagingControlledPreparationGrpcStatusEvidence === undefined
         && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
@@ -459,6 +477,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationQueryErrorEvidence === undefined
         && stagingControlledPreparationGrpcStatusEvidence === undefined
         && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && noStagingDiagnostics
@@ -467,6 +486,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationQueryErrorEvidence === undefined
         && stagingControlledPreparationGrpcStatusEvidence === undefined
         && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
@@ -508,6 +528,9 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationPhaseEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingControlledPreparationPhaseEvidence ?? null
         : null,
+      stagingControlledPreparationReferenceReadStageEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingControlledPreparationReferenceReadStageEvidence ?? null
+        : null,
       stagingControlledPreparationReconciliationReadStageEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingControlledPreparationReconciliationReadStageEvidence ?? null
         : null,
@@ -531,6 +554,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   }
@@ -554,6 +578,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   }
@@ -587,6 +612,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   } catch {
@@ -602,6 +628,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationQueryErrorEvidence: null,
       stagingControlledPreparationGrpcStatusEvidence: null,
       stagingControlledPreparationPhaseEvidence: null,
+      stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
     });
   }
@@ -658,6 +685,11 @@ if (invocation.stagingControlledPreparationGrpcStatusEvidence !== null) {
 if (invocation.stagingControlledPreparationPhaseEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE=${invocation.stagingControlledPreparationPhaseEvidence}\n`,
+  );
+}
+if (invocation.stagingControlledPreparationReferenceReadStageEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE=${invocation.stagingControlledPreparationReferenceReadStageEvidence}\n`,
   );
 }
 if (invocation.stagingControlledPreparationReconciliationReadStageEvidence !== null) {
