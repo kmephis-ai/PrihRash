@@ -1,0 +1,52 @@
+name: R1 #744 local patch publisher
+
+on:
+  push:
+    branches:
+      - agent/r1-744-metadata-scan-ru
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: a2287c9aeecfc93c33f09c231370d93ee2c62566
+  EXPECTED_PATCH_SHA256: cbb4d2bdb29682618ee419dbc8ac4894d6db488d89a29c1c23e253b0f912cf2c
+  EXPECTED_TREE_SHA: d66189d2279d16f5e7b9d8090e7f3fc409ec27cb
+  TARGET_BRANCH: agent/r1-744-metadata-scan-ru
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact locally verified patch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test "$GITHUB_REF" = "refs/heads/$TARGET_BRANCH"
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          current="$(curl --fail --silent --show-error             -H "Authorization: Bearer $GH_TOKEN"             -H 'Accept: application/vnd.github+json'             "$api/branches/main" | jq -er '.commit.sha')"
+          test "$current" = "$SOURCE_SHA" || { echo R1_744_PUBLISH_MAIN_MOVED; exit 1; }
+
+          base64 --decode .github/r1-744-local.patch.gz.b64 > "$RUNNER_TEMP/r1-744.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/r1-744.patch.gz" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA256"
+          gzip --decompress --stdout "$RUNNER_TEMP/r1-744.patch.gz" > "$RUNNER_TEMP/r1-744.patch"
+          git apply --check "$RUNNER_TEMP/r1-744.patch"
+          git apply "$RUNNER_TEMP/r1-744.patch"
+
+          rm -f .github/r1-744-local.patch.gz.b64 .github/workflows/r1-744-local-patch-publisher.yml
+          git add -A
+          git diff --cached --check
+          test "$(git write-tree)" = "$EXPECTED_TREE_SHA" || { echo R1_744_PUBLISH_TREE_MISMATCH; exit 1; }
+
+          git config user.name 'OpenAI PrihRash Agent'
+          git config user.email 'agent@openai.invalid'
+          git commit -m 'R1 #744: measure metadata scan RU'
+          git push origin "HEAD:$TARGET_BRANCH"
