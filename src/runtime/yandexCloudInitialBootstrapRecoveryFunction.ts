@@ -31,6 +31,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingControlledPreparationPhaseEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationPhaseEvidence'];
       stagingControlledPreparationReferenceReadStageEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationReferenceReadStageEvidence'];
       stagingControlledPreparationReconciliationReadStageEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationReconciliationReadStageEvidence'];
+      stagingControlledPreparationMetadataScanCostEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationMetadataScanCostEvidence'];
     }>
   | Readonly<{
       status: 'FAIL';
@@ -263,6 +264,15 @@ const STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE = new Se
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationMetadataScanCostEvidence']>>([
+  'UNOBSERVED',
+  'LT_10_RU',
+  'GE_10_LT_3000_RU',
+  'GE_3000_RU',
+  'STATS_UNAVAILABLE',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const SOURCE_DECODE_ERROR_CODES = new Set([
   'INVALID_PAYLOAD_SCHEMA',
   'UNRECOGNIZED_FINANCIAL_OPERATION_TYPE',
@@ -363,6 +373,8 @@ function validClassification(
     value.stagingControlledPreparationReferenceReadStageEvidence;
   const controlledPreparationReconciliationReadStageDiagnostic =
     value.stagingControlledPreparationReconciliationReadStageEvidence;
+  const controlledPreparationMetadataScanCostDiagnostic =
+    value.stagingControlledPreparationMetadataScanCostEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
       || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
@@ -372,7 +384,8 @@ function validClassification(
       || controlledPreparationGrpcStatusDiagnostic !== undefined
       || controlledPreparationPhaseDiagnostic !== undefined
       || controlledPreparationReferenceReadStageDiagnostic !== undefined
-      || controlledPreparationReconciliationReadStageDiagnostic !== undefined) return false;
+      || controlledPreparationReconciliationReadStageDiagnostic !== undefined
+      || controlledPreparationMetadataScanCostDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
       diagnostic !== undefined
@@ -398,6 +411,10 @@ function validClassification(
       || !STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE.has(
         controlledPreparationReconciliationReadStageDiagnostic,
       )
+      || controlledPreparationMetadataScanCostDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE.has(
+        controlledPreparationMetadataScanCostDiagnostic,
+      )
     ) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT') {
     if (diagnostic === undefined || !STAGING_REVISION_EVIDENCE.has(diagnostic)) return false;
@@ -413,6 +430,7 @@ function validClassification(
       || controlledPreparationPhaseDiagnostic !== undefined
       || controlledPreparationReferenceReadStageDiagnostic !== undefined
       || controlledPreparationReconciliationReadStageDiagnostic !== undefined
+      || controlledPreparationMetadataScanCostDiagnostic !== undefined
     ) return false;
   } else if (
     diagnostic !== undefined
@@ -427,6 +445,7 @@ function validClassification(
     || controlledPreparationPhaseDiagnostic !== undefined
     || controlledPreparationReferenceReadStageDiagnostic !== undefined
     || controlledPreparationReconciliationReadStageDiagnostic !== undefined
+    || controlledPreparationMetadataScanCostDiagnostic !== undefined
   ) {
     return false;
   }
@@ -503,6 +522,12 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
         : {
             stagingControlledPreparationReconciliationReadStageEvidence:
               classification.stagingControlledPreparationReconciliationReadStageEvidence,
+          }),
+      ...(classification.stagingControlledPreparationMetadataScanCostEvidence === undefined
+        ? {}
+        : {
+            stagingControlledPreparationMetadataScanCostEvidence:
+              classification.stagingControlledPreparationMetadataScanCostEvidence,
           }),
     });
   } catch (error) {

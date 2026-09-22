@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { StatusIds_StatusCode } from '@ydbjs/api/operation';
+import { StatsMode } from '@ydbjs/api/query';
 import { List } from '@ydbjs/value/list';
 import { Optional, OptionalType } from '@ydbjs/value/optional';
 import * as primitive from '@ydbjs/value/primitive';
@@ -28,6 +29,7 @@ import {
   createYdbJsV6DataClient,
   createYdbJsV6DataTransport,
   createYdbJsV6ParameterMapper,
+  estimateYdbYqlReadRequestUnits,
   waitForYdbJsDriverReady,
 } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 
@@ -93,7 +95,7 @@ function fakeSdk() {
   return sdk;
 }
 
-function makeExecutor(events, rows = []) {
+function makeExecutor(events, rows = [], stats = undefined) {
   return function executor(text) {
     events.push(['query', text]);
     const builder = {
@@ -104,6 +106,14 @@ function makeExecutor(events, rows = []) {
       timeout(timeoutMs) {
         events.push(['timeout', timeoutMs]);
         return builder;
+      },
+      withStats(mode) {
+        events.push(['withStats', mode]);
+        return builder;
+      },
+      stats() {
+        events.push(['stats']);
+        return stats;
       },
       then(resolve, reject) {
         return Promise.resolve([rows]).then(resolve, reject);
@@ -129,10 +139,10 @@ function makeRejectingExecutor(error) {
 
 function makeSql(options = {}) {
   const events = [];
-  const sql = makeExecutor(events, options.readRows ?? []);
+  const sql = makeExecutor(events, options.readRows ?? [], options.readStats);
   sql.begin = async (txOptions, work) => {
     events.push(['begin', txOptions]);
-    const tx = makeExecutor(events, options.transactionRows ?? []);
+    const tx = makeExecutor(events, options.transactionRows ?? [], options.transactionStats);
     let result;
     try {
       result = await work(tx);
@@ -335,6 +345,90 @@ test('optional read timeout reaches SDK query builder without changing transacti
     events.filter(([kind]) => kind === 'timeout'),
     [['timeout', 21_000]],
   );
+});
+
+test('YQL read RU estimator follows Yandex CPU and I/O max formula without exposing raw stats', () => {
+  const stats = ({ processCpuTimeUs = 0n, compilationCpuTimeUs = 0n, phaseCpuTimeUs = 0n, rows = 0n, bytes = 0n }) => ({
+    processCpuTimeUs,
+    compilation: { cpuTimeUs: compilationCpuTimeUs },
+    queryPhases: [{
+      cpuTimeUs: phaseCpuTimeUs,
+      tableAccess: [{ reads: { rows, bytes } }],
+    }],
+  });
+
+  assert.equal(estimateYdbYqlReadRequestUnits(stats({ rows: 12n, bytes: 100n })), 12);
+  assert.equal(estimateYdbYqlReadRequestUnits(stats({ rows: 1n, bytes: 8_193n })), 3);
+  assert.equal(estimateYdbYqlReadRequestUnits(stats({ processCpuTimeUs: 6_000n })), 4);
+  assert.equal(estimateYdbYqlReadRequestUnits(stats({
+    processCpuTimeUs: 870n,
+    compilationCpuTimeUs: 4_062n,
+    phaseCpuTimeUs: 989n,
+    rows: 2n,
+    bytes: 16n,
+  })), 3);
+  assert.equal(estimateYdbYqlReadRequestUnits({ queryPhases: [] }), null);
+  assert.equal(estimateYdbYqlReadRequestUnits({ processCpuTimeUs: 1n, queryPhases: [{ cpuTimeUs: -1n, tableAccess: [] }] }), null);
+});
+
+test('opt-in standalone read stats observe coarse RU while default and transaction paths stay unchanged', async () => {
+  const readStats = {
+    processCpuTimeUs: 0n,
+    compilation: { cpuTimeUs: 0n },
+    queryPhases: [{
+      cpuTimeUs: 0n,
+      tableAccess: [{ reads: { rows: 12n, bytes: 100n } }],
+    }],
+  };
+  const observed = [];
+  const configured = makeSql({
+    readRows: [{ id: 'synthetic-read' }],
+    readStats,
+    transactionRows: [{ id: 'synthetic-write' }],
+    transactionStats: readStats,
+  });
+  const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+    configured.sql,
+    createYdbJsV6ParameterMapper(fakeSdk()),
+    { readRequestUnitObserver: (units) => observed.push(units) },
+  ));
+
+  await adapter.read(readStatement('SELECT 1'));
+  await adapter.serializableReadWrite((transaction) => transaction.execute(writeStatement('UPSERT INTO synthetic SELECT 1')));
+
+  assert.deepEqual(observed, [12]);
+  assert.deepEqual(
+    configured.events.filter(([kind]) => kind === 'withStats'),
+    [['withStats', StatsMode.FULL]],
+  );
+  assert.equal(configured.events.filter(([kind]) => kind === 'stats').length, 1);
+
+  const defaultClient = makeSql({ readRows: [{ id: 'default' }], readStats });
+  const defaultAdapter = new YdbAdapter(createYdbJsV6DataTransport(
+    defaultClient.sql,
+    createYdbJsV6ParameterMapper(fakeSdk()),
+  ));
+  await defaultAdapter.read(readStatement('SELECT 1'));
+  assert.equal(defaultClient.events.some(([kind]) => kind === 'withStats' || kind === 'stats'), false);
+});
+
+test('read stats observer and malformed stats never alter successful query semantics', async () => {
+  const { events, sql } = makeSql({ readRows: [{ id: 'synthetic-read' }], readStats: { malformed: true } });
+  const adapter = new YdbAdapter(createYdbJsV6DataTransport(
+    sql,
+    createYdbJsV6ParameterMapper(fakeSdk()),
+    {
+      readRequestUnitObserver(units) {
+        assert.equal(units, null);
+        throw new Error('diagnostic observer failure');
+      },
+    },
+  ));
+
+  const result = await adapter.read(readStatement('SELECT 1'));
+  assert.deepEqual(result.rows, [{ id: 'synthetic-read' }]);
+  assert.equal(events.filter(([kind]) => kind === 'withStats').length, 1);
+  assert.equal(events.filter(([kind]) => kind === 'stats').length, 1);
 });
 
 test('driver query rejection becomes privacy-safe transport code for reads and transaction statements', async () => {

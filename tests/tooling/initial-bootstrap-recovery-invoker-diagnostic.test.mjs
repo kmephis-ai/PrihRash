@@ -259,12 +259,12 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence] of [
-    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'VIKA_MEMBER_READ', 'UNOBSERVED'],
-    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'ACCOUNTS_READ', 'REVISION_METADATA_SCAN'],
-    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'CATEGORIES_READ', 'REVISION_PAYLOAD_BATCH'],
-    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'VIKA_MEMBER_READ', 'REVISION_COLLISION_READ'],
-    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
+  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence] of [
+    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'VIKA_MEMBER_READ', 'UNOBSERVED', 'UNOBSERVED'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'ACCOUNTS_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'CATEGORIES_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'VIKA_MEMBER_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
   ]) {
     const yc = await fakeYc({
       ...base,
@@ -275,6 +275,7 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
       stagingControlledPreparationPhaseEvidence: phaseEvidence,
       stagingControlledPreparationReferenceReadStageEvidence: referenceReadStageEvidence,
       stagingControlledPreparationReconciliationReadStageEvidence: readStageEvidence,
+      stagingControlledPreparationMetadataScanCostEvidence: metadataScanCostEvidence,
     });
     const result = await execFileAsync(
       process.execPath,
@@ -298,7 +299,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
         + `R1_STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE=${grpcStatusEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE=${phaseEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE=${referenceReadStageEvidence}\n`
-        + `R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=${readStageEvidence}\n`,
+        + `R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=${readStageEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${metadataScanCostEvidence}\n`,
     );
   }
 });
@@ -320,6 +322,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '0',
@@ -333,6 +336,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -346,6 +350,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -359,6 +364,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -372,6 +378,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -384,6 +391,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -397,6 +405,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -409,6 +418,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -422,6 +432,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'PRIVATE_GRPC_STATUS_ENUM',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -434,6 +445,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -447,6 +459,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
         stagingControlledPreparationPhaseEvidence: 'PRIVATE_PHASE',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -483,6 +496,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
         stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
         stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
@@ -496,6 +510,34 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
         stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+        stagingControlledPreparationMetadataScanCostEvidence: 'PRIVATE_COST_ENUM',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+        stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+        stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
+        stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+      },
+      mode: '1',
+    },
+    {
+      payload: {
+        ...base,
+        stagingControlledPreparationEvidence: 'READY',
+        stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+        stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+        stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+        stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
+        stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'PRIVATE_READ_STAGE',
       },
       mode: '1',
@@ -509,6 +551,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
         stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
         stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+        stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
       },
       mode: '1',
     },

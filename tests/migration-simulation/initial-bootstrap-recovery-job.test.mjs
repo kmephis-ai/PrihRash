@@ -7,6 +7,7 @@ import {
   classifyInitialBootstrapControlledPreparationFailure,
   classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
+  createInitialBootstrapControlledPreparationMetadataScanCostTracker,
   createInitialBootstrapControlledPreparationPhaseTracker,
   createInitialBootstrapControlledPreparationReferenceReadStageTracker,
   createInitialBootstrapControlledPreparationReconciliationReadStageTracker,
@@ -173,6 +174,34 @@ test('controlled preparation reference read-stage tracker is non-throwing and fa
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
 
   const explicitFailure = createInitialBootstrapControlledPreparationReferenceReadStageTracker();
+  explicitFailure.markDiagnosticFailed();
+  assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
+});
+
+test('controlled preparation metadata-scan cost tracker exposes only bounded RU buckets', () => {
+  const cases = [
+    [null, 'STATS_UNAVAILABLE'],
+    [0, 'LT_10_RU'],
+    [9, 'LT_10_RU'],
+    [10, 'GE_10_LT_3000_RU'],
+    [2_999, 'GE_10_LT_3000_RU'],
+    [3_000, 'GE_3000_RU'],
+    [30_000, 'GE_3000_RU'],
+  ];
+  for (const [estimatedRequestUnits, expected] of cases) {
+    const tracker = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
+    assert.equal(tracker.evidence(), 'UNOBSERVED');
+    tracker.observeEstimatedRequestUnits(estimatedRequestUnits);
+    assert.equal(tracker.evidence(), expected);
+  }
+
+  const malformed = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
+  malformed.observeEstimatedRequestUnits(-1);
+  assert.equal(malformed.evidence(), 'DIAGNOSTIC_FAILED');
+  malformed.observeEstimatedRequestUnits(1);
+  assert.equal(malformed.evidence(), 'DIAGNOSTIC_FAILED');
+
+  const explicitFailure = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
   explicitFailure.markDiagnosticFailed();
   assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
 });
@@ -496,6 +525,7 @@ function runtime(overrides = {}) {
           phaseEvidence: 'UNOBSERVED',
           referenceReadStageEvidence: 'UNOBSERVED',
           reconciliationReadStageEvidence: 'UNOBSERVED',
+          metadataScanCostEvidence: 'UNOBSERVED',
         });
       },
       ...overrides,
@@ -861,6 +891,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         phaseEvidence: 'RESUME_CONTEXT_READ',
         referenceReadStageEvidence: 'CATEGORIES_READ',
         reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+        metadataScanCostEvidence: 'GE_3000_RU',
       });
     },
   });
@@ -876,6 +907,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
       stagingControlledPreparationReferenceReadStageEvidence: 'CATEGORIES_READ',
       stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+      stagingControlledPreparationMetadataScanCostEvidence: 'GE_3000_RU',
     },
   );
   assert.equal(controlledPreparationCalls, 1);

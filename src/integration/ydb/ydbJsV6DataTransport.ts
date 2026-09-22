@@ -1,5 +1,6 @@
 import type { CredentialsProvider } from '@ydbjs/auth';
 import { StatusIds_StatusCode } from '@ydbjs/api/operation';
+import { StatsMode } from '@ydbjs/api/query';
 import {
   YdbTransportCommitOutcomeUnknownError,
   type YdbQueryResult,
@@ -76,6 +77,8 @@ type SdkSurface = Readonly<Record<string, unknown>>;
 interface YdbSqlQueryBuilder extends PromiseLike<unknown> {
   parameter(name: string, value: unknown): YdbSqlQueryBuilder;
   timeout(timeoutMs: number): YdbSqlQueryBuilder;
+  withStats(mode: StatsMode): YdbSqlQueryBuilder;
+  stats(): unknown;
 }
 
 export interface YdbSqlExecutor {
@@ -101,6 +104,7 @@ interface YdbJsCommonDataClientConfig {
   readonly readyTimeoutMs?: number;
   readonly readTimeoutMs?: number;
   readonly transactionTimeoutMs?: number;
+  readonly readRequestUnitObserver?: (estimatedRequestUnits: number | null) => void;
 }
 
 export interface YdbJsDataClientConfig extends YdbJsCommonDataClientConfig {
@@ -140,6 +144,86 @@ export async function waitForYdbJsDriverReady(
 
 function fail(code: YdbJsV6DataTransportErrorCode): never {
   throw new YdbJsV6DataTransportError(code);
+}
+
+const YDB_YQL_CPU_RU_WINDOW_US = 1_500n;
+const YDB_YQL_READ_BLOCK_BYTES = 4_096n;
+
+function nonNegativeBigInt(value: unknown): bigint | null {
+  return typeof value === 'bigint' && value >= 0n ? value : null;
+}
+
+function objectRecord(value: unknown): Readonly<Record<string, unknown>> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : null;
+}
+
+export function estimateYdbYqlReadRequestUnits(stats: unknown): number | null {
+  try {
+    const root = objectRecord(stats);
+    if (root === null) return null;
+    const queryPhases = Reflect.get(root, 'queryPhases');
+    const processCpuTimeUs = nonNegativeBigInt(Reflect.get(root, 'processCpuTimeUs'));
+    if (!Array.isArray(queryPhases) || processCpuTimeUs === null) return null;
+
+    let totalCpuTimeUs = processCpuTimeUs;
+    let totalReadRows = 0n;
+    let totalReadBytes = 0n;
+
+    const compilation = objectRecord(Reflect.get(root, 'compilation'));
+    if (compilation !== null) {
+      const compilationCpuTimeUs = nonNegativeBigInt(Reflect.get(compilation, 'cpuTimeUs'));
+      if (compilationCpuTimeUs === null) return null;
+      totalCpuTimeUs += compilationCpuTimeUs;
+    }
+
+    for (const phaseValue of queryPhases) {
+      const phase = objectRecord(phaseValue);
+      if (phase === null) return null;
+      const cpuTimeUs = nonNegativeBigInt(Reflect.get(phase, 'cpuTimeUs'));
+      const tableAccess = Reflect.get(phase, 'tableAccess');
+      if (cpuTimeUs === null || !Array.isArray(tableAccess)) return null;
+      totalCpuTimeUs += cpuTimeUs;
+
+      for (const accessValue of tableAccess) {
+        const access = objectRecord(accessValue);
+        if (access === null) return null;
+        const readsValue = Reflect.get(access, 'reads');
+        if (readsValue === undefined) continue;
+        const reads = objectRecord(readsValue);
+        if (reads === null) return null;
+        const rows = nonNegativeBigInt(Reflect.get(reads, 'rows'));
+        const bytes = nonNegativeBigInt(Reflect.get(reads, 'bytes'));
+        if (rows === null || bytes === null) return null;
+        totalReadRows += rows;
+        totalReadBytes += bytes;
+      }
+    }
+
+    const cpuRequestUnits = totalCpuTimeUs / YDB_YQL_CPU_RU_WINDOW_US;
+    const readBlocks = totalReadBytes === 0n
+      ? 0n
+      : (totalReadBytes + YDB_YQL_READ_BLOCK_BYTES - 1n) / YDB_YQL_READ_BLOCK_BYTES;
+    const ioRequestUnits = totalReadRows > readBlocks ? totalReadRows : readBlocks;
+    const requestUnits = cpuRequestUnits > ioRequestUnits ? cpuRequestUnits : ioRequestUnits;
+    if (requestUnits > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    return Number(requestUnits);
+  } catch {
+    return null;
+  }
+}
+
+function observeReadRequestUnits(
+  observer: ((estimatedRequestUnits: number | null) => void) | undefined,
+  estimatedRequestUnits: number | null,
+): void {
+  if (observer === undefined) return;
+  try {
+    observer(estimatedRequestUnits);
+  } catch {
+    // Read-cost diagnostics must never change query semantics or provider request count.
+  }
 }
 
 const YDB_QUERY_EXECUTION_STATUS_BY_CODE = new Map<number, YdbJsV6QueryExecutionStatusCode>([
@@ -309,6 +393,7 @@ async function executeStatement<Row>(
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
   timeoutMs?: number,
   deferQueryExecutionFailure?: (error: unknown) => never,
+  readRequestUnitObserver?: (estimatedRequestUnits: number | null) => void,
 ): Promise<YdbQueryResult<Row>> {
   let query: YdbSqlQueryBuilder;
   try {
@@ -328,6 +413,18 @@ async function executeStatement<Row>(
     throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
   }
 
+  let statsEnabled = false;
+  if (readRequestUnitObserver !== undefined) {
+    try {
+      if (typeof query.withStats === 'function') {
+        query = query.withStats(StatsMode.FULL);
+        statsEnabled = true;
+      }
+    } catch {
+      statsEnabled = false;
+    }
+  }
+
   let resultSets: unknown;
   try {
     resultSets = await query;
@@ -335,6 +432,20 @@ async function executeStatement<Row>(
     if (error instanceof YdbJsV6DataTransportError) throw error;
     if (deferQueryExecutionFailure !== undefined) deferQueryExecutionFailure(error);
     throw new YdbJsV6DataTransportError(classifyQueryExecutionFailure(error));
+  }
+
+  if (readRequestUnitObserver !== undefined) {
+    let estimatedRequestUnits: number | null = null;
+    if (statsEnabled) {
+      try {
+        estimatedRequestUnits = typeof query.stats === 'function'
+          ? estimateYdbYqlReadRequestUnits(query.stats())
+          : null;
+      } catch {
+        estimatedRequestUnits = null;
+      }
+    }
+    observeReadRequestUnits(readRequestUnitObserver, estimatedRequestUnits);
   }
 
   const rows = Array.isArray(resultSets) && Array.isArray(resultSets[0])
@@ -363,7 +474,11 @@ function positiveTimeout(value: number | undefined): boolean {
 export function createYdbJsV6DataTransport(
   sql: YdbSqlClient,
   mapParameter: (parameter: Readonly<YdbParameter>) => unknown,
-  options: Readonly<{ readTimeoutMs?: number; transactionTimeoutMs?: number }> = {},
+  options: Readonly<{
+    readTimeoutMs?: number;
+    transactionTimeoutMs?: number;
+    readRequestUnitObserver?: (estimatedRequestUnits: number | null) => void;
+  }> = {},
 ): YdbTransport {
   if (typeof sql !== 'function' || typeof sql.begin !== 'function') fail('SDK_SHAPE_INVALID');
   if (!positiveTimeout(options.readTimeoutMs) || !positiveTimeout(options.transactionTimeoutMs)) {
@@ -372,7 +487,14 @@ export function createYdbJsV6DataTransport(
 
   return Object.freeze({
     executeRead<Row>(statement: Readonly<YdbStatement>) {
-      return executeStatement<Row>(sql, statement, mapParameter, options.readTimeoutMs);
+      return executeStatement<Row>(
+        sql,
+        statement,
+        mapParameter,
+        options.readTimeoutMs,
+        undefined,
+        options.readRequestUnitObserver,
+      );
     },
     async serializableReadWrite<T>(work: (transaction: { execute<Row>(statement: YdbStatement): Promise<YdbQueryResult<Row>> }) => Promise<T>) {
       let bodyCompleted = false;
@@ -442,6 +564,7 @@ function validateCommonClientConfig(config: Readonly<YdbJsCommonDataClientConfig
     || !positiveTimeout(config.readyTimeoutMs)
     || !positiveTimeout(config.readTimeoutMs)
     || !positiveTimeout(config.transactionTimeoutMs)
+    || (config.readRequestUnitObserver !== undefined && typeof config.readRequestUnitObserver !== 'function')
   ) {
     fail('CLIENT_CONFIG_INVALID');
   }
@@ -489,6 +612,9 @@ async function createDataClientWithCredentials(
     Object.freeze({
       ...(config.readTimeoutMs === undefined ? {} : { readTimeoutMs: config.readTimeoutMs }),
       ...(config.transactionTimeoutMs === undefined ? {} : { transactionTimeoutMs: config.transactionTimeoutMs }),
+      ...(config.readRequestUnitObserver === undefined
+        ? {}
+        : { readRequestUnitObserver: config.readRequestUnitObserver }),
     }),
   );
 
