@@ -29,6 +29,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence'];
       stagingControlledPreparationGrpcStatusEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationGrpcStatusEvidence'];
       stagingControlledPreparationPhaseEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationPhaseEvidence'];
+      stagingControlledPreparationReferenceReadStageEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationReferenceReadStageEvidence'];
       stagingControlledPreparationReconciliationReadStageEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationReconciliationReadStageEvidence'];
     }>
   | Readonly<{
@@ -246,6 +247,14 @@ const STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE = new Set<NonNullable<Initia
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationReferenceReadStageEvidence']>>([
+  'UNOBSERVED',
+  'ACCOUNTS_READ',
+  'CATEGORIES_READ',
+  'VIKA_MEMBER_READ',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationReconciliationReadStageEvidence']>>([
   'UNOBSERVED',
   'REVISION_METADATA_SCAN',
@@ -350,6 +359,8 @@ function validClassification(
   const controlledPreparationQueryErrorDiagnostic = value.stagingControlledPreparationQueryErrorEvidence;
   const controlledPreparationGrpcStatusDiagnostic = value.stagingControlledPreparationGrpcStatusEvidence;
   const controlledPreparationPhaseDiagnostic = value.stagingControlledPreparationPhaseEvidence;
+  const controlledPreparationReferenceReadStageDiagnostic =
+    value.stagingControlledPreparationReferenceReadStageEvidence;
   const controlledPreparationReconciliationReadStageDiagnostic =
     value.stagingControlledPreparationReconciliationReadStageEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
@@ -360,6 +371,7 @@ function validClassification(
       || controlledPreparationQueryErrorDiagnostic !== undefined
       || controlledPreparationGrpcStatusDiagnostic !== undefined
       || controlledPreparationPhaseDiagnostic !== undefined
+      || controlledPreparationReferenceReadStageDiagnostic !== undefined
       || controlledPreparationReconciliationReadStageDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
@@ -378,6 +390,10 @@ function validClassification(
       || !STAGING_CONTROLLED_PREPARATION_GRPC_STATUS_EVIDENCE.has(controlledPreparationGrpcStatusDiagnostic)
       || controlledPreparationPhaseDiagnostic === undefined
       || !STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE.has(controlledPreparationPhaseDiagnostic)
+      || controlledPreparationReferenceReadStageDiagnostic === undefined
+      || !STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE.has(
+        controlledPreparationReferenceReadStageDiagnostic,
+      )
       || controlledPreparationReconciliationReadStageDiagnostic === undefined
       || !STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE.has(
         controlledPreparationReconciliationReadStageDiagnostic,
@@ -395,6 +411,7 @@ function validClassification(
       || controlledPreparationQueryErrorDiagnostic !== undefined
       || controlledPreparationGrpcStatusDiagnostic !== undefined
       || controlledPreparationPhaseDiagnostic !== undefined
+      || controlledPreparationReferenceReadStageDiagnostic !== undefined
       || controlledPreparationReconciliationReadStageDiagnostic !== undefined
     ) return false;
   } else if (
@@ -408,6 +425,7 @@ function validClassification(
     || controlledPreparationQueryErrorDiagnostic !== undefined
     || controlledPreparationGrpcStatusDiagnostic !== undefined
     || controlledPreparationPhaseDiagnostic !== undefined
+    || controlledPreparationReferenceReadStageDiagnostic !== undefined
     || controlledPreparationReconciliationReadStageDiagnostic !== undefined
   ) {
     return false;
@@ -474,6 +492,12 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingControlledPreparationPhaseEvidence === undefined
         ? {}
         : { stagingControlledPreparationPhaseEvidence: classification.stagingControlledPreparationPhaseEvidence }),
+      ...(classification.stagingControlledPreparationReferenceReadStageEvidence === undefined
+        ? {}
+        : {
+            stagingControlledPreparationReferenceReadStageEvidence:
+              classification.stagingControlledPreparationReferenceReadStageEvidence,
+          }),
       ...(classification.stagingControlledPreparationReconciliationReadStageEvidence === undefined
         ? {}
         : {
