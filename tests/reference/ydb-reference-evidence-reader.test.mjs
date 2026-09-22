@@ -125,6 +125,30 @@ test('builds immutable resolver from one consistent YDB transaction including ex
   assert.equal(Object.isFrozen(resolver), true);
 });
 
+test('optional reference-read observer sees the exact existing read order without extra requests', async () => {
+  const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
+  const stages = [];
+  await readYdbReferenceResolverSnapshot(adapter, (stage) => stages.push(stage));
+
+  assert.deepEqual(stages, ['ACCOUNTS_READ', 'CATEGORIES_READ', 'VIKA_MEMBER_READ']);
+  assert.equal(observed.outsideReads, 0);
+  assert.equal(observed.transactionCount, 1);
+  assert.equal(observed.calls.length, 3);
+});
+
+test('reference-read observer failure cannot alter resolver semantics or request count', async () => {
+  const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
+  const seen = [];
+  const resolver = await readYdbReferenceResolverSnapshot(adapter, (stage) => {
+    seen.push(stage);
+    throw new Error('diagnostic observer failure');
+  });
+
+  assert.deepEqual(seen, ['ACCOUNTS_READ', 'CATEGORIES_READ', 'VIKA_MEMBER_READ']);
+  assert.equal(observed.calls.length, 3);
+  assert.equal(resolver.vikaMemberId, MEMBER);
+});
+
 for (const [name, memberRows, code] of [
   ['missing active Vika member', [], 'VIKA_MEMBER_NOT_FOUND'],
   ['duplicate active Vika member', [
