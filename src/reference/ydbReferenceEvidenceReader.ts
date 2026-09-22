@@ -31,6 +31,13 @@ export interface YdbReferenceMappingEvidence {
   readonly categories: readonly Readonly<CategoryReferenceMapping>[];
 }
 
+export type YdbReferenceResolverReadStage =
+  | 'ACCOUNTS_READ'
+  | 'CATEGORIES_READ'
+  | 'VIKA_MEMBER_READ';
+
+export type YdbReferenceResolverReadObserver = (stage: YdbReferenceResolverReadStage) => void;
+
 export type YdbReferenceEvidenceReaderErrorCode =
   | 'MALFORMED_ACCOUNT_REFERENCE_EVIDENCE'
   | 'MALFORMED_CATEGORY_REFERENCE_EVIDENCE'
@@ -88,11 +95,28 @@ function categoryMapping(row: Readonly<CategoryReferenceRow>): Readonly<Category
   });
 }
 
-async function readMappings(scope: YdbReadScope): Promise<Readonly<YdbReferenceMappingEvidence>> {
+function observeReadStage(
+  observer: YdbReferenceResolverReadObserver | undefined,
+  stage: YdbReferenceResolverReadStage,
+): void {
+  if (observer === undefined) return;
+  try {
+    observer(stage);
+  } catch {
+    // Diagnostics must never change reference-reader semantics or request count.
+  }
+}
+
+async function readMappings(
+  scope: YdbReadScope,
+  observer?: YdbReferenceResolverReadObserver,
+): Promise<Readonly<YdbReferenceMappingEvidence>> {
+  observeReadStage(observer, 'ACCOUNTS_READ');
   const accountResult = await scope.read<AccountReferenceRow>(readStatement(
     'SELECT id, normalized_source_label, currency FROM accounts '
       + 'WHERE normalized_source_label IS NOT NULL',
   ));
+  observeReadStage(observer, 'CATEGORIES_READ');
   const categoryResult = await scope.read<CategoryReferenceRow>(readStatement(
     'SELECT id, kind, normalized_source_label FROM categories '
       + 'WHERE normalized_source_label IS NOT NULL',
@@ -134,9 +158,11 @@ export async function readYdbReferenceMappingEvidence(
 
 export async function readYdbReferenceResolverSnapshot(
   adapter: YdbAdapter,
+  observer?: YdbReferenceResolverReadObserver,
 ): Promise<Readonly<ReferenceResolver>> {
   return adapter.serializableReadWrite(async (transaction) => {
-    const mappings = await readMappings(transaction);
+    const mappings = await readMappings(transaction, observer);
+    observeReadStage(observer, 'VIKA_MEMBER_READ');
     const memberResult = await transaction.read<FamilyMemberReferenceRow>(readStatement(
       'SELECT id, name, status FROM family_members WHERE name = $name AND status = $status',
       {
