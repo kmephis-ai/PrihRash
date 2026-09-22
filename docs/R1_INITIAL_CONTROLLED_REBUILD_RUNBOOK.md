@@ -337,7 +337,6 @@ After independently proven COMMITTED current state, the temporary WU7 write auth
 
 Observer отмечается непосредственно перед уже существующими revision metadata scan, byte-bounded exact payload batch read и conditional collision read. Он не добавляет YDB request, не меняет SQL/parameters/order/batch size, retry/timeout/RCU/cap/IAM и не разрешает controlled rebuild replay. Query text, parameters, rows, provider IDs и financial payload в evidence не входят.
 
-
 ### #740 resume snapshot read collapse
 
 Exact-main recovery `35677723728` на `3f464b5e2da62553cecfc501316c9f386c3dae55` завершился как `RESUME_SNAPSHOT_READ / GRPC_STATUS / RESOURCE_EXHAUSTED` после успешного `RESUME_IDENTITY_MANIFEST_READ`. Repository inspection доказал, что identity-manifest query уже JOIN'ит exact `source_snapshots` row и проверяет `snapshot_digest` + `row_count`; следующий `readDurableSnapshot` повторно читал тот же `source_snapshots` row только ради `captured_at` и повторной проверки тех же snapshot facts.
