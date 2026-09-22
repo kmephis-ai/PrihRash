@@ -117,6 +117,8 @@ for (const forbidden of [
   'dist/runtime/yandexCloudInitialBootstrapRecoveryFunction.js',
   'dist/runtime/yandexCloudSchemaBootstrapFunction.js',
   'dist/runtime/yandexCloudSchemaUpgrade003Function.js',
+  'dist/runtime/yandexCloudSchemaUpgrade004Function.js',
+  'dist/runtime/ydbSchemaUpgrade004.js',
 ]) {
   if (files.includes(forbidden)) fail(`forbidden runtime content: ${forbidden}`);
 }

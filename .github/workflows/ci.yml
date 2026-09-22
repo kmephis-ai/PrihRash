@@ -38,6 +38,7 @@ jobs:
             .artifacts/yandex-scheduled-sync-function/
             .artifacts/yandex-schema-bootstrap-function/
             .artifacts/yandex-schema-upgrade-003-function/
+            .artifacts/yandex-schema-upgrade-004-function/
             .artifacts/yandex-initial-bootstrap-function/
             .artifacts/yandex-initial-bootstrap-recovery-function/
             .artifacts/yandex-initial-controlled-rebuild-function/

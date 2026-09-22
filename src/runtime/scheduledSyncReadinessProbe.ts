@@ -24,7 +24,7 @@ import {
   type ScheduledSyncJobEnvironment,
 } from './scheduledSyncJob.js';
 
-export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 3 as const;
+export const REQUIRED_SCHEDULED_SYNC_SCHEMA_VERSION = 4 as const;
 export const SCHEDULED_SYNC_READINESS_DEADLINE_MS = 20_000 as const;
 export const SCHEDULED_SYNC_READINESS_YDB_READY_TIMEOUT_MS = 10_000 as const;
 export const SCHEDULED_SYNC_READINESS_YDB_READ_TIMEOUT_MS = 21_000 as const;
@@ -72,6 +72,7 @@ export type ScheduledSyncReadinessErrorCode =
   | 'YDB_ACCOUNTS_SCHEMA_READ_FAILED'
   | 'YDB_CATEGORIES_SCHEMA_READ_FAILED'
   | 'YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED'
+  | 'YDB_SOURCE_RECORD_REVISION_RUN_INDEX_SCHEMA_READ_FAILED'
   | 'MALFORMED_SCHEMA_MIGRATION_EVIDENCE'
   | 'MISSING_REQUIRED_SCHEMA_MIGRATION'
   | 'UNEXPECTED_SCHEMA_MIGRATION'
@@ -323,6 +324,14 @@ async function runScheduledSyncReadinessProbeWithinDeadline(
     )));
   } catch (error) {
     throw stageReadFailure(error, 'YDB_INITIAL_BOOTSTRAP_IDENTITY_MANIFEST_SCHEMA_READ_FAILED');
+  }
+
+  try {
+    await deadline.run(() => adapter.read(readStatement(
+      'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, CAST(row_digest AS Utf8) AS row_digest, change_class FROM source_record_revisions VIEW idx_source_record_revisions_run_revision LIMIT 0',
+    )));
+  } catch (error) {
+    throw stageReadFailure(error, 'YDB_SOURCE_RECORD_REVISION_RUN_INDEX_SCHEMA_READ_FAILED');
   }
 
   return Object.freeze({

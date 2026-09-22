@@ -496,7 +496,7 @@ Invariant:
 
 Initial bootstrap до любых verified-current mutations обязан сначала закрепить durable writer identity и все уже принятые row identity decisions.
 
-Production prerequisite: перед первым real initial bootstrap `schema_migrations` обязан содержать exact applied versions `1..3`, а physical `initial_bootstrap_identity_manifests` — проходить read-only required-column probe. Migration `003_initial_bootstrap_identity_manifest.sql` применяется только отдельным bounded provider gate `docs/R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md`; scheduled/readiness runtime не выполняет DDL автоматически. Отсутствующий/partial schema-v3 state блокирует initial bootstrap до provider recovery и не разрешает fallback identity storage.
+Production prerequisite: перед продолжением real initial bootstrap `schema_migrations` обязан содержать exact applied versions `1..4`; physical `initial_bootstrap_identity_manifests` обязан проходить read-only required-column probe, а `source_record_revisions VIEW idx_source_record_revisions_run_revision` — read-only physical index probe. Migration `003_initial_bootstrap_identity_manifest.sql` и migration `004_source_record_revision_run_index.sql` применяются только отдельными bounded provider gates `docs/R1_YDB_SCHEMA_UPGRADE_003_RUNBOOK.md` и `docs/R1_YDB_SCHEMA_UPGRADE_004_RUNBOOK.md`; scheduled/readiness runtime не выполняет DDL автоматически. Migration 004 существует только для proven run-scoped revision-evidence access path: она не меняет financial semantics, revision identity или raw-payload contract. Отсутствующий/partial schema-v4 state блокирует initial bootstrap до provider recovery и не разрешает fallback identity storage или full-scan bypass.
 
 Минимальный протокол:
 
