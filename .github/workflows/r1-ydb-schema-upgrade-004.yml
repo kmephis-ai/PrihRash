@@ -36,6 +36,7 @@ jobs:
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_SCHEMA_UPGRADE_004_WIF_SERVICE_ACCOUNT_ID }}
       YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID }}
+      YC_LOCKBOX_VERSION_ID: ${{ secrets.YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_VERSION_ID }}
 
     steps:
       - name: Checkout exact main
@@ -56,6 +57,7 @@ jobs:
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           test -n "$YC_LOCKBOX_SECRET_ID"
+          test -n "$YC_LOCKBOX_VERSION_ID"
 
       - name: Setup Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -247,56 +249,16 @@ jobs:
           fi
 
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
-          if ! secret_json="$(yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
-            --format json --retry 0 --no-user-output 2>"$tmp/secret.err")"; then
-            if grep -Eqi 'not found|not_found|does not exist' "$tmp/secret.err"; then
-              if ! secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
-                --format json --retry 0 --no-user-output 2>"$tmp/secret-scoped.err")"; then
-                if grep -Eqi 'permission denied|permission_denied|forbidden|access denied' "$tmp/secret-scoped.err"; then
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_FORBIDDEN'
-                elif grep -Eqi 'unauthenticated|unauthorized|invalid token|token.*expired|authentication' "$tmp/secret-scoped.err"; then
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNAUTHENTICATED'
-                elif grep -Eqi 'not found|not_found|does not exist' "$tmp/secret-scoped.err"; then
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND'
-                elif grep -Eqi 'rate.?limit|resource exhausted|too many requests' "$tmp/secret-scoped.err"; then
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_RATE_LIMITED'
-                elif grep -Eqi 'deadline exceeded|timeout|timed out|connection reset|connection refused|no such host|tls|x509' "$tmp/secret-scoped.err"; then
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_TRANSPORT_FAILED'
-                else
-                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNCLASSIFIED'
-                fi
-                exit 1
-              fi
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_LOOKUP_RECOVERED'
-            elif grep -Eqi 'permission denied|permission_denied|forbidden|access denied' "$tmp/secret.err"; then
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_FORBIDDEN'
-              exit 1
-            elif grep -Eqi 'unauthenticated|unauthorized|invalid token|token.*expired|authentication' "$tmp/secret.err"; then
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_UNAUTHENTICATED'
-              exit 1
-            elif grep -Eqi 'rate.?limit|resource exhausted|too many requests' "$tmp/secret.err"; then
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_RATE_LIMITED'
-              exit 1
-            elif grep -Eqi 'deadline exceeded|timeout|timed out|connection reset|connection refused|no such host|tls|x509' "$tmp/secret.err"; then
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_TRANSPORT_FAILED'
-              exit 1
-            else
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_UNCLASSIFIED'
-              exit 1
-            fi
-          fi
-          if ! jq -e \
-            --arg expected_id "$YC_LOCKBOX_SECRET_ID" \
-            --arg expected_name "$LOCKBOX_SECRET_NAME" \
-            --arg expected_folder_id "$YC_FOLDER_ID" \
-            '(.id == $expected_id) and (.name == $expected_name) and ((.folder_id // .folderId) == $expected_folder_id)' \
-            <<<"$secret_json" >/dev/null 2>&1; then
-            echo 'SCHEMA_UPGRADE_004_LOCKBOX_SECRET_METADATA_INVALID'
+          echo "::add-mask::${YC_LOCKBOX_VERSION_ID}"
+          secret_id="$YC_LOCKBOX_SECRET_ID"
+          secret_version_id="$YC_LOCKBOX_VERSION_ID"
+
+          if [[ ! "$secret_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo 'SCHEMA_UPGRADE_004_LOCKBOX_SECRET_LOCATOR_INVALID'
             exit 1
           fi
-          secret_id="$YC_LOCKBOX_SECRET_ID"
-          if ! secret_version_id="$(jq -er '(.current_version.id // .current_version_id // .currentVersion.id // .currentVersionId) | select(type == "string" and length > 0)' <<<"$secret_json" 2>/dev/null)"; then
-            echo 'SCHEMA_UPGRADE_004_LOCKBOX_VERSION_RESOLUTION_FAILED'
+          if [[ ! "$secret_version_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo 'SCHEMA_UPGRADE_004_LOCKBOX_VERSION_LOCATOR_INVALID'
             exit 1
           fi
 

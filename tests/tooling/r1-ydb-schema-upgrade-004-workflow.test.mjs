@@ -27,32 +27,23 @@ test('migration-004 provider workflow is manual exact-main only and requires exp
   assert.match(workflow, /persist-credentials:\s*false/);
   assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID/);
+  assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_VERSION_ID/);
 });
 
-test('migration-004 provider preflight classifies WIF Lockbox failures without raw provider output or IAM widening', async () => {
+test('migration-004 provider preflight uses exact secret/version locators without deploy-SA Lockbox reads', async () => {
   const workflow = await text(WORKFLOW);
   assert.match(workflow, /yc iam whoami/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_WIF_IDENTITY_READ_FAILED/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_WIF_IDENTITY_MISMATCH/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_FORBIDDEN/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNAUTHENTICATED/);
-  assert.match(workflow, /not found\|not_found\|does not exist/);
-  assert.match(workflow, /lockbox secret get --name "\$LOCKBOX_SECRET_NAME" --folder-id "\$YC_FOLDER_ID"/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_LOOKUP_RECOVERED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_FORBIDDEN/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNAUTHENTICATED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_RATE_LIMITED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_TRANSPORT_FAILED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNCLASSIFIED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_RATE_LIMITED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_TRANSPORT_FAILED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNCLASSIFIED/);
-  assert.match(workflow, /secret\.err/);
-  assert.match(workflow, /secret-scoped\.err/);
-  assert.match(workflow, /\(\.id == \$expected_id\).*\(\.name == \$expected_name\).*folder_id \/\/ \.folderId/s);
-  assert.doesNotMatch(workflow, /cat\s+["']?\$tmp\/secret(?:-scoped)?\.err|echo\s+["']?\$\(.*secret(?:-scoped)?\.err/s);
-  assert.doesNotMatch(workflow, /lockbox payload get|payloadViewer.*YC_WIF_SERVICE_ACCOUNT_ID/);
+  assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID/);
+  assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_VERSION_ID/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SECRET_LOCATOR_INVALID/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_VERSION_LOCATOR_INVALID/);
+  assert.match(workflow, /PRIHRASH_LOCKBOX_SECRET_ID/);
+  assert.match(workflow, /PRIHRASH_LOCKBOX_VERSION_ID/);
+  assert.doesNotMatch(workflow, /yc lockbox secret get|lockbox payload get|secret-scoped\.err/);
+  assert.doesNotMatch(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_(?:SCOPED_)?(?:FORBIDDEN|UNAUTHENTICATED|NOT_FOUND|RATE_LIMITED|TRANSPORT_FAILED|UNCLASSIFIED)/);
+  assert.doesNotMatch(workflow, /payloadViewer.*YC_WIF_SERVICE_ACCOUNT_ID/);
 });
 
 test('migration-004 workflow deploys only the dedicated private trigger-free upgrade package', async () => {
