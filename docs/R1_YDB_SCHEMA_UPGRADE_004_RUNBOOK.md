@@ -119,6 +119,41 @@ Fallback не разрешён для `FORBIDDEN`, `UNAUTHENTICATED`, rate-limit
 
 Этот fallback не расширяет IAM, не читает payload, не меняет provider resources и не ослабляет exact-resource proof: дальнейший deploy разрешён только после exact ID/name/folder equality.
 
+### Temporary WIF Lockbox metadata visibility
+
+После merge #750 exact-main run `35757658319` и locator-corrected run `35763678941` на `main=3a61fcc2d9005b0b8f9dc801d760f2d27b0b7413` оба завершились fail-closed **до deploy/invoke** с `SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND`.
+
+Read-only provider reconciliation доказал одновременно:
+
+- Function, runtime SA, deploy SA и dedicated secret находятся в одном exact folder;
+- current deploy SA имеет ровно один direct `lockbox.viewer` binding на dedicated secret, без condition;
+- current deploy SA имеет exact GitHub federated credential: exact service account, subject, issuer и audience;
+- local impersonation exact этой deploy SA выполняет `secret get --id`, но folder-scoped lookup по name не проходит;
+- повторная запись обоих GitHub locators из current exact deploy SA/secret не изменила WIF result;
+- во всех этих runs deploy Function version и migration invoke были skipped, поэтому migration 004/ledger version 4 не применялись.
+
+Yandex Cloud WIF выдаёт IAM token service account и допускает Lockbox access от имени этого account. Официальный WIF→Lockbox pattern использует folder-level Lockbox role. Поэтому для завершения этого one-shot gate допускается **временный metadata-only recovery scope**:
+
+```text
+exact current deploy SA
++ exact current target folder
+→ add folder-level lockbox.viewer
+→ NO lockbox.payloadViewer for deploy SA
+→ one fresh exact-main schema-upgrade-004 attempt
+→ success: fresh readiness-v4
+→ revoke temporary folder-level lockbox.viewer during migration-004 retirement
+```
+
+Границы:
+
+- это только metadata visibility; deploy SA не получает доступ к secret payload;
+- runtime SA сохраняет existing dedicated-secret `lockbox.payloadViewer`; его scope не расширяется;
+- YDB roles, cap, Google authority, timer/cutover и controlled-rebuild authority не меняются;
+- перед IAM mutation обязательны exact current `main`, green canonical verification, #748 open, no active migration-004 run и exact provider resource reconciliation;
+- после known IAM grant допускается ровно один fresh workflow dispatch; старые failed runs не rerun;
+- если fresh run снова останавливается до deploy/invoke, дальнейшее IAM widening запрещено; temporary folder-level `lockbox.viewer` остаётся отдельным known recovery state и должен быть revoked при abandonment/retirement;
+- raw IAM/provider IDs, Lockbox payload и financial data не публикуются.
+
 ## Provider isolation
 
 Package `.artifacts/yandex-schema-upgrade-004-function` содержит только:
