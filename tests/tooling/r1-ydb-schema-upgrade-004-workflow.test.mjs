@@ -29,6 +29,22 @@ test('migration-004 provider workflow is manual exact-main only and requires exp
   assert.match(workflow, /YC_R1_SCHEMA_UPGRADE_004_LOCKBOX_SECRET_ID/);
 });
 
+test('migration-004 provider preflight classifies WIF Lockbox failures without raw provider output or IAM widening', async () => {
+  const workflow = await text(WORKFLOW);
+  assert.match(workflow, /yc iam whoami/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_WIF_IDENTITY_READ_FAILED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_WIF_IDENTITY_MISMATCH/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_FORBIDDEN/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNAUTHENTICATED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_NOT_FOUND/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_RATE_LIMITED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_TRANSPORT_FAILED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNCLASSIFIED/);
+  assert.match(workflow, /secret\.err/);
+  assert.doesNotMatch(workflow, /cat\s+["']?\$tmp\/secret\.err|echo\s+["']?\$\(.*secret\.err/s);
+  assert.doesNotMatch(workflow, /lockbox payload get|payloadViewer.*YC_WIF_SERVICE_ACCOUNT_ID/);
+});
+
 test('migration-004 workflow deploys only the dedicated private trigger-free upgrade package', async () => {
   const workflow = await text(WORKFLOW);
   assert.match(workflow, /FUNCTION_NAME:\s*prihrash-r1-schema-upgrade-004/);

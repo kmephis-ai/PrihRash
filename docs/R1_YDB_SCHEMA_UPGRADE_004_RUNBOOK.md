@@ -81,6 +81,18 @@ Fail-closed:
 
 `IF NOT EXISTS`, manual ledger patch, blind replay и provider error-text publication запрещены.
 
+## Provider-read diagnostic boundary
+
+Live runs `35749648876` и `35750441003` на exact `main=b9ec60ba58df2a336b7d9f342dcde08b13c8d369` оба прошли exact-source, YC CLI и GitHub OIDC→WIF exchange, но fail-closed остановились **до deploy/invoke** на чтении metadata dedicated Lockbox secret. Поэтому эти runs не применяли migration 004 и не меняли YDB migration ledger.
+
+До следующего provider attempt workflow обязан:
+- read-only подтвердить WIF identity через `yc iam whoami` и exact locator `YC_R1_SCHEMA_UPGRADE_004_WIF_SERVICE_ACCOUNT_ID`;
+- при ошибке `yc lockbox secret get --id` классифицировать только privacy-safe enum: `LOCKBOX_FORBIDDEN | LOCKBOX_UNAUTHENTICATED | LOCKBOX_NOT_FOUND | LOCKBOX_RATE_LIMITED | LOCKBOX_TRANSPORT_FAILED | LOCKBOX_UNCLASSIFIED`;
+- не публиковать raw stderr, HTTP status, provider IDs, secret payload или endpoint/path;
+- fail-closed завершиться после diagnostic code; deploy/invoke не продолжать.
+
+Этот diagnostic patch не расширяет IAM, не меняет dedicated resource bindings и не разрешает повторный provider dispatch сам по себе. Новый live attempt допустим только после merge/CI PASS и fresh exact-main reconciliation. Повторный rerun уже завершённых failed runs запрещён.
+
 ## Provider isolation
 
 Package `.artifacts/yandex-schema-upgrade-004-function` содержит только:
