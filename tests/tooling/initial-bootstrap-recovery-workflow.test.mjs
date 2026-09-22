@@ -107,6 +107,8 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /RESUME_CONTEXT_READ\|RESUME_IDENTITY_MANIFEST_READ\|RESUME_SNAPSHOT_READ/);
   assert.match(workflow, /RECONCILIATION_READ\|VALIDATION_EVALUATION\|CURRENT_PLAN_PREPARATION\|CURRENT_WRITE_PREPARATION/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_PHASE_EVIDENCE_INVALID/);
+  assert.match(workflow, /UNOBSERVED\|ACCOUNTS_READ\|CATEGORIES_READ\|VIKA_MEMBER_READ\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE_INVALID/);
   assert.match(workflow, /UNOBSERVED\|REVISION_METADATA_SCAN\|REVISION_PAYLOAD_BATCH\|REVISION_COLLISION_READ\|DIAGNOSTIC_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation\.json/);
@@ -114,6 +116,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /controlled-preparation-query-error\.json/);
   assert.match(workflow, /controlled-preparation-grpc-status\.json/);
   assert.match(workflow, /controlled-preparation-phase\.json/);
+  assert.match(workflow, /controlled-preparation-reference-read-stage\.json/);
   assert.match(workflow, /controlled-preparation-reconciliation-read-stage\.json/);
   assert.match(workflow, /retention-days: 30/);
 });
