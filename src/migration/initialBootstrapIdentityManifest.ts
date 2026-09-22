@@ -84,7 +84,6 @@ export type InitialBootstrapIdentityManifestErrorCode =
   | 'MALFORMED_BINDING_SET'
   | 'MALFORMED_BINDING_COUNT'
   | 'MALFORMED_SNAPSHOT_ROW_COUNT'
-  | 'MALFORMED_SNAPSHOT_CAPTURED_AT'
   | 'MALFORMED_RUN_STATE'
   | 'MALFORMED_MIGRATION_RUN_ID'
   | 'MALFORMED_SOURCE_SNAPSHOT_ID'
@@ -512,7 +511,7 @@ export async function recoverInitialBootstrapIdentities(
   }
   const capturedAt = normalizeYdbTimestampReadback(readback.snapshotCapturedAt);
   if (capturedAt === null) {
-    throw new InitialBootstrapIdentityManifestError('MALFORMED_SNAPSHOT_CAPTURED_AT');
+    throw new InitialBootstrapIdentityManifestError('MANIFEST_EVIDENCE_MISMATCH');
   }
 
   const sourceRows: Readonly<InitialSourceRow>[] = [];
