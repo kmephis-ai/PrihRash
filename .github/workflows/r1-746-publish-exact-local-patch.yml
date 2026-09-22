@@ -51,7 +51,12 @@ jobs:
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/d05d0fe613751c6539fc47170fc004cc150c67f3" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/763d830e2e269c5d1e9da122e7f289e1b82dae88" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/fef5c73d937b87eff95bc31821ed0f7ad5499dfd" \
             | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -61,7 +66,17 @@ jobs:
           curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/1b38d0a96ac172fc8f50c87f79e51b0beed0e530" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/bf1bb69eb45fa921916fe1aad29eece547ee8e55" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/ffaa8d7d97d1fd7fd2f073a7ceb44e62148a3d2d" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/962fe2f65e062175d98f8a8ff2c7ce984dd7bcce" \
             | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
 
           test "$(sha256sum "$RUNNER_TEMP/patch.gz.b64" | awk '{print $1}')" = "$EXPECTED_PATCH_B64_SHA256"
