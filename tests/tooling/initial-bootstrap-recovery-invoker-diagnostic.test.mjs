@@ -446,6 +446,7 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
         stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
         stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
         stagingControlledPreparationPhaseEvidence: 'PRIVATE_PHASE',
+        stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
         stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
       },
       mode: '1',
