@@ -1,0 +1,35 @@
+name: R1 #742 recovery dispatch transport
+
+on:
+  push:
+    branches:
+      - transport/r1-742-recovery-dispatch-a2287c9
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch exact-main controlled preparation once
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: a2287c9aeecfc93c33f09c231370d93ee2c62566
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test "$GITHUB_REF" = 'refs/heads/transport/r1-742-recovery-dispatch-a2287c9'
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          h="Authorization: Bearer ${GH_TOKEN}"
+          accept="Accept: application/vnd.github+json"
+          current="$(curl --fail --silent --show-error -H "$h" -H "$accept" "$api/branches/main" | jq -er '.commit.sha')"
+          test "$current" = "$SOURCE_SHA" || { echo R1_742_DISPATCH_MAIN_MOVED; exit 1; }
+          runs="$(curl --fail --silent --show-error -H "$h" -H "$accept" "$api/actions/runs?head_sha=$SOURCE_SHA&per_page=100")"
+          existing="$(jq '[.workflow_runs[] | select(.event=="workflow_dispatch" and .path==".github/workflows/r1-initial-bootstrap-recovery.yml")] | length' <<<"$runs")"
+          test "$existing" = '0' || { echo R1_742_RECOVERY_ALREADY_DISPATCHED; exit 1; }
+          curl --fail --silent --show-error --request POST             -H "$h" -H "$accept" -H 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             --data '{"ref":"main","inputs":{"surface_only":"false","controlled_preparation_only":"true"}}'
+          echo R1_742_CONTROLLED_PREPARATION_DISPATCHED
