@@ -36,12 +36,22 @@ test('migration-004 provider preflight classifies WIF Lockbox failures without r
   assert.match(workflow, /SCHEMA_UPGRADE_004_WIF_IDENTITY_MISMATCH/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_FORBIDDEN/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNAUTHENTICATED/);
-  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_NOT_FOUND/);
+  assert.match(workflow, /not found\|not_found\|does not exist/);
+  assert.match(workflow, /lockbox secret get --name "\$LOCKBOX_SECRET_NAME" --folder-id "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_LOOKUP_RECOVERED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_FORBIDDEN/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNAUTHENTICATED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_RATE_LIMITED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_TRANSPORT_FAILED/);
+  assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNCLASSIFIED/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_RATE_LIMITED/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_TRANSPORT_FAILED/);
   assert.match(workflow, /SCHEMA_UPGRADE_004_LOCKBOX_UNCLASSIFIED/);
   assert.match(workflow, /secret\.err/);
-  assert.doesNotMatch(workflow, /cat\s+["']?\$tmp\/secret\.err|echo\s+["']?\$\(.*secret\.err/s);
+  assert.match(workflow, /secret-scoped\.err/);
+  assert.match(workflow, /\(\.id == \$expected_id\).*\(\.name == \$expected_name\).*folder_id \/\/ \.folderId/s);
+  assert.doesNotMatch(workflow, /cat\s+["']?\$tmp\/secret(?:-scoped)?\.err|echo\s+["']?\$\(.*secret(?:-scoped)?\.err/s);
   assert.doesNotMatch(workflow, /lockbox payload get|payloadViewer.*YC_WIF_SERVICE_ACCOUNT_ID/);
 });
 

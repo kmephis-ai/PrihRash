@@ -249,20 +249,41 @@ jobs:
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           if ! secret_json="$(yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
             --format json --retry 0 --no-user-output 2>"$tmp/secret.err")"; then
-            if grep -Eqi 'permission denied|permission_denied|forbidden|access denied' "$tmp/secret.err"; then
+            if grep -Eqi 'not found|not_found|does not exist' "$tmp/secret.err"; then
+              if ! secret_json="$(yc lockbox secret get --name "$LOCKBOX_SECRET_NAME" --folder-id "$YC_FOLDER_ID" \
+                --format json --retry 0 --no-user-output 2>"$tmp/secret-scoped.err")"; then
+                if grep -Eqi 'permission denied|permission_denied|forbidden|access denied' "$tmp/secret-scoped.err"; then
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_FORBIDDEN'
+                elif grep -Eqi 'unauthenticated|unauthorized|invalid token|token.*expired|authentication' "$tmp/secret-scoped.err"; then
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNAUTHENTICATED'
+                elif grep -Eqi 'not found|not_found|does not exist' "$tmp/secret-scoped.err"; then
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_NOT_FOUND'
+                elif grep -Eqi 'rate.?limit|resource exhausted|too many requests' "$tmp/secret-scoped.err"; then
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_RATE_LIMITED'
+                elif grep -Eqi 'deadline exceeded|timeout|timed out|connection reset|connection refused|no such host|tls|x509' "$tmp/secret-scoped.err"; then
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_TRANSPORT_FAILED'
+                else
+                  echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_UNCLASSIFIED'
+                fi
+                exit 1
+              fi
+              echo 'SCHEMA_UPGRADE_004_LOCKBOX_SCOPED_LOOKUP_RECOVERED'
+            elif grep -Eqi 'permission denied|permission_denied|forbidden|access denied' "$tmp/secret.err"; then
               echo 'SCHEMA_UPGRADE_004_LOCKBOX_FORBIDDEN'
+              exit 1
             elif grep -Eqi 'unauthenticated|unauthorized|invalid token|token.*expired|authentication' "$tmp/secret.err"; then
               echo 'SCHEMA_UPGRADE_004_LOCKBOX_UNAUTHENTICATED'
-            elif grep -Eqi 'not found|not_found|does not exist' "$tmp/secret.err"; then
-              echo 'SCHEMA_UPGRADE_004_LOCKBOX_NOT_FOUND'
+              exit 1
             elif grep -Eqi 'rate.?limit|resource exhausted|too many requests' "$tmp/secret.err"; then
               echo 'SCHEMA_UPGRADE_004_LOCKBOX_RATE_LIMITED'
+              exit 1
             elif grep -Eqi 'deadline exceeded|timeout|timed out|connection reset|connection refused|no such host|tls|x509' "$tmp/secret.err"; then
               echo 'SCHEMA_UPGRADE_004_LOCKBOX_TRANSPORT_FAILED'
+              exit 1
             else
               echo 'SCHEMA_UPGRADE_004_LOCKBOX_UNCLASSIFIED'
+              exit 1
             fi
-            exit 1
           fi
           if ! jq -e \
             --arg expected_id "$YC_LOCKBOX_SECRET_ID" \
