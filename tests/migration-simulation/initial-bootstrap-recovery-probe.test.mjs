@@ -203,6 +203,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
     stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
     stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+    stagingControlledPreparationMetadataScanCostEvidence: 'GE_10_LT_3000_RU',
     stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
   };
   assert.deepEqual(
@@ -250,6 +251,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
         }),
       ),
@@ -272,6 +274,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidRetryEvidence === undefined
             ? {}
@@ -297,6 +300,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidQueryErrorEvidence === undefined
             ? {}
@@ -322,6 +326,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidGrpcStatusEvidence === undefined
             ? {}
@@ -348,6 +353,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidPhaseEvidence === undefined
             ? {}
@@ -373,12 +379,42 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
           stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
           ...(invalidReferenceReadStageEvidence === undefined
             ? {}
             : {
                 stagingControlledPreparationReferenceReadStageEvidence:
                   invalidReferenceReadStageEvidence,
+              }),
+        }),
+      ),
+      {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
+      },
+    );
+  }
+
+  for (const invalidMetadataScanCostEvidence of [undefined, 'PRIVATE_COST_ENUM']) {
+    assert.deepEqual(
+      await executeYandexInitialBootstrapRecoveryFunction(
+        { PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1' },
+        async () => ({
+          verdict: 'RECOVERY_REQUIRED',
+          reason: 'STAGING_RUN_PRESENT',
+          stagingControlledPreparationEvidence: 'READY',
+          stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+          stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+          stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
+          stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
+          stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+          ...(invalidMetadataScanCostEvidence === undefined
+            ? {}
+            : {
+                stagingControlledPreparationMetadataScanCostEvidence:
+                  invalidMetadataScanCostEvidence,
               }),
         }),
       ),
@@ -402,6 +438,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
           stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           ...(invalidReadStageEvidence === undefined
             ? {}
             : {

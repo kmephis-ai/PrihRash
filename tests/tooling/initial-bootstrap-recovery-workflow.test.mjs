@@ -107,6 +107,8 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /RESUME_CONTEXT_READ\|RESUME_IDENTITY_MANIFEST_READ\|RESUME_SNAPSHOT_READ/);
   assert.match(workflow, /RECONCILIATION_READ\|VALIDATION_EVALUATION\|CURRENT_PLAN_PREPARATION\|CURRENT_WRITE_PREPARATION/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_PHASE_EVIDENCE_INVALID/);
+  assert.match(workflow, /UNOBSERVED\|LT_10_RU\|GE_10_LT_3000_RU\|GE_3000_RU\|STATS_UNAVAILABLE\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE_INVALID/);
   assert.match(workflow, /UNOBSERVED\|ACCOUNTS_READ\|CATEGORIES_READ\|VIKA_MEMBER_READ\|DIAGNOSTIC_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE_INVALID/);
   assert.match(workflow, /UNOBSERVED\|REVISION_METADATA_SCAN\|REVISION_PAYLOAD_BATCH\|REVISION_COLLISION_READ\|DIAGNOSTIC_FAILED/);
@@ -116,6 +118,7 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /controlled-preparation-query-error\.json/);
   assert.match(workflow, /controlled-preparation-grpc-status\.json/);
   assert.match(workflow, /controlled-preparation-phase\.json/);
+  assert.match(workflow, /controlled-preparation-metadata-scan-cost\.json/);
   assert.match(workflow, /controlled-preparation-reference-read-stage\.json/);
   assert.match(workflow, /controlled-preparation-reconciliation-read-stage\.json/);
   assert.match(workflow, /retention-days: 30/);
@@ -170,6 +173,9 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000/);
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000/);
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000/);
+  assert.match(runtime, /readRequestUnitObserver/);
+  assert.match(runtime, /createInitialBootstrapControlledPreparationMetadataScanCostTracker/);
+  assert.match(runtime, /REVISION_METADATA_SCAN/);
   assert.match(runtime, /prepareInitialControlledRebuildContinuation/);
   assert.match(runtime, /node:diagnostics_channel/);
   assert.match(runtime, /ydb:retry\.attempt\.completed/);

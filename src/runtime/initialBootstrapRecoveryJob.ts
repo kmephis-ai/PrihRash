@@ -180,6 +180,14 @@ export type InitialBootstrapControlledPreparationReconciliationReadStageEvidence
   | 'UNOBSERVED'
   | 'DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapControlledPreparationMetadataScanCostEvidence =
+  | 'UNOBSERVED'
+  | 'LT_10_RU'
+  | 'GE_10_LT_3000_RU'
+  | 'GE_3000_RU'
+  | 'STATS_UNAVAILABLE'
+  | 'DIAGNOSTIC_FAILED';
+
 export interface InitialBootstrapControlledPreparationResult {
   readonly preparationEvidence: InitialBootstrapControlledPreparationDiagnostic;
   readonly retryEvidence: InitialBootstrapControlledPreparationRetryEvidence;
@@ -188,6 +196,7 @@ export interface InitialBootstrapControlledPreparationResult {
   readonly phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence;
   readonly referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
+  readonly metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
@@ -205,6 +214,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingControlledPreparationPhaseEvidence?: InitialBootstrapControlledPreparationPhaseEvidence;
   readonly stagingControlledPreparationReferenceReadStageEvidence?: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly stagingControlledPreparationReconciliationReadStageEvidence?: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
+  readonly stagingControlledPreparationMetadataScanCostEvidence?: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -417,6 +427,53 @@ export function createInitialBootstrapControlledPreparationReconciliationReadSta
           return;
         }
         latest = stage as InitialSourceRevisionEvidenceReadStage;
+      } catch {
+        diagnosticFailed = true;
+      }
+    },
+    markDiagnosticFailed() {
+      diagnosticFailed = true;
+    },
+    evidence() {
+      return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : latest;
+    },
+  });
+}
+
+const INITIAL_RECOVERY_SERVERLESS_THROTTLING_RU_PER_SECOND = 10 as const;
+const INITIAL_RECOVERY_SERVERLESS_BURST_SECONDS = 5 * 60;
+const INITIAL_RECOVERY_SERVERLESS_FULL_BURST_RU = (
+  INITIAL_RECOVERY_SERVERLESS_THROTTLING_RU_PER_SECOND
+  * INITIAL_RECOVERY_SERVERLESS_BURST_SECONDS
+);
+
+interface InitialBootstrapControlledPreparationMetadataScanCostTracker {
+  observeEstimatedRequestUnits(value: unknown): void;
+  markDiagnosticFailed(): void;
+  evidence(): InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+}
+
+export function createInitialBootstrapControlledPreparationMetadataScanCostTracker(
+): InitialBootstrapControlledPreparationMetadataScanCostTracker {
+  let latest: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
+  let diagnosticFailed = false;
+
+  return Object.freeze({
+    observeEstimatedRequestUnits(value: unknown) {
+      try {
+        if (value === null) {
+          latest = 'STATS_UNAVAILABLE';
+          return;
+        }
+        if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+          diagnosticFailed = true;
+          return;
+        }
+        latest = value >= INITIAL_RECOVERY_SERVERLESS_FULL_BURST_RU
+          ? 'GE_3000_RU'
+          : value >= INITIAL_RECOVERY_SERVERLESS_THROTTLING_RU_PER_SECOND
+            ? 'GE_10_LT_3000_RU'
+            : 'LT_10_RU';
       } catch {
         diagnosticFailed = true;
       }
@@ -758,9 +815,12 @@ async function diagnoseStagingControlledPreparation(
       phaseEvidence: 'UNOBSERVED' as const,
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
+      metadataScanCostEvidence: 'UNOBSERVED' as const,
     });
   }
 
+  let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
+  const metadataScanCostTracker = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
   let client: Readonly<YdbJsDataClient>;
   try {
     client = await createYdbJsV6MetadataDataClient({
@@ -769,6 +829,15 @@ async function diagnoseStagingControlledPreparation(
       readyTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS,
       readTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS,
       transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
+      readRequestUnitObserver(estimatedRequestUnits) {
+        try {
+          if (reconciliationReadStageTracker?.evidence() === 'REVISION_METADATA_SCAN') {
+            metadataScanCostTracker.observeEstimatedRequestUnits(estimatedRequestUnits);
+          }
+        } catch {
+          metadataScanCostTracker.markDiagnosticFailed();
+        }
+      },
     });
   } catch (error) {
     return Object.freeze({
@@ -779,6 +848,7 @@ async function diagnoseStagingControlledPreparation(
       phaseEvidence: 'UNOBSERVED' as const,
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
+      metadataScanCostEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -789,11 +859,11 @@ async function diagnoseStagingControlledPreparation(
   let phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence = 'UNOBSERVED';
   let referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence = 'UNOBSERVED';
   let reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence = 'UNOBSERVED';
+  let metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
   let queryErrorTracker: InitialBootstrapControlledPreparationQueryErrorTracker | null = null;
   let phaseTracker: InitialBootstrapControlledPreparationPhaseTracker | null = null;
   let referenceReadStageTracker: InitialBootstrapControlledPreparationReferenceReadStageTracker | null = null;
-  let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
   let stopRetryObservation: (() => void) | null = null;
   let stopQueryErrorObservation: (() => void) | null = null;
   try {
@@ -862,6 +932,7 @@ async function diagnoseStagingControlledPreparation(
     if (reconciliationReadStageTracker !== null) {
       reconciliationReadStageEvidence = reconciliationReadStageTracker.evidence();
     }
+    metadataScanCostEvidence = metadataScanCostTracker.evidence();
     if (retryTracker !== null) retryEvidence = retryTracker.evidence();
   }
 
@@ -878,6 +949,7 @@ async function diagnoseStagingControlledPreparation(
     phaseEvidence,
     referenceReadStageEvidence,
     reconciliationReadStageEvidence,
+    metadataScanCostEvidence,
   });
 }
 
@@ -1004,6 +1076,7 @@ export async function executeInitialBootstrapRecoveryJob(
       let stagingControlledPreparationPhaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence;
       let stagingControlledPreparationReferenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
       let stagingControlledPreparationReconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
+      let stagingControlledPreparationMetadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
@@ -1019,6 +1092,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationPhaseEvidence = diagnostic.phaseEvidence;
         stagingControlledPreparationReferenceReadStageEvidence = diagnostic.referenceReadStageEvidence;
         stagingControlledPreparationReconciliationReadStageEvidence = diagnostic.reconciliationReadStageEvidence;
+        stagingControlledPreparationMetadataScanCostEvidence = diagnostic.metadataScanCostEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
@@ -1027,6 +1101,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationPhaseEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationReferenceReadStageEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationReconciliationReadStageEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationMetadataScanCostEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
@@ -1037,6 +1112,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationPhaseEvidence,
         stagingControlledPreparationReferenceReadStageEvidence,
         stagingControlledPreparationReconciliationReadStageEvidence,
+        stagingControlledPreparationMetadataScanCostEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
