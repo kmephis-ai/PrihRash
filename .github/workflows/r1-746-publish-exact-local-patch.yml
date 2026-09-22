@@ -1,0 +1,85 @@
+name: R1 #746 publish exact local patch
+
+on:
+  push:
+    branches:
+      - transport/r1-746-publish-acf1a95
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: 3521024b670917148346409be0d9482f1ec48a65
+      TARGET_BRANCH: agent/r1-746-schema-v4-index
+      EXPECTED_PATCH_B64_SHA256: b51329ece965e11cd94a5251aa7bc79ac3f3a29154326a24145d8fe9b65375e7
+      EXPECTED_PATCH_SHA256: 509ba02cd929e9390f84b3b36c33deb8cdd52cc02ea789765a6e397062b04931
+      EXPECTED_TREE_SHA: a02f2cafee6ab9ccfade9ee55906a49daeeecda8
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 3521024b670917148346409be0d9482f1ec48a65
+          fetch-depth: 1
+
+      - name: Reconstruct and publish exact checked patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse FETCH_HEAD)" = "$SOURCE_SHA" || { echo R1_746_MAIN_MOVED; exit 1; }
+
+          if git ls-remote --exit-code --heads origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo R1_746_TARGET_ALREADY_EXISTS
+            exit 1
+          fi
+
+          : > "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/59329d630604f7c6e37bc1d96f6843d2157b73e7" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/d05d0fe613751c6539fc47170fc004cc150c67f3" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/61bfcade4e136a1b3d39e320c1f0171a778d7ada" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/git/blobs/1b38d0a96ac172fc8f50c87f79e51b0beed0e530" \
+            | jq -er '.content' | tr -d '\n' | base64 -d >> "$RUNNER_TEMP/patch.gz.b64"
+
+          test "$(sha256sum "$RUNNER_TEMP/patch.gz.b64" | awk '{print $1}')" = "$EXPECTED_PATCH_B64_SHA256"
+          base64 -d "$RUNNER_TEMP/patch.gz.b64" > "$RUNNER_TEMP/patch.gz"
+          gzip -dc "$RUNNER_TEMP/patch.gz" > "$RUNNER_TEMP/change.patch"
+          test "$(sha256sum "$RUNNER_TEMP/change.patch" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA256"
+
+          git apply --check "$RUNNER_TEMP/change.patch"
+          git apply --index "$RUNNER_TEMP/change.patch"
+          git diff --cached --check
+
+          git config user.name "PrihRash AI"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "R1 #746: add schema v4 revision run index"
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE_SHA" || { echo R1_746_TREE_MISMATCH; exit 1; }
+
+          git fetch --no-tags origin main
+          test "$(git rev-parse FETCH_HEAD)" = "$SOURCE_SHA" || { echo R1_746_MAIN_MOVED_BEFORE_PUSH; exit 1; }
+
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+          echo "R1_746_PUBLISHED_TREE=$EXPECTED_TREE_SHA"
