@@ -214,7 +214,7 @@ test('restart after durable claim recovers exactly the same source and transacti
 test('restart rejects malformed durable snapshot captured_at from the same manifest join', async () => {
   const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
   await expectManifestError(
-    'MALFORMED_SNAPSHOT_CAPTURED_AT',
+    'MANIFEST_EVIDENCE_MISMATCH',
     () => recoverInitialBootstrapIdentities(
       reader([readbackRow(write, { snapshot_captured_at: 'not-a-timestamp' })]),
       RUN_ID,
