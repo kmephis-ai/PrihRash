@@ -17,6 +17,7 @@ const RUN_ID = '00000000-0000-0000-0000-000000009402';
 const SOURCE_ID_1 = '00000000-0000-0000-0000-000000009403';
 const SOURCE_ID_2 = '00000000-0000-0000-0000-000000009404';
 const TRANSACTION_ID = '00000000-0000-0000-0000-000000009405';
+const CAPTURED_AT = '2026-09-07T19:40:00Z';
 
 function candidate() {
   return buildInitialBootstrapCandidate({
@@ -74,6 +75,7 @@ function readbackRow(write, overrides = {}) {
     run_snapshot_digest: 'synthetic-snapshot-digest',
     snapshot_digest: 'synthetic-snapshot-digest',
     snapshot_row_count: 2n,
+    snapshot_captured_at: CAPTURED_AT,
     ...overrides,
   };
 }
@@ -165,6 +167,7 @@ test('manifest readback query aliases every qualified manifest column to the par
   assert.match(statement.text, /m\.source_snapshot_id AS source_snapshot_id/);
   assert.match(statement.text, /m\.binding_count AS binding_count/);
   assert.match(statement.text, /m\.bindings AS bindings/);
+  assert.match(statement.text, /s\.captured_at AS snapshot_captured_at/);
   assert.doesNotMatch(statement.text, /SELECT m\.source_snapshot_id,/);
   assert.doesNotMatch(statement.text, /m\.binding_count, m\.bindings,/);
 });
@@ -199,12 +202,29 @@ test('restart after durable claim recovers exactly the same source and transacti
 
   assert.deepEqual(recovered, {
     sourceSnapshotId: SNAPSHOT_ID,
+    capturedAt: CAPTURED_AT,
     sourceRows: [
       { sourceRecordId: SOURCE_ID_1, rowHint: 2, digest: 'synthetic-row-a' },
       { sourceRecordId: SOURCE_ID_2, rowHint: 3, digest: 'synthetic-row-b' },
     ],
     transactionAssignments: [assignment()],
   });
+});
+
+test('restart rejects malformed durable snapshot captured_at from the same manifest join', async () => {
+  const write = prepareInitialBootstrapIdentityManifestWrite(manifest());
+  await expectManifestError(
+    'MALFORMED_SNAPSHOT_CAPTURED_AT',
+    () => recoverInitialBootstrapIdentities(
+      reader([readbackRow(write, { snapshot_captured_at: 'not-a-timestamp' })]),
+      RUN_ID,
+      'synthetic-snapshot-digest',
+      [
+        { sourceOrdinal: 0, rowHint: 2, digest: 'synthetic-row-a' },
+        { sourceOrdinal: 1, rowHint: 3, digest: 'synthetic-row-b' },
+      ],
+    ),
+  );
 });
 
 test('manifest readback parser exposes structural failure class without row values', async () => {

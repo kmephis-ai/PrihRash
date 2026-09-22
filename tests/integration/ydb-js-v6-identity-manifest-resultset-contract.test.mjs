@@ -20,6 +20,7 @@ const MIGRATION_RUN_ID = '11111111-1111-4111-8111-111111111111';
 const SNAPSHOT_ID = '22222222-2222-4222-8222-222222222222';
 const SOURCE_RECORD_ID = '33333333-3333-4333-8333-333333333333';
 const SNAPSHOT_DIGEST = 'fixture-snapshot-digest';
+const CAPTURED_AT = '2026-09-07T19:40:00Z';
 
 const EXPECTED_COLUMNS = Object.freeze([
   'source_snapshot_id',
@@ -30,6 +31,7 @@ const EXPECTED_COLUMNS = Object.freeze([
   'run_snapshot_digest',
   'snapshot_digest',
   'snapshot_row_count',
+  'snapshot_captured_at',
 ]);
 
 function resultSetFixture() {
@@ -51,6 +53,7 @@ function resultSetFixture() {
     new primitive.Utf8(SNAPSHOT_DIGEST),
     new primitive.Utf8(SNAPSHOT_DIGEST),
     new primitive.Uint64(1n),
+    new primitive.Utf8(CAPTURED_AT),
   ];
 
   return create(ResultSetSchema, {
@@ -136,6 +139,7 @@ test('pinned YDB SDK ResultSet preserves every identity-manifest alias through t
     assert.equal(readback.runSnapshotDigest, SNAPSHOT_DIGEST);
     assert.equal(readback.snapshotDigest, SNAPSHOT_DIGEST);
     assert.equal(readback.snapshotRowCount, 1);
+    assert.equal(readback.snapshotCapturedAt, CAPTURED_AT);
   } finally {
     await rawSql[Symbol.asyncDispose]();
   }

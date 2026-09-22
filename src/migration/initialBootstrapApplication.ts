@@ -1,10 +1,7 @@
 import {
   YdbAdapter,
   YdbCommitOutcomeUnknownError,
-  readStatement,
 } from '../integration/ydb/adapter.js';
-import { uuidParameter } from '../integration/ydb/parameters.js';
-import { normalizeYdbTimestampReadback } from '../integration/ydb/readbackTimestamp.js';
 import { promoteAtomicDelta } from './atomicPromotion.js';
 import {
   buildInitialBootstrapCandidate,
@@ -238,25 +235,11 @@ export class InitialBootstrapApplicationError extends Error {
   }
 }
 
-interface DurableSnapshotRow {
-  readonly captured_at?: unknown;
-  readonly snapshot_digest?: unknown;
-  readonly row_count?: unknown;
-}
-
 interface PreparedBootstrapContext {
   readonly candidate: Readonly<InitialBootstrapCandidateEnvelope>;
   readonly projection: Readonly<InitialSnapshotProjection>;
   readonly assignments: readonly Readonly<InitialTransactionIdentityAssignment>[];
   readonly observation: Readonly<InitialBootstrapObservation>;
-}
-
-function counter(value: unknown): number | null {
-  if (typeof value === 'bigint') {
-    if (value < 0n || value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
-    return Number(value);
-  }
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function envelopeWithRun(
@@ -366,37 +349,6 @@ function assertResumeRunMatchesCandidate(
   }
 }
 
-async function readDurableSnapshot(
-  adapter: YdbAdapter,
-  snapshotId: string,
-  expectedDigest: string,
-  expectedRowCount: number,
-): Promise<Readonly<{ capturedAt: string }>> {
-  const result = await adapter.read<DurableSnapshotRow>(readStatement(
-    'SELECT captured_at, CAST(snapshot_digest AS Utf8) AS snapshot_digest, row_count '
-      + 'FROM source_snapshots WHERE id = $id',
-    { id: uuidParameter(snapshotId) },
-  ));
-  if (result.rows.length === 0) {
-    throw new InitialBootstrapApplicationError('SNAPSHOT_EVIDENCE_MISSING');
-  }
-  if (result.rows.length !== 1) {
-    throw new InitialBootstrapApplicationError('SNAPSHOT_EVIDENCE_AMBIGUOUS');
-  }
-  const row = result.rows[0];
-  const rowCount = counter(row?.row_count);
-  const capturedAt = normalizeYdbTimestampReadback(row?.captured_at);
-  if (
-    row === undefined
-    || capturedAt === null
-    || row.snapshot_digest !== expectedDigest
-    || rowCount !== expectedRowCount
-  ) {
-    throw new InitialBootstrapApplicationError('SNAPSHOT_EVIDENCE_MISMATCH');
-  }
-  return Object.freeze({ capturedAt });
-}
-
 async function assertCurrentStateEmpty(adapter: YdbAdapter): Promise<void> {
   const diagnostic = await adapter.serializableReadWrite((transaction) =>
     diagnoseInitialBootstrapStaleStagingRetirementCurrentState(transaction));
@@ -481,18 +433,11 @@ async function prepareResumeContext(
     resumeObservation.snapshotDigest,
     resumeObservations(resumeObservation),
   );
-  markApplicationPhase(dependencies, 'RESUME_SNAPSHOT_READ');
-  const snapshot = await readDurableSnapshot(
-    dependencies.adapter,
-    recovered.sourceSnapshotId,
-    resumeObservation.snapshotDigest,
-    resumeObservation.rows.length,
-  );
   markApplicationPhase(dependencies, 'RESUME_CONTEXT_PREPARATION');
   const baseCandidate = buildInitialBootstrapCandidate({
     snapshotId: recovered.sourceSnapshotId,
     migrationRunId: run.id,
-    capturedAt: snapshot.capturedAt,
+    capturedAt: recovered.capturedAt,
     startedAt: run.startedAt,
     snapshotDigest: observation.snapshotDigest,
     rows: recovered.sourceRows,
