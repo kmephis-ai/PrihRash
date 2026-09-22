@@ -11,6 +11,7 @@ import {
   uuidParameter,
   type YdbParameter,
 } from '../integration/ydb/parameters.js';
+import { normalizeYdbTimestampReadback } from '../integration/ydb/readbackTimestamp.js';
 import type { InitialBootstrapCandidateEnvelope } from './initialBootstrapCandidate.js';
 import type { InitialSnapshotProjection } from './initialSnapshotProjection.js';
 import type { InitialSourceRow } from './initialSnapshot.js';
@@ -46,6 +47,7 @@ export interface InitialBootstrapResumeObservation {
 
 export interface InitialBootstrapIdentityRecovery {
   readonly sourceSnapshotId: string;
+  readonly capturedAt: string;
   readonly sourceRows: readonly Readonly<InitialSourceRow>[];
   readonly transactionAssignments: readonly Readonly<InitialTransactionIdentityAssignment>[];
 }
@@ -56,6 +58,7 @@ export interface InitialBootstrapIdentityManifestReadback {
   readonly runSnapshotDigest: string;
   readonly snapshotDigest: string;
   readonly snapshotRowCount: number;
+  readonly snapshotCapturedAt: unknown;
 }
 
 export type InitialBootstrapIdentityManifestErrorCode =
@@ -115,6 +118,7 @@ interface IdentityManifestReadRow extends InitialBootstrapIdentityManifestConten
   readonly run_snapshot_digest?: unknown;
   readonly snapshot_digest?: unknown;
   readonly snapshot_row_count?: unknown;
+  readonly snapshot_captured_at?: unknown;
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -403,7 +407,8 @@ export function initialBootstrapIdentityManifestReadStatement(migrationRunId: st
       + 'CAST(m.source_snapshot_digest AS Utf8) AS source_snapshot_digest, '
       + 'm.binding_count AS binding_count, m.bindings AS bindings, r.state AS run_state, '
       + 'CAST(r.source_snapshot_digest AS Utf8) AS run_snapshot_digest, '
-      + 'CAST(s.snapshot_digest AS Utf8) AS snapshot_digest, s.row_count AS snapshot_row_count '
+      + 'CAST(s.snapshot_digest AS Utf8) AS snapshot_digest, s.row_count AS snapshot_row_count, '
+      + 's.captured_at AS snapshot_captured_at '
       + 'FROM initial_bootstrap_identity_manifests AS m '
       + 'JOIN migration_runs AS r ON r.id = m.migration_run_id '
       + 'JOIN source_snapshots AS s ON s.id = m.source_snapshot_id '
@@ -427,6 +432,7 @@ export function parseInitialBootstrapIdentityManifestRows(
     runSnapshotDigest: digestString(row.run_snapshot_digest, 'MALFORMED_RUN_SNAPSHOT_DIGEST'),
     snapshotDigest: digestString(row.snapshot_digest, 'MALFORMED_SNAPSHOT_DIGEST'),
     snapshotRowCount,
+    snapshotCapturedAt: row.snapshot_captured_at,
   });
 }
 
@@ -503,6 +509,10 @@ export async function recoverInitialBootstrapIdentities(
   ) {
     throw new InitialBootstrapIdentityManifestError('MANIFEST_EVIDENCE_MISMATCH');
   }
+  const capturedAt = normalizeYdbTimestampReadback(readback.snapshotCapturedAt);
+  if (capturedAt === null) {
+    throw new InitialBootstrapIdentityManifestError('MANIFEST_EVIDENCE_MISMATCH');
+  }
 
   const sourceRows: Readonly<InitialSourceRow>[] = [];
   const transactionAssignments: Readonly<InitialTransactionIdentityAssignment>[] = [];
@@ -531,6 +541,7 @@ export async function recoverInitialBootstrapIdentities(
 
   return Object.freeze({
     sourceSnapshotId: readback.manifest.sourceSnapshotId,
+    capturedAt,
     sourceRows: Object.freeze(sourceRows),
     transactionAssignments: Object.freeze(transactionAssignments),
   });

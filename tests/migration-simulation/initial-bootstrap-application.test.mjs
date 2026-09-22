@@ -266,6 +266,7 @@ function statementRows(statement, state) {
       run_snapshot_digest: run.source_snapshot_digest,
       snapshot_digest: snapshot.snapshot_digest,
       snapshot_row_count: snapshot.row_count,
+      snapshot_captured_at: snapshot.captured_at,
     }];
   }
   if (text.includes('FROM initial_bootstrap_identity_manifests WHERE migration_run_id = $migration_run_id')) {
@@ -739,6 +740,7 @@ test('exact STAGING claim resumes durable identities without allocator reuse and
 
   assert.equal(result.status, 'COMMITTED');
   assert.deepEqual(ids.calls, []);
+  assert.equal(db.events.some((event) => event.startsWith('read:SELECT captured_at')), false);
   assert.equal(db.state.revisions.get(`${SOURCE_1}|1`).observed_at, CAPTURED_AT);
   assert.equal(db.state.sourceRecords.get(SOURCE_1).transaction_id, TX_1);
 });
@@ -770,15 +772,14 @@ test('advanced live source fails closed when durable cutoff A is not fully recon
   assert.equal(db.state.transactions.size, 0);
 });
 
-test('resume read failures preserve the exact read layer without writes or identity allocation', async (t) => {
-  for (const [table, phase] of [
-    ['manifests', 'RESUME_IDENTITY_MANIFEST_READ'],
-    ['sourceSnapshots', 'RESUME_SNAPSHOT_READ'],
+test('resume manifest and snapshot evidence share one read boundary without a redundant snapshot query', async (t) => {
+  for (const [failure, mutate] of [
+    ['manifest missing', (db) => db.state.manifests.clear()],
+    ['snapshot captured_at invalid', (db) => { db.state.sourceSnapshots.get(SNAPSHOT_ID).captured_at = 'invalid-timestamp'; }],
   ]) {
-    await t.test(phase, async () => {
+    await t.test(failure, async () => {
       const db = fakeDatabase({ seed: stagingSeed() });
-      if (table === 'manifests') db.state.manifests.clear();
-      else db.state.sourceSnapshots.get(SNAPSHOT_ID).captured_at = 'invalid-timestamp';
+      mutate(db);
       const ids = allocator({ forbid: true });
       const phases = [];
       await assert.rejects(() => prepareInitialControlledRebuildContinuation(
@@ -786,7 +787,8 @@ test('resume read failures preserve the exact read layer without writes or ident
           observePhase(value) { phases.push(value); },
         }),
       ));
-      assert.equal(phases.at(-1), phase);
+      assert.equal(phases.at(-1), 'RESUME_IDENTITY_MANIFEST_READ');
+      assert.equal(db.events.some((event) => event.startsWith('read:SELECT captured_at')), false);
       assert.deepEqual(ids.calls, []);
       assert.equal(db.events.some((event) => event.startsWith('tx:')), false);
       assert.equal(db.state.sourceRecords.size, 0);

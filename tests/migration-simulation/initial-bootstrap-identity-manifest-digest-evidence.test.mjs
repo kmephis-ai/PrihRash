@@ -8,6 +8,7 @@ const SNAPSHOT_ID = '00000000-0000-0000-0000-000000009502';
 const SOURCE_ID = '00000000-0000-0000-0000-000000009503';
 const SNAPSHOT_DIGEST = ' synthetic-snapshot-digest ';
 const ROW_DIGEST = ' synthetic-row-digest ';
+const CAPTURED_AT = '2026-09-07T19:40:00Z';
 
 test('resume preserves exact nonblank digest evidence instead of imposing trim normalization', async () => {
   const adapter = new YdbAdapter({
@@ -31,6 +32,7 @@ test('resume preserves exact nonblank digest evidence instead of imposing trim n
           run_snapshot_digest: SNAPSHOT_DIGEST,
           snapshot_digest: SNAPSHOT_DIGEST,
           snapshot_row_count: 1n,
+          snapshot_captured_at: CAPTURED_AT,
         }],
       };
     },
@@ -46,6 +48,7 @@ test('resume preserves exact nonblank digest evidence instead of imposing trim n
 
   assert.deepEqual(recovered, {
     sourceSnapshotId: SNAPSHOT_ID,
+    capturedAt: CAPTURED_AT,
     sourceRows: [{ sourceRecordId: SOURCE_ID, rowHint: 2, digest: ROW_DIGEST }],
     transactionAssignments: [],
   });
