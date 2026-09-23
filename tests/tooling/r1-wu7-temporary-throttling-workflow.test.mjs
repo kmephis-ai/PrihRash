@@ -70,15 +70,18 @@ test('runtime mutates only the exact throttling field and waits a terminal opera
   assert.match(runtime, /UPDATE_MASK = 'serverlessDatabase\.throttlingRcuLimit'/);
   assert.match(runtime, /method: 'PATCH'/);
   assert.match(runtime, /serverlessDatabase: \{ throttlingRcuLimit: String\(target\) \}/);
-  assert.match(runtime, /OPERATION_POLL_LIMIT = 300/);
-  assert.match(runtime, /OPERATION_READ_AUTH/);
-  assert.match(runtime, /OPERATION_READ_NOT_FOUND/);
-  assert.match(runtime, /OPERATION_READ_TRANSPORT/);
-  assert.match(runtime, /OPERATION_NOT_TERMINAL/);
+  assert.match(runtime, /OPERATION_POLL_LIMIT = 150/);
+  assert.match(runtime, /OPERATION_POLL_MS = 2_000/);
+  assert.match(runtime, /'Idempotency-Key': idempotencyKey/);
+  assert.match(runtime, /crypto\.randomUUID\(\)/);
+  assert.match(runtime, /UPDATE_AUTH/);
+  assert.match(runtime, /UPDATE_TRANSPORT/);
+  assert.match(runtime, /UPDATE_NOT_TERMINAL/);
+  assert.doesNotMatch(runtime, /operation\.api\.cloud\.yandex\.net|OPERATIONS_API|waitForOperation/);
   assert.match(workflow, /--execution-timeout 360s/);
-  assert.ok(runtime.includes("return result.value.response !== undefined ? 'DONE' : 'MALFORMED';"));
+  assert.ok(runtime.includes("return hasError ? 'FAILED' : 'DONE';"));
   assert.doesNotMatch(
-    runtime.slice(runtime.indexOf('body: JSON.stringify'), runtime.indexOf('return waitForOperation')),
+    runtime.slice(runtime.indexOf('const body = JSON.stringify'), runtime.indexOf('let operationId')),
     /enableThrottlingRcuLimit|provisionedRcuLimit/,
   );
 });

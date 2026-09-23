@@ -65,6 +65,13 @@ test('SET_14 changes only throttlingRcuLimit, waits operation, then proves exact
   );
   assert.deepEqual(result, { status: 'PASS', code: 'WU7_THROTTLING_SET_14' });
   assert.equal(io.calls[1].init.method, 'PATCH');
+  assert.equal(io.calls[2].init.method, 'PATCH');
+  assert.equal(io.calls[1].input, io.calls[2].input);
+  assert.equal(io.calls[1].init.body, io.calls[2].init.body);
+  const idempotencyKey = io.calls[1].init.headers['Idempotency-Key'];
+  assert.match(idempotencyKey, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  assert.equal(io.calls[2].init.headers['Idempotency-Key'], idempotencyKey);
+  assert.deepEqual(io.calls.filter((call) => call.init.method === 'GET').map((call) => call.input), [io.calls[0].input, io.calls[3].input]);
   const body = JSON.parse(io.calls[1].init.body);
   assert.deepEqual(body, {
     folderId: 'folder-safe',
@@ -124,7 +131,7 @@ test('unknown update outcome never becomes success', async () => {
   assert.deepEqual(result, {
     status: 'STOP',
     code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'UPDATE_UNKNOWN',
+    stage: 'UPDATE_TRANSPORT',
   });
 });
 
@@ -132,7 +139,7 @@ test('unknown update outcome never becomes success', async () => {
 test('terminal provider operation error stays fail-closed without read-back success', async () => {
   const io = sequence([
     response(database(10)),
-    response({ id: 'operation-safe' }),
+    response({ id: 'operation-safe', done: false }),
     response({ id: 'operation-safe', done: true, error: { code: 1 } }),
   ]);
   const result = await executeWu7TemporaryThrottlingGate(
@@ -159,7 +166,7 @@ test('operation permission failure is classified without waiting or exposing pro
   assert.deepEqual(result, {
     status: 'STOP',
     code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'OPERATION_READ_AUTH',
+    stage: 'UPDATE_AUTH',
   });
   assert.equal(io.calls.length, 3);
 });
@@ -176,7 +183,7 @@ test('operation not-found is a distinct fail-closed terminal-proof failure', asy
   assert.deepEqual(result, {
     status: 'STOP',
     code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'OPERATION_READ_NOT_FOUND',
+    stage: 'UPDATE_NOT_FOUND',
   });
 });
 
@@ -184,7 +191,7 @@ test('operation that never becomes terminal is not accepted from state transitio
   const values = [
     response(database(10)),
     response({ id: 'operation-safe', done: false }),
-    ...Array.from({ length: 300 }, () => response({ id: 'operation-safe', done: false })),
+    ...Array.from({ length: 149 }, () => response({ id: 'operation-safe', done: false })),
   ];
   const io = sequence(values);
   const result = await executeWu7TemporaryThrottlingGate(
@@ -193,9 +200,9 @@ test('operation that never becomes terminal is not accepted from state transitio
   assert.deepEqual(result, {
     status: 'STOP',
     code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'OPERATION_NOT_TERMINAL',
+    stage: 'UPDATE_NOT_TERMINAL',
   });
-  assert.equal(io.calls.some((call) => String(call.input).includes('/operations/operation-safe')), true);
+  assert.equal(io.calls.some((call) => String(call.input).includes('/operations/')), false);
 });
 
 test('malformed terminal operation never becomes success', async () => {
@@ -210,6 +217,6 @@ test('malformed terminal operation never becomes success', async () => {
   assert.deepEqual(result, {
     status: 'STOP',
     code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'OPERATION_READ_MALFORMED',
+    stage: 'UPDATE_MALFORMED',
   });
 });

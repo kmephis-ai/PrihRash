@@ -372,3 +372,16 @@ Live run `35906947701` на `d58b2606...` доказал отдельный cont
 Начиная с #761 terminal Operation envelope увеличен до bounded 300 секунд внутри 360-second temporary Function timeout. Runtime различает privacy-safe `OPERATION_READ_AUTH | OPERATION_READ_NOT_FOUND | OPERATION_READ_TRANSPORT | OPERATION_READ_MALFORMED | OPERATION_NOT_TERMINAL`, не публикуя provider IDs/raw errors. Workflow сохраняет отдельные `set-classification.json` и `restore-classification.json`; при restore failure выполняется только независимый read-only final state proof, но success по-прежнему невозможен без terminal Operation.
 
 Unknown/failed set или restore не разрешает replay. Если terminal restore proof/final read не доказан, workflow остаётся failed/recovery-required; cap выше `14`, provisioned RCU change, IAM widening, Google mutation, cleanup ambiguous financial state, timer/cutover и новый controlled rebuild/provider attempt без отдельного Owner decision запрещены.
+
+
+### #767: terminal Operation proof через Idempotency-Key
+
+Live evidence после #762/#766 локализовал blocker: runtime SA может выполнить exact `Database.Update`, но generic `Operation.Get` не проходит authorization. Временный DB-scoped `auditor` был полностью удалён; provider state возвращён и доказан как exact `10 / enabled / provisioned=0`.
+
+Начиная с #767 temporary throttling handler не использует generic Operation endpoint. Для каждого логического SET/RESTORE создаётся один UUID v4 и передаётся как `Idempotency-Key` в exact `Database.Update`. Повторные bounded poll requests используют тот же method/path/body/key. По documented Yandex Cloud idempotency contract такой повтор не выполняет mutation снова, а возвращает тот же `Operation` с его текущим status.
+
+Terminal proof не ослаблен: success существует только при `done=true` и ровно одном `response`; terminal `error` остаётся failure; изменение operation ID, malformed shape, authorization/not-found, transport exhaustion или bounded non-terminal timeout fail closed. После terminal success отдельный exact `Database.Get` по-прежнему обязан доказать target limit.
+
+Polling envelope остаётся bounded 300 seconds, реализован как максимум 150 identical idempotent PATCH requests с интервалом 2 seconds внутри 360-second temporary Function timeout. Generic `Operation.Get`, temporary `auditor` и любое IAM widening для этого path не требуются.
+
+Repository-only #767 не разрешает новый provider attempt. Новый live `10→14→controlled rebuild→10` возможен только под отдельной fresh Owner authority после merge и exact-main verification.
