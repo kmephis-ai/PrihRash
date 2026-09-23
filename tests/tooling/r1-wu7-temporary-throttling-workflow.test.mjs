@@ -76,7 +76,7 @@ test('runtime mutates only the exact throttling field and waits a terminal opera
   assert.match(runtime, /OPERATION_READ_TRANSPORT/);
   assert.match(runtime, /OPERATION_NOT_TERMINAL/);
   assert.match(workflow, /--execution-timeout 360s/);
-  assert.match(runtime, /result\\.value\\.response !== undefined \\? 'DONE' : 'MALFORMED'/);
+  assert.ok(runtime.includes("return result.value.response !== undefined ? 'DONE' : 'MALFORMED';"));
   assert.doesNotMatch(
     runtime.slice(runtime.indexOf('body: JSON.stringify'), runtime.indexOf('return waitForOperation')),
     /enableThrottlingRcuLimit|provisionedRcuLimit/,
