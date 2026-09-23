@@ -3,7 +3,7 @@ const OPERATIONS_API = 'https://operation.api.cloud.yandex.net/operations' as co
 const UPDATE_MASK = 'serverlessDatabase.throttlingRcuLimit' as const;
 const INITIAL_LIMIT = 10 as const;
 const TEMPORARY_LIMIT = 14 as const;
-const OPERATION_POLL_LIMIT = 120;
+const OPERATION_POLL_LIMIT = 300;
 const OPERATION_POLL_MS = 1_000;
 
 type Action = 'READ' | 'SET_14' | 'RESTORE_10';
@@ -46,6 +46,11 @@ export type Wu7TemporaryThrottlingResult =
         | 'STATE_NOT_EXACT'
         | 'UPDATE_FAILED'
         | 'UPDATE_UNKNOWN'
+        | 'OPERATION_READ_AUTH'
+        | 'OPERATION_READ_NOT_FOUND'
+        | 'OPERATION_READ_TRANSPORT'
+        | 'OPERATION_READ_MALFORMED'
+        | 'OPERATION_NOT_TERMINAL'
         | 'READBACK_MISMATCH';
     }>;
 
@@ -115,13 +120,17 @@ async function jsonResponse(
   fetchImpl: Wu7ThrottlingFetch,
   input: string | URL,
   init: RequestInit,
-): Promise<{ readonly ok: boolean; readonly value: UnknownRecord | null }> {
+): Promise<{ readonly ok: boolean; readonly status: number | null; readonly value: UnknownRecord | null }> {
   let response: Response;
-  try { response = await fetchImpl(input, init); } catch { return { ok: false, value: null }; }
-  if (!response.ok) return { ok: false, value: null };
+  try { response = await fetchImpl(input, init); } catch {
+    return { ok: false, status: null, value: null };
+  }
+  if (!response.ok) return { ok: false, status: response.status, value: null };
   let value: unknown;
-  try { value = await response.json(); } catch { return { ok: false, value: null }; }
-  return { ok: true, value: record(value) };
+  try { value = await response.json(); } catch {
+    return { ok: false, status: response.status, value: null };
+  }
+  return { ok: true, status: response.status, value: record(value) };
 }
 
 async function readExactState(
@@ -162,7 +171,17 @@ async function waitForOperation(
   token: string,
   fetchImpl: Wu7ThrottlingFetch,
   sleep: Wu7Sleep,
-): Promise<'DONE' | 'FAILED' | 'UNKNOWN'> {
+): Promise<
+  'DONE'
+  | 'FAILED'
+  | 'READ_AUTH'
+  | 'READ_NOT_FOUND'
+  | 'READ_TRANSPORT'
+  | 'MALFORMED'
+  | 'NOT_TERMINAL'
+> {
+  let observedNonTerminal = false;
+  let observedTransportFailure = false;
   for (let attempt = 0; attempt < OPERATION_POLL_LIMIT; attempt += 1) {
     const result = await jsonResponse(
       fetchImpl,
@@ -170,18 +189,24 @@ async function waitForOperation(
       { method: 'GET', headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, redirect: 'error' },
     );
     if (!result.ok || result.value === null) {
+      if (result.status === 401 || result.status === 403) return 'READ_AUTH';
+      if (result.status === 404) return 'READ_NOT_FOUND';
+      if (result.status !== null && result.status >= 400 && result.status < 500) return 'MALFORMED';
+      observedTransportFailure = true;
       await sleep(OPERATION_POLL_MS);
       continue;
     }
-    if (result.value.id !== operationId) return 'UNKNOWN';
+    if (result.value.id !== operationId) return 'MALFORMED';
     if (result.value.done === true) {
       if (result.value.error !== undefined) return 'FAILED';
-      return result.value.response !== undefined ? 'DONE' : 'UNKNOWN';
+      return result.value.response !== undefined ? 'DONE' : 'MALFORMED';
     }
-    if (result.value.done !== false && result.value.done !== undefined) return 'UNKNOWN';
+    if (result.value.done !== false) return 'MALFORMED';
+    observedNonTerminal = true;
     await sleep(OPERATION_POLL_MS);
   }
-  return 'UNKNOWN';
+  if (observedNonTerminal) return 'NOT_TERMINAL';
+  return observedTransportFailure ? 'READ_TRANSPORT' : 'MALFORMED';
 }
 
 async function updateLimit(
@@ -191,7 +216,16 @@ async function updateLimit(
   target: 10 | 14,
   fetchImpl: Wu7ThrottlingFetch,
   sleep: Wu7Sleep,
-): Promise<'DONE' | 'FAILED' | 'UNKNOWN'> {
+): Promise<
+  'DONE'
+  | 'FAILED'
+  | 'UNKNOWN'
+  | 'READ_AUTH'
+  | 'READ_NOT_FOUND'
+  | 'READ_TRANSPORT'
+  | 'MALFORMED'
+  | 'NOT_TERMINAL'
+> {
   const result = await jsonResponse(
     fetchImpl,
     `${YDB_DATABASES_API}/${encodeURIComponent(state.databaseId)}`,
@@ -253,6 +287,11 @@ export async function executeWu7TemporaryThrottlingGate(
   const updated = await updateLimit(before, folderId, token, target, fetchImpl, sleep);
   if (updated === 'FAILED') return stop('UPDATE_FAILED');
   if (updated === 'UNKNOWN') return stop('UPDATE_UNKNOWN');
+  if (updated === 'READ_AUTH') return stop('OPERATION_READ_AUTH');
+  if (updated === 'READ_NOT_FOUND') return stop('OPERATION_READ_NOT_FOUND');
+  if (updated === 'READ_TRANSPORT') return stop('OPERATION_READ_TRANSPORT');
+  if (updated === 'MALFORMED') return stop('OPERATION_READ_MALFORMED');
+  if (updated === 'NOT_TERMINAL') return stop('OPERATION_NOT_TERMINAL');
 
   const after = await readExactState(databaseId, folderId, token, fetchImpl);
   if (after === 'READ_FAILED') return stop('UPDATE_UNKNOWN');

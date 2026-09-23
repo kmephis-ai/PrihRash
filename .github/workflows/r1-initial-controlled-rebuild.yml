@@ -507,7 +507,7 @@ jobs:
             --runtime nodejs22 \
             --entrypoint index.wu7TemporaryThrottlingHandler \
             --memory 128m \
-            --execution-timeout 180s \
+            --execution-timeout 360s \
             --source-path .artifacts/yandex-wu7-temporary-throttling-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-wu7-temp-throttling \
@@ -741,6 +741,7 @@ jobs:
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-wu7-temp-throttling-set"
           evidence_dir="$RUNNER_TEMP/r1-wu7-temp-throttling-evidence"
+          set_evidence="$evidence_dir/set-classification.json"
           mkdir -p "$tmp" "$evidence_dir"
           : >"$RUNNER_TEMP/r1-wu7-temp-throttling-restore-required"
 
@@ -749,24 +750,46 @@ jobs:
             --tag r1-wu7-temp-throttling \
             --data '{"action":"SET_14"}' \
             --format json --retry 0 --no-user-output >"$tmp/set.json" 2>"$tmp/set.err"; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_SET_UNPROVEN"}' >"$evidence_dir/classification.json"
+            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_SET_INVOKE_UNPROVEN"}' >"$set_evidence"
+            cp "$set_evidence" "$evidence_dir/classification.json"
             rm -f "$tmp/set.json" "$tmp/set.err"
             echo 'WU7_TEMP_THROTTLING_SET_UNPROVEN'
             exit 1
           fi
-          if ! jq -e '
+
+          if jq -e '
             type == "object"
             and (keys | sort) == ["code","status"]
             and .status == "PASS"
             and .code == "WU7_THROTTLING_SET_14"
           ' "$tmp/set.json" >/dev/null; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_SET_UNPROVEN"}' >"$evidence_dir/classification.json"
+            printf '%s\n' '{"status":"PASS","code":"WU7_TEMP_THROTTLING_AT_14"}' >"$set_evidence"
+            cp "$set_evidence" "$evidence_dir/classification.json"
             rm -f "$tmp/set.json" "$tmp/set.err"
-            echo 'WU7_TEMP_THROTTLING_SET_UNPROVEN'
-            exit 1
+            exit 0
           fi
-          printf '%s\n' '{"status":"IN_PROGRESS","code":"WU7_TEMP_THROTTLING_AT_14"}' >"$evidence_dir/classification.json"
+
+          if jq -e '
+            type == "object"
+            and (keys | sort) == ["code","stage","status"]
+            and .status == "STOP"
+            and .code == "WU7_THROTTLING_GATE_STOP"
+            and (.stage | IN(
+              "CONFIG_INVALID","EVENT_INVALID","READ_FAILED","IDENTITY_MISMATCH","STATE_NOT_EXACT",
+              "UPDATE_FAILED","UPDATE_UNKNOWN","OPERATION_READ_AUTH","OPERATION_READ_NOT_FOUND",
+              "OPERATION_READ_TRANSPORT","OPERATION_READ_MALFORMED","OPERATION_NOT_TERMINAL",
+              "READBACK_MISMATCH"
+            ))
+          ' "$tmp/set.json" >/dev/null; then
+            jq -c '{status:"STOP",code:"WU7_TEMP_THROTTLING_SET_UNPROVEN",stage:.stage}' \
+              "$tmp/set.json" >"$set_evidence"
+          else
+            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_SET_OUTPUT_UNPROVEN"}' >"$set_evidence"
+          fi
+          cp "$set_evidence" "$evidence_dir/classification.json"
           rm -f "$tmp/set.json" "$tmp/set.err"
+          echo 'WU7_TEMP_THROTTLING_SET_UNPROVEN'
+          exit 1
 
       - name: Invoke exact controlled rebuild tag synchronously once
         if: ${{ steps.prerequisites.outputs.provider_mode == 'reuse' || steps.provider-deploy.outcome == 'success' }}
@@ -861,71 +884,93 @@ jobs:
         run: |
           set -euo pipefail
           evidence_dir="$RUNNER_TEMP/r1-wu7-temp-throttling-evidence"
+          restore_evidence="$evidence_dir/restore-classification.json"
           mkdir -p "$evidence_dir"
           if [ ! -f "$RUNNER_TEMP/r1-wu7-temp-throttling-restore-required" ]; then
-            printf '%s\n' '{"status":"NOOP","code":"WU7_TEMP_THROTTLING_NOT_MUTATED"}' >"$evidence_dir/classification.json"
+            printf '%s\n' '{"status":"NOOP","code":"WU7_TEMP_THROTTLING_NOT_MUTATED"}' >"$restore_evidence"
+            cp "$restore_evidence" "$evidence_dir/classification.json"
             echo 'WU7_TEMP_THROTTLING_NOT_MUTATED'
             exit 0
           fi
 
           tmp="$RUNNER_TEMP/r1-wu7-temp-throttling-restore"
           mkdir -p "$tmp"
-          if ! yc serverless function invoke \
+          restore_proof='UNPROVEN'
+          restore_stage='INVOKE_UNPROVEN'
+          if yc serverless function invoke \
             --id "$PRIHRASH_YC_FUNCTION_ID" \
             --tag r1-wu7-temp-throttling \
             --data '{"action":"RESTORE_10"}' \
             --format json --retry 0 --no-user-output >"$tmp/restore.json" 2>"$tmp/restore.err"; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_RESTORE_UNPROVEN"}' >"$evidence_dir/classification.json"
-            rm -f "$tmp/restore.json" "$tmp/restore.err"
-            echo 'WU7_TEMP_THROTTLING_RESTORE_UNPROVEN'
-            exit 1
-          fi
-          if ! jq -e '
-            type == "object"
-            and (keys | sort) == ["code","status"]
-            and .status == "PASS"
-            and .code == "WU7_THROTTLING_RESTORED_10"
-          ' "$tmp/restore.json" >/dev/null; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_RESTORE_UNPROVEN"}' >"$evidence_dir/classification.json"
-            rm -f "$tmp/restore.json" "$tmp/restore.err"
-            echo 'WU7_TEMP_THROTTLING_RESTORE_UNPROVEN'
-            exit 1
+            if jq -e '
+              type == "object"
+              and (keys | sort) == ["code","status"]
+              and .status == "PASS"
+              and .code == "WU7_THROTTLING_RESTORED_10"
+            ' "$tmp/restore.json" >/dev/null; then
+              restore_proof='PROVEN'
+              restore_stage='NONE'
+            elif jq -e '
+              type == "object"
+              and (keys | sort) == ["code","stage","status"]
+              and .status == "STOP"
+              and .code == "WU7_THROTTLING_GATE_STOP"
+              and (.stage | IN(
+                "CONFIG_INVALID","EVENT_INVALID","READ_FAILED","IDENTITY_MISMATCH","STATE_NOT_EXACT",
+                "UPDATE_FAILED","UPDATE_UNKNOWN","OPERATION_READ_AUTH","OPERATION_READ_NOT_FOUND",
+                "OPERATION_READ_TRANSPORT","OPERATION_READ_MALFORMED","OPERATION_NOT_TERMINAL",
+                "READBACK_MISMATCH"
+              ))
+            ' "$tmp/restore.json" >/dev/null; then
+              restore_stage="$(jq -r '.stage' "$tmp/restore.json")"
+            else
+              restore_stage='OUTPUT_UNPROVEN'
+            fi
           fi
 
-          if ! yc serverless function invoke \
+          final_state='UNPROVEN'
+          if yc serverless function invoke \
             --id "$PRIHRASH_YC_FUNCTION_ID" \
             --tag r1-wu7-temp-throttling \
             --data '{"action":"READ"}' \
             --format json --retry 0 --no-user-output >"$tmp/final.json" 2>"$tmp/final.err"; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_FINAL_READ_UNPROVEN"}' >"$evidence_dir/classification.json"
-            rm -f "$tmp/restore.json" "$tmp/restore.err" "$tmp/final.json" "$tmp/final.err"
-            echo 'WU7_TEMP_THROTTLING_FINAL_READ_UNPROVEN'
-            exit 1
+            if jq -e '
+              type == "object"
+              and (keys | sort) == ["code","provisionedRcuLimit","status","throttlingEnabled","throttlingRcuLimit"]
+              and .status == "PASS"
+              and .code == "WU7_THROTTLING_STATE_CLASSIFIED"
+              and .throttlingEnabled == true
+              and .throttlingRcuLimit == 10
+              and .provisionedRcuLimit == 0
+            ' "$tmp/final.json" >/dev/null; then
+              final_state='EXACT_10'
+            fi
           fi
-          if ! jq -e '
-            type == "object"
-            and (keys | sort) == ["code","provisionedRcuLimit","status","throttlingEnabled","throttlingRcuLimit"]
-            and .status == "PASS"
-            and .code == "WU7_THROTTLING_STATE_CLASSIFIED"
-            and .throttlingEnabled == true
-            and .throttlingRcuLimit == 10
-            and .provisionedRcuLimit == 0
-          ' "$tmp/final.json" >/dev/null; then
-            printf '%s\n' '{"status":"STOP","code":"WU7_TEMP_THROTTLING_FINAL_STATE_NOT_10"}' >"$evidence_dir/classification.json"
+
+          if [ "$restore_proof" = 'PROVEN' ] && [ "$final_state" = 'EXACT_10' ]; then
+            printf '%s\n' '{"status":"PASS","code":"WU7_TEMP_THROTTLING_RESTORED_10"}' >"$restore_evidence"
+            cp "$restore_evidence" "$evidence_dir/classification.json"
             rm -f "$tmp/restore.json" "$tmp/restore.err" "$tmp/final.json" "$tmp/final.err"
-            echo 'WU7_TEMP_THROTTLING_FINAL_STATE_NOT_10'
-            exit 1
+            echo 'WU7_TEMP_THROTTLING_RESTORED_10'
+            exit 0
           fi
-          printf '%s\n' '{"status":"PASS","code":"WU7_TEMP_THROTTLING_RESTORED_10"}' >"$evidence_dir/classification.json"
+
+          jq -cn \
+            --arg restoreStage "$restore_stage" \
+            --arg finalState "$final_state" \
+            '{status:"STOP",code:"WU7_TEMP_THROTTLING_RESTORE_UNPROVEN",restoreStage:$restoreStage,finalState:$finalState}' \
+            >"$restore_evidence"
+          cp "$restore_evidence" "$evidence_dir/classification.json"
           rm -f "$tmp/restore.json" "$tmp/restore.err" "$tmp/final.json" "$tmp/final.err"
-          echo 'WU7_TEMP_THROTTLING_RESTORED_10'
+          echo 'WU7_TEMP_THROTTLING_RESTORE_UNPROVEN'
+          exit 1
 
       - name: Publish temporary throttling evidence
         if: ${{ always() && inputs.temporary_throttling_gate_issue != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-wu7-temp-throttling-evidence-${{ github.run_id }}
-          path: ${{ runner.temp }}/r1-wu7-temp-throttling-evidence/classification.json
+          path: ${{ runner.temp }}/r1-wu7-temp-throttling-evidence/
           if-no-files-found: error
           retention-days: 30
 

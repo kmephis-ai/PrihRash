@@ -145,3 +145,71 @@ test('terminal provider operation error stays fail-closed without read-back succ
   });
   assert.equal(io.calls.length, 3);
 });
+
+
+test('operation permission failure is classified without waiting or exposing provider payload', async () => {
+  const io = sequence([
+    response(database(10)),
+    response({ id: 'operation-safe', done: false }),
+    response({}, 403),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'OPERATION_READ_AUTH',
+  });
+  assert.equal(io.calls.length, 3);
+});
+
+test('operation not-found is a distinct fail-closed terminal-proof failure', async () => {
+  const io = sequence([
+    response(database(10)),
+    response({ id: 'operation-safe', done: false }),
+    response({}, 404),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'OPERATION_READ_NOT_FOUND',
+  });
+});
+
+test('operation that never becomes terminal is not accepted from state transition alone', async () => {
+  const values = [
+    response(database(10)),
+    response({ id: 'operation-safe', done: false }),
+    ...Array.from({ length: 300 }, () => response({ id: 'operation-safe', done: false })),
+  ];
+  const io = sequence(values);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'OPERATION_NOT_TERMINAL',
+  });
+  assert.equal(io.calls.some((call) => String(call.input).includes('/operations/operation-safe')), true);
+});
+
+test('malformed terminal operation never becomes success', async () => {
+  const io = sequence([
+    response(database(10)),
+    response({ id: 'operation-safe', done: false }),
+    response({ id: 'operation-safe', done: true }),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'OPERATION_READ_MALFORMED',
+  });
+});
