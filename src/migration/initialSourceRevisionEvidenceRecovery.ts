@@ -210,27 +210,23 @@ function estimatedRevisionReadBytes(
     + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
 }
 
-function exactPayloadRangeReadStatement(
+function exactPayloadKeyReadStatement(
   runId: string,
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ) {
-  const first = revisions[0];
-  const last = revisions.at(-1);
-  if (first === undefined || last === undefined) {
-    throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
-  }
+  const sourceKeys = revisions.map((revision) => Object.freeze({
+    source_record_id: uuidParameter(revision.sourceRecordId),
+  }));
   return readStatement(
-    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
-      + 'FROM source_record_revisions '
-      + 'WHERE source_record_id >= $source_record_id_from '
-      + 'AND source_record_id <= $source_record_id_to '
-      + 'AND revision = $revision AND migration_run_id = $migration_run_id',
+    'SELECT r.source_record_id, r.revision, r.migration_run_id, r.observed_at, r.row_hint, '
+      + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class, r.raw_payload '
+      + 'FROM source_record_revisions AS r '
+      + 'INNER JOIN AS_TABLE($source_keys) AS k ON r.source_record_id = k.source_record_id '
+      + 'WHERE r.revision = $revision AND r.migration_run_id = $migration_run_id',
     {
-      source_record_id_from: uuidParameter(first.sourceRecordId),
-      source_record_id_to: uuidParameter(last.sourceRecordId),
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(runId),
+      source_keys: listStructParameter(SOURCE_KEY_COLUMNS, sourceKeys),
     },
   );
 }
@@ -312,9 +308,9 @@ export async function planInitialSourceRevisionEvidenceResume(
   );
   validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
 
-  // Exact payload equality remains mandatory. The metadata-only run scan is
-  // explicitly ordered by YDB, so range boundaries use provider order rather than
-  // assuming that Node string ordering matches YDB Uuid ordering.
+  // Exact payload equality remains mandatory. The metadata scan already returns
+  // the exact current-run source IDs; payload verification reuses those exact keys
+  // so sparse UUID ranges cannot amplify read RU.
   const existingRevisions = runResult.rows.map((row) => {
     const sourceRecordId = uuid(row.source_record_id);
     const revision = expected.bySourceId.get(sourceRecordId);
@@ -327,7 +323,7 @@ export async function planInitialSourceRevisionEvidenceResume(
   for (const batch of planRevisionReadBatches(existingRevisions)) {
     observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
-      exactPayloadRangeReadStatement(expected.runId, batch),
+      exactPayloadKeyReadStatement(expected.runId, batch),
     );
     validateRevisionRows(payloadResult.rows, expected, payloadVerifiedSourceIds, true);
   }
