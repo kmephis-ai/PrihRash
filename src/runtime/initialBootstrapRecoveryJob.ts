@@ -819,8 +819,6 @@ async function diagnoseStagingControlledPreparation(
     });
   }
 
-  let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
-  const metadataScanCostTracker = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
   let client: Readonly<YdbJsDataClient>;
   try {
     client = await createYdbJsV6MetadataDataClient({
@@ -829,15 +827,6 @@ async function diagnoseStagingControlledPreparation(
       readyTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS,
       readTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS,
       transactionTimeoutMs: INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS,
-      readRequestUnitObserver(estimatedRequestUnits) {
-        try {
-          if (reconciliationReadStageTracker?.evidence() === 'REVISION_METADATA_SCAN') {
-            metadataScanCostTracker.observeEstimatedRequestUnits(estimatedRequestUnits);
-          }
-        } catch {
-          metadataScanCostTracker.markDiagnosticFailed();
-        }
-      },
     });
   } catch (error) {
     return Object.freeze({
@@ -859,11 +848,12 @@ async function diagnoseStagingControlledPreparation(
   let phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence = 'UNOBSERVED';
   let referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence = 'UNOBSERVED';
   let reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence = 'UNOBSERVED';
-  let metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
+  const metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
   let queryErrorTracker: InitialBootstrapControlledPreparationQueryErrorTracker | null = null;
   let phaseTracker: InitialBootstrapControlledPreparationPhaseTracker | null = null;
   let referenceReadStageTracker: InitialBootstrapControlledPreparationReferenceReadStageTracker | null = null;
+  let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
   let stopRetryObservation: (() => void) | null = null;
   let stopQueryErrorObservation: (() => void) | null = null;
   try {
@@ -932,7 +922,6 @@ async function diagnoseStagingControlledPreparation(
     if (reconciliationReadStageTracker !== null) {
       reconciliationReadStageEvidence = reconciliationReadStageTracker.evidence();
     }
-    metadataScanCostEvidence = metadataScanCostTracker.evidence();
     if (retryTracker !== null) retryEvidence = retryTracker.evidence();
   }
 
