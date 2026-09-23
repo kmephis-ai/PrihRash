@@ -58,6 +58,10 @@ test('10→14→controlled invoke→10 ordering is structural and restore is alw
   assert.match(workflow, /--data '\{"action":"READ"\}'/);
   assert.match(workflow, /\.throttlingRcuLimit == 10/);
   assert.match(workflow, /\.provisionedRcuLimit == 0/);
+  assert.match(workflow, /set-classification\.json/);
+  assert.match(workflow, /restore-classification\.json/);
+  assert.match(workflow, /finalState:\$finalState/);
+  assert.match(workflow, /path: \$\{\{ runner\.temp \}\}\/r1-wu7-temp-throttling-evidence\//);
 });
 
 test('runtime mutates only the exact throttling field and waits a terminal operation', () => {
@@ -66,7 +70,12 @@ test('runtime mutates only the exact throttling field and waits a terminal opera
   assert.match(runtime, /UPDATE_MASK = 'serverlessDatabase\.throttlingRcuLimit'/);
   assert.match(runtime, /method: 'PATCH'/);
   assert.match(runtime, /serverlessDatabase: \{ throttlingRcuLimit: String\(target\) \}/);
-  assert.match(runtime, /OPERATION_POLL_LIMIT = 120/);
+  assert.match(runtime, /OPERATION_POLL_LIMIT = 300/);
+  assert.match(runtime, /OPERATION_READ_AUTH/);
+  assert.match(runtime, /OPERATION_READ_NOT_FOUND/);
+  assert.match(runtime, /OPERATION_READ_TRANSPORT/);
+  assert.match(runtime, /OPERATION_NOT_TERMINAL/);
+  assert.match(workflow, /--execution-timeout 360s/);
   assert.match(runtime, /result\.value\.response !== undefined \? 'DONE' : 'UNKNOWN'/);
   assert.doesNotMatch(
     runtime.slice(runtime.indexOf('body: JSON.stringify'), runtime.indexOf('return waitForOperation')),
