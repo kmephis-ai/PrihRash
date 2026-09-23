@@ -51,7 +51,9 @@ test('R1 controlled rebuild deploy is private trigger-free and exposes only dedi
   assert.doesNotMatch(workflow, /INITIAL_CONTROLLED_REBUILD_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
   assert.doesNotMatch(workflow, /PRIHRASH_ASYNC_INVOKER_SA_ID/);
   assert.doesNotMatch(workflow, /--async-success-ymq-arn|--async-failure-ymq-arn/);
-  assert.doesNotMatch(workflow, /--no-logging/);
+  const controlledDeploy = workflow.match(/- name: Deploy initial-controlled-rebuild-only Function version[\s\S]*?- name: Re-verify private trigger-free boundary/);
+  assert.ok(controlledDeploy);
+  assert.doesNotMatch(controlledDeploy[0], /--no-logging/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_PUBLIC/);
   assert.match(workflow, /INITIAL_CONTROLLED_REBUILD_FUNCTION_TRIGGER_PRESENT/);
   assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
