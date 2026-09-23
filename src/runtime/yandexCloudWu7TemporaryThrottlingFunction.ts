@@ -1,10 +1,9 @@
 const YDB_DATABASES_API = 'https://ydb.api.cloud.yandex.net/ydb/v1/databases' as const;
-const OPERATIONS_API = 'https://operation.api.cloud.yandex.net/operations' as const;
 const UPDATE_MASK = 'serverlessDatabase.throttlingRcuLimit' as const;
 const INITIAL_LIMIT = 10 as const;
 const TEMPORARY_LIMIT = 14 as const;
-const OPERATION_POLL_LIMIT = 300;
-const OPERATION_POLL_MS = 1_000;
+const OPERATION_POLL_LIMIT = 150;
+const OPERATION_POLL_MS = 2_000;
 
 type Action = 'READ' | 'SET_14' | 'RESTORE_10';
 type UnknownRecord = Readonly<Record<string, unknown>>;
@@ -46,11 +45,11 @@ export type Wu7TemporaryThrottlingResult =
         | 'STATE_NOT_EXACT'
         | 'UPDATE_FAILED'
         | 'UPDATE_UNKNOWN'
-        | 'OPERATION_READ_AUTH'
-        | 'OPERATION_READ_NOT_FOUND'
-        | 'OPERATION_READ_TRANSPORT'
-        | 'OPERATION_READ_MALFORMED'
-        | 'OPERATION_NOT_TERMINAL'
+        | 'UPDATE_AUTH'
+        | 'UPDATE_NOT_FOUND'
+        | 'UPDATE_TRANSPORT'
+        | 'UPDATE_MALFORMED'
+        | 'UPDATE_NOT_TERMINAL'
         | 'READBACK_MISMATCH';
     }>;
 
@@ -166,49 +165,6 @@ async function readExactState(
   });
 }
 
-async function waitForOperation(
-  operationId: string,
-  token: string,
-  fetchImpl: Wu7ThrottlingFetch,
-  sleep: Wu7Sleep,
-): Promise<
-  'DONE'
-  | 'FAILED'
-  | 'READ_AUTH'
-  | 'READ_NOT_FOUND'
-  | 'READ_TRANSPORT'
-  | 'MALFORMED'
-  | 'NOT_TERMINAL'
-> {
-  let observedNonTerminal = false;
-  let observedTransportFailure = false;
-  for (let attempt = 0; attempt < OPERATION_POLL_LIMIT; attempt += 1) {
-    const result = await jsonResponse(
-      fetchImpl,
-      `${OPERATIONS_API}/${encodeURIComponent(operationId)}`,
-      { method: 'GET', headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, redirect: 'error' },
-    );
-    if (!result.ok || result.value === null) {
-      if (result.status === 401 || result.status === 403) return 'READ_AUTH';
-      if (result.status === 404) return 'READ_NOT_FOUND';
-      if (result.status !== null && result.status >= 400 && result.status < 500) return 'MALFORMED';
-      observedTransportFailure = true;
-      await sleep(OPERATION_POLL_MS);
-      continue;
-    }
-    if (result.value.id !== operationId) return 'MALFORMED';
-    if (result.value.done === true) {
-      if (result.value.error !== undefined) return 'FAILED';
-      return result.value.response !== undefined ? 'DONE' : 'MALFORMED';
-    }
-    if (result.value.done !== false) return 'MALFORMED';
-    observedNonTerminal = true;
-    await sleep(OPERATION_POLL_MS);
-  }
-  if (observedNonTerminal) return 'NOT_TERMINAL';
-  return observedTransportFailure ? 'READ_TRANSPORT' : 'MALFORMED';
-}
-
 async function updateLimit(
   state: ExactState,
   folderId: string,
@@ -219,33 +175,67 @@ async function updateLimit(
 ): Promise<
   'DONE'
   | 'FAILED'
-  | 'UNKNOWN'
-  | 'READ_AUTH'
-  | 'READ_NOT_FOUND'
-  | 'READ_TRANSPORT'
+  | 'AUTH'
+  | 'NOT_FOUND'
+  | 'TRANSPORT'
   | 'MALFORMED'
   | 'NOT_TERMINAL'
 > {
-  const result = await jsonResponse(
-    fetchImpl,
-    `${YDB_DATABASES_API}/${encodeURIComponent(state.databaseId)}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
+  const idempotencyKey = crypto.randomUUID();
+  const body = JSON.stringify({
+    folderId,
+    updateMask: UPDATE_MASK,
+    serverlessDatabase: { throttlingRcuLimit: String(target) },
+  });
+  let operationId: string | null = null;
+  let observedNonTerminal = false;
+  let observedTransportFailure = false;
+
+  for (let attempt = 0; attempt < OPERATION_POLL_LIMIT; attempt += 1) {
+    const result = await jsonResponse(
+      fetchImpl,
+      `${YDB_DATABASES_API}/${encodeURIComponent(state.databaseId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        redirect: 'error',
+        body,
       },
-      redirect: 'error',
-      body: JSON.stringify({
-        folderId,
-        updateMask: UPDATE_MASK,
-        serverlessDatabase: { throttlingRcuLimit: String(target) },
-      }),
-    },
-  );
-  if (!result.ok || result.value === null || !nonBlank(result.value.id)) return 'UNKNOWN';
-  return waitForOperation(result.value.id, token, fetchImpl, sleep);
+    );
+
+    if (!result.ok || result.value === null) {
+      if (result.status === 401 || result.status === 403) return 'AUTH';
+      if (result.status === 404) return 'NOT_FOUND';
+      if (result.status !== null && result.status >= 400 && result.status < 500) return 'MALFORMED';
+      observedTransportFailure = true;
+      await sleep(OPERATION_POLL_MS);
+      continue;
+    }
+
+    if (!nonBlank(result.value.id)) return 'MALFORMED';
+    if (operationId === null) operationId = result.value.id;
+    else if (result.value.id !== operationId) return 'MALFORMED';
+
+    if (result.value.done === true) {
+      const hasError = result.value.error !== undefined;
+      const hasResponse = result.value.response !== undefined;
+      if (hasError === hasResponse) return 'MALFORMED';
+      return hasError ? 'FAILED' : 'DONE';
+    }
+    if (result.value.done !== false) return 'MALFORMED';
+    if (result.value.response !== undefined) return 'MALFORMED';
+
+    observedNonTerminal = true;
+    await sleep(OPERATION_POLL_MS);
+  }
+
+  if (observedNonTerminal) return 'NOT_TERMINAL';
+  return observedTransportFailure ? 'TRANSPORT' : 'MALFORMED';
 }
 
 export async function executeWu7TemporaryThrottlingGate(
@@ -286,12 +276,11 @@ export async function executeWu7TemporaryThrottlingGate(
   }
   const updated = await updateLimit(before, folderId, token, target, fetchImpl, sleep);
   if (updated === 'FAILED') return stop('UPDATE_FAILED');
-  if (updated === 'UNKNOWN') return stop('UPDATE_UNKNOWN');
-  if (updated === 'READ_AUTH') return stop('OPERATION_READ_AUTH');
-  if (updated === 'READ_NOT_FOUND') return stop('OPERATION_READ_NOT_FOUND');
-  if (updated === 'READ_TRANSPORT') return stop('OPERATION_READ_TRANSPORT');
-  if (updated === 'MALFORMED') return stop('OPERATION_READ_MALFORMED');
-  if (updated === 'NOT_TERMINAL') return stop('OPERATION_NOT_TERMINAL');
+  if (updated === 'AUTH') return stop('UPDATE_AUTH');
+  if (updated === 'NOT_FOUND') return stop('UPDATE_NOT_FOUND');
+  if (updated === 'TRANSPORT') return stop('UPDATE_TRANSPORT');
+  if (updated === 'MALFORMED') return stop('UPDATE_MALFORMED');
+  if (updated === 'NOT_TERMINAL') return stop('UPDATE_NOT_TERMINAL');
 
   const after = await readExactState(databaseId, folderId, token, fetchImpl);
   if (after === 'READ_FAILED') return stop('UPDATE_UNKNOWN');

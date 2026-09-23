@@ -776,8 +776,8 @@ jobs:
             and .code == "WU7_THROTTLING_GATE_STOP"
             and (.stage | IN(
               "CONFIG_INVALID","EVENT_INVALID","READ_FAILED","IDENTITY_MISMATCH","STATE_NOT_EXACT",
-              "UPDATE_FAILED","UPDATE_UNKNOWN","OPERATION_READ_AUTH","OPERATION_READ_NOT_FOUND",
-              "OPERATION_READ_TRANSPORT","OPERATION_READ_MALFORMED","OPERATION_NOT_TERMINAL",
+              "UPDATE_FAILED","UPDATE_UNKNOWN","UPDATE_AUTH","UPDATE_NOT_FOUND",
+              "UPDATE_TRANSPORT","UPDATE_MALFORMED","UPDATE_NOT_TERMINAL",
               "READBACK_MISMATCH"
             ))
           ' "$tmp/set.json" >/dev/null; then
@@ -917,8 +917,8 @@ jobs:
               and .code == "WU7_THROTTLING_GATE_STOP"
               and (.stage | IN(
                 "CONFIG_INVALID","EVENT_INVALID","READ_FAILED","IDENTITY_MISMATCH","STATE_NOT_EXACT",
-                "UPDATE_FAILED","UPDATE_UNKNOWN","OPERATION_READ_AUTH","OPERATION_READ_NOT_FOUND",
-                "OPERATION_READ_TRANSPORT","OPERATION_READ_MALFORMED","OPERATION_NOT_TERMINAL",
+                "UPDATE_FAILED","UPDATE_UNKNOWN","UPDATE_AUTH","UPDATE_NOT_FOUND",
+                "UPDATE_TRANSPORT","UPDATE_MALFORMED","UPDATE_NOT_TERMINAL",
                 "READBACK_MISMATCH"
               ))
             ' "$tmp/restore.json" >/dev/null; then
