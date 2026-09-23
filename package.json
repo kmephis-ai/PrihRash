@@ -20,7 +20,7 @@
     "test:schema": "node --test tests/schema/*.test.mjs",
     "test:ydb-adapter": "npm run build --silent && node --test tests/integration/*.test.mjs",
     "privacy": "node scripts/privacy-smoke.mjs",
-    "check": "npm run privacy && npm run lint && npm run typecheck && npm run build && npm run test:from-build && npm run package:function:from-build && npm run package:schema-bootstrap:from-build && npm run package:schema-upgrade-003:from-build && npm run package:schema-upgrade-004:from-build && npm run package:initial-bootstrap:from-build && npm run package:initial-bootstrap-recovery:from-build && npm run package:initial-controlled-rebuild:from-build && npm run package:initial-bootstrap-stale-validated-terminalization:from-build",
+    "check": "npm run privacy && npm run lint && npm run typecheck && npm run build && npm run test:from-build && npm run package:function:from-build && npm run package:schema-bootstrap:from-build && npm run package:schema-upgrade-003:from-build && npm run package:schema-upgrade-004:from-build && npm run package:initial-bootstrap:from-build && npm run package:initial-bootstrap-recovery:from-build && npm run package:initial-controlled-rebuild:from-build && npm run package:initial-bootstrap-stale-validated-terminalization:from-build && npm run package:wu7-temp-throttling:from-build",
     "preview:build": "node scripts/build-r2-ui-preview.mjs",
     "preview:r2": "npm run preview:build --silent && node scripts/serve-r2-ui-preview.mjs",
     "package:schema-bootstrap": "npm run build --silent && npm run package:schema-bootstrap:from-build --silent",
@@ -45,7 +45,9 @@
     "package:initial-bootstrap-stale-validated-terminalization:from-build": "node scripts/package-yandex-initial-bootstrap-stale-validated-terminalization-function.mjs && node scripts/verify-yandex-initial-bootstrap-stale-validated-terminalization-package.mjs",
     "package:schema-upgrade-004": "npm run build --silent && npm run package:schema-upgrade-004:from-build --silent",
     "schema-upgrade-004:invoke": "node scripts/invoke-yandex-schema-upgrade-004.mjs",
-    "package:schema-upgrade-004:from-build": "node scripts/package-yandex-schema-upgrade-004-function.mjs && node scripts/verify-yandex-schema-upgrade-004-package.mjs"
+    "package:schema-upgrade-004:from-build": "node scripts/package-yandex-schema-upgrade-004-function.mjs && node scripts/verify-yandex-schema-upgrade-004-package.mjs",
+    "package:wu7-temp-throttling": "npm run build --silent && npm run package:wu7-temp-throttling:from-build --silent",
+    "package:wu7-temp-throttling:from-build": "node scripts/package-yandex-wu7-temporary-throttling-function.mjs && node scripts/verify-yandex-wu7-temporary-throttling-package.mjs"
   },
   "devDependencies": {
     "typescript": "5.8.3",

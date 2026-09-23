@@ -354,3 +354,17 @@ Exact-main recovery `35677723728` на `3f464b5e2da62553cecfc501316c9f386c3dae55
 Начиная с #755 обычный `controlled_preparation_only` больше не передаёт `readRequestUnitObserver`; следовательно, он не запрашивает FULL query stats для всех reads. Protocol field `stagingControlledPreparationMetadataScanCostEvidence` сохраняется для backward-compatible evidence и штатно возвращает `UNOBSERVED`. Pure RU estimator/tracker и transport capability не удаляются: этот item retire'ит только активное stage-specific wiring.
 
 Это изменение **не** утверждает, что FULL stats был причиной `RESOURCE_EXHAUSTED`, и не ослабляет revision evidence. Exact schema-v4 metadata read, exact-key full `raw_payload` verification, retry/timeout envelope, request ordering/count, IAM и financial semantics остаются прежними. После merge разрешён максимум один fresh exact-main read-only controlled-preparation diagnostic; controlled rebuild replay, cap increase, Google mutation, timer/cutover и production Writer остаются запрещены.
+
+### #758/#759: one-shot temporary 14 RU/s gate
+
+Owner отдельно разрешил ровно один WU7 controlled rebuild с временным повышением serverless throttling `10 → 14 RU/s` и обязательным возвратом на `10`. Эта authority не меняет Google/YDB authority model: Google остаётся authoritative, YDB — shadow; timer/cutover/production Writer не включаются.
+
+Repository surface остаётся внутри существующего manual-only `R1 initial controlled rebuild`. Новый input `temporary_throttling_gate_issue` по умолчанию пуст и не меняет обычное поведение. Если input задан, workflow fail-closed требует отдельный open provider gate с `Provider-Authority: WU7_TEMPORARY_THROTTLING_14` и explicit hard bounds `10 → max 14 → 10`, а controlled-rebuild Issue обязан ссылаться на тот же gate.
+
+Temporary Function package содержит только `wu7TemporaryThrottlingHandler`, использует существующий `prihrash-initial-bootstrap` runtime service account и получает только `PRIHRASH_YDB_CONNECTION_STRING` + folder locator. Google secrets и financial source payload в package не передаются. Workflow не создаёт и не меняет IAM bindings.
+
+Перед mutation handler выполняет exact `Database.Get` identity/state proof: serverless, throttling enabled, `throttlingRcuLimit=10`, `provisionedRcuLimit=0`. `Database.Update` использует только exact field mask `serverlessDatabase.throttlingRcuLimit`; enable/provisioned/storage/network/backup и прочие поля не входят в mutation body. Async provider operation обязана достичь terminal state, после чего отдельный `Database.Get` подтверждает exact target.
+
+После доказанного `14` выполняется ровно один existing controlled-rebuild invoke. Сразу после него `always()` compensation выполняет explicit `Database.Update → 10` даже если current read уже показывает `10`, ждёт terminal Operation и затем делает независимый final `Database.Get`. Success gate существует только при exact final `10 / enabled / provisioned=0`.
+
+Unknown/failed set или restore не разрешает replay. Если restore/final read не доказан, workflow остаётся failed/recovery-required; cap выше `14`, provisioned RCU change, IAM widening, Google mutation, cleanup ambiguous financial state, timer/cutover и второй controlled rebuild под #759 запрещены. После завершения one-shot stage-specific package/workflow wiring подлежит retirement на следующей natural boundary.
