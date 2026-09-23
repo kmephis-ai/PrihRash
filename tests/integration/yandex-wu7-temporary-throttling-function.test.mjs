@@ -71,7 +71,7 @@ test('SET_14 changes only throttlingRcuLimit, waits operation, then proves exact
   const idempotencyKey = io.calls[1].init.headers['Idempotency-Key'];
   assert.match(idempotencyKey, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
   assert.equal(io.calls[2].init.headers['Idempotency-Key'], idempotencyKey);
-  assert.equal(io.calls.some((call) => String(call.input).includes('operation.api.cloud.yandex.net')), false);
+  assert.deepEqual(io.calls.filter((call) => call.init.method === 'GET').map((call) => call.input), [io.calls[0].input, io.calls[3].input]);
   const body = JSON.parse(io.calls[1].init.body);
   assert.deepEqual(body, {
     folderId: 'folder-safe',
