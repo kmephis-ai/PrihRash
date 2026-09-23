@@ -42,6 +42,7 @@ jobs:
             .artifacts/yandex-initial-bootstrap-function/
             .artifacts/yandex-initial-bootstrap-recovery-function/
             .artifacts/yandex-initial-controlled-rebuild-function/
+            .artifacts/yandex-wu7-temporary-throttling-function/
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
