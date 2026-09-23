@@ -1,7 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const checkedExtensions = new Set(['.ts', '.mjs', '.json', '.yml', '.yaml']);
 const ignoredDirs = new Set(['node_modules', 'dist', '.git']);
 const violations = [];
@@ -17,7 +18,7 @@ async function walk(dir) {
     if (!checkedExtensions.has(extname(entry.name))) continue;
     const text = await readFile(path, 'utf8');
     const rel = relative(root, path);
-    text.split('\n').forEach((line, index) => {
+    text.split(/\r?\n/).forEach((line, index) => {
       if (/\s+$/.test(line)) violations.push(`${rel}:${index + 1}: trailing whitespace`);
       if (line.includes('\t')) violations.push(`${rel}:${index + 1}: tab character`);
     });

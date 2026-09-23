@@ -1,7 +1,8 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = fileURLToPath(new URL('..', import.meta.url));
 const ignoredDirs = new Set(['node_modules', 'dist', '.git']);
 const textExtensions = new Set(['.ts', '.mjs', '.json', '.md', '.yml', '.yaml']);
 const forbiddenNameFragments = ['.private.', 'ПрихРасхOnline.csv', 'ПрихРасхOnline.xlsx'];
