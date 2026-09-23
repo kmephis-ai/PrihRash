@@ -173,8 +173,9 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READY_TIMEOUT_MS = 10_000/);
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_READ_TIMEOUT_MS = 21_000/);
   assert.match(runtime, /INITIAL_RECOVERY_CONTROLLED_PREPARATION_YDB_TRANSACTION_TIMEOUT_MS = 25_000/);
-  assert.match(runtime, /readRequestUnitObserver/);
+  assert.doesNotMatch(runtime, /readRequestUnitObserver/);
   assert.match(runtime, /createInitialBootstrapControlledPreparationMetadataScanCostTracker/);
+  assert.match(runtime, /metadataScanCostEvidence: 'UNOBSERVED' as const/);
   assert.match(runtime, /REVISION_METADATA_SCAN/);
   assert.match(runtime, /prepareInitialControlledRebuildContinuation/);
   assert.match(runtime, /node:diagnostics_channel/);
