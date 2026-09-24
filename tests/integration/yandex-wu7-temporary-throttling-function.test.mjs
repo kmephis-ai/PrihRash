@@ -171,19 +171,99 @@ test('omitted proto3 done with early error remains non-terminal until done=true'
   assert.equal(io.calls.length, 3);
 });
 
-test('omitted proto3 done with response is malformed', async () => {
+test('early provider response waits for terminal proof for SET and RESTORE', async () => {
+  for (const action of ['SET_14', 'RESTORE_10']) {
+    for (const done of [undefined, false]) {
+      const target = action === 'SET_14' ? 14 : 10;
+      const io = sequence([
+        response(database(target === 14 ? 10 : 14)),
+        response({ id: 'operation-safe', done, response: database(target) }),
+        response({ id: 'operation-safe', done: false, response: database(target) }),
+        response({ id: 'operation-safe', done: true, response: database(target) }),
+        response(database(target)),
+      ]);
+      const result = await executeWu7TemporaryThrottlingGate(
+        { action }, environment, context, io.fetchImpl, noSleep,
+      );
+      assert.deepEqual(result, {
+        status: 'PASS',
+        code: target === 14 ? 'WU7_THROTTLING_SET_14' : 'WU7_THROTTLING_RESTORED_10',
+      });
+      assert.deepEqual(io.calls.map((call) => call.init.method), ['GET', 'PATCH', 'PATCH', 'PATCH', 'GET']);
+      for (const call of io.calls.slice(2, 4)) {
+        assert.equal(call.input, io.calls[1].input);
+        assert.equal(call.init.body, io.calls[1].init.body);
+        assert.equal(call.init.headers['Idempotency-Key'], io.calls[1].init.headers['Idempotency-Key']);
+      }
+    }
+  }
+});
+
+test('early response cannot replace missing, failed, changed or contradictory terminal proof', async () => {
+  for (const terminal of [
+    { id: 'operation-safe', done: true },
+    { id: 'operation-other', done: true, response: {} },
+    { id: 'operation-safe', done: true, response: {}, error: { code: 1 } },
+    { id: 'operation-safe', done: 'true', response: {} },
+    { id: 'operation-safe', done: true, error: { code: 1 } },
+  ]) {
+    const io = sequence([
+      response(database(10)),
+      response({ id: 'operation-safe', done: false, response: database(14) }),
+      response(terminal),
+    ]);
+    const result = await executeWu7TemporaryThrottlingGate(
+      { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+    );
+    assert.equal(result.status, 'STOP');
+    assert.equal(result.stage, terminal.error && !terminal.response ? 'UPDATE_FAILED' : 'UPDATE_MALFORMED');
+    assert.equal(io.calls.length, 3);
+  }
+});
+
+test('early response still requires independent exact post-terminal read-back', async () => {
   const io = sequence([
     response(database(10)),
-    response({ id: 'operation-safe', response: {} }),
+    response({ id: 'operation-safe', done: false, response: database(14) }),
+    response({ id: 'operation-safe', done: true, response: database(14) }),
+    response(database(10)),
   ]);
   const result = await executeWu7TemporaryThrottlingGate(
     { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
   );
-  assert.deepEqual(result, {
-    status: 'STOP',
-    code: 'WU7_THROTTLING_GATE_STOP',
-    stage: 'UPDATE_MALFORMED',
-  });
+  assert.equal(result.stage, 'READBACK_MISMATCH');
+});
+
+test('non-terminal response with invalid shape or simultaneous error stays malformed', async () => {
+  for (const early of [
+    { response: null }, { response: [] }, { response: 'private-response' },
+    { response: {}, error: { code: 1 } },
+  ]) {
+    const io = sequence([
+      response(database(10)),
+      response({ id: 'operation-safe', done: false, ...early }),
+    ]);
+    const result = await executeWu7TemporaryThrottlingGate(
+      { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+    );
+    assert.deepEqual(result, { status: 'STOP', code: 'WU7_THROTTLING_GATE_STOP', stage: 'UPDATE_MALFORMED' });
+    assert.equal(io.calls.length, 2);
+  }
+});
+
+test('early response never reaching done=true exhausts polling without success or GET read-back', async () => {
+  const io = sequence([
+    response(database(10)),
+    ...Array.from({ length: 150 }, () => response({
+      id: 'operation-safe', done: false, response: database(14),
+    })),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, { status: 'STOP', code: 'WU7_THROTTLING_GATE_STOP', stage: 'UPDATE_NOT_TERMINAL' });
+  assert.equal(io.calls.length, 151);
+  assert.equal(io.calls.filter((call) => call.init.method === 'GET').length, 1);
 });
 
 test('operation permission failure is classified without waiting or exposing provider payload', async () => {

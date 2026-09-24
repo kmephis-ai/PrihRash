@@ -396,3 +396,28 @@ Yandex Cloud REST API использует gRPC-JSON transcoding поверх pr
 Это не ослабляет terminal proof: success по-прежнему существует только при `done=true` и ровно одном `response`; terminal failure — при `done=true` и ровно одном `error`. Omitted/false `done` с `response` остаётся malformed; omitted/false `done` с ранним `error` остаётся non-terminal и продолжает bounded polling тем же Idempotency-Key.
 
 #773 — repository-only. Live provider retry, cap mutation и controlled rebuild требуют новой отдельной Owner authority после merge и exact-main verification.
+
+### #777: ранний response у незавершённой Managed YDB Operation
+
+Новая Owner-authorized попытка `36029010407` после #774 снова вернула `UPDATE_MALFORMED`
+на SET и restore; financial invoke был пропущен. Independent read-only run `36029331966`
+доказал итоговые `10 RU/s / enabled / provisioned=0`, но не terminal Operation proof.
+
+Причина воспроизведена отдельным bounded no-op `Database.Update` на тестовой YDB:
+единственное поле `throttlingRcuLimit` оставалось `10 → 10`. Первый ответ и первый
+idempotent poll содержали `done=false` **вместе с объектом `response`**, без `error`.
+Следующий poll с тем же UUID, method/path/body вернул ту же Operation с `done=true`
+и `response`. Независимый final read подтвердил exact `10 / enabled / provisioned=0`.
+Provider identifiers, token и raw response в evidence не публиковались.
+
+Это наблюдаемое поведение Managed YDB отличается от общего описания
+[Operation](https://yandex.cloud/en/docs/api-design-guide/concepts/operation), где
+`response` описан как поле завершённой операции. Начиная с #777 ранний объект
+`response` при omitted/false `done` не является ни terminal success, ни сам по себе
+ошибкой формата: продолжается bounded polling тем же idempotency key.
+Success по-прежнему требует `done=true`, ровно одного `response` без `error` и
+независимого exact Database.Get. Изменившийся operation ID, invalid done type,
+необъектный ранний response или одновременные response/error остаются fail-closed.
+Ранний response без последующего terminal proof заканчивается `UPDATE_NOT_TERMINAL`;
+он никогда не заменяет terminal proof или final read-back. Это уточнение заменяет
+запрет любого раннего response в предыдущем разделе #773.
