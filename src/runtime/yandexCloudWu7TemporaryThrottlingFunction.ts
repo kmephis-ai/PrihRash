@@ -229,7 +229,10 @@ async function updateLimit(
       return hasError ? 'FAILED' : 'DONE';
     }
     if (done !== false) return 'MALFORMED';
-    if (result.value.response !== undefined) return 'MALFORMED';
+    // Managed YDB may populate response before done=true. It is not terminal proof.
+    if (result.value.response !== undefined && (
+      record(result.value.response) === null || result.value.error !== undefined
+    )) return 'MALFORMED';
 
     observedNonTerminal = true;
     await sleep(OPERATION_POLL_MS);
