@@ -385,3 +385,14 @@ Terminal proof не ослаблен: success существует только 
 Polling envelope остаётся bounded 300 seconds, реализован как максимум 150 identical idempotent PATCH requests с интервалом 2 seconds внутри 360-second temporary Function timeout. Generic `Operation.Get`, temporary `auditor` и любое IAM widening для этого path не требуются.
 
 Repository-only #767 не разрешает новый provider attempt. Новый live `10→14→controlled rebuild→10` возможен только под отдельной fresh Owner authority после merge и exact-main verification.
+
+
+### #773: proto3 default done=false
+
+Live one-shot `35953332143` после #768 доказал новый control-plane parsing blocker: initial exact 10 PASS, SET и restore оба завершились `UPDATE_MALFORMED`, controlled rebuild был SKIPPED, а final provider read-back остался exact `10 / enabled / provisioned=0`.
+
+Yandex Cloud REST API использует gRPC-JSON transcoding поверх proto3. Для Operation `done=false` означает non-terminal state; `response` отсутствует до successful completion, а `error` может появиться ещё до завершения rollback. Runtime поэтому нормализует отсутствующий JSON field `done` к proto3 default `false`.
+
+Это не ослабляет terminal proof: success по-прежнему существует только при `done=true` и ровно одном `response`; terminal failure — при `done=true` и ровно одном `error`. Omitted/false `done` с `response` остаётся malformed; omitted/false `done` с ранним `error` остаётся non-terminal и продолжает bounded polling тем же Idempotency-Key.
+
+#773 — repository-only. Live provider retry, cap mutation и controlled rebuild требуют новой отдельной Owner authority после merge и exact-main verification.
