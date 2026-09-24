@@ -221,13 +221,14 @@ async function updateLimit(
     if (operationId === null) operationId = result.value.id;
     else if (result.value.id !== operationId) return 'MALFORMED';
 
-    if (result.value.done === true) {
+    const done = result.value.done === undefined ? false : result.value.done;
+    if (done === true) {
       const hasError = result.value.error !== undefined;
       const hasResponse = result.value.response !== undefined;
       if (hasError === hasResponse) return 'MALFORMED';
       return hasError ? 'FAILED' : 'DONE';
     }
-    if (result.value.done !== false) return 'MALFORMED';
+    if (done !== false) return 'MALFORMED';
     if (result.value.response !== undefined) return 'MALFORMED';
 
     observedNonTerminal = true;

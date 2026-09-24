@@ -56,7 +56,7 @@ test('READ exposes only exact safe 10/14 state and proto3 omitted provisioned=0'
 test('SET_14 changes only throttlingRcuLimit, waits operation, then proves exact read-back', async () => {
   const io = sequence([
     response(database(10, { provisionedRcuLimit: '0' })),
-    response({ id: 'operation-safe', done: false }),
+    response({ id: 'operation-safe' }),
     response({ id: 'operation-safe', done: true, response: {} }),
     response(database(14)),
   ]);
@@ -93,7 +93,7 @@ test('RESTORE_10 is read-only when state already proves exact 10', async () => {
 test('RESTORE_10 changes exact 14 back to exact 10', async () => {
   const io = sequence([
     response(database(14)),
-    response({ id: 'operation-safe', done: false }),
+    response({ id: 'operation-safe' }),
     response({ id: 'operation-safe', done: true, response: {} }),
     response(database(10)),
   ]);
@@ -154,6 +154,38 @@ test('terminal provider operation error stays fail-closed without read-back succ
 });
 
 
+test('omitted proto3 done with early error remains non-terminal until done=true', async () => {
+  const io = sequence([
+    response(database(10)),
+    response({ id: 'operation-safe', error: { code: 1 } }),
+    response({ id: 'operation-safe', done: true, error: { code: 1 } }),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'UPDATE_FAILED',
+  });
+  assert.equal(io.calls.length, 3);
+});
+
+test('omitted proto3 done with response is malformed', async () => {
+  const io = sequence([
+    response(database(10)),
+    response({ id: 'operation-safe', response: {} }),
+  ]);
+  const result = await executeWu7TemporaryThrottlingGate(
+    { action: 'SET_14' }, environment, context, io.fetchImpl, noSleep,
+  );
+  assert.deepEqual(result, {
+    status: 'STOP',
+    code: 'WU7_THROTTLING_GATE_STOP',
+    stage: 'UPDATE_MALFORMED',
+  });
+});
+
 test('operation permission failure is classified without waiting or exposing provider payload', async () => {
   const io = sequence([
     response(database(10)),
@@ -190,8 +222,8 @@ test('operation not-found is a distinct fail-closed terminal-proof failure', asy
 test('operation that never becomes terminal is not accepted from state transition alone', async () => {
   const values = [
     response(database(10)),
-    response({ id: 'operation-safe', done: false }),
-    ...Array.from({ length: 149 }, () => response({ id: 'operation-safe', done: false })),
+    response({ id: 'operation-safe' }),
+    ...Array.from({ length: 149 }, () => response({ id: 'operation-safe' })),
   ];
   const io = sequence(values);
   const result = await executeWu7TemporaryThrottlingGate(

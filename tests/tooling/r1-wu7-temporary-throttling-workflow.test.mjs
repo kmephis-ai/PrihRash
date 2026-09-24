@@ -74,6 +74,7 @@ test('runtime mutates only the exact throttling field and waits a terminal opera
   assert.match(runtime, /OPERATION_POLL_MS = 2_000/);
   assert.match(runtime, /'Idempotency-Key': idempotencyKey/);
   assert.match(runtime, /crypto\.randomUUID\(\)/);
+  assert.match(runtime, /result\.value\.done === undefined \? false : result\.value\.done/);
   assert.match(runtime, /UPDATE_AUTH/);
   assert.match(runtime, /UPDATE_TRANSPORT/);
   assert.match(runtime, /UPDATE_NOT_TERMINAL/);
