@@ -28,6 +28,19 @@ test('bootstrap runtime evidence becomes the exact bounded observed signature', 
   }), 'REFERENCE_APPLICATION_YDB_DATA_FAILED/REVISION_EVIDENCE_WRITE/YDB_TRANSPORT_QUERY_EXECUTION_FAILED');
 });
 
+test('revision payload preparation failure is the exact Incident-M observed signature', () => {
+  assert.equal(deriveBootstrapEvidenceSignature({
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_RUNTIME_FAILED',
+    runtimeCode: 'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+    applicationPhase: 'REVISION_EVIDENCE_PREPARATION',
+    metadataFailureCode: null,
+    ydbDataFailureCode: null,
+    httpStatus: null,
+    functionError: null,
+  }), 'REFERENCE_APPLICATION_SEMANTIC_FAILED/REVISION_EVIDENCE_PREPARATION');
+});
+
 
 test('stale-retirement semantic evidence becomes an exact bounded observed signature', () => {
   assert.equal(deriveBootstrapEvidenceSignature({

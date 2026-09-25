@@ -210,23 +210,27 @@ function estimatedRevisionReadBytes(
     + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
 }
 
-function exactPayloadKeyReadStatement(
+function exactPayloadRangeReadStatement(
   runId: string,
   revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
 ) {
-  const sourceKeys = revisions.map((revision) => Object.freeze({
-    source_record_id: uuidParameter(revision.sourceRecordId),
-  }));
+  const first = revisions[0];
+  const last = revisions.at(-1);
+  if (first === undefined || last === undefined) {
+    throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
+  }
   return readStatement(
     'SELECT r.source_record_id, r.revision, r.migration_run_id, r.observed_at, r.row_hint, '
       + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class, r.raw_payload '
       + 'FROM source_record_revisions AS r '
-      + 'INNER JOIN AS_TABLE($source_keys) AS k ON r.source_record_id = k.source_record_id '
-      + 'WHERE r.revision = $revision AND r.migration_run_id = $migration_run_id',
+      + 'WHERE r.source_record_id >= $source_record_id_from '
+      + 'AND r.source_record_id <= $source_record_id_to '
+      + 'AND r.revision = $revision AND r.migration_run_id = $migration_run_id',
     {
+      source_record_id_from: uuidParameter(first.sourceRecordId),
+      source_record_id_to: uuidParameter(last.sourceRecordId),
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(runId),
-      source_keys: listStructParameter(SOURCE_KEY_COLUMNS, sourceKeys),
     },
   );
 }
@@ -323,7 +327,7 @@ export async function planInitialSourceRevisionEvidenceResume(
   for (const batch of planRevisionReadBatches(existingRevisions)) {
     observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
-      exactPayloadKeyReadStatement(expected.runId, batch),
+      exactPayloadRangeReadStatement(expected.runId, batch),
     );
     validateRevisionRows(payloadResult.rows, expected, payloadVerifiedSourceIds, true);
   }

@@ -390,6 +390,37 @@ The next allowed operation is one full read-only recovery on a new exact SHA usi
 `Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. No bootstrap or resume follows from the new error
 signature until fresh recovery and cross-run circuit evidence have been reviewed.
 
+### RESOURCE_EXHAUSTED in application revision payload batch on `b729820a10890707e3bc5b0116ca9d4d4af6c253`
+
+Read-only recovery `36161751076` on exact main again proved digest mismatch, complete durable
+revisions, empty verified current, source decode `NONE`, and exact source `NOT_PROVEN`. The separate
+controlled-preparation-only read-only diagnostic `36163186003` returned:
+
+- `YDB_DATA_QUERY_EXECUTION_FAILED` after retry `RETRIED`;
+- phase `RECONCILIATION_READ`;
+- reconciliation stage `REVISION_PAYLOAD_BATCH`;
+- query error `GRPC_STATUS / RESOURCE_EXHAUSTED`;
+- reference read stage `VIKA_MEMBER_READ`.
+
+This localizes the 1g application's sanitized
+`REFERENCE_APPLICATION_SEMANTIC_FAILED / REVISION_EVIDENCE_PREPARATION` to the exact-payload batch
+query. The earlier recovery optimization to UUID primary-key range reads had not been applied to
+`planInitialSourceRevisionEvidenceResume`; application resume still used a large
+`AS_TABLE($source_keys)` list for payload batches. The bounded correction ports the already-proven
+`source_record_id_from..source_record_id_to` range read, preserving the YDB-returned metadata order,
+exact run/revision filter, byte-derived 512 KiB response envelope, raw-payload equality and
+missing-key collision probe. `AS_TABLE` remains only for the metadata-only collision check of absent
+IDs. The historical #625 summary overstated that the application-resume implementation had already
+adopted range reads; source inspection for this incident found the recovery and application paths had
+diverged. Synthetic adapter regression deterministically emits `RESOURCE_EXHAUSTED` for the old
+payload join seam and verifies the range implementation completes with exact equality.
+
+This is a root-cause candidate for signature
+`REFERENCE_APPLICATION_SEMANTIC_FAILED/REVISION_EVIDENCE_PREPARATION`; it does not widen retries,
+timeouts, write set, schema, financial semantics or authority. Any next provider attempt is at most
+one exact-SHA guarded orchestrator dispatch, subject to current durable classification and the
+distinct-SHA circuit.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
