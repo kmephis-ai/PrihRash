@@ -436,12 +436,26 @@ restore to exact `10`; the final throttle classification was
 established.
 
 Read-only recovery `36032381827` on the same SHA returned only
-`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. That establishes the durable run surface, but does not
-classify exact revision evidence, fresh source match, or resumability. The live recovery therefore
-does not authorize another controlled rebuild, swap, cleanup, or replay. The next permitted step is
-one full read-only exact-revision recovery on a new exact-main SHA using
-`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`; its result must independently establish the fresh
-source/revision and staging state before any later separately authorized mutation.
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. It did not classify exact revision evidence, fresh
+source match, or resumability. It therefore did not authorize another controlled rebuild, swap,
+cleanup, or replay.
+
+Full read-only exact-revision recovery `36138207398` on exact main
+`102a56b690ff2fde232ab3e2c33f82c4b9724bef` then proved:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence `COMPLETE_CURRENT_RUN_ONLY`;
+- `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+The current Google observation no longer matches the staged snapshot. The durable revision evidence
+is complete for its original run, but exact revision-to-current-source equality is not proven; this
+does not authorize resume or retirement by itself. On a successor exact-main SHA, the next bounded
+step is one orchestrator preflight with both `allow_staging_resume=false` and
+`allow_stale_staging_retirement=false`. It must stop at read-only recovery before readiness/bootstrap
+and produce the exact pre-write signature required for any later source-drift rebase. No cleanup or
+controlled rebuild is authorized by this checkpoint.
 
 The one-shot WU7 authority in #779/#780 was bound to SHA `c28d6335bfefc68e8ad7f9bb2a00fd4af54d99b8`
 and was consumed by this run. A successor write-capable attempt requires fresh exact-main
