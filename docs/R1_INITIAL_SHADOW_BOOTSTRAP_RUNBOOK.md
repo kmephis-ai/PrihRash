@@ -404,22 +404,40 @@ controlled-preparation-only read-only diagnostic `36163186003` returned:
 
 This localizes the 1g application's sanitized
 `REFERENCE_APPLICATION_SEMANTIC_FAILED / REVISION_EVIDENCE_PREPARATION` to the exact-payload batch
-query. The earlier recovery optimization to UUID primary-key range reads had not been applied to
-`planInitialSourceRevisionEvidenceResume`; application resume still used a large
-`AS_TABLE($source_keys)` list for payload batches. The bounded correction ports the already-proven
-`source_record_id_from..source_record_id_to` range read, preserving the YDB-returned metadata order,
-exact run/revision filter, byte-derived 512 KiB response envelope, raw-payload equality and
-missing-key collision probe. `AS_TABLE` remains only for the metadata-only collision check of absent
-IDs. The historical #625 summary overstated that the application-resume implementation had already
-adopted range reads; source inspection for this incident found the recovery and application paths had
-diverged. Synthetic adapter regression deterministically emits `RESOURCE_EXHAUSTED` for the old
-payload join seam and verifies the range implementation completes with exact equality.
+query. The application-resume source path still used `AS_TABLE($source_keys)` for exact payload
+verification while read-only recovery had been optimized to UUID primary-key ranges. The first bounded
+correction aligned application resume to that proven range-read strategy, but controlled-preparation
+probe `36171271614` on exact main `3eeb7e90c5fc15c1a696883629047855b69d0bda` still returned
+`RESOURCE_EXHAUSTED / REVISION_PAYLOAD_BATCH` with the old 512 KiB range batch envelope.
 
-This is a root-cause candidate for signature
-`REFERENCE_APPLICATION_SEMANTIC_FAILED/REVISION_EVIDENCE_PREPARATION`; it does not widen retries,
-timeouts, write set, schema, financial semantics or authority. Any next provider attempt is at most
-one exact-SHA guarded orchestrator dispatch, subject to current durable classification and the
-distinct-SHA circuit.
+The successful initial-bootstrap run reached `CONTROLLED_REBUILD_REQUIRED`, but the separate
+read-only controlled-preparation probe `36171271614` still saw resource exhaustion on a 512 KiB
+payload batch even after moving the application query to primary-key ranges. The bounded root-cause
+fix lowers only `REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT` to 64 KiB. The byte-derived batching
+strategy, exact range semantics, YDB-returned order and payload verification remain unchanged; it is
+not a row cap, and an individual larger source payload is never split or silently accepted.
+
+A synthetic adapter fault fixture returns `YDB RESOURCE_EXHAUSTED` when one exact-range batch exceeds
+96 KiB, then proves byte-sized 64 KiB batches complete with exact payload equality. This threshold is
+fixture-only, not asserted as a YDB provider quota. `AS_TABLE` remains only for the metadata-only
+collision check of expected IDs that were missing from the exact run scan. The historical #625 summary
+overstated that application resume had already adopted range reads; this Incident-M ports and bounds
+the actual production path. It does not widen retries, timeouts, write set, schema, financial semantics
+or authority.
+
+This corrective PR authorizes no bootstrap invoke. After merge, a fresh full recovery runs on exact main;
+then a read-only controlled-preparation probe must pass the revision payload phase before the separate
+WU7 Issue #630 authority is exercised.
+
+The full-recovery successor uses the read-only marker:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
 
 ### Full classification required after `CONTROLLED_REBUILD_REQUIRED` on `79fdc6e669c16e8fb363eac4f28edc679f72f113`
 

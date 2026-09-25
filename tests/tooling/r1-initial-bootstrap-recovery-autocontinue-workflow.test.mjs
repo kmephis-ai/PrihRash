@@ -153,3 +153,18 @@ test('CONTROLLED_REBUILD_REQUIRED post-invoke state requires fresh read-only cla
   assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(evidence, /open #630 authority/);
 });
+
+test('revision payload resource exhaustion fix arms only a read-only recovery successor', () => {
+  const evidence = runbook.match(
+    /### RESOURCE_EXHAUSTED in application revision payload batch on `b729820a10890707e3bc5b0116ca9d4d4af6c253`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the controlled-preparation resource-exhaustion evidence must be retained');
+  assert.match(evidence, /controlled-preparation probe `36171271614`/);
+  assert.match(evidence, /RESOURCE_EXHAUSTED.*REVISION_PAYLOAD_BATCH/s);
+  assert.match(evidence, /`REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT` to 64 KiB/);
+  assert.match(evidence, /PR authorizes no bootstrap invoke/);
+  assert.match(evidence, /fresh full recovery runs on exact main/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+});

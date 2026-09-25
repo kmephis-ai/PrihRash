@@ -244,7 +244,7 @@ test('large current-run payload verification uses primary-key range batches boun
 
   const payloadReads = statements.slice(1);
   assert.equal(payloadReads.length > 1, true);
-  assert.equal(payloadReads.length < 10, true);
+  assert.equal(payloadReads.length < 32, true);
   assert.equal(new Set(payloadReads.map((statement) => statement.text)).size, 1);
   assert.equal(payloadReads.every((statement) => (
     statement.parameters.migration_run_id.value === RUN_ID
@@ -317,16 +317,17 @@ test('payload primary-key ranges follow YDB metadata order without client-side U
   assert.deepEqual(resume.missingRevisions, []);
 });
 
-test('RESOURCE_EXHAUSTED exact-payload AS_TABLE fixture is avoided by bounded primary-key range reads', async () => {
+test('RESOURCE_EXHAUSTED exact-payload range batches stay below the synthetic per-query resource envelope', async () => {
   const expected = Array.from({ length: 4 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 2,
     `synthetic-row-${index + 1}`,
-    `Synthetic ${index + 1} ${'x'.repeat(180_000)}`,
+    `Synthetic ${index + 1} ${'x'.repeat(40_000)}`,
   ));
   const providerOrdered = [...expected].reverse();
   const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
   const payloadReadBoundaries = [];
+  const providerRank = new Map(providerOrdered.map((item, index) => [item.sourceRecordId, index]));
   const adapter = new YdbAdapter({
     async executeRead(statement) {
       if (/raw_payload/.test(statement.text) && /AS_TABLE\(\$source_keys\)/.test(statement.text)) {
@@ -336,11 +337,16 @@ test('RESOURCE_EXHAUSTED exact-payload AS_TABLE fixture is avoided by bounded pr
 
       const from = statement.parameters.source_record_id_from.value;
       const to = statement.parameters.source_record_id_to.value;
+      const fromRank = providerRank.get(from);
+      const toRank = providerRank.get(to);
+      const range = providerOrdered.slice(fromRank, toRank + 1);
+      const estimatedResponseBytes = range.reduce((total, item) => total + item.rawPayload.length + 256, 0);
+      if (estimatedResponseBytes > 96 * 1024) {
+        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED');
+      }
       payloadReadBoundaries.push([from, to]);
-      const fromRank = providerOrdered.findIndex((item) => item.sourceRecordId === from);
-      const toRank = providerOrdered.findIndex((item) => item.sourceRecordId === to);
       return {
-        rows: providerOrdered.slice(fromRank, toRank + 1)
+        rows: range
           .map((item) => byId.get(item.sourceRecordId))
           .filter((item) => item !== undefined)
           .map(providerRow),
@@ -354,8 +360,8 @@ test('RESOURCE_EXHAUSTED exact-payload AS_TABLE fixture is avoided by bounded pr
   assert.equal(payloadReadBoundaries.length > 1, true);
   assert.deepEqual(
     payloadReadBoundaries.flatMap(([from, to]) => {
-      const fromRank = providerOrdered.findIndex((item) => item.sourceRecordId === from);
-      const toRank = providerOrdered.findIndex((item) => item.sourceRecordId === to);
+      const fromRank = providerRank.get(from);
+      const toRank = providerRank.get(to);
       return providerOrdered.slice(fromRank, toRank + 1).map((item) => item.sourceRecordId);
     }),
     providerOrdered.map((item) => item.sourceRecordId),
