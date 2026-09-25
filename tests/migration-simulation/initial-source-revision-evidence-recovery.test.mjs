@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
   planInitialSourceRevisionEvidenceResume,
@@ -112,14 +113,12 @@ test('restart after partial revision evidence separates run-scoped payload verif
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
 
   assert.match(statements[1].text, /raw_payload/);
-  assert.match(statements[1].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
+  assert.match(statements[1].text, /source_record_id >= \$source_record_id_from/);
+  assert.match(statements[1].text, /source_record_id <= \$source_record_id_to/);
   assert.match(statements[1].text, /r\.migration_run_id = \$migration_run_id/);
-  assert.doesNotMatch(statements[1].text, />=|<=|source_record_id_\d+/);
-  assert.equal(statements[1].parameters.source_keys.type, 'ListStruct');
-  assert.deepEqual(
-    statements[1].parameters.source_keys.value.rows.map((row) => row.source_record_id.value),
-    [SOURCE_ID_1],
-  );
+  assert.doesNotMatch(statements[1].text, /AS_TABLE|source_record_id_\d+/);
+  assert.equal(statements[1].parameters.source_record_id_from.value, SOURCE_ID_1);
+  assert.equal(statements[1].parameters.source_record_id_to.value, SOURCE_ID_1);
 
   assert.match(statements[2].text, /INNER JOIN AS_TABLE\(\$source_keys\) AS k/);
   assert.doesNotMatch(statements[2].text, /raw_payload/);
@@ -219,7 +218,7 @@ test('foreign or duplicate source evidence returned by the provider fails closed
   );
 });
 
-test('large current-run payload verification uses exact-key batches bounded by response bytes', async () => {
+test('large current-run payload verification uses primary-key range batches bounded by response bytes', async () => {
   const expected = Array.from({ length: 1_000 }, (_, index) => revision(
     `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
     index + 1,
@@ -231,9 +230,9 @@ test('large current-run payload verification uses exact-key batches bounded by r
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
       if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
-      return statement.parameters.source_keys.value.rows
-        .map((row) => byId.get(row.source_record_id.value))
-        .filter((item) => item !== undefined)
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      return expected.filter((item) => item.sourceRecordId >= from && item.sourceRecordId <= to)
         .map(providerRow);
     }, (statement) => statements.push(statement)),
     expected,
@@ -250,21 +249,24 @@ test('large current-run payload verification uses exact-key batches bounded by r
   assert.equal(payloadReads.every((statement) => (
     statement.parameters.migration_run_id.value === RUN_ID
     && /raw_payload/.test(statement.text)
-    && /INNER JOIN AS_TABLE\(\$source_keys\) AS k/.test(statement.text)
-    && !/>=|<=|source_record_id_\d+/.test(statement.text)
-    && statement.parameters.source_keys.type === 'ListStruct'
+    && /source_record_id >= \$source_record_id_from/.test(statement.text)
+    && /source_record_id <= \$source_record_id_to/.test(statement.text)
+    && !/AS_TABLE|source_record_id_\d+/.test(statement.text)
     && Object.keys(statement.parameters).sort().join(',') ===
-      'migration_run_id,revision,source_keys'
+      'migration_run_id,revision,source_record_id_from,source_record_id_to'
   )), true);
-  const flattenedKeys = payloadReads.flatMap((statement) => (
-    statement.parameters.source_keys.value.rows.map((row) => row.source_record_id.value)
-  ));
-  assert.deepEqual(flattenedKeys, expected.map((item) => item.sourceRecordId));
+  assert.deepEqual(
+    payloadReads.flatMap((statement) => expected.filter((item) => (
+      item.sourceRecordId >= statement.parameters.source_record_id_from.value
+      && item.sourceRecordId <= statement.parameters.source_record_id_to.value
+    )).map((item) => item.sourceRecordId)),
+    expected.map((item) => item.sourceRecordId),
+  );
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId).sort());
   assert.deepEqual(resume.missingRevisions, []);
 });
 
-test('payload exact-key batches follow YDB metadata order without widening UUID ranges', async () => {
+test('payload primary-key ranges follow YDB metadata order without client-side UUID sorting', async () => {
   const ids = [
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000002',
@@ -279,6 +281,7 @@ test('payload exact-key batches follow YDB metadata order without widening UUID 
   const providerOrder = [expected[2], expected[0], expected[1]];
   const statements = [];
   const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
+  const providerRank = new Map(providerOrder.map((item, index) => [item.sourceRecordId, index]));
 
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
@@ -286,10 +289,14 @@ test('payload exact-key batches follow YDB metadata order without widening UUID 
         assert.match(statement.text, /ORDER BY source_record_id$/);
         return providerOrder.map(providerRow);
       }
-      assert.doesNotMatch(statement.text, />=|<=/);
-      return statement.parameters.source_keys.value.rows
-        .map((row) => byId.get(row.source_record_id.value))
-        .filter((item) => item !== undefined)
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      const fromRank = providerRank.get(from);
+      const toRank = providerRank.get(to);
+      return providerOrder.filter((item) => {
+        const rank = providerRank.get(item.sourceRecordId);
+        return rank >= fromRank && rank <= toRank;
+      })
         .map(providerRow);
     }, (statement) => statements.push(statement)),
     expected,
@@ -298,11 +305,62 @@ test('payload exact-key batches follow YDB metadata order without widening UUID 
   const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
   assert.deepEqual(
     payloadReads.flatMap((statement) => (
-      statement.parameters.source_keys.value.rows.map((row) => row.source_record_id.value)
+      providerOrder.filter((item) => {
+        const rank = providerRank.get(item.sourceRecordId);
+        return rank >= providerRank.get(statement.parameters.source_record_id_from.value)
+          && rank <= providerRank.get(statement.parameters.source_record_id_to.value);
+      }).map((item) => item.sourceRecordId)
     )),
     providerOrder.map((item) => item.sourceRecordId),
   );
   assert.deepEqual(resume.existingSourceRecordIds, [...ids].sort());
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
+test('RESOURCE_EXHAUSTED exact-payload AS_TABLE fixture is avoided by bounded primary-key range reads', async () => {
+  const expected = Array.from({ length: 4 }, (_, index) => revision(
+    `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    index + 2,
+    `synthetic-row-${index + 1}`,
+    `Synthetic ${index + 1} ${'x'.repeat(180_000)}`,
+  ));
+  const providerOrdered = [...expected].reverse();
+  const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
+  const payloadReadBoundaries = [];
+  const adapter = new YdbAdapter({
+    async executeRead(statement) {
+      if (/raw_payload/.test(statement.text) && /AS_TABLE\(\$source_keys\)/.test(statement.text)) {
+        throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED');
+      }
+      if (!/raw_payload/.test(statement.text)) return { rows: providerOrdered.map(providerRow) };
+
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      payloadReadBoundaries.push([from, to]);
+      const fromRank = providerOrdered.findIndex((item) => item.sourceRecordId === from);
+      const toRank = providerOrdered.findIndex((item) => item.sourceRecordId === to);
+      return {
+        rows: providerOrdered.slice(fromRank, toRank + 1)
+          .map((item) => byId.get(item.sourceRecordId))
+          .filter((item) => item !== undefined)
+          .map(providerRow),
+      };
+    },
+    async serializableReadWrite() { throw new Error('write not expected'); },
+  });
+
+  const resume = await planInitialSourceRevisionEvidenceResume(adapter, expected);
+
+  assert.equal(payloadReadBoundaries.length > 1, true);
+  assert.deepEqual(
+    payloadReadBoundaries.flatMap(([from, to]) => {
+      const fromRank = providerOrdered.findIndex((item) => item.sourceRecordId === from);
+      const toRank = providerOrdered.findIndex((item) => item.sourceRecordId === to);
+      return providerOrdered.slice(fromRank, toRank + 1).map((item) => item.sourceRecordId);
+    }),
+    providerOrdered.map((item) => item.sourceRecordId),
+  );
+  assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId).sort());
   assert.deepEqual(resume.missingRevisions, []);
 });
 
