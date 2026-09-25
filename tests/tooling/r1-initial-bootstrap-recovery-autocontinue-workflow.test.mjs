@@ -7,6 +7,10 @@ const workflow = (await readFile(
   new URL('../../.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', import.meta.url),
   'utf8',
 )).replace(/\r\n/g, '\n');
+const runbook = (await readFile(
+  new URL('../../docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md', import.meta.url),
+  'utf8',
+)).replace(/\r\n/g, '\n');
 
 test('recovery autocontinue is a bounded exact-main read-only dispatch surface', () => {
   assert.match(workflow, /workflow_run:/);
@@ -69,4 +73,20 @@ test('unknown durable outcome accepts only the read-only classification marker p
     'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
     'Recovery-State': 'STAGING_RESUMABLE',
   }), { valid: true, surfaceOnly: false });
+});
+
+test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
+  const evidence = runbook.match(
+    /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest privacy-safe post-invoke classification must be recorded');
+  assert.match(evidence, /orchestrator `36141234938`/);
+  assert.match(evidence, /bootstrap child `36141543533` reached the write-capable invoke and failed/);
+  assert.match(evidence, /`RECOVERY_REQUIRED \/ STAGING_RUN_PRESENT`/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Recovery-Probe: READY/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(evidence, /does not\nauthorize readiness, orchestrator, bootstrap, resume, cleanup, or authority change/);
 });
