@@ -90,3 +90,19 @@ test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only r
   assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(evidence, /does not\nauthorize readiness, orchestrator, bootstrap, resume, cleanup, or authority change/);
 });
+
+test('the latest repeated HTTP 502 post-invoke state remains unclassified and read-only', () => {
+  const evidence = runbook.match(
+    /### Full classification required after repeated HTTP 502 on `ab1708c427ee9bad8b43dc6841c87afd7cff32df`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the current exact-SHA post-invoke recovery boundary must be recorded');
+  assert.match(evidence, /orchestrator\s+`36154418182`/);
+  assert.match(evidence, /bootstrap child\s+`36154779191`/);
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED \/ HTTP_502 \/ functionError=PRESENT`/);
+  assert.match(evidence, /`RECOVERY_REQUIRED \/ STAGING_RUN_PRESENT`/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(evidence, /may dispatch only the recovery workflow/);
+});

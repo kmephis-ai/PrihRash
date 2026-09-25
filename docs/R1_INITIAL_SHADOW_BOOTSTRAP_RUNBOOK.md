@@ -321,6 +321,23 @@ from the source lease is passed unchanged to reference planning and application 
 Any automatic live attempt remains subject to the exact signature/circuit and fresh recovery guards;
 this hypothesis alone does not authorize an invoke.
 
+### Full classification required after repeated HTTP 502 on `ab1708c427ee9bad8b43dc6841c87afd7cff32df`
+
+The exact-source root-cause candidate passed CI and autocontinue selected one orchestrator
+`36154418182`. Fresh readiness `36154623727` returned `READINESS_READY`; bootstrap child
+`36154779191` reached invoke and returned the same
+`INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED / HTTP_502 / functionError=PRESENT`. The mandatory embedded
+post-invoke recovery only returned `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, with
+`stagingResumeAuthorized=false` and `staleStagingRetirementAuthorized=true`. This does not prove
+whether the new snapshot reduction changed durable state and does not authorize another bootstrap.
+
+The next successor may request exactly one full read-only recovery on a new exact SHA using
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`, and
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. It may dispatch only the recovery workflow. Any
+subsequent root-cause write path must be blocked or freshly authorized from the exact recovery
+classification and deterministic signature history; no blind replay, cleanup, or cutover is allowed.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
