@@ -421,6 +421,23 @@ timeouts, write set, schema, financial semantics or authority. Any next provider
 one exact-SHA guarded orchestrator dispatch, subject to current durable classification and the
 distinct-SHA circuit.
 
+### Full classification required after `CONTROLLED_REBUILD_REQUIRED` on `79fdc6e669c16e8fb363eac4f28edc679f72f113`
+
+The guarded range-read successor dispatched orchestrator `36168126324` on exact main
+`79fdc6e669c16e8fb363eac4f28edc679f72f113`. Fresh readiness `36168296429` returned
+`READINESS_READY`; bootstrap child `36168468708` returned
+`STOP / INITIAL_BOOTSTRAP_CONTROLLED_REBUILD_REQUIRED` after the single invoke. The orchestrator's
+mandatory post-invoke recovery only classified `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`; therefore
+the exact durable stage is not yet independently classified.
+
+The next safe operation is exactly one full read-only recovery on a new exact SHA using
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`, and
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. No further ordinary bootstrap follows. If recovery
+confirms a valid resumable STAGING requiring promotion beyond the atomic budget, controlled rebuild
+must proceed only under its separate open #630 authority and exact provider/circuit contract; do not
+infer that authority from `CONTROLLED_REBUILD_REQUIRED` alone.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
