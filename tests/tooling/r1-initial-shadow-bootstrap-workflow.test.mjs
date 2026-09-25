@@ -185,9 +185,14 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
   assert.match(runbook, /Bounded memory-envelope root-cause candidate/);
   assert.match(runbook, /write-capable bootstrap memory `1g`/);
   assert.match(runbook, /RESOURCE_EXHAUSTED in application revision payload batch/);
-  assert.match(runbook, /range read/);
+  assert.match(runbook, /primary-key range reads/);
+  assert.match(runbook, /range batch envelope/);
+  assert.match(runbook, /to 64 KiB/);
+  assert.match(runbook, /fixture returns `YDB RESOURCE_EXHAUSTED`/);
   assert.match(runbook, /controlled-preparation-only read-only diagnostic `36163186003`/);
-  assert.match(runbook, /`AS_TABLE` remains only for the metadata-only collision check/);
+  assert.match(runbook, /controlled-preparation probe `36171271614`/);
+  assert.match(runbook, /`REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT` to 64 KiB/);
+  assert.match(runbook, /`AS_TABLE` remains only for the metadata-only\s+collision check/);
   assert.match(runbook, /EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN/);
   assert.match(runbook, /removes the duplicate full projection and releases the raw lease/);
   assert.match(runbook, /Ответы на форму \(11\)/);

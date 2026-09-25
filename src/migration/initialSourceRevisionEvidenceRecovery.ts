@@ -6,7 +6,6 @@ import {
   uuidParameter,
   type YdbListStructColumn,
 } from '../integration/ydb/parameters.js';
-import { PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT } from './atomicPromotion.js';
 import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
 import { serializeRawPayload } from './rawPayloadProvenance.js';
 
@@ -59,10 +58,11 @@ const SOURCE_KEY_COLUMNS = Object.freeze([
 ] satisfies readonly YdbListStructColumn[]);
 
 const TEXT_ENCODER = new TextEncoder();
-// Reuse the live-calibrated 512 KiB envelope as a conservative upper bound for
-// one exact revision-evidence verification response batch. This is not a row cap:
-// batching is derived from the expected payload bytes and preserves full raw-payload verification.
-const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = PRELIVE_PROMOTION_PARAMETER_BYTES_LIMIT;
+// A 512 KiB exact-payload batch reached YDB RESOURCE_EXHAUSTED in the read-only
+// controlled-preparation probe. Keep these read-only resume batches substantially
+// smaller; batching is still byte-derived, not a row cap. A single oversized row
+// remains unsplit and fails closed through the existing YDB error boundary.
+const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
 
 function observeReadStage(
