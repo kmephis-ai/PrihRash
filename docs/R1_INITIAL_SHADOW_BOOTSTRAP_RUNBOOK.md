@@ -338,6 +338,25 @@ The next successor may request exactly one full read-only recovery on a new exac
 subsequent root-cause write path must be blocked or freshly authorized from the exact recovery
 classification and deterministic signature history; no blind replay, cleanup, or cutover is allowed.
 
+### Full recovery confirms unchanged durable diagnostics on `9ac9e55b64ab71f9fd75134080982b69024714db`
+
+Full read-only recovery `36156171335` returned
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT` and the
+same exact diagnostics as the prior recovery:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revisions `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- exact revision source `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+The state remains unclassified for resume/retirement permission purposes. The HTTP 502 signature
+survived the source-lifetime correction; this read-only result does not authorize another bootstrap.
+Before any next automatic provider cycle, the cross-run root-cause circuit must count only exact
+distinct-SHA attempts that actually reached invoke and determine whether it requires
+`BLOCKED_NEEDS_ROOT_CAUSE`. Any follow-up is diagnostic-only until a separate deterministic root
+cause is fixed and its marker passes that guard.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

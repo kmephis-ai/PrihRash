@@ -106,3 +106,19 @@ test('the latest repeated HTTP 502 post-invoke state remains unclassified and re
   assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(evidence, /may dispatch only the recovery workflow/);
 });
+
+test('the full recovery after the repeated HTTP 502 remains privacy-safe and preserves the root-cause circuit', () => {
+  const evidence = runbook.match(
+    /### Full recovery confirms unchanged durable diagnostics on `9ac9e55b64ab71f9fd75134080982b69024714db`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the exact full-recovery diagnostics must be retained');
+  assert.match(evidence, /Full read-only recovery `36156171335`/);
+  assert.match(evidence, /`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`/);
+  assert.match(evidence, /`COMPLETE_CURRENT_RUN_ONLY`/);
+  assert.match(evidence, /`STALE_STAGING_CURRENT_STATE_EMPTY`/);
+  assert.match(evidence, /`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`/);
+  assert.match(evidence, /signature\nsurvived the source-lifetime correction/);
+  assert.match(evidence, /`BLOCKED_NEEDS_ROOT_CAUSE`/);
+  assert.match(evidence, /does not authorize another bootstrap/);
+});
