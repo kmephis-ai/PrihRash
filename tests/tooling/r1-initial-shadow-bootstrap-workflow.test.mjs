@@ -55,7 +55,7 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /\.artifacts\/yandex-initial-bootstrap-function/);
   assert.match(workflow, /index\.initialBootstrapHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap/);
-  assert.match(workflow, /--memory 256m/);
+  assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--no-logging/);
   assert.match(workflow, /serverless trigger list/);
@@ -182,6 +182,8 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
 
   assert.match(runbook, /Google authoritative → YDB shadow/);
   assert.match(runbook, /Root-cause correction for post-invoke HTTP 502/);
+  assert.match(runbook, /Bounded memory-envelope root-cause candidate/);
+  assert.match(runbook, /write-capable bootstrap memory `1g`/);
   assert.match(runbook, /EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN/);
   assert.match(runbook, /removes the duplicate full projection and releases the raw lease/);
   assert.match(runbook, /Ответы на форму \(11\)/);
