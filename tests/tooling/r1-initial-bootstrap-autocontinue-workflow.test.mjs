@@ -99,6 +99,22 @@ test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery st
   assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
 });
 
+test('source-drift rebase requires exact pre-write evidence and arms stale retirement only', async () => {
+  const workflow = await workflowText();
+  const sourceDriftGate = workflow.match(
+    /if \[ "\$rearm_mode" = 'SOURCE_DRIFT_REBASE' \]; then([\s\S]*?)elif ! jq -e/,
+  )?.[1];
+
+  assert.ok(sourceDriftGate, 'source-drift branch must remain separately bounded');
+  assert.match(sourceDriftGate, /tests\/tooling\/r1-initial-bootstrap-autocontinue-workflow\.test\.mjs/);
+  assert.match(sourceDriftGate, /docs\/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK\.md/);
+  assert.match(workflow, /Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(workflow, /and \$recovery == \["Recovery-State: STAGING_STALE_RETIREABLE"\]/);
+  assert.match(workflow, /allow_staging_resume='false'/);
+  assert.match(workflow, /allow_stale_staging_retirement='true'/);
+  assert.match(workflow, /\{ref:"main", inputs:\{allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale\}\}/);
+});
+
 test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate incident keys cross-run', async () => {
   const workflow = await workflowText();
 
