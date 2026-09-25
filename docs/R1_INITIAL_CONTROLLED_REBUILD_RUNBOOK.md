@@ -421,3 +421,29 @@ Success по-прежнему требует `done=true`, ровно одног�
 Ранний response без последующего terminal proof заканчивается `UPDATE_NOT_TERMINAL`;
 он никогда не заменяет terminal proof или final read-back. Это уточнение заменяет
 запрет любого раннего response в предыдущем разделе #773.
+
+### Post-#778 WU7 result on `c28d6335bfefc68e8ad7f9bb2a00fd4af54d99b8`
+
+The one-shot controlled rebuild `36032087423` ran after #778 with fresh readiness and the exact
+staging recovery prerequisite. Its enum-only evidence was
+`INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED / APPLICATION_FAILED / PREPARATION /
+RECONCILIATION_READ`. The controlled phase probe was unavailable as
+`INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE / LOG_READ_FAILED`.
+
+The temporary throttling artifacts independently proved `10 → 14`, followed by a successful
+restore to exact `10`; the final throttle classification was
+`WU7_TEMP_THROTTLING_RESTORED_10`. No successful controlled result or COMMITTED baseline was
+established.
+
+Read-only recovery `36032381827` on the same SHA returned only
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. That establishes the durable run surface, but does not
+classify exact revision evidence, fresh source match, or resumability. The live recovery therefore
+does not authorize another controlled rebuild, swap, cleanup, or replay. The next permitted step is
+one full read-only exact-revision recovery on a new exact-main SHA using
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`; its result must independently establish the fresh
+source/revision and staging state before any later separately authorized mutation.
+
+The one-shot WU7 authority in #779/#780 was bound to SHA `c28d6335bfefc68e8ad7f9bb2a00fd4af54d99b8`
+and was consumed by this run. A successor write-capable attempt requires fresh exact-main
+preconditions and a current open authority gate; this checkpoint does not extend or re-arm that
+one-shot authority.
