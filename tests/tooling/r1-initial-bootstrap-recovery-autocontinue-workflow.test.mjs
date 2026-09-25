@@ -138,3 +138,18 @@ test('the 1g memory-envelope attempt authorizes only full read-only revision cla
   assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(evidence, /No bootstrap or resume follows/);
 });
+
+test('CONTROLLED_REBUILD_REQUIRED post-invoke state requires fresh read-only classification', () => {
+  const evidence = runbook.match(
+    /### Full classification required after `CONTROLLED_REBUILD_REQUIRED` on `79fdc6e669c16e8fb363eac4f28edc679f72f113`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the controlled-rebuild boundary must be classified on the current SHA');
+  assert.match(evidence, /orchestrator `36168126324`/);
+  assert.match(evidence, /bootstrap child `36168468708`/);
+  assert.match(evidence, /STOP \/ INITIAL_BOOTSTRAP_CONTROLLED_REBUILD_REQUIRED/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(evidence, /open #630 authority/);
+});
