@@ -181,6 +181,9 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
   const runbook = await text(RUNBOOK);
 
   assert.match(runbook, /Google authoritative → YDB shadow/);
+  assert.match(runbook, /Root-cause correction for post-invoke HTTP 502/);
+  assert.match(runbook, /EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN/);
+  assert.match(runbook, /removes the duplicate full projection and releases the raw lease/);
   assert.match(runbook, /Ответы на форму \(11\)/);
   assert.match(runbook, /#433/);
   assert.match(runbook, /main\.protected=true/);
@@ -203,7 +206,7 @@ test('STAGING resume releases no-longer-needed reference planning state before a
 
   assert.match(
     runtime,
-    /function releaseReferencePlanningState\(\): void \{\s*lease = null;\s*digest = null;\s*primitives = null;\s*referenceRows = null;\s*referencePlan = null;\s*\}/s,
+    /function releaseReferencePlanningState\(\): void \{\s*primitives = null;\s*referenceRows = null;\s*referencePlan = null;\s*\}/s,
   );
   assert.match(
     runtime,
@@ -213,4 +216,15 @@ test('STAGING resume releases no-longer-needed reference planning state before a
     runtime,
     /isInitialBootstrapResidualReferenceRecoveryAuthorized\([\s\S]*?\)\) \{\s*throw new InitialBootstrapReferenceAwareRuntimeError\('REFERENCE_BOOTSTRAP_RECOVERY_UNSAFE'\);\s*\}\s*releaseReferencePlanningState\(\);\s*return runApplicationSafely\(observation, dependencies, runApplication\);/s,
   );
+});
+
+test('initial bootstrap reuses canonical observation for reference planning and releases the full source lease', async () => {
+  const job = await text(new URL('../../src/runtime/initialBootstrapJob.ts', import.meta.url));
+  const runtime = await text(REFERENCE_AWARE_RUNTIME);
+
+  assert.match(job, /async function readInitialBootstrapObservation\([\s\S]*?const source = runtime\.createSource\([\s\S]*?const lease = await source\.readFullSnapshotObservation\(\);[\s\S]*?return buildInitialBootstrapObservation\([\s\S]*?\);\n\}/);
+  assert.match(job, /const observation = await readInitialBootstrapObservation\([\s\S]*?runtime\.readReferenceResolver\(adapter, observation\)/);
+  assert.doesNotMatch(runtime, /let lease:|let digest:/);
+  assert.doesNotMatch(runtime, /projectGoogleSnapshotForIncrementalMigration/);
+  assert.match(runtime, /observation\.rows\.map\(\(row, sourceOrdinal\) => Object\.freeze\(\{\s*sourceOrdinal,\s*rawPayload: row\.rawPayload/);
 });
