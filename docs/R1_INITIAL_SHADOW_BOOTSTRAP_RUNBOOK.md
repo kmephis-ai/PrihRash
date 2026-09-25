@@ -244,6 +244,30 @@ runbook is updated on the new SHA and dispatches the orchestrator with resume di
 retirement enabled. Source-drift rebase is not included in the two-attempt Incident-M root-cause
 counter.
 
+### Post-WU7 source drift rebase preflight on `343de24b0822336e3e061b5d3846820eadcfd2f0`
+
+After WU7 controlled rebuild `36032087423` failed in
+`PREPARATION / RECONCILIATION_READ`, full read-only recovery `36138207398` on exact main
+`102a56b690ff2fde232ab3e2c33f82c4b9724bef` proved authoritative digest mismatch, complete
+durable revision evidence, stale staging with empty verified current, source decode `NONE`, and
+`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+Successor orchestrator `36139781599` on exact main
+`343de24b0822336e3e061b5d3846820eadcfd2f0` was dispatched with both staging flags disabled. Its
+fresh initial read-only recovery reproduced
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT` and the
+same five allowlisted diagnostics above. `readinessRunId=null` and `bootstrapRunId=null`; neither
+readiness nor a bootstrap child was dispatched. This pre-write stop is not a root-cause bootstrap
+attempt.
+
+The exact source-drift rebase marker on the next distinct SHA may therefore arm only one orchestrator
+with `allow_staging_resume=false` and `allow_stale_staging_retirement=true`. It is authorized solely
+by the fresh digest mismatch + empty verified current evidence, requires this runbook entry and the
+canonical autocontinue regression guard, and does not authorize a controlled-rebuild replay, cap
+increase, cleanup of ambiguous financial state, timer, or cutover. If retirement or subsequent fresh
+bootstrap does not reach an exact safe result, the orchestrator must stop and publish only its
+privacy-safe recovery evidence.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
