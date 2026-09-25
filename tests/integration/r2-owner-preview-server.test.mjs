@@ -216,8 +216,13 @@ test('preview CLI serves the artifact and terminates cleanly on SIGTERM', async 
   const exit = waitForExit(child);
   child.kill('SIGTERM');
   const exited = await exit;
-  assert.equal(exited.code, 0);
-  assert.equal(exited.signal, null);
+  if (process.platform === 'win32') {
+    assert.equal(exited.code, null);
+    assert.equal(exited.signal, 'SIGTERM');
+  } else {
+    assert.equal(exited.code, 0);
+    assert.equal(exited.signal, null);
+  }
 });
 
 test('preview CLI rejects invalid R2_PREVIEW_PORT before listening', async (t) => {

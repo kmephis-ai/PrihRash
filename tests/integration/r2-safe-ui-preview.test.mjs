@@ -1466,8 +1466,8 @@ test('R3A preview INCOME retry after server commit but local ACK failure reuses 
 });
 
 test('R3A preview INCOME delivery remains transport-neutral and EXPENSE payer delivery is pinned', async () => {
-  const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
-  const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
+  const incomeDeliverySource = (await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const expenseDeliverySource = (await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(incomeDeliverySource, /parsePreviewIncomeIntent/u);
   assert.match(incomeDeliverySource, /sendIncomeCreate/u);
   assert.match(incomeDeliverySource, /toAccountId/u);
@@ -1686,9 +1686,9 @@ test('R3A preview TRANSFER retry after server commit but local ACK failure reuse
 });
 
 test('R3A preview TRANSFER delivery remains transport-neutral and existing type-specific delivery boundaries stay pinned', async () => {
-  const transferDeliverySource = await readFile(new URL('../../web/preview-transfer-writer-delivery.mjs', import.meta.url), 'utf8');
-  const expenseDeliverySource = await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8');
-  const incomeDeliverySource = await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8');
+  const transferDeliverySource = (await readFile(new URL('../../web/preview-transfer-writer-delivery.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const expenseDeliverySource = (await readFile(new URL('../../web/preview-writer-delivery.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+  const incomeDeliverySource = (await readFile(new URL('../../web/preview-income-writer-delivery.mjs', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(transferDeliverySource, /parsePreviewTransferIntent/u);
   assert.match(transferDeliverySource, /sendTransferCreate/u);
   assert.match(transferDeliverySource, /fromAccountId/u);

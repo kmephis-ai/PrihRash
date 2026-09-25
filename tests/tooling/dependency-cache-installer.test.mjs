@@ -3,11 +3,14 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { createHash } from "node:crypto";
 
-const repoRoot = new URL("../../", import.meta.url).pathname;
+const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
 const installer = join(repoRoot, "tools/dependency-cache/install_from_artifact.py");
+const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const npmOptions = { encoding: "utf8", shell: process.platform === "win32" };
 
 function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -30,8 +33,8 @@ function makeArtifact({ lockHash = sha256(join(repoRoot, "package-lock.json")), 
     cache_archive_sha256: sha256(join(payload, "npm-cache.tar.gz")),
     node_version: process.version,
     node_major: Number(process.versions.node.split(".")[0]),
-    npm_version: execFileSync("npm", ["--version"], { encoding: "utf8" }).trim(),
-    npm_major: Number(execFileSync("npm", ["--version"], { encoding: "utf8" }).trim().split(".")[0]),
+    npm_version: execFileSync(npmExecutable, ["--version"], npmOptions).trim(),
+    npm_major: Number(execFileSync(npmExecutable, ["--version"], npmOptions).trim().split(".")[0]),
     platform: process.platform,
     arch: process.arch,
   };

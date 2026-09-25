@@ -33,10 +33,12 @@ function connectionString(environment: Readonly<YandexSchemaBootstrapEnvironment
 
 const productionRuntime: Readonly<YandexSchemaBootstrapRuntime> = Object.freeze({
   loadMigration001() {
-    return readFile(new URL('../../migrations/001_initial.sql', import.meta.url), 'utf8');
+    return readFile(new URL('../../migrations/001_initial.sql', import.meta.url), 'utf8')
+      .then((sql) => sql.replace(/\r\n/g, '\n'));
   },
   loadMigration002() {
-    return readFile(new URL('../../migrations/002_reference_source_labels.sql', import.meta.url), 'utf8');
+    return readFile(new URL('../../migrations/002_reference_source_labels.sql', import.meta.url), 'utf8')
+      .then((sql) => sql.replace(/\r\n/g, '\n'));
   },
   async createClient(value: string) {
     try {

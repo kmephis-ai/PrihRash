@@ -21,6 +21,7 @@ class DependencyCacheError(RuntimeError):
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_NPM_EXECUTABLE = (shutil.which("npm.cmd") or "npm.cmd") if os.name == "nt" else "npm"
 
 
 def _sha256(path: Path) -> str:
@@ -147,7 +148,7 @@ def verify_artifact(
             raise DependencyCacheError("invalid manifest runtime fingerprint")
 
         current_node_major = int(_run(["node", "-p", "process.versions.node.split('.')[0]"]))
-        current_npm_major = int(_run(["npm", "--version"]).split(".", 1)[0])
+        current_npm_major = int(_run([_NPM_EXECUTABLE, "--version"]).split(".", 1)[0])
         current_platform = _run(["node", "-p", "process.platform"])
         current_arch = _run(["node", "-p", "process.arch"])
         if current_node_major != node_major:
@@ -181,7 +182,7 @@ def install(artifact_zip: Path, repo: Path, expected_source_sha: str | None, ver
 
         _run(
             [
-                "npm",
+                _NPM_EXECUTABLE,
                 "ci",
                 "--offline",
                 "--ignore-scripts",
@@ -192,7 +193,7 @@ def install(artifact_zip: Path, repo: Path, expected_source_sha: str | None, ver
             ],
             cwd=repo,
         )
-        _run(["npm", "ls", "--depth=0"], cwd=repo)
+        _run([_NPM_EXECUTABLE, "ls", "--depth=0"], cwd=repo)
         result["installed"] = True
         return result
     finally:

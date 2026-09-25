@@ -614,6 +614,7 @@ async function invokeRecovery(environment = process.env) {
       ['serverless', 'function', 'invoke', '--id', functionId, '--tag', RECOVERY_TAG, '--retry', '0', '--no-user-output'],
       {
         encoding: 'utf8',
+        shell: process.platform === 'win32' && ycBinary.toLowerCase().endsWith('.cmd'),
         env: safeChildEnvironment(environment),
         timeout: INVOKE_TIMEOUT_MS,
         maxBuffer: MAX_CAPTURE_BYTES,
