@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
@@ -13,6 +12,7 @@ import {
   ScheduledSyncReadinessError,
   runScheduledSyncReadinessProbe,
 } from '../../dist/runtime/scheduledSyncReadinessProbe.js';
+import { createFakeNodeCli } from '../helpers/fake-node-cli.mjs';
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -92,13 +92,7 @@ test('migration column failure remains distinct when the table-only probe succee
   assert.equal(columnFailure.capture.transactions, 0);
 });
 
-async function fakeYc(source) {
-  const directory = await mkdtemp(join(tmpdir(), 'prihrash-fake-yc-table-diagnostic-'));
-  const path = join(directory, 'yc');
-  await writeFile(path, `#!/usr/bin/env node\n${source}\n`, 'utf8');
-  await chmod(path, 0o755);
-  return { directory, path };
-}
+const fakeYc = (source) => createFakeNodeCli('prihrash-fake-yc-table-diagnostic-', source);
 
 test('safe invoker maps migration table diagnostics without exposing captured provider detail', async () => {
   const cases = [

@@ -3,10 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workflow = await readFile(
+const workflow = (await readFile(
   new URL('../../.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', import.meta.url),
   'utf8',
-);
+)).replace(/\r\n/g, '\n');
 
 test('recovery autocontinue is a bounded exact-main read-only dispatch surface', () => {
   assert.match(workflow, /workflow_run:/);
@@ -32,9 +32,14 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /cancel-in-progress:\s*false/);
 });
 
-test('unknown durable outcome accepts only the read-only classification marker pair', () => {
+test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {
   const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
   assert.ok(filter, 'extract the live jq marker filter from the workflow');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
 
   const valid = (overrides = {}) => {
     const lines = {

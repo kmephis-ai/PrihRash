@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
+import { createFakeNodeCli } from '../helpers/fake-node-cli.mjs';
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, '../..');
@@ -13,11 +14,7 @@ const FUNCTION_ID = 'synthetic-function-id';
 const PRIVATE_LOOKING = 'private-provider-id private-endpoint private-detail';
 
 async function fakeYc(source) {
-  const directory = await mkdtemp(join(tmpdir(), 'prihrash-resource-limits-yc-'));
-  const path = join(directory, 'yc');
-  await writeFile(path, `#!/usr/bin/env node\n${source}\n`, 'utf8');
-  await chmod(path, 0o755);
-  return { directory, path };
+  return createFakeNodeCli('prihrash-resource-limits-yc-', source);
 }
 
 async function runInvoker({ fakeSource, includeFunctionId = true, ycPath = null }) {

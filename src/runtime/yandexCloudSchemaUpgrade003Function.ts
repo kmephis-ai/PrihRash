@@ -32,7 +32,8 @@ function connectionString(environment: Readonly<YandexSchemaUpgrade003Environmen
 
 const productionRuntime: Readonly<YandexSchemaUpgrade003Runtime> = Object.freeze({
   loadMigration003() {
-    return readFile(new URL('../../migrations/003_initial_bootstrap_identity_manifest.sql', import.meta.url), 'utf8');
+    return readFile(new URL('../../migrations/003_initial_bootstrap_identity_manifest.sql', import.meta.url), 'utf8')
+      .then((sql) => sql.replace(/\r\n/g, '\n'));
   },
   async createClient(value: string) {
     try {

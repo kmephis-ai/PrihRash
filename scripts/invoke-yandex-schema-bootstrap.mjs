@@ -118,6 +118,7 @@ async function invokeBootstrap(environment = process.env) {
       ],
       {
         encoding: 'utf8',
+        shell: process.platform === 'win32' && ycBinary.toLowerCase().endsWith('.cmd'),
         env: safeChildEnvironment(environment),
         timeout: INVOKE_TIMEOUT_MS,
         maxBuffer: MAX_CAPTURE_BYTES,

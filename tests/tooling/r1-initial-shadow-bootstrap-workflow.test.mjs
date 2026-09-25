@@ -12,7 +12,7 @@ const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-initial-bootstrap.mjs');
 const REFERENCE_AWARE_RUNTIME = resolve(ROOT, 'src/runtime/initialBootstrapReferenceAwareJob.ts');
 
 async function text(path) {
-  return readFile(path, 'utf8');
+  return (await readFile(path, 'utf8')).replace(/\r\n/g, '\n');
 }
 
 test('initial shadow bootstrap workflow is manual main-only and structurally gated by #433 plus exact-sha readiness', async () => {

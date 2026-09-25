@@ -12,9 +12,9 @@ import {
 } from '../../dist/runtime/ydbSchemaBootstrap.js';
 
 const ROOT = resolve(import.meta.dirname, '../..');
-const MIGRATION_001 = await readFile(resolve(ROOT, 'db/migrations/001_initial.sql'), 'utf8');
-const MIGRATION_002 = await readFile(resolve(ROOT, 'db/migrations/002_reference_source_labels.sql'), 'utf8');
-const MIGRATION_003 = await readFile(resolve(ROOT, 'db/migrations/003_initial_bootstrap_identity_manifest.sql'), 'utf8');
+const MIGRATION_001 = (await readFile(resolve(ROOT, 'db/migrations/001_initial.sql'), 'utf8')).replace(/\r\n/g, '\n');
+const MIGRATION_002 = (await readFile(resolve(ROOT, 'db/migrations/002_reference_source_labels.sql'), 'utf8')).replace(/\r\n/g, '\n');
+const MIGRATION_003 = (await readFile(resolve(ROOT, 'db/migrations/003_initial_bootstrap_identity_manifest.sql'), 'utf8')).replace(/\r\n/g, '\n');
 const MIGRATIONS = createYdbSchemaBootstrapMigrations({
   migration001Sql: MIGRATION_001,
   migration002Sql: MIGRATION_002,

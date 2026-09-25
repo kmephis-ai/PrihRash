@@ -1,19 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
+import { createFakeNodeCli } from '../helpers/fake-node-cli.mjs';
 
 const execFileAsync = promisify(execFile);
 
 async function fakeYc(stdoutPayload) {
-  const directory = await mkdtemp(join(tmpdir(), 'prihrash-recovery-insertions-'));
-  const path = join(directory, 'yc');
-  await writeFile(path, `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(`${JSON.stringify(stdoutPayload)}\n`)});\n`, 'utf8');
-  await chmod(path, 0o755);
-  return path;
+  return (await createFakeNodeCli(
+    'prihrash-recovery-insertions-',
+    `process.stdout.write(${JSON.stringify(`${JSON.stringify(stdoutPayload)}\n`)});`,
+  )).path;
 }
 
 test('recovery invoker accepts only enum-safe insertion-only evidence', async () => {
