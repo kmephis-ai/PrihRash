@@ -357,6 +357,22 @@ distinct-SHA attempts that actually reached invoke and determine whether it requ
 `BLOCKED_NEEDS_ROOT_CAUSE`. Any follow-up is diagnostic-only until a separate deterministic root
 cause is fixed and its marker passes that guard.
 
+### Bounded memory-envelope root-cause candidate after repeated HTTP 502 on `280ea864d561b7b450e41b204b6b53371051888b`
+
+Full recovery `36157603929` on exact main `280ea864d561b7b450e41b204b6b53371051888b` repeated the
+same five diagnostics: authoritative digest mismatch, complete durable revisions, exact-empty
+verified current, source decode `NONE`, and exact current source `NOT_PROVEN`. Bootstrap child
+`36154779191` on the preceding exact SHA still returned `HTTP_502 / functionError=PRESENT` after the
+source-lifetime reduction; no application phase or durable transition was observed.
+
+The remaining bounded hypothesis is that the canonical observation plus required application
+projection still exceeds the write-capable Function's existing `256m` memory envelope. This is not
+directly proven by the HTTP header, so the next candidate changes only that dedicated bootstrap
+version to `1g`, matching the already-used read-only recovery envelope. Function execution timeout
+remains `600s`, retry stays disabled, and YDB/Google semantics, write set, schema, IAM, triggers, and
+authority do not change. The deployment remains one-shot and non-scheduled. If exact signature,
+recovery, or circuit evidence does not arm it, no provider attempt follows.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
@@ -526,7 +542,8 @@ Function должна быть:
 - triggers = 0;
 - logging disabled;
 - runtime `nodejs22`;
-- memory `256m`;
+- write-capable bootstrap memory `1g`;
+- read-only recovery memory `1g`;
 - write-capable bootstrap version: execution timeout `600s`;
 - read-only recovery version: execution timeout `150s`;
 - write-capable entrypoint `index.initialBootstrapHandler` только в bootstrap version;
