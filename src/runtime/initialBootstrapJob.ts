@@ -91,7 +91,10 @@ export interface InitialBootstrapJobRuntime {
   ): Readonly<InitialBootstrapJobSource>;
   createRuntimePrimitives(): Readonly<InitialBootstrapRuntimePrimitives>;
   createYdbClient(config: Readonly<InitialBootstrapJobConfig>): Promise<Readonly<InitialBootstrapJobYdbClient>>;
-  readReferenceResolver(adapter: YdbAdapter): Promise<Readonly<ReferenceResolver>>;
+  readReferenceResolver(
+    adapter: YdbAdapter,
+    observation: Readonly<InitialBootstrapObservation>,
+  ): Promise<Readonly<ReferenceResolver>>;
   createReconciliation(
     adapter: YdbAdapter,
     projectionContext: Readonly<InitialSnapshotProjectionContext>,
@@ -207,10 +210,29 @@ const productionRuntime: Readonly<InitialBootstrapJobRuntime> = Object.freeze({
       poolMaxSize: 1,
     });
   },
-  readReferenceResolver: readYdbReferenceResolverSnapshot,
+  readReferenceResolver(adapter: YdbAdapter) {
+    return readYdbReferenceResolverSnapshot(adapter);
+  },
   createReconciliation: createInitialBootstrapDurableReconciliation,
   runApplication: runInitialBootstrapApplication,
 });
+
+async function readInitialBootstrapObservation(
+  config: Readonly<InitialBootstrapJobConfig>,
+  digest: Readonly<CanonicalSourceDigest>,
+  historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+  runtime: Readonly<InitialBootstrapJobRuntime>,
+  clock: Readonly<InitialBootstrapRuntimePrimitives['clock']>,
+): Promise<Readonly<InitialBootstrapObservation>> {
+  const source = runtime.createSource(config, digest);
+  const lease = await source.readFullSnapshotObservation();
+  return buildInitialBootstrapObservation(
+    lease,
+    digest,
+    historicalEvidence,
+    clock.now(),
+  );
+}
 
 export async function executeInitialBootstrapJob(
   config: Readonly<InitialBootstrapJobConfig>,
@@ -219,21 +241,20 @@ export async function executeInitialBootstrapJob(
   const validated = validateConfig(config);
   const historicalEvidence = runtime.parseHistoricalEvidence(validated.privateHistoricalEvidence);
   const digest = runtime.createDigest();
-  const source = runtime.createSource(validated, digest);
   const primitives = runtime.createRuntimePrimitives();
   const ydbClient = await runtime.createYdbClient(validated);
   const adapter = new YdbAdapter(ydbClient.transport);
   let primaryError: unknown = null;
 
   try {
-    const lease = await source.readFullSnapshotObservation();
-    const observation = buildInitialBootstrapObservation(
-      lease,
+    const observation = await readInitialBootstrapObservation(
+      validated,
       digest,
       historicalEvidence,
-      primitives.clock.now(),
+      runtime,
+      primitives.clock,
     );
-    const refs = await runtime.readReferenceResolver(adapter);
+    const refs = await runtime.readReferenceResolver(adapter, observation);
     const projectionContext: Readonly<InitialSnapshotProjectionContext> = Object.freeze({
       granularityEvidence: historicalEvidence.granularityEvidence,
       refs,

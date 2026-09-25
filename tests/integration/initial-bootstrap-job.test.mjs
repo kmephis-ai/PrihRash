@@ -135,6 +135,7 @@ function makeRuntime(options = {}) {
       return SOURCE_LEASE;
     },
   });
+  let referenceObservation;
   const applicationResult = options.applicationResult ?? COMMITTED_RESULT;
 
   return Object.freeze({
@@ -168,8 +169,9 @@ function makeRuntime(options = {}) {
         },
       });
     },
-    async readReferenceResolver() {
+    async readReferenceResolver(_adapter, observation) {
       calls.push('refs');
+      referenceObservation = observation;
       return refs;
     },
     createReconciliation(_adapter, projectionContext, receivedEvidence) {
@@ -181,11 +183,14 @@ function makeRuntime(options = {}) {
     },
     async runApplication(observation, dependencies) {
       calls.push('application');
+      assert.equal(observation, referenceObservation);
       assert.equal(observation.capturedAt, CAPTURED_AT);
       assert.equal(observation.snapshotDigest, SOURCE_LEASE.snapshotDigest);
       assert.equal(observation.rows.length, 1);
       assert.equal(observation.rows[0].rowHint, 2);
       assert.equal(observation.rows[0].digest, 'synthetic-row-digest');
+      assert.equal(typeof observation.rows[0].rawPayload, 'object');
+      assert.ok(observation.rows[0].rawPayload);
       assert.equal(observation.rows[0].aggregatePeriodMonth, '2024-01-01');
       assert.equal(dependencies.identityAllocator, identityAllocator);
       assert.equal(dependencies.clock, clock);
@@ -243,9 +248,9 @@ test('one-shot composition reads the authoritative lease, builds exact observati
   assert.deepEqual(calls, [
     'evidence',
     'digest',
-    'source',
     'primitives',
     'ydb',
+    'source',
     'read-source',
     'evidence-row-count',
     'evidence-month',

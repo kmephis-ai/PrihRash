@@ -27,6 +27,7 @@ import {
   runInitialBootstrapApplication,
   runInitialBootstrapGateCApplication,
   type InitialBootstrapApplicationPhase,
+  type InitialBootstrapObservation,
 } from '../migration/initialBootstrapApplication.js';
 import { InitialBootstrapCandidateError } from '../migration/initialBootstrapCandidate.js';
 import { AtomicPromotionError } from '../migration/atomicPromotion.js';
@@ -76,7 +77,6 @@ import {
   InitialBootstrapStaleStagingRetirementError,
   type InitialBootstrapStaleStagingRetirementErrorCode,
 } from '../migration/initialBootstrapStaleStagingRetirement.js';
-import { projectGoogleSnapshotForIncrementalMigration } from '../migration/googleSnapshotProjection.js';
 import {
   InitialSnapshotProjectionStructuralError,
 } from '../migration/initialSnapshotProjection.js';
@@ -377,15 +377,11 @@ async function runApplicationSafely(
 function createReferenceAwareRuntime(
   runApplication: InitialBootstrapApplicationRunner,
 ): Readonly<InitialBootstrapJobRuntime> {
-  let lease: Readonly<GoogleSheetsFullSnapshotLease> | null = null;
-  let digest: Readonly<CanonicalSourceDigest> | null = null;
   let primitives: Readonly<InitialBootstrapRuntimePrimitives> | null = null;
   let referenceRows: readonly Readonly<InitialReferenceBootstrapObservationRow>[] | null = null;
   let referencePlan: Readonly<InitialReferenceBootstrapPlan> | null = null;
 
   function releaseReferencePlanningState(): void {
-    lease = null;
-    digest = null;
     primitives = null;
     referenceRows = null;
     referencePlan = null;
@@ -393,8 +389,7 @@ function createReferenceAwareRuntime(
 
   const runtime: InitialBootstrapJobRuntime = {
     createDigest(): Readonly<CanonicalSourceDigest> {
-      digest = createCanonicalSourceDigest();
-      return digest;
+      return createCanonicalSourceDigest();
     },
     parseHistoricalEvidence: parseInitialBootstrapPrivateHistoricalEvidence,
     createSource(
@@ -414,8 +409,7 @@ function createReferenceAwareRuntime(
       return Object.freeze({
         async readFullSnapshotObservation() {
           try {
-            lease = await reader.readFullSnapshotObservation();
-            return lease;
+            return await reader.readFullSnapshotObservation();
           } catch {
             throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_SOURCE_READ_FAILED');
           }
@@ -436,19 +430,22 @@ function createReferenceAwareRuntime(
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_YDB_CLIENT_CREATE_FAILED');
       }
     },
-    async readReferenceResolver(adapter: YdbAdapter) {
-      if (lease === null || digest === null || primitives === null) {
+    async readReferenceResolver(
+      adapter: YdbAdapter,
+      observation: Readonly<InitialBootstrapObservation>,
+    ) {
+      if (primitives === null) {
         throw new InitialBootstrapReferenceAwareRuntimeError('REFERENCE_RUNTIME_STATE_INVALID');
       }
       try {
-        const projected = projectGoogleSnapshotForIncrementalMigration(lease.snapshot, digest);
-        referenceRows = Object.freeze(projected.rows.map((row, sourceOrdinal) => Object.freeze({
+        const plannedRows = Object.freeze(observation.rows.map((row, sourceOrdinal) => Object.freeze({
           sourceOrdinal,
           rawPayload: row.rawPayload,
         })));
+        referenceRows = plannedRows;
         referencePlan = await planInitialReferenceBootstrap(
           adapter,
-          referenceRows,
+          plannedRows,
           primitives.referenceIdentityAllocator,
         );
         return referencePlan.resolver;

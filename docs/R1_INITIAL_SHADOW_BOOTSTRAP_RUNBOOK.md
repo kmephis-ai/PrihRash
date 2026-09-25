@@ -291,6 +291,36 @@ authorize readiness, orchestrator, bootstrap, resume, cleanup, or authority chan
 from fresh privacy-safe full-recovery classification; if that probe does not produce an exact
 allowlisted durable classification, stop without another provider attempt.
 
+### Root-cause correction for post-invoke HTTP 502 on `34e58d178638b65516ba16f981407b8f65d35f0c`
+
+Full read-only recovery `36149776621` proved the following privacy-safe diagnostics:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revisions `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- exact revision source `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+Bootstrap child `36141543533` returned only
+`INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED / HTTP_502 / functionError=PRESENT`, without an application
+phase. Durable state remained the same single STAGING run with empty verified current. This does not
+authorize replay, retirement, or resume.
+
+The bounded repository-side hypothesis is avoidable source-memory retention during initial bootstrap:
+the job kept the full Google snapshot lease reachable while the application ran, and the
+reference-aware runtime independently projected that same snapshot again to build reference-planning
+rows. A process-level HTTP 502 with no application enum is consistent with that peak-memory surface,
+but does not itself prove memory exhaustion. The correction derives reference planning rows from the
+already-built canonical observation and confines the full lease/reader to a helper that returns only
+that observation. It removes the duplicate full projection and releases the raw lease before YDB
+application work; reference ordering, row payloads, digest, historical evidence, identity planning,
+financial writes, caps, retry semantics, Function resources, and authority remain unchanged.
+
+The successor requires a synthetic integration regression proving that the exact observation produced
+from the source lease is passed unchanged to reference planning and application in the existing order.
+Any automatic live attempt remains subject to the exact signature/circuit and fresh recovery guards;
+this hypothesis alone does not authorize an invoke.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
