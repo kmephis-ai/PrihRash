@@ -373,6 +373,23 @@ remains `600s`, retry stays disabled, and YDB/Google semantics, write set, schem
 authority do not change. The deployment remains one-shot and non-scheduled. If exact signature,
 recovery, or circuit evidence does not arm it, no provider attempt follows.
 
+### Full read-only classification required after memory-envelope attempt on `388c13db5d55bb7ea97d1ba965c8d5ef5e05384e`
+
+The bounded 1g bootstrap Function attempt dispatched orchestrator `36159628640` on exact main.
+Fresh readiness `36159801476` returned `READINESS_READY`; bootstrap child `36159946320` reached the
+single invoke and changed the failure signature to
+`INITIAL_BOOTSTRAP_RUNTIME_FAILED / REFERENCE_APPLICATION_SEMANTIC_FAILED /
+REVISION_EVIDENCE_PREPARATION`. The mandatory embedded post-invoke recovery only classified
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, with resume unauthorized. This proves the Function now
+returned a sanitized application failure rather than HTTP 502; it does not classify durable exact
+revision evidence and does not authorize replay.
+
+The next allowed operation is one full read-only recovery on a new exact SHA using
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`, and
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. No bootstrap or resume follows from the new error
+signature until fresh recovery and cross-run circuit evidence have been reviewed.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

@@ -122,3 +122,19 @@ test('the full recovery after the repeated HTTP 502 remains privacy-safe and pre
   assert.match(evidence, /`BLOCKED_NEEDS_ROOT_CAUSE`/);
   assert.match(evidence, /does not authorize another bootstrap/);
 });
+
+test('the 1g memory-envelope attempt authorizes only full read-only revision classification next', () => {
+  const evidence = runbook.match(
+    /### Full read-only classification required after memory-envelope attempt on `388c13db5d55bb7ea97d1ba965c8d5ef5e05384e`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the exact post-memory-change failure must be recorded');
+  assert.match(evidence, /orchestrator `36159628640`/);
+  assert.match(evidence, /bootstrap child `36159946320`/);
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RUNTIME_FAILED \/ REFERENCE_APPLICATION_SEMANTIC_FAILED \/\s+REVISION_EVIDENCE_PREPARATION`/);
+  assert.match(evidence, /`RECOVERY_REQUIRED \/ STAGING_RUN_PRESENT`/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(evidence, /No bootstrap or resume follows/);
+});
