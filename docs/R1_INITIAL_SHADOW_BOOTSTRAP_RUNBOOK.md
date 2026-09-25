@@ -268,6 +268,29 @@ increase, cleanup of ambiguous financial state, timer, or cutover. If retirement
 bootstrap does not reach an exact safe result, the orchestrator must stop and publish only its
 privacy-safe recovery evidence.
 
+### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`
+
+The bounded source-drift rebase dispatched orchestrator `36141234938` on exact main. Initial
+read-only recovery allowed only guarded stale retirement; readiness `36141385920` returned
+`READINESS_READY`; bootstrap child `36141543533` reached the write-capable invoke and failed. The
+mandatory post-invoke read-only recovery succeeded as a workflow but returned only
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`:
+
+- `status=STOP`, `code=R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED`;
+- `bootstrapInvokeStep=failure`;
+- `postRecoveryVerdict=RECOVERY_REQUIRED`, `postRecoveryReason=STAGING_RUN_PRESENT`;
+- `stagingResumeAuthorized=false`, `staleStagingRetirementAuthorized=true`.
+
+This does not classify durable state as resumable or stale-retireable. The successor may request
+exactly one full read-only recovery on a new exact SHA using
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`, and
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`, with regression guard
+`tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs`. This marker does not
+authorize readiness, orchestrator, bootstrap, resume, cleanup, or authority change. Continue only
+from fresh privacy-safe full-recovery classification; if that probe does not produce an exact
+allowlisted durable classification, stop without another provider attempt.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
