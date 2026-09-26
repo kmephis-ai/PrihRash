@@ -4,6 +4,7 @@ import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
+  createInitialSourceRevisionEvidenceReadBudgetWaiter,
   initialSourceRevisionEvidenceReadBudgetDelayMs,
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
@@ -381,6 +382,26 @@ test('RU pacing preserves a one-unit CPU margin under the verified 10-RU/s basel
     (error) => error instanceof InitialSourceRevisionEvidenceRecoveryError
       && error.code === 'INVALID_EXPECTED_REVISION',
   );
+});
+
+test('RU pacer accounts for time spent in the preceding query instead of adding a full batch delay', async () => {
+  let now = 0;
+  const waits = [];
+  const pacer = createInitialSourceRevisionEvidenceReadBudgetWaiter(
+    () => now,
+    async (milliseconds) => {
+      waits.push(milliseconds);
+      now += milliseconds;
+    },
+  );
+
+  await pacer(8);
+  now += 400;
+  await pacer(8);
+  now += 1_000;
+  await pacer(1);
+
+  assert.deepEqual(waits, [900, 500]);
 });
 
 test('payload primary-key ranges follow YDB metadata order without client-side UUID sorting', async () => {

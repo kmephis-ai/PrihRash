@@ -56,7 +56,7 @@ import { InitialSourceLineagePersistenceError } from '../migration/initialSource
 import { InitialRevisionEvidenceError } from '../migration/initialSourceRevisionEvidenceExecutor.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
-  waitForInitialSourceRevisionEvidenceReadBudget,
+  createInitialSourceRevisionEvidenceReadBudgetWaiter,
 } from '../migration/initialSourceRevisionEvidenceRecovery.js';
 import { InitialVerifiedCurrentPlanError } from '../migration/initialVerifiedCurrentPlan.js';
 import { InitialVerifiedCurrentPersistenceError } from '../migration/initialVerifiedCurrentPersistence.js';
@@ -463,7 +463,7 @@ function createReferenceAwareRuntime(
         historicalEvidence,
         undefined,
         undefined,
-        waitForInitialSourceRevisionEvidenceReadBudget,
+        createInitialSourceRevisionEvidenceReadBudgetWaiter(),
       );
     },
     async runApplication(observation, dependencies) {

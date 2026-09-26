@@ -1227,4 +1227,18 @@ provisioned RCU, IAM и writer authority не меняются.
 на exact main в bounded 600 s envelope. Если он снова завершится timeout или не докажет `READY` и
 полную exact payload equality, diagnostic stops; WU7 остаётся disarmed до новой причинной гипотезы.
 
+### Идемпотентный RU deadline после timeout `36257149785`
+
+Свежий controlled-preparation-only recovery на exact main
+`c740df689709ebdb2f281a9bafe53903e4ad7870` завершился по 600 s envelope без enum artifact; write
+path не запускался. Repository timing review нашёл лишний idle time в pacing: перед каждым batch
+полностью ждалась оценка `RU / 10` уже **после** завершения предыдущего query, то есть время самого
+query не засчитывалось в refill интервал.
+
+Successor сохраняет предел 10 RU/s, 1 RU CPU margin и batch ≤9 rows; pacer теперь удерживает
+monotonic next-request deadline и ждёт только остаток интервала от старта предыдущего YDB request.
+Это не уменьшает refill delay и не увеличивает cap, а убирает двойной учёт elapsed query time. Следующий
+шаг после merge — один новый 600 s controlled-preparation-only read-only probe; никаких writer actions
+эта проверка не вооружает.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.

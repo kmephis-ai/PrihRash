@@ -17,7 +17,7 @@ import {
   type InitialControlledRebuildSwapRecoveryDiagnosticResult,
 } from '../migration/initialControlledRebuildApplication.js';
 import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
-import { waitForInitialSourceRevisionEvidenceReadBudget } from '../migration/initialSourceRevisionEvidenceRecovery.js';
+import { createInitialSourceRevisionEvidenceReadBudgetWaiter } from '../migration/initialSourceRevisionEvidenceRecovery.js';
 import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../migration/initialBootstrapPrivateEvidence.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
@@ -215,7 +215,7 @@ export async function runInitialControlledRebuildJob(
       historicalEvidence,
       undefined,
       undefined,
-      waitForInitialSourceRevisionEvidenceReadBudget,
+      createInitialSourceRevisionEvidenceReadBudgetWaiter(),
     );
 
     let result: InitialControlledRebuildApplicationResult | InitialControlledRebuildSwapRecoveryDiagnosticResult;
