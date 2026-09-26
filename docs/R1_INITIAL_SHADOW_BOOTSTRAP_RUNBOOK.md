@@ -1330,3 +1330,38 @@ Repository successor добавляет отдельный режим `staging_r
 После merge разрешена ровно одна свежая exact-main read-only диагностика cardinality. Результат
 служит только для выбора следующей repository-гипотезы: он не разрешает controlled preparation,
 WU7, retirement, cleanup, изменение quota или write path.
+
+### Однопроходное восстановление revisions после `GE_5000_ROWS`
+
+Read-only cardinality diagnostic `36279266156` на exact main
+`695598ec94e744ecf40dc5f889f862fb45db4aa2` вернул только `GE_5000_ROWS`. Точная длина источника
+не публиковалась. Такая coarse-классификация согласуется с тем, что полный metadata scan, а затем
+второй проход payload point-reads могут не уложиться в 600 s при текущем 10 RU/s budget.
+
+Repository successor оставляет один run/revision secondary-index scan, но читает его keyset pages:
+каждая страница возвращает metadata и raw payload одновременно, не более 9 rows, в provider order.
+Manifest остаётся точным expected source-ID set. Невалидная/неполная страница, отсутствующий
+manifest binding, лишний или повторный revision, metadata mismatch либо canonical digest mismatch
+прерывает reconstruction fail-closed; дополнительного metadata-only row pass нет.
+
+После merge допустим ровно один свежий exact-main controlled-preparation-only read-only probe.
+`READY` требует полного восстановления и существующих application gates. Timeout/non-PASS означает
+новую repo-side диагностику; controlled rebuild/WU7, bootstrap replay и cleanup не armed этим probe.
+
+### Один проход по historical revisions после bucket `GE_5000_ROWS`
+
+Cardinality-only recovery `36279266156` на exact main
+`695598ec94e744ecf40dc5f889f862fb45db4aa2` вернула только `GE_5000_ROWS`. Это подтверждает, что
+immutable STAGING manifest относится к верхней coarse-size группе; точное количество не публиковалось.
+
+Root cause review показал повторное чтение каждого revision: полный metadata-only index scan, затем
+отдельные exact-key payload batches. Successor убирает первый проход и использует keyset pagination
+по существующему `idx_source_record_revisions_run_revision`, возвращая в каждом paced page metadata и
+raw payload вместе, не более 9 строк на страницу. Каждый revision проверяется против exact
+manifest binding, run/revision, timestamp, row digest и canonical payload digest. Чтение продолжается
+до исчерпания индекса, поэтому missing/extra/duplicate revisions fail-closed; отдельный полный
+metadata response не нужен.
+
+После merge допускается ровно один новый exact-main controlled-preparation-only read-only probe.
+Успех требует полного исторического восстановления и `READY`; timeout/non-PASS запускает новую
+repo-side причинную диагностику. WU7, bootstrap replay, retirement и cleanup не разрешаются этим probe.

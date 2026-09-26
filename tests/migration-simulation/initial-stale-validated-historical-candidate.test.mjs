@@ -74,6 +74,16 @@ function evidence() {
   }));
 }
 
+function revisionPage(statement, rows) {
+  const cursor = statement.parameters.source_record_id_after?.value ?? null;
+  const limit = Number(statement.text.match(/LIMIT (\d+)$/)?.[1]);
+  assert.ok(Number.isSafeInteger(limit) && limit > 0);
+  return rows
+    .filter((row) => row.migration_run_id === RUN_ID && row.revision === 1n)
+    .filter((row) => cursor === null || row.source_record_id > cursor)
+    .slice(0, limit);
+}
+
 const refs = Object.freeze({
   vikaMemberId: VIKA_ID,
   resolveAccountId(label) {
@@ -133,10 +143,7 @@ function fixture(overrides = {}) {
           return { rows: [snapshotRow] };
         }
         if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
-          return { rows: revisionRows.map(({ raw_payload: _, ...metadata }) => metadata) };
-        }
-        if (statement.text.includes('FROM source_record_revisions')) {
-          return { rows: revisionRows };
+          return { rows: revisionPage(statement, revisionRows) };
         }
         throw new Error(`unexpected read: ${statement.text}`);
       },
@@ -144,7 +151,7 @@ function fixture(overrides = {}) {
   });
 }
 
-test('durable STAGING reconstruction verifies exact-key payload batches and returns an exact proof', async () => {
+test('durable STAGING reconstruction verifies paged payload rows and returns an exact proof', async () => {
   const f = fixture({ runState: 'STAGING' });
   const stagingRun = run({ state: 'STAGING' });
   const reconstructed = await reconstructInitialBootstrapDurableObservation(
@@ -154,13 +161,12 @@ test('durable STAGING reconstruction verifies exact-key payload batches and retu
   );
 
   assert.equal(reconstructed.rows.length, 1);
-  assert.equal(f.reads.length, 4);
+  assert.equal(f.reads.length, 3);
   assert.match(f.reads[2], /VIEW idx_source_record_revisions_run_revision/);
-  assert.doesNotMatch(f.reads[2], /raw_payload/);
-  assert.match(f.reads[3], /source_record_id = \$source_record_id_0/);
-  assert.doesNotMatch(f.reads[3], /source_record_id >=|source_record_id <=/);
-  assert.match(f.reads[3], /migration_run_id = \$migration_run_id/);
-  assert.match(f.reads[3], /raw_payload/);
+  assert.match(f.reads[2], /ORDER BY source_record_id LIMIT 2/);
+  assert.doesNotMatch(f.reads[2], /source_record_id >=|source_record_id <=/);
+  assert.match(f.reads[2], /migration_run_id = \$migration_run_id/);
+  assert.match(f.reads[2], /raw_payload/);
 
   const exactRevision = Object.freeze({
     sourceRecordId: SOURCE_ID,
@@ -184,7 +190,7 @@ test('durable STAGING reconstruction verifies exact-key payload batches and retu
   ), false);
 });
 
-test('large durable reconstruction uses one metadata scan and complete paced exact-key payload batches', async () => {
+test('large durable reconstruction streams one indexed payload scan without a duplicate metadata pass', async () => {
   const rowCount = 27;
   const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
     schema_version: 1,
@@ -239,15 +245,7 @@ test('large durable reconstruction uses one metadata scan and complete paced exa
         return { rows: [snapshotRow] };
       }
       if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
-        return { rows: revisionRows.map(({ raw_payload: _, ...metadata }) => metadata) };
-      }
-      if (statement.text.includes('FROM source_record_revisions')) {
-        const sourceIds = new Set(Object.entries(statement.parameters)
-          .filter(([name]) => name.startsWith('source_record_id_'))
-          .map(([, parameter]) => parameter.value));
-        return {
-          rows: revisionRows.filter((revision) => sourceIds.has(revision.source_record_id)),
-        };
+        return { rows: revisionPage(statement, revisionRows) };
       }
       throw new Error(`unexpected read: ${statement.text}`);
     },
@@ -260,19 +258,16 @@ test('large durable reconstruction uses one metadata scan and complete paced exa
     async (units) => { waitedUnits.push(units); },
   );
 
-  const metadataReads = statements.filter((statement) => (
-    statement.text.includes('VIEW idx_source_record_revisions_run_revision')
-  ));
   const payloadReads = statements.filter((statement) => (
     statement.text.includes('raw_payload')
   ));
-  assert.equal(metadataReads.length, 1);
-  assert.equal(payloadReads.length, 3);
+  assert.equal(payloadReads.length, 4);
   for (const statement of payloadReads) {
     assert.doesNotMatch(statement.text, /source_record_id >=|source_record_id <=/);
-    assert.equal(Object.keys(statement.parameters).filter((name) => name.startsWith('source_record_id_')).length, 9);
+    assert.match(statement.text, /VIEW idx_source_record_revisions_run_revision/);
+    assert.match(statement.text, /ORDER BY source_record_id LIMIT (?:9|1)$/);
   }
-  assert.deepEqual(waitedUnits, [9, 9, 9]);
+  assert.deepEqual(waitedUnits, [9, 9, 9, 1]);
   assert.equal(reconstructed.rows.length, rowCount);
   assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
     reconstructed.revisionEvidenceProof,
@@ -301,7 +296,7 @@ test('reconstructs exact historical candidate from durable evidence without any 
   assert.equal(result.verifiedPlan.transactions.length, 1);
   assert.equal(result.verifiedPlan.transactions[0].transactionId, TRANSACTION_ID);
   assert.equal(result.verifiedPlan.transactions[0].transaction.amountMinor, 1234);
-  assert.equal(f.reads.length, 4);
+  assert.equal(f.reads.length, 3);
   assert.equal(f.reads.some((sql) => /google|sheets/i.test(sql)), false);
 });
 
@@ -320,6 +315,41 @@ test('fails closed when durable revision payload no longer proves its stored row
 
 test('fails closed for missing revision evidence', async () => {
   const f = fixture({ revisionRows: [] });
+  await assert.rejects(
+    () => reconstructInitialStaleValidatedHistoricalCandidate(f.reader, run(), refs, evidence()),
+    (error) => error instanceof InitialStaleValidatedHistoricalCandidateError
+      && error.code === 'REVISION_EVIDENCE_INVALID',
+  );
+});
+
+test('fails closed when the indexed historical revision scan finds an unmanifested row', async () => {
+  const exactPayload = payload();
+  const extraPayload = payload('Unmanifested revision');
+  const f = fixture({
+    revisionRows: [
+      {
+        source_record_id: SOURCE_ID,
+        revision: 1n,
+        migration_run_id: RUN_ID,
+        observed_at: new Date(CAPTURED_AT),
+        row_hint: 2n,
+        row_digest: rowDigest(exactPayload),
+        change_class: null,
+        raw_payload: serializeRawPayload(exactPayload),
+      },
+      {
+        source_record_id: id(676008),
+        revision: 1n,
+        migration_run_id: RUN_ID,
+        observed_at: new Date(CAPTURED_AT),
+        row_hint: 3n,
+        row_digest: rowDigest(extraPayload),
+        change_class: null,
+        raw_payload: serializeRawPayload(extraPayload),
+      },
+    ],
+  });
+
   await assert.rejects(
     () => reconstructInitialStaleValidatedHistoricalCandidate(f.reader, run(), refs, evidence()),
     (error) => error instanceof InitialStaleValidatedHistoricalCandidateError

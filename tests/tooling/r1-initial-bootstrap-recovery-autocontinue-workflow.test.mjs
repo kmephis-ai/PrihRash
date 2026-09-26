@@ -299,3 +299,19 @@ test('revision-cardinality successor is metadata-only, coarse-bucketed and read-
   assert.match(evidence, /разрешена ровно одна свежая exact-main read-only диагностика cardinality/);
   assert.match(evidence, /он не разрешает controlled preparation,\s+WU7, retirement, cleanup/);
 });
+
+test('large revision bucket leads to one-pass paged exact-manifest reconstruction only', () => {
+  const evidence = runbook.match(
+    /### Однопроходное восстановление revisions после `GE_5000_ROWS`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the GE_5000_ROWS result must drive the next bounded runtime fix');
+  assert.match(evidence, /Read-only cardinality diagnostic `36279266156`/);
+  assert.match(evidence, /600 s при текущем 10 RU\/s budget/);
+  assert.match(evidence, /keyset pages/);
+  assert.match(evidence, /не более 9 rows/);
+  assert.match(evidence, /Manifest остаётся точным expected source-ID set/);
+  assert.match(evidence, /лишний или повторный revision/);
+  assert.match(evidence, /ровно один свежий exact-main controlled-preparation-only read-only probe/);
+  assert.match(evidence, /controlled rebuild\/WU7, bootstrap replay и cleanup не armed/);
+});

@@ -179,38 +179,28 @@ function rawPayload(value: unknown): RawPayload | null {
   }
 }
 
-function revisionMetadataStatement(runId: string) {
-  return readStatement(
-    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
-      + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
-      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision '
-      + 'ORDER BY source_record_id',
-    {
-      migration_run_id: uuidParameter(runId),
-      revision: uint64Parameter(1),
-    },
-  );
-}
-
-function revisionPayloadKeysStatement(runId: string, sourceRecordIds: readonly string[]) {
-  if (sourceRecordIds.length === 0 || sourceRecordIds.length > HISTORICAL_REVISION_READ_ROWS_LIMIT) {
+function revisionPayloadPageStatement(
+  runId: string,
+  afterSourceRecordId: string | null,
+  limit: number,
+) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > HISTORICAL_REVISION_READ_ROWS_LIMIT) {
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
   }
-  const sourceIdPredicates = sourceRecordIds.map((_, index) => (
-    `source_record_id = $source_record_id_${index}`
-  ));
-  const sourceIdParameters = Object.fromEntries(sourceRecordIds.map((sourceRecordId, index) => (
-    [`source_record_id_${index}`, uuidParameter(sourceRecordId)]
-  )));
+  const cursorPredicate = afterSourceRecordId === null
+    ? ''
+    : 'AND source_record_id > $source_record_id_after ';
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
-      + 'FROM source_record_revisions '
-      + `WHERE (${sourceIdPredicates.join(' OR ')}) `
-      + 'AND revision = $revision AND migration_run_id = $migration_run_id',
+      + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
+      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision '
+      + cursorPredicate
+      + `ORDER BY source_record_id LIMIT ${limit}`,
     {
-      ...sourceIdParameters,
+      ...(afterSourceRecordId === null
+        ? {}
+        : { source_record_id_after: uuidParameter(afterSourceRecordId) }),
       migration_run_id: uuidParameter(runId),
       revision: uint64Parameter(1),
     },
@@ -292,44 +282,6 @@ function parseRevisionRows(
   return Object.freeze(revisions);
 }
 
-function parseRevisionMetadataRows(
-  rows: readonly Readonly<RevisionRow>[],
-  run: Readonly<MigrationRun>,
-  capturedAt: string,
-  expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
-): readonly Readonly<{ sourceRecordId: string; rowHint: number; rowDigest: string }>[] {
-  if (rows.length !== expectedBySource.size) {
-    throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
-  }
-  const seen = new Set<string>();
-  return Object.freeze(rows.map((row) => {
-    const sourceRecordId = uuid(row.source_record_id);
-    const migrationRunId = uuid(row.migration_run_id);
-    const observedAt = normalizeYdbTimestampReadback(row.observed_at);
-    const rowHint = integer(row.row_hint, 1);
-    const rowDigest = nonEmptyString(row.row_digest);
-    const expected = sourceRecordId === null ? undefined : expectedBySource.get(sourceRecordId);
-    if (
-      sourceRecordId === null
-      || migrationRunId !== run.id.toLowerCase()
-      || integer(row.revision, 1) !== 1
-      || observedAt === null
-      || !ydbTimestampReadbackMatches(row.observed_at, capturedAt)
-      || rowHint === null
-      || rowDigest === null
-      || row.change_class !== null
-      || expected === undefined
-      || expected.rowHint !== rowHint
-      || expected.rowDigest !== rowDigest
-      || seen.has(sourceRecordId)
-    ) {
-      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
-    }
-    seen.add(sourceRecordId);
-    return Object.freeze({ sourceRecordId, rowHint, rowDigest });
-  }));
-}
-
 async function readHistoricalRevisionsInBoundedBatches(
   reader: YdbReadScope,
   run: Readonly<MigrationRun>,
@@ -337,30 +289,32 @@ async function readHistoricalRevisionsInBoundedBatches(
   expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
   waitForReadBudget: ReturnType<typeof createInitialSourceRevisionEvidenceReadBudgetWaiter>,
 ): Promise<readonly Readonly<HistoricalRevision>[]> {
-  const metadataResult = await reader.read<RevisionRow>(revisionMetadataStatement(run.id));
-  const metadata = parseRevisionMetadataRows(metadataResult.rows, run, capturedAt, expectedBySource);
   const seen = new Set<string>();
   const revisions: HistoricalRevision[] = [];
+  let afterSourceRecordId: string | null = null;
 
-  for (let offset = 0; offset < metadata.length; offset += HISTORICAL_REVISION_READ_ROWS_LIMIT) {
-    const batch = metadata.slice(offset, offset + HISTORICAL_REVISION_READ_ROWS_LIMIT);
-    if (batch.length === 0) {
-      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
-    }
-    await waitForReadBudget(batch.length);
-    const payloadResult = await reader.read<RevisionRow>(
-      revisionPayloadKeysStatement(run.id, batch.map((row) => row.sourceRecordId)),
+  while (true) {
+    const remaining = expectedBySource.size - seen.size;
+    const limit = Math.min(
+      HISTORICAL_REVISION_READ_ROWS_LIMIT,
+      Math.max(1, remaining + 1),
     );
-    const parsed = parseRevisionRows(payloadResult.rows, run, capturedAt, expectedBySource, seen);
-    const batchIds = new Set(batch.map((row) => row.sourceRecordId));
-    if (
-      parsed.length !== batch.length
-      || parsed.some((revision) => !batchIds.has(revision.sourceRecordId))
-      || [...batchIds].some((sourceRecordId) => !seen.has(sourceRecordId))
-    ) {
+    await waitForReadBudget(limit);
+    const payloadResult = await reader.read<RevisionRow>(
+      revisionPayloadPageStatement(run.id, afterSourceRecordId, limit),
+    );
+    if (payloadResult.rows.length > limit) {
       throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
     }
+    if (payloadResult.rows.length === 0) break;
+    const parsed = parseRevisionRows(payloadResult.rows, run, capturedAt, expectedBySource, seen);
+    const last = parsed.at(-1);
+    if (last === undefined) {
+      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+    }
+    afterSourceRecordId = last.sourceRecordId;
     revisions.push(...parsed);
+    if (payloadResult.rows.length < limit) break;
   }
 
   if (seen.size !== expectedBySource.size) {

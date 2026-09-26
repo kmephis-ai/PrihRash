@@ -220,10 +220,8 @@ test('durable reconstruction proof prevents a redundant second exact revision sc
       if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: [manifestRow] };
       if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: [snapshotRow] };
       if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
-        const { raw_payload: _, ...metadata } = revisionRow;
-        return { rows: [metadata] };
+        return { rows: [revisionRow] };
       }
-      if (statement.text.includes('FROM source_record_revisions')) return { rows: [revisionRow] };
       throw new Error(`unexpected read: ${statement.text}`);
     },
   });
