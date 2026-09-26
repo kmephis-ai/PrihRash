@@ -1118,4 +1118,26 @@ autocontinue может запустить один orchestrator на exact main
 Это evidence не разрешает WU7 replay, blind retry, cleanup неоднозначного состояния, увеличение
 cap, timer или cutover.
 
+### Full recovery после неуспешного source-drift rebase на `8a68969a4cc7e313e48b0147da84960a60166941`
+
+Orchestrator `36239901216` на exact main после preflight выполнил свежий `READINESS_READY`
+`36239981608` и ровно один bootstrap child `36240045946`. Child завершился
+`INITIAL_BOOTSTRAP_INVOKE_FAILED` без классифицированного application phase. Обязательная
+post-invoke recovery вернула только `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`.
+
+Её privacy-safe diagnostics совпали с preflight:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence — `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current — `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode — `NONE`;
+- exact current-run source proof — `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+Этого недостаточно, чтобы классифицировать staging как resumable или разрешить ещё один retirement.
+Следующий и единственный допустимый шаг — full read-only exact revision recovery на новом exact SHA
+через `Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION` и
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. До её результата запрещены readiness/orchestrator/
+bootstrap, resume, retirement и cleanup.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
