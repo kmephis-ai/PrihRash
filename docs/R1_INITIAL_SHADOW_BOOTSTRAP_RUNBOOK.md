@@ -1081,4 +1081,41 @@ Retirement — Owner/provider-admin boundary. Workflow намеренно не �
 
 При non-success после write boundary путь заканчивается `one read-only recovery classification → STOP`; automatic second bootstrap отсутствует.
 
+### Preflight rebase из-за source drift после WU7 на `efe316b45edace5d0ffceabd47e3b8c3672edd1c`
+
+Единственная controlled rebuild попытка WU7 `36238246863` прошла exact-main, fresh
+recovery/readiness, private trigger-free и initial throttling checks. Она установила throttling
+14 RU/s, выполнила ровно один controlled rebuild invoke и восстановила/независимо прочитала
+10 RU/s. Bounded результат:
+
+`FAIL / INITIAL_CONTROLLED_REBUILD_RUNTIME_FAILED / APPLICATION_FAILED / PREPARATION / RECONCILIATION_READ / QUERY_EXECUTION_FAILED`.
+
+Phase probe недоступен: `INITIAL_CONTROLLED_REBUILD_PHASE_UNAVAILABLE / LOG_READ_FAILED`.
+Второй financial invoke не выполнялся.
+
+Post-invoke full read-only recovery `36238543493` вернул
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT` и privacy-safe staging evidence:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence — `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current — `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode — `NONE`;
+- exact current-run source proof — `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+На том же SHA orchestrator `36239021237` был запущен с обоими staging flags выключенными. Он
+остановился до readiness/bootstrap с
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+`readinessRunId=null`, `bootstrapRunId=null`. Следовательно, текущее состояние не разрешает
+resume, retirement или повтор WU7 на этом SHA.
+
+Детерминированная pre-write orchestrator signature вместе со свежими digest-mismatch и
+empty-current evidence допускают только существующее исключение source-drift rebase на новом exact
+SHA:
+`Recovery-State: STAGING_STALE_RETIREABLE` и `Circuit-Rearm: SOURCE_DRIFT_REBASE`. Canonical
+autocontinue может запустить один orchestrator на exact main с
+`allow_staging_resume=false` и `allow_stale_staging_retirement=true`; runtime всё равно обязан
+повторно доказать cutoff/history и exact durable state до любого retirement или нового bootstrap.
+Это evidence не разрешает WU7 replay, blind retry, cleanup неоднозначного состояния, увеличение
+cap, timer или cutover.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
