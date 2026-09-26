@@ -47,7 +47,8 @@ export type YdbReferenceEvidenceReaderErrorCode =
   | 'MALFORMED_ACCOUNT_REFERENCE_EVIDENCE'
   | 'MALFORMED_CATEGORY_REFERENCE_EVIDENCE'
   | 'MALFORMED_VIKA_MEMBER_EVIDENCE'
-  | 'MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE'
+  | 'REFERENCE_SNAPSHOT_KIND_MISSING'
+  | 'REFERENCE_SNAPSHOT_KIND_UNKNOWN'
   | 'VIKA_MEMBER_NOT_FOUND'
   | 'DUPLICATE_VIKA_MEMBER_EVIDENCE';
 
@@ -206,7 +207,11 @@ export async function readYdbReferenceResolverSnapshot(
         });
         break;
       default:
-        throw new YdbReferenceEvidenceReaderError('MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE');
+        throw new YdbReferenceEvidenceReaderError(
+          row.reference_type === undefined || row.reference_type === null
+            ? 'REFERENCE_SNAPSHOT_KIND_MISSING'
+            : 'REFERENCE_SNAPSHOT_KIND_UNKNOWN',
+        );
     }
   }
   const mappings = Object.freeze({

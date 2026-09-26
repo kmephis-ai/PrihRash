@@ -208,25 +208,23 @@ test('one tagged snapshot read avoids synthetic RESOURCE_EXHAUSTED at the third 
   assert.equal(observed.transactionCount, 0);
 });
 
-test('tagged snapshot reader rejects unknown reference kinds without partial resolver output', async () => {
-  const adapter = new YdbAdapter({
+test('tagged snapshot reader distinguishes missing and unknown row-kind evidence', async () => {
+  const adapterFor = (referenceRows) => new YdbAdapter({
     async executeRead() {
-      return {
-        rows: [{
-          reference_type: 'PRIVATE_REFERENCE_KIND',
-          id: ACCOUNT_A,
-          source_label: 'Synthetic',
-          descriptor: 'RUB',
-        }],
-      };
+      return { rows: referenceRows };
     },
     async serializableReadWrite() { throw new Error('TRANSACTION_READ_FORBIDDEN'); },
   });
 
   await assert.rejects(
-    () => readYdbReferenceResolverSnapshot(adapter),
+    () => readYdbReferenceResolverSnapshot(adapterFor([{ reference_type: 'PRIVATE_REFERENCE_KIND' }])),
     (error) => error instanceof YdbReferenceEvidenceReaderError
-      && error.code === 'MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE',
+      && error.code === 'REFERENCE_SNAPSHOT_KIND_UNKNOWN',
+  );
+  await assert.rejects(
+    () => readYdbReferenceResolverSnapshot(adapterFor([{}])),
+    (error) => error instanceof YdbReferenceEvidenceReaderError
+      && error.code === 'REFERENCE_SNAPSHOT_KIND_MISSING',
   );
 });
 

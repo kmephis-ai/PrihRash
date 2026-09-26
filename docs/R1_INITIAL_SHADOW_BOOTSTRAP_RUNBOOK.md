@@ -553,6 +553,20 @@ read-only probe may classify this boundary; only `REFERENCE_SNAPSHOT_VALIDATED` 
 revision phase beyond the payload read advances toward WU7 preflight. Any validation enum, diagnostic
 failure, or missing evidence remains STOP.
 
+#### Reference row-kind diagnostic split on `8f99d2fb2657abbeab5138a0b827730560745c56`
+
+The single controlled-preparation-only read-only probe `36227316895` returned
+`DIAGNOSTIC_FAILED` with reference evidence `REFERENCE_READER_MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE`;
+the reference statement stage was observed, while transport/query status, application phase and
+revision batch were unobserved. This is a typed parser failure from the exact tagged-row contract,
+not another YDB resource-exhaustion result. The bounded successor separates only whether the
+allowlisted tag field is missing or has an unrecognized value (`REFERENCE_SNAPSHOT_KIND_MISSING` /
+`REFERENCE_SNAPSHOT_KIND_UNKNOWN`); it still never emits the tag value, row data, or provider text.
+
+After its merge and exact-main CI, one full read-only classification may run, followed by one
+controlled-preparation-only read-only probe on that new SHA. No writer/WU7 path is permitted from
+either result; inspect the new enum and fix the tagged response contract before any further probe.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
