@@ -267,3 +267,19 @@ test('metadata pagination candidate follows the latest exact-stage RESOURCE_EXHA
   assert.match(evidence, /128-row \*\*per-query\*\* limit/);
   assert.match(evidence, /does not cap total reconciliation\s+coverage/);
 });
+
+test('historical revision timeout candidate switches from sparse PK ranges to exact key reads', () => {
+  const evidence = runbook.match(
+    /### Exact-key historical revision reads после recovery `36272896579`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest read-only historical reconstruction failure must remain documented');
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`/);
+  assert.match(evidence, /Enum artifact отсутствует/);
+  assert.match(evidence, /не запуска[лн] bootstrap\/write path/);
+  assert.match(evidence, /broad primary-key диапазоном/);
+  assert.match(evidence, /exact source ids/);
+  assert.match(evidence, /cardinality, identity, immutable metadata, canonical\s+payload digest/);
+  assert.match(evidence, /ровно один новый exact-main controlled-preparation-only read-only probe/);
+  assert.match(evidence, /controlled rebuild, bootstrap replay,\s+retirement и cleanup остаются disarmed/);
+});

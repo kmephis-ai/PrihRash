@@ -144,7 +144,7 @@ function fixture(overrides = {}) {
   });
 }
 
-test('durable STAGING reconstruction verifies revision payloads in bounded ranges and returns an exact proof', async () => {
+test('durable STAGING reconstruction verifies exact-key payload batches and returns an exact proof', async () => {
   const f = fixture({ runState: 'STAGING' });
   const stagingRun = run({ state: 'STAGING' });
   const reconstructed = await reconstructInitialBootstrapDurableObservation(
@@ -157,8 +157,9 @@ test('durable STAGING reconstruction verifies revision payloads in bounded range
   assert.equal(f.reads.length, 4);
   assert.match(f.reads[2], /VIEW idx_source_record_revisions_run_revision/);
   assert.doesNotMatch(f.reads[2], /raw_payload/);
-  assert.match(f.reads[3], /source_record_id >= \$source_record_id_from/);
-  assert.match(f.reads[3], /source_record_id <= \$source_record_id_to/);
+  assert.match(f.reads[3], /source_record_id = \$source_record_id_0/);
+  assert.doesNotMatch(f.reads[3], /source_record_id >=|source_record_id <=/);
+  assert.match(f.reads[3], /migration_run_id = \$migration_run_id/);
   assert.match(f.reads[3], /raw_payload/);
 
   const exactRevision = Object.freeze({
@@ -183,7 +184,7 @@ test('durable STAGING reconstruction verifies revision payloads in bounded range
   ), false);
 });
 
-test('large durable reconstruction uses one metadata scan and complete paced payload ranges', async () => {
+test('large durable reconstruction uses one metadata scan and complete paced exact-key payload batches', async () => {
   const rowCount = 27;
   const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
     schema_version: 1,
@@ -241,12 +242,11 @@ test('large durable reconstruction uses one metadata scan and complete paced pay
         return { rows: revisionRows.map(({ raw_payload: _, ...metadata }) => metadata) };
       }
       if (statement.text.includes('FROM source_record_revisions')) {
-        const from = statement.parameters.source_record_id_from.value;
-        const to = statement.parameters.source_record_id_to.value;
+        const sourceIds = new Set(Object.entries(statement.parameters)
+          .filter(([name]) => name.startsWith('source_record_id_'))
+          .map(([, parameter]) => parameter.value));
         return {
-          rows: revisionRows.filter((revision) => (
-            revision.source_record_id >= from && revision.source_record_id <= to
-          )),
+          rows: revisionRows.filter((revision) => sourceIds.has(revision.source_record_id)),
         };
       }
       throw new Error(`unexpected read: ${statement.text}`);
@@ -268,6 +268,10 @@ test('large durable reconstruction uses one metadata scan and complete paced pay
   ));
   assert.equal(metadataReads.length, 1);
   assert.equal(payloadReads.length, 3);
+  for (const statement of payloadReads) {
+    assert.doesNotMatch(statement.text, /source_record_id >=|source_record_id <=/);
+    assert.equal(Object.keys(statement.parameters).filter((name) => name.startsWith('source_record_id_')).length, 9);
+  }
   assert.deepEqual(waitedUnits, [9, 9, 9]);
   assert.equal(reconstructed.rows.length, rowCount);
   assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
