@@ -363,9 +363,7 @@ export function createInitialBootstrapControlledPreparationPhaseTracker(): Initi
 }
 
 const YDB_REFERENCE_RESOLVER_READ_STAGES = new Set<YdbReferenceResolverReadStage>([
-  'ACCOUNTS_READ',
-  'CATEGORIES_READ',
-  'VIKA_MEMBER_READ',
+  'REFERENCE_SNAPSHOT_READ',
 ]);
 
 interface InitialBootstrapControlledPreparationReferenceReadStageTracker {

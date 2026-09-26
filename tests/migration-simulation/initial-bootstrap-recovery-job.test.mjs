@@ -164,13 +164,13 @@ test('controlled preparation phase tracker preserves only the existing applicati
 test('controlled preparation reference read-stage tracker is non-throwing and fail-closed', () => {
   const tracker = createInitialBootstrapControlledPreparationReferenceReadStageTracker();
   assert.equal(tracker.evidence(), 'UNOBSERVED');
-  for (const stage of ['ACCOUNTS_READ', 'CATEGORIES_READ', 'VIKA_MEMBER_READ']) {
+  for (const stage of ['REFERENCE_SNAPSHOT_READ']) {
     assert.doesNotThrow(() => tracker.observeStage(stage));
     assert.equal(tracker.evidence(), stage);
   }
   assert.doesNotThrow(() => tracker.observeStage('PRIVATE_STAGE'));
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
-  tracker.observeStage('ACCOUNTS_READ');
+  tracker.observeStage('REFERENCE_SNAPSHOT_READ');
   assert.equal(tracker.evidence(), 'DIAGNOSTIC_FAILED');
 
   const explicitFailure = createInitialBootstrapControlledPreparationReferenceReadStageTracker();
@@ -889,7 +889,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         queryErrorEvidence: 'YDB_STATUS',
         grpcStatusEvidence: 'NON_GRPC',
         phaseEvidence: 'RESUME_CONTEXT_READ',
-        referenceReadStageEvidence: 'CATEGORIES_READ',
+        referenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
         reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
         metadataScanCostEvidence: 'GE_3000_RU',
         revisionPayloadBatchEvidence: 'UNOBSERVED',
@@ -906,7 +906,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationQueryErrorEvidence: 'YDB_STATUS',
       stagingControlledPreparationGrpcStatusEvidence: 'NON_GRPC',
       stagingControlledPreparationPhaseEvidence: 'RESUME_CONTEXT_READ',
-      stagingControlledPreparationReferenceReadStageEvidence: 'CATEGORIES_READ',
+      stagingControlledPreparationReferenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
       stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
       stagingControlledPreparationMetadataScanCostEvidence: 'GE_3000_RU',
       stagingControlledPreparationRevisionPayloadBatchEvidence: 'UNOBSERVED',

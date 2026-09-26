@@ -26,15 +26,20 @@ interface FamilyMemberReferenceRow {
   readonly status?: unknown;
 }
 
+interface ReferenceResolverSnapshotRow {
+  readonly reference_type?: unknown;
+  readonly id?: unknown;
+  readonly source_label?: unknown;
+  readonly descriptor?: unknown;
+}
+
 export interface YdbReferenceMappingEvidence {
   readonly accounts: readonly Readonly<AccountReferenceMapping>[];
   readonly categories: readonly Readonly<CategoryReferenceMapping>[];
 }
 
 export type YdbReferenceResolverReadStage =
-  | 'ACCOUNTS_READ'
-  | 'CATEGORIES_READ'
-  | 'VIKA_MEMBER_READ';
+  | 'REFERENCE_SNAPSHOT_READ';
 
 export type YdbReferenceResolverReadObserver = (stage: YdbReferenceResolverReadStage) => void;
 
@@ -42,6 +47,7 @@ export type YdbReferenceEvidenceReaderErrorCode =
   | 'MALFORMED_ACCOUNT_REFERENCE_EVIDENCE'
   | 'MALFORMED_CATEGORY_REFERENCE_EVIDENCE'
   | 'MALFORMED_VIKA_MEMBER_EVIDENCE'
+  | 'MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE'
   | 'VIKA_MEMBER_NOT_FOUND'
   | 'DUPLICATE_VIKA_MEMBER_EVIDENCE';
 
@@ -109,14 +115,11 @@ function observeReadStage(
 
 async function readMappings(
   scope: YdbReadScope,
-  observer?: YdbReferenceResolverReadObserver,
 ): Promise<Readonly<YdbReferenceMappingEvidence>> {
-  observeReadStage(observer, 'ACCOUNTS_READ');
   const accountResult = await scope.read<AccountReferenceRow>(readStatement(
     'SELECT id, normalized_source_label, currency FROM accounts '
       + 'WHERE normalized_source_label IS NOT NULL',
   ));
-  observeReadStage(observer, 'CATEGORIES_READ');
   const categoryResult = await scope.read<CategoryReferenceRow>(readStatement(
     'SELECT id, kind, normalized_source_label FROM categories '
       + 'WHERE normalized_source_label IS NOT NULL',
@@ -160,19 +163,58 @@ export async function readYdbReferenceResolverSnapshot(
   adapter: YdbAdapter,
   observer?: YdbReferenceResolverReadObserver,
 ): Promise<Readonly<ReferenceResolver>> {
-  return adapter.serializableReadWrite(async (transaction) => {
-    const mappings = await readMappings(transaction, observer);
-    observeReadStage(observer, 'VIKA_MEMBER_READ');
-    const memberResult = await transaction.read<FamilyMemberReferenceRow>(readStatement(
-      'SELECT id, name, status FROM family_members WHERE name = $name AND status = $status',
-      {
-        name: utf8Parameter(VIKA_MEMBER_NAME),
-        status: utf8Parameter(ACTIVE_STATUS),
-      },
-    ));
-    return buildReferenceResolverSnapshot({
-      ...mappings,
-      vikaMemberId: vikaMemberId(memberResult.rows),
-    });
+  observeReadStage(observer, 'REFERENCE_SNAPSHOT_READ');
+  const result = await adapter.read<ReferenceResolverSnapshotRow>(readStatement(
+    'SELECT "ACCOUNT" AS reference_type, id, normalized_source_label AS source_label, '
+      + 'currency AS descriptor FROM accounts WHERE normalized_source_label IS NOT NULL '
+      + 'UNION ALL '
+      + 'SELECT "CATEGORY" AS reference_type, id, normalized_source_label AS source_label, '
+      + 'kind AS descriptor FROM categories WHERE normalized_source_label IS NOT NULL '
+      + 'UNION ALL '
+      + 'SELECT "VIKA_MEMBER" AS reference_type, id, name AS source_label, '
+      + 'status AS descriptor FROM family_members WHERE name = $name AND status = $status',
+    {
+      name: utf8Parameter(VIKA_MEMBER_NAME),
+      status: utf8Parameter(ACTIVE_STATUS),
+    },
+  ));
+
+  const accounts: Readonly<AccountReferenceMapping>[] = [];
+  const categories: Readonly<CategoryReferenceMapping>[] = [];
+  const members: Readonly<FamilyMemberReferenceRow>[] = [];
+  for (const row of result.rows) {
+    switch (row.reference_type) {
+      case 'ACCOUNT':
+        accounts.push(accountMapping({
+          id: row.id,
+          normalized_source_label: row.source_label,
+          currency: row.descriptor,
+        }));
+        break;
+      case 'CATEGORY':
+        categories.push(categoryMapping({
+          id: row.id,
+          kind: row.descriptor,
+          normalized_source_label: row.source_label,
+        }));
+        break;
+      case 'VIKA_MEMBER':
+        members.push({
+          id: row.id,
+          name: row.source_label,
+          status: row.descriptor,
+        });
+        break;
+      default:
+        throw new YdbReferenceEvidenceReaderError('MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE');
+    }
+  }
+  const mappings = Object.freeze({
+    accounts: Object.freeze(accounts),
+    categories: Object.freeze(categories),
+  });
+  return buildReferenceResolverSnapshot({
+    ...mappings,
+    vikaMemberId: vikaMemberId(members),
   });
 }
