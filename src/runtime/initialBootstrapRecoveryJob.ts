@@ -45,7 +45,7 @@ import {
 } from '../migration/initialBootstrapDurableReconciliation.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
-  waitForInitialSourceRevisionEvidenceReadBudget,
+  createInitialSourceRevisionEvidenceReadBudgetWaiter,
   type InitialSourceRevisionEvidenceReadBatchEvidence,
   type InitialSourceRevisionEvidenceReadBatchObserver,
   type InitialSourceRevisionEvidenceReadStage,
@@ -941,7 +941,7 @@ async function diagnoseStagingControlledPreparation(
       historicalEvidence,
       (stage) => reconciliationReadStageTracker?.observeStage(stage),
       observeRevisionPayloadBatch,
-      waitForInitialSourceRevisionEvidenceReadBudget,
+      createInitialSourceRevisionEvidenceReadBudgetWaiter(),
     );
     phaseTracker = createInitialBootstrapControlledPreparationPhaseTracker();
     const prepared = await prepareInitialControlledRebuildContinuation(

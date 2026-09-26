@@ -95,11 +95,22 @@ export function initialSourceRevisionEvidenceReadBudgetDelayMs(
   );
 }
 
-export async function waitForInitialSourceRevisionEvidenceReadBudget(
-  estimatedRequestUnits: number,
-): Promise<void> {
-  const milliseconds = initialSourceRevisionEvidenceReadBudgetDelayMs(estimatedRequestUnits);
-  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+export function createInitialSourceRevisionEvidenceReadBudgetWaiter(
+  now: () => number = () => performance.now(),
+  sleep: (milliseconds: number) => Promise<void> = (milliseconds) => (
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
+  ),
+): InitialSourceRevisionEvidenceReadBudgetWaiter {
+  let nextReadStartAt: number | null = null;
+  return async (estimatedRequestUnits) => {
+    const delayMs = initialSourceRevisionEvidenceReadBudgetDelayMs(estimatedRequestUnits);
+    const currentTime = now();
+    const waitMs = nextReadStartAt === null
+      ? delayMs
+      : Math.max(0, nextReadStartAt - currentTime);
+    if (waitMs > 0) await sleep(waitMs);
+    nextReadStartAt = now() + delayMs;
+  };
 }
 
 function observeReadStage(
