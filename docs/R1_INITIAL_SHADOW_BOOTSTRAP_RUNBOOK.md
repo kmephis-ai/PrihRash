@@ -1241,4 +1241,54 @@ monotonic next-request deadline и ждёт только остаток инте
 шаг после merge — один новый 600 s controlled-preparation-only read-only probe; никаких writer actions
 эта проверка не вооружает.
 
+### RESOURCE_EXHAUSTED во время исторической reconstruction на `07d5a604307ea7809534b65d7d3625a9531aa936`
+
+Read-only controlled-preparation recovery `36262391812` после metadata/payload pacing candidate
+классифицировала:
+
+- `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
+- phase `RESUME_CONTEXT_READ`;
+- query failure `YDB_DATA_QUERY_EXECUTION_FAILED / GRPC_STATUS / RESOURCE_EXHAUSTED`;
+- reconciliation stage `UNOBSERVED`.
+
+Repository trace локализовал boundary в stale-cutoff reconstruction: весь run-scoped `raw_payload`
+читался одним YDB result до controlled continuation и его byte-bounded verifier. Это отдельный
+causal seam, не тот же payload-batch RESOURCE_EXHAUSTED. Successor сначала выполняет один
+metadata-only exact-index scan, затем читает payload в paced primary-key ranges. Каждая payload row
+сверяется с immutable manifest, `observed_at`, row digest и canonical payload digest; полный набор
+должен совпасть exact.
+
+Успешная reconstruction выдаёт in-memory branded proof, связанный с run, snapshot и точными
+revision bindings. Application и durable reconciliation валидируют proof против полученного lineage
+и не повторяют ту же дорогостоящую exact revision read; forged/mismatched proof остаётся fail-closed.
+Proof не сериализуется и не содержит raw payload. Если его проверка не проходит, обычный exact
+revision verifier остаётся fail-closed.
+
+После merge допускается ровно один fresh controlled-preparation-only read-only probe. Успех требует
+полной bounded reconstruction и `READY`; timeout/non-PASS не разрешает controlled rebuild, replay,
+retirement, cleanup или authority change.
+
+### Повторяемый RESUME_CONTEXT_READ read failure на `07d5a604307ea7809534b65d7d3625a9531aa936`
+
+Recovery `36261520615` завершилась после bounded 600 s без enum artifact. Последующая controlled
+preparation-only read-only классификация `36262391812` на том же SHA локализовала причину:
+
+- `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
+- phase `RESUME_CONTEXT_READ`;
+- YDB `QUERY_EXECUTION_FAILED / GRPC_STATUS / RESOURCE_EXHAUSTED`;
+- application-level revision reconciliation ещё `UNOBSERVED`.
+
+Durable state не менялся: обе функции только читали Google/YDB. Причина — прежняя
+`reconstructInitialBootstrapDurableObservation` читала все historical `raw_payload` одним YDB result
+до application resume; предыдущие metadata/payload pagers этот boundary не затрагивали. Новый fix
+делит историю на один exact metadata index scan и paced exact primary-key payload ranges. В памяти
+остаётся только уже проверенный `InitialBootstrapDurableRevisionEvidenceProof`, жёстко привязанный к
+run, snapshot, captured_at и каждому source id/rowHint/digest. Тот же in-memory proof позволяет
+controlled continuation не повторять второй exact revision scan, но application/durable reconciliation
+перед использованием повторно сверяют каждый lineage payload hash; forged/mismatched proof
+fail-closes. Persisted schema, lifecycle и writer authority не меняются.
+
+После merge допускается только один новый exact-main controlled-preparation-only recovery. Timeout
+или иной non-PASS требует новой repo-side causal diagnosis; writer не запускается.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.

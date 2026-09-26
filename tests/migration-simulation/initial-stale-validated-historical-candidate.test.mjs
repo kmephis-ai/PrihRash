@@ -4,7 +4,9 @@ import test from 'node:test';
 import { createCanonicalSourceDigest } from '../../dist/integration/google/canonicalSourceDigest.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
 import {
+  matchesInitialBootstrapDurableRevisionEvidenceProof,
   InitialStaleValidatedHistoricalCandidateError,
+  reconstructInitialBootstrapDurableObservation,
   reconstructInitialStaleValidatedHistoricalCandidate,
 } from '../../dist/migration/initialStaleValidatedHistoricalCandidate.js';
 import { serializeRawPayload, serializeRawPayloadForLineageDigest } from '../../dist/migration/rawPayloadProvenance.js';
@@ -98,7 +100,7 @@ function fixture(overrides = {}) {
     source_snapshot_digest: SNAPSHOT_DIGEST,
     binding_count: 1n,
     bindings: { schema_version: 1, bindings: [binding] },
-    run_state: 'VALIDATED',
+    run_state: overrides.runState ?? 'VALIDATED',
     run_snapshot_digest: SNAPSHOT_DIGEST,
     snapshot_digest: overrides.manifestSnapshotDigest ?? SNAPSHOT_DIGEST,
     snapshot_row_count: 1n,
@@ -130,6 +132,9 @@ function fixture(overrides = {}) {
         if (statement.text.includes('FROM source_snapshots WHERE id = $id')) {
           return { rows: [snapshotRow] };
         }
+        if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
+          return { rows: revisionRows.map(({ raw_payload: _, ...metadata }) => metadata) };
+        }
         if (statement.text.includes('FROM source_record_revisions')) {
           return { rows: revisionRows };
         }
@@ -138,6 +143,148 @@ function fixture(overrides = {}) {
     }),
   });
 }
+
+test('durable STAGING reconstruction verifies revision payloads in bounded ranges and returns an exact proof', async () => {
+  const f = fixture({ runState: 'STAGING' });
+  const stagingRun = run({ state: 'STAGING' });
+  const reconstructed = await reconstructInitialBootstrapDurableObservation(
+    f.reader,
+    stagingRun,
+    evidence(),
+  );
+
+  assert.equal(reconstructed.rows.length, 1);
+  assert.equal(f.reads.length, 4);
+  assert.match(f.reads[2], /VIEW idx_source_record_revisions_run_revision/);
+  assert.doesNotMatch(f.reads[2], /raw_payload/);
+  assert.match(f.reads[3], /source_record_id >= \$source_record_id_from/);
+  assert.match(f.reads[3], /source_record_id <= \$source_record_id_to/);
+  assert.match(f.reads[3], /raw_payload/);
+
+  const exactRevision = Object.freeze({
+    sourceRecordId: SOURCE_ID,
+    revision: 1,
+    migrationRunId: RUN_ID,
+    observedAt: CAPTURED_AT,
+    rowHint: 2,
+    rowDigest: rowDigest(),
+    changeClass: null,
+    rawPayload: serializeRawPayload(payload()),
+  });
+  assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
+    reconstructed.revisionEvidenceProof,
+    stagingRun,
+    [exactRevision],
+  ), true);
+  assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
+    reconstructed.revisionEvidenceProof,
+    stagingRun,
+    [Object.freeze({ ...exactRevision, rawPayload: serializeRawPayload(payload('Changed')) })],
+  ), false);
+});
+
+test('large durable reconstruction uses one metadata scan and complete paced payload ranges', async () => {
+  const rowCount = 27;
+  const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
+    schema_version: 1,
+    coarse_expense_ordinal_range: { start_inclusive: 0, end_exclusive: rowCount },
+    aggregate_period_month_ranges: [
+      { start_inclusive: 0, end_exclusive: rowCount, aggregate_period_month: '2024-01-01' },
+    ],
+  }));
+  const revisionRows = Array.from({ length: rowCount }, (_, index) => {
+    const raw = payload(`Historical ${index + 1}`);
+    return Object.freeze({
+      source_record_id: id(700_000 + index),
+      revision: 1n,
+      migration_run_id: RUN_ID,
+      observed_at: new Date(CAPTURED_AT),
+      row_hint: BigInt(index + 2),
+      row_digest: rowDigest(raw),
+      change_class: null,
+      raw_payload: serializeRawPayload(raw),
+    });
+  });
+  const bindings = revisionRows.map((revision, index) => ({
+    source_ordinal: index,
+    row_hint: revision.row_hint,
+    row_digest: revision.row_digest,
+    source_record_id: revision.source_record_id,
+    transaction_id: id(800_000 + index),
+  }));
+  const manifestRow = {
+    source_snapshot_id: SNAPSHOT_ID,
+    source_snapshot_digest: SNAPSHOT_DIGEST,
+    binding_count: BigInt(rowCount),
+    bindings: { schema_version: 1, bindings },
+    run_state: 'STAGING',
+    run_snapshot_digest: SNAPSHOT_DIGEST,
+    snapshot_digest: SNAPSHOT_DIGEST,
+    snapshot_row_count: BigInt(rowCount),
+  };
+  const snapshotRow = {
+    captured_at: new Date(CAPTURED_AT),
+    snapshot_digest: SNAPSHOT_DIGEST,
+    row_count: BigInt(rowCount),
+  };
+  const statements = [];
+  const reader = Object.freeze({
+    async read(statement) {
+      statements.push(statement);
+      if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
+        return { rows: [manifestRow] };
+      }
+      if (statement.text.includes('FROM source_snapshots WHERE id = $id')) {
+        return { rows: [snapshotRow] };
+      }
+      if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
+        return { rows: revisionRows.map(({ raw_payload: _, ...metadata }) => metadata) };
+      }
+      if (statement.text.includes('FROM source_record_revisions')) {
+        const from = statement.parameters.source_record_id_from.value;
+        const to = statement.parameters.source_record_id_to.value;
+        return {
+          rows: revisionRows.filter((revision) => (
+            revision.source_record_id >= from && revision.source_record_id <= to
+          )),
+        };
+      }
+      throw new Error(`unexpected read: ${statement.text}`);
+    },
+  });
+  const waitedUnits = [];
+  const reconstructed = await reconstructInitialBootstrapDurableObservation(
+    reader,
+    run({ state: 'STAGING', rowsSeen: rowCount, rowsNew: rowCount }),
+    historicalEvidence,
+    async (units) => { waitedUnits.push(units); },
+  );
+
+  const metadataReads = statements.filter((statement) => (
+    statement.text.includes('VIEW idx_source_record_revisions_run_revision')
+  ));
+  const payloadReads = statements.filter((statement) => (
+    statement.text.includes('raw_payload')
+  ));
+  assert.equal(metadataReads.length, 1);
+  assert.equal(payloadReads.length, 3);
+  assert.deepEqual(waitedUnits, [9, 9, 9]);
+  assert.equal(reconstructed.rows.length, rowCount);
+  assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
+    reconstructed.revisionEvidenceProof,
+    run({ state: 'STAGING', rowsSeen: rowCount, rowsNew: rowCount }),
+    revisionRows.map((revision, index) => Object.freeze({
+      sourceRecordId: revision.source_record_id,
+      revision: 1,
+      migrationRunId: RUN_ID,
+      observedAt: CAPTURED_AT,
+      rowHint: index + 2,
+      rowDigest: revision.row_digest,
+      changeClass: null,
+      rawPayload: revision.raw_payload,
+    })),
+  ), true);
+});
 
 test('reconstructs exact historical candidate from durable evidence without any current Google observation', async () => {
   const f = fixture();
@@ -150,7 +297,7 @@ test('reconstructs exact historical candidate from durable evidence without any 
   assert.equal(result.verifiedPlan.transactions.length, 1);
   assert.equal(result.verifiedPlan.transactions[0].transactionId, TRANSACTION_ID);
   assert.equal(result.verifiedPlan.transactions[0].transaction.amountMinor, 1234);
-  assert.equal(f.reads.length, 3);
+  assert.equal(f.reads.length, 4);
   assert.equal(f.reads.some((sql) => /google|sheets/i.test(sql)), false);
 });
 

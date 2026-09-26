@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+import { createCanonicalSourceDigest } from '../../dist/integration/google/canonicalSourceDigest.js';
 import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
@@ -10,10 +11,14 @@ import {
   InitialBootstrapPrivateEvidenceError,
   parseInitialBootstrapPrivateHistoricalEvidence,
 } from '../../dist/migration/initialBootstrapPrivateEvidence.js';
+import { reconstructInitialBootstrapDurableObservation } from '../../dist/migration/initialStaleValidatedHistoricalCandidate.js';
 import { projectInitialSnapshot } from '../../dist/migration/initialSnapshotProjection.js';
+import { serializeRawPayloadForLineageDigest } from '../../dist/migration/rawPayloadProvenance.js';
 
 const SOURCE = '00000000-0000-0000-0000-000000000101';
 const RUN = '00000000-0000-0000-0000-000000000102';
+const SNAPSHOT = '00000000-0000-0000-0000-000000000103';
+const TRANSACTION = '00000000-0000-0000-0000-000000000104';
 const ACCOUNT = '00000000-0000-0000-0000-000000000201';
 const CATEGORY = '00000000-0000-0000-0000-000000000202';
 const MEMBER = '00000000-0000-0000-0000-000000000203';
@@ -35,6 +40,9 @@ const rawPayload = Object.freeze({
 });
 
 const serializedRawPayload = JSON.stringify(rawPayload);
+const ROW_DIGEST = createCanonicalSourceDigest().digestCanonicalRow(
+  serializeRawPayloadForLineageDigest(rawPayload),
+);
 
 const historicalEvidence = parseInitialBootstrapPrivateHistoricalEvidence(JSON.stringify({
   schema_version: 1,
@@ -88,7 +96,7 @@ function input() {
           migrationRunId: RUN,
           observedAt: OBSERVED,
           rowHint: 2,
-          rowDigest: 'synthetic-row-digest',
+          rowDigest: ROW_DIGEST,
           changeClass: null,
           rawPayload: serializedRawPayload,
         }),
@@ -108,7 +116,7 @@ function matchingTransport({ includeRevision = true } = {}) {
           migration_run_id: RUN,
           observed_at: OBSERVED,
           row_hint: 2n,
-          row_digest: 'synthetic-row-digest',
+          row_digest: ROW_DIGEST,
           change_class: null,
           raw_payload: serializedRawPayload,
         }] : [],
@@ -171,6 +179,81 @@ test('controlled durable revision reconciliation waits for the injected RU pacin
   await reconciliation.port.reconcile(input());
 
   assert.deepEqual(waitedUnits, [1]);
+});
+
+test('durable reconstruction proof prevents a redundant second exact revision scan', async () => {
+  const baseInput = input();
+  const binding = {
+    source_ordinal: 0,
+    row_hint: 2n,
+    row_digest: ROW_DIGEST,
+    source_record_id: SOURCE,
+    transaction_id: TRANSACTION,
+  };
+  const manifestRow = {
+    source_snapshot_id: SNAPSHOT,
+    source_snapshot_digest: 'synthetic-snapshot',
+    binding_count: 1n,
+    bindings: { schema_version: 1, bindings: [binding] },
+    run_state: 'STAGING',
+    run_snapshot_digest: 'synthetic-snapshot',
+    snapshot_digest: 'synthetic-snapshot',
+    snapshot_row_count: 1n,
+  };
+  const snapshotRow = {
+    captured_at: new Date(OBSERVED),
+    snapshot_digest: 'synthetic-snapshot',
+    row_count: 1n,
+  };
+  const revisionRow = {
+    source_record_id: SOURCE,
+    revision: 1n,
+    migration_run_id: RUN,
+    observed_at: new Date(OBSERVED),
+    row_hint: 2n,
+    row_digest: ROW_DIGEST,
+    change_class: null,
+    raw_payload: JSON.parse(serializedRawPayload),
+  };
+  const reconstructionReader = Object.freeze({
+    async read(statement) {
+      if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: [manifestRow] };
+      if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: [snapshotRow] };
+      if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
+        const { raw_payload: _, ...metadata } = revisionRow;
+        return { rows: [metadata] };
+      }
+      if (statement.text.includes('FROM source_record_revisions')) return { rows: [revisionRow] };
+      throw new Error(`unexpected read: ${statement.text}`);
+    },
+  });
+  const reconstructed = await reconstructInitialBootstrapDurableObservation(
+    reconstructionReader,
+    baseInput.run,
+    historicalEvidence,
+  );
+  let sourceRevisionReadCount = 0;
+  const transport = matchingTransport();
+  const adapter = new YdbAdapter({
+    async executeRead(statement) {
+      if (statement.text.includes('source_record_revisions')) sourceRevisionReadCount += 1;
+      return transport.executeRead(statement);
+    },
+    serializableReadWrite: transport.serializableReadWrite,
+  });
+  const reconciliation = createInitialBootstrapDurableReconciliation(
+    adapter,
+    projectionContext,
+    historicalEvidence,
+  );
+
+  const result = await reconciliation.port.reconcile(Object.freeze({
+    ...baseInput,
+    durableRevisionEvidenceProof: reconstructed.revisionEvidenceProof,
+  }));
+
+  assert.equal(Object.values(result.checks).every((status) => status === 'MATCHED'), true);
+  assert.equal(sourceRevisionReadCount, 0);
 });
 
 test('durable initial reconciliation refuses to infer MATCHED when persisted revision evidence is incomplete', async () => {

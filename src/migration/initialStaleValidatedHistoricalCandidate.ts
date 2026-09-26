@@ -11,6 +11,8 @@ import {
   parseInitialBootstrapIdentityManifestRows,
 } from './initialBootstrapIdentityManifest.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
+import type { InitialSourceRecordRevisionProjection } from './initialSourceLineage.js';
+import { createInitialSourceRevisionEvidenceReadBudgetWaiter } from './initialSourceRevisionEvidenceRecovery.js';
 import type { RawPayload } from './rawPayloadDecoder.js';
 import { normalizeRawPayload, serializeRawPayload, serializeRawPayloadForLineageDigest } from './rawPayloadProvenance.js';
 import { buildInitialSourceLineageProjection } from './initialSourceLineage.js';
@@ -71,6 +73,78 @@ interface HistoricalRevision {
 }
 
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const MINIMUM_UUID = '00000000-0000-0000-0000-000000000000';
+const HISTORICAL_REVISION_READ_ROWS_LIMIT = 9;
+const VERIFIED_REVISION_EVIDENCE_PROOF: unique symbol = Symbol('VERIFIED_REVISION_EVIDENCE_PROOF');
+
+export interface InitialBootstrapDurableRevisionEvidenceProof {
+  readonly [VERIFIED_REVISION_EVIDENCE_PROOF]: true;
+  readonly migrationRunId: string;
+  readonly sourceSnapshotDigest: string;
+  readonly capturedAt: string;
+  readonly bindings: readonly Readonly<{
+    sourceRecordId: string;
+    rowHint: number;
+    rowDigest: string;
+  }>[];
+}
+
+export function matchesInitialBootstrapDurableRevisionEvidenceProof(
+  proof: InitialBootstrapDurableRevisionEvidenceProof | null | undefined,
+  run: Readonly<MigrationRun>,
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+): boolean {
+  if (
+    proof === null
+    || proof === undefined
+    || proof[VERIFIED_REVISION_EVIDENCE_PROOF] !== true
+    || proof.migrationRunId !== run.id.toLowerCase()
+    || proof.sourceSnapshotDigest !== run.sourceSnapshotDigest
+    || proof.bindings.length !== revisions.length
+  ) {
+    return false;
+  }
+
+  const revisionsBySource = new Map<string, Readonly<InitialSourceRecordRevisionProjection>>();
+  for (const revision of revisions) {
+    const sourceRecordId = revision.sourceRecordId.toLowerCase();
+    if (revisionsBySource.has(sourceRecordId)) return false;
+    revisionsBySource.set(sourceRecordId, revision);
+  }
+  if (revisionsBySource.size !== proof.bindings.length) return false;
+
+  const digest = createCanonicalSourceDigest();
+  try {
+    for (const binding of proof.bindings) {
+      const revision = revisionsBySource.get(binding.sourceRecordId);
+      if (
+        revision === undefined
+        || revision.migrationRunId.toLowerCase() !== proof.migrationRunId
+        || revision.revision !== 1
+        || revision.observedAt !== proof.capturedAt
+        || revision.rowHint !== binding.rowHint
+        || revision.rowDigest !== binding.rowDigest
+        || revision.changeClass !== null
+      ) {
+        return false;
+      }
+      const payload = JSON.parse(revision.rawPayload) as unknown;
+      if (
+        payload === null
+        || typeof payload !== 'object'
+        || Array.isArray(payload)
+        || digest.digestCanonicalRow(
+          serializeRawPayloadForLineageDigest(payload as Readonly<Record<string, unknown>>),
+        ) !== binding.rowDigest
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
 
 function uuid(value: unknown): string | null {
   return typeof value === 'string' && UUID_PATTERN.test(value) ? value.toLowerCase() : null;
@@ -105,14 +179,30 @@ function rawPayload(value: unknown): RawPayload | null {
   }
 }
 
-function revisionStatement(runId: string) {
+function revisionMetadataStatement(runId: string) {
+  return readStatement(
+    'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
+      + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
+      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision '
+      + 'ORDER BY source_record_id',
+    {
+      migration_run_id: uuidParameter(runId),
+      revision: uint64Parameter(1),
+    },
+  );
+}
+
+function revisionPayloadRangeStatement(runId: string, firstSourceRecordId: string, lastSourceRecordId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions '
-      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision '
-      + 'ORDER BY source_record_id',
+      + 'WHERE source_record_id >= $source_record_id_from AND source_record_id <= $source_record_id_to '
+      + 'AND revision = $revision AND migration_run_id = $migration_run_id',
     {
+      source_record_id_from: uuidParameter(firstSourceRecordId),
+      source_record_id_to: uuidParameter(lastSourceRecordId),
       migration_run_id: uuidParameter(runId),
       revision: uint64Parameter(1),
     },
@@ -148,16 +238,13 @@ function parseSnapshot(
   return capturedAt;
 }
 
-function parseRevisions(
+function parseRevisionRows(
   rows: readonly Readonly<RevisionRow>[],
   run: Readonly<MigrationRun>,
   capturedAt: string,
   expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
+  seen: Set<string>,
 ): readonly Readonly<HistoricalRevision>[] {
-  if (rows.length !== expectedBySource.size) {
-    throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
-  }
-  const seen = new Set<string>();
   const digest = createCanonicalSourceDigest();
   const revisions: HistoricalRevision[] = [];
 
@@ -194,19 +281,119 @@ function parseRevisions(
     revisions.push(Object.freeze({ sourceRecordId, observedAt, rowHint, rowDigest, rawPayload: payload }));
   }
 
+  return Object.freeze(revisions);
+}
+
+function parseRevisionMetadataRows(
+  rows: readonly Readonly<RevisionRow>[],
+  run: Readonly<MigrationRun>,
+  capturedAt: string,
+  expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
+): readonly Readonly<{ sourceRecordId: string; rowHint: number; rowDigest: string }>[] {
+  if (rows.length !== expectedBySource.size) {
+    throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+  }
+  const seen = new Set<string>();
+  return Object.freeze(rows.map((row) => {
+    const sourceRecordId = uuid(row.source_record_id);
+    const migrationRunId = uuid(row.migration_run_id);
+    const observedAt = normalizeYdbTimestampReadback(row.observed_at);
+    const rowHint = integer(row.row_hint, 1);
+    const rowDigest = nonEmptyString(row.row_digest);
+    const expected = sourceRecordId === null ? undefined : expectedBySource.get(sourceRecordId);
+    if (
+      sourceRecordId === null
+      || migrationRunId !== run.id.toLowerCase()
+      || integer(row.revision, 1) !== 1
+      || observedAt === null
+      || !ydbTimestampReadbackMatches(row.observed_at, capturedAt)
+      || rowHint === null
+      || rowDigest === null
+      || row.change_class !== null
+      || expected === undefined
+      || expected.rowHint !== rowHint
+      || expected.rowDigest !== rowDigest
+      || seen.has(sourceRecordId)
+    ) {
+      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+    }
+    seen.add(sourceRecordId);
+    return Object.freeze({ sourceRecordId, rowHint, rowDigest });
+  }));
+}
+
+async function readHistoricalRevisionsInBoundedRanges(
+  reader: YdbReadScope,
+  run: Readonly<MigrationRun>,
+  capturedAt: string,
+  expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
+  waitForReadBudget: ReturnType<typeof createInitialSourceRevisionEvidenceReadBudgetWaiter>,
+): Promise<readonly Readonly<HistoricalRevision>[]> {
+  const metadataResult = await reader.read<RevisionRow>(revisionMetadataStatement(run.id));
+  const metadata = parseRevisionMetadataRows(metadataResult.rows, run, capturedAt, expectedBySource);
+  const seen = new Set<string>();
+  const revisions: HistoricalRevision[] = [];
+
+  for (let offset = 0; offset < metadata.length; offset += HISTORICAL_REVISION_READ_ROWS_LIMIT) {
+    const batch = metadata.slice(offset, offset + HISTORICAL_REVISION_READ_ROWS_LIMIT);
+    const first = batch[0];
+    const last = batch.at(-1);
+    if (first === undefined || last === undefined) {
+      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+    }
+    await waitForReadBudget(batch.length);
+    const payloadResult = await reader.read<RevisionRow>(
+      revisionPayloadRangeStatement(run.id, first.sourceRecordId, last.sourceRecordId),
+    );
+    const parsed = parseRevisionRows(payloadResult.rows, run, capturedAt, expectedBySource, seen);
+    const batchIds = new Set(batch.map((row) => row.sourceRecordId));
+    if (
+      parsed.length !== batch.length
+      || parsed.some((revision) => !batchIds.has(revision.sourceRecordId))
+      || [...batchIds].some((sourceRecordId) => !seen.has(sourceRecordId))
+    ) {
+      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+    }
+    revisions.push(...parsed);
+  }
+
   if (seen.size !== expectedBySource.size) {
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
   }
   return Object.freeze(revisions);
 }
 
+function createDurableRevisionEvidenceProof(
+  run: Readonly<MigrationRun>,
+  capturedAt: string,
+  bindings: readonly Readonly<{
+    sourceRecordId: string;
+    rowHint: number;
+    rowDigest: string;
+  }>[],
+): Readonly<InitialBootstrapDurableRevisionEvidenceProof> {
+  return Object.freeze({
+    [VERIFIED_REVISION_EVIDENCE_PROOF]: true as const,
+    migrationRunId: run.id.toLowerCase(),
+    sourceSnapshotDigest: run.sourceSnapshotDigest,
+    capturedAt,
+    bindings: Object.freeze(bindings.map((binding) => Object.freeze({
+      sourceRecordId: binding.sourceRecordId.toLowerCase(),
+      rowHint: binding.rowHint,
+      rowDigest: binding.rowDigest,
+    }))),
+  });
+}
+
 export async function reconstructInitialBootstrapDurableObservation(
   reader: YdbReadScope,
   run: Readonly<MigrationRun>,
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
+  waitForReadBudget = createInitialSourceRevisionEvidenceReadBudgetWaiter(),
 ): Promise<Readonly<{
   capturedAt: string;
   snapshotDigest: string;
+  revisionEvidenceProof: Readonly<InitialBootstrapDurableRevisionEvidenceProof>;
   rows: readonly Readonly<{
     rowHint: number;
     digest: string;
@@ -253,8 +440,13 @@ export async function reconstructInitialBootstrapDurableObservation(
   ] as const));
   let durableRevisions: readonly Readonly<HistoricalRevision>[];
   try {
-    const revisionResult = await reader.read<RevisionRow>(revisionStatement(run.id));
-    durableRevisions = parseRevisions(revisionResult.rows, run, capturedAt, expectedBySource);
+    durableRevisions = await readHistoricalRevisionsInBoundedRanges(
+      reader,
+      run,
+      capturedAt,
+      expectedBySource,
+      waitForReadBudget,
+    );
   } catch (error) {
     if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
@@ -264,6 +456,11 @@ export async function reconstructInitialBootstrapDurableObservation(
   return Object.freeze({
     capturedAt,
     snapshotDigest: run.sourceSnapshotDigest,
+    revisionEvidenceProof: createDurableRevisionEvidenceProof(
+      run,
+      capturedAt,
+      readback.manifest.bindings,
+    ),
     rows: Object.freeze(readback.manifest.bindings.map((binding) => {
       const revision = revisionBySource.get(binding.sourceRecordId);
       if (revision === undefined) {
@@ -323,8 +520,13 @@ export async function reconstructInitialStaleValidatedHistoricalCandidate(
   ] as const));
   let durableRevisions: readonly Readonly<HistoricalRevision>[];
   try {
-    const revisionResult = await reader.read<RevisionRow>(revisionStatement(run.id));
-    durableRevisions = parseRevisions(revisionResult.rows, run, capturedAt, expectedBySource);
+    durableRevisions = await readHistoricalRevisionsInBoundedRanges(
+      reader,
+      run,
+      capturedAt,
+      expectedBySource,
+      createInitialSourceRevisionEvidenceReadBudgetWaiter(),
+    );
   } catch (error) {
     if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
