@@ -587,6 +587,30 @@ controlled-preparation-only read-only probe will verify it on a distinct exact S
 `REFERENCE_SNAPSHOT_VALIDATED` followed by `READY` and a revision phase past payload verification
 allows consideration of WU7 preflight. All other results stay read-only STOP.
 
+#### Metadata-scan RESOURCE_EXHAUSTED after numeric reference tags on `0b810880d3e5dea4db1ccd52b66cf0d4de1cde68`
+
+Controlled-preparation-only probe `36230537420` now returned
+`REFERENCE_SNAPSHOT_VALIDATED`, so the reference resolver stage completed. The next failure moved to:
+
+- preparation `YDB_DATA_QUERY_EXECUTION_FAILED`;
+- phase `RECONCILIATION_READ`;
+- reconciliation stage `REVISION_METADATA_SCAN`;
+- query error `GRPC_STATUS / RESOURCE_EXHAUSTED`, retry `RETRIED`;
+- revision payload batch `UNOBSERVED`.
+
+This localizes the current provider failure to reading all current-run revision metadata in one
+unbounded result. The bounded candidate pages that same run+revision secondary-index scan by
+`source_record_id` with a 128-row **per-query** limit and follows provider-returned order until an
+empty/short page. Every page is validated; persisted evidence outside the authoritative expected set,
+duplicates, or cursor anomalies remain fail-closed. The page limit does not cap total reconciliation
+coverage, truncate source history, or weaken exact payload verification. The synthetic adapter fixture
+exhausts an unpaged response envelope and proves all pages still produce exact complete evidence.
+
+After merge and exact-main CI, perform one fresh full read-only classification and one
+controlled-preparation-only read-only probe on that distinct SHA. Continue only if the snapshot
+reference is validated, preparation is `READY`, and exact revision payload verification completes.
+Otherwise preserve the new enum-only stage/error and fix that boundary before any WU7 mutation.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

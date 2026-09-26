@@ -194,7 +194,7 @@ test('the latest controlled-preparation failure stops before revision payload pl
   assert.match(evidence, /`APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`/);
   assert.match(evidence, /`RESUME_CONTEXT_READ`/);
   assert.match(evidence, /`VIKA_MEMBER_READ`/);
-  assert.match(evidence, /`RESOURCE_EXHAUSTED`/);
+  assert.match(evidence, /RESOURCE_EXHAUSTED/);
   assert.match(evidence, /revision payload batch: `UNOBSERVED`/);
   assert.match(evidence, /Do not repeat controlled preparation, dispatch WU7/);
 });
@@ -252,4 +252,18 @@ test('numeric reference tags follow the exact unknown-kind evidence and stay rea
   assert.match(evidence, /`CAST\(1\|2\|3 AS Uint32\)`/);
   assert.match(evidence, /one new\s+controlled-preparation-only read-only probe/);
   assert.match(evidence, /All other results stay read-only STOP/);
+});
+
+test('metadata pagination candidate follows the latest exact-stage RESOURCE_EXHAUSTED evidence', () => {
+  const evidence = runbook.match(
+    /#### Metadata-scan RESOURCE_EXHAUSTED after numeric reference tags on `0b810880d3e5dea4db1ccd52b66cf0d4de1cde68`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest revision metadata scan failure must drive the next bounded fix');
+  assert.match(evidence, /probe `36230537420`/);
+  assert.match(evidence, /`REFERENCE_SNAPSHOT_VALIDATED`/);
+  assert.match(evidence, /`REVISION_METADATA_SCAN`/);
+  assert.match(evidence, /RESOURCE_EXHAUSTED/);
+  assert.match(evidence, /128-row \*\*per-query\*\* limit/);
+  assert.match(evidence, /does not cap total reconciliation\s+coverage/);
 });
