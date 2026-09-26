@@ -1156,4 +1156,27 @@ identity. Он не разрешает продолжить retirement/rebase и
 попытка остаётся disarmed до отдельного deterministic root-cause/evidence fix и новой допустимой
 authority boundary; Google остаётся authoritative, YDB — shadow.
 
+### Повтор RESOURCE_EXHAUSTED на paginated metadata scan на `c34bc8cda33b9cd58d7f0affad841aa577f73622`
+
+Controlled-preparation-only recovery `36244255372` выполнила только read-only continuation diagnostic.
+Reference snapshot прошёл; затем она воспроизвела:
+
+- preparation `YDB_DATA_QUERY_EXECUTION_FAILED`;
+- retry `RETRIED`, query error `GRPC_STATUS`, gRPC status `RESOURCE_EXHAUSTED`;
+- phase `RECONCILIATION_READ`, substage `REVISION_METADATA_SCAN`;
+- payload batch `UNOBSERVED`.
+
+На этом SHA metadata reconciliation ещё выполняла отдельный запрос на каждую 128-row UUID page.
+Это причинно связывает текущий отказ с burst RU, исчерпываемым последовательными page queries; exact
+payload verification не начиналась. Full recovery на том же YDB ранее успешно получила полный
+metadata-only run scan через один запрос к тому же exact index. Минимальный repository correction
+возвращает для metadata proof один ordered index read только с metadata columns. Complete-set,
+duplicate/extra/contradictory guards остаются включёнными; `raw_payload` по-прежнему читается
+отдельно exact primary-key range batches в пределах 64 KiB.
+
+Этот root-cause candidate остаётся diagnostic-only: после merge допускается только один fresh
+controlled-preparation-only read-only probe на exact main. Ни WU7, ни bootstrap, ни resume/retirement
+не вооружаются до `READY`, complete exact payload evidence и доказательства current cutoff; любая
+повторная `RESOURCE_EXHAUSTED` требует нового sanitized stage evidence до выбора следующего fix.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
