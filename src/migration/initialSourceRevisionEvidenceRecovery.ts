@@ -30,8 +30,19 @@ export type InitialSourceRevisionEvidenceReadStage =
   | 'REVISION_PAYLOAD_BATCH'
   | 'REVISION_COLLISION_READ';
 
+export type InitialSourceRevisionEvidenceReadBatchEvidence =
+  | 'UNOBSERVED'
+  | 'NO_PAYLOAD_BATCH'
+  | 'ALL_BATCHES_WITHIN_64_KIB'
+  | 'SINGLE_REVISION_EXCEEDS_64_KIB'
+  | 'DIAGNOSTIC_FAILED';
+
 export type InitialSourceRevisionEvidenceReadObserver = (
   stage: InitialSourceRevisionEvidenceReadStage,
+) => void;
+
+export type InitialSourceRevisionEvidenceReadBatchObserver = (
+  evidence: Exclude<InitialSourceRevisionEvidenceReadBatchEvidence, 'UNOBSERVED' | 'DIAGNOSTIC_FAILED'>,
 ) => void;
 
 export type InitialSourceRevisionEvidenceRecoveryErrorCode =
@@ -72,6 +83,18 @@ function observeReadStage(
   if (observer === undefined) return;
   try {
     observer(stage);
+  } catch {
+    // Diagnostics must never alter recovery semantics or provider request count.
+  }
+}
+
+function observeBatchEvidence(
+  observer: InitialSourceRevisionEvidenceReadBatchObserver | undefined,
+  evidence: Exclude<InitialSourceRevisionEvidenceReadBatchEvidence, 'UNOBSERVED' | 'DIAGNOSTIC_FAILED'>,
+): void {
+  if (observer === undefined) return;
+  try {
+    observer(evidence);
   } catch {
     // Diagnostics must never alter recovery semantics or provider request count.
   }
@@ -296,9 +319,11 @@ export async function planInitialSourceRevisionEvidenceResume(
   reader: YdbReadScope,
   expectedRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
   observeReadStageEvidence?: InitialSourceRevisionEvidenceReadObserver,
+  observeReadBatchEvidence?: InitialSourceRevisionEvidenceReadBatchObserver,
 ): Promise<Readonly<InitialSourceRevisionResumePlan>> {
   const expected = expectedMap(expectedRevisions);
   if (expected.runId === null) {
+    observeBatchEvidence(observeReadBatchEvidence, 'NO_PAYLOAD_BATCH');
     return Object.freeze({
       existingSourceRecordIds: Object.freeze([]),
       missingRevisions: Object.freeze([]),
@@ -324,7 +349,19 @@ export async function planInitialSourceRevisionEvidenceResume(
     return revision;
   });
   const payloadVerifiedSourceIds = new Set<string>();
-  for (const batch of planRevisionReadBatches(existingRevisions)) {
+  const batches = planRevisionReadBatches(existingRevisions);
+  if (batches.length === 0) observeBatchEvidence(observeReadBatchEvidence, 'NO_PAYLOAD_BATCH');
+  for (const batch of batches) {
+    const estimatedBatchBytes = batch.reduce(
+      (total, revision) => total + estimatedRevisionReadBytes(revision),
+      0,
+    );
+    observeBatchEvidence(
+      observeReadBatchEvidence,
+      batch.length === 1 && estimatedBatchBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+        ? 'SINGLE_REVISION_EXCEEDS_64_KIB'
+        : 'ALL_BATCHES_WITHIN_64_KIB',
+    );
     observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
       exactPayloadRangeReadStatement(expected.runId, batch),

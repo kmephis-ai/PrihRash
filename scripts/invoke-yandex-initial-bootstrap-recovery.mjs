@@ -316,6 +316,14 @@ const STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE = new Set([
   'DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE = new Set([
+  'UNOBSERVED',
+  'NO_PAYLOAD_BATCH',
+  'ALL_BATCHES_WITHIN_64_KIB',
+  'SINGLE_REVISION_EXCEEDS_64_KIB',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const FUNCTION_FAILURE_CODES = new Set([
   'INITIAL_BOOTSTRAP_RECOVERY_CONFIG_INVALID',
   'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED',
@@ -389,6 +397,8 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       result.stagingControlledPreparationReconciliationReadStageEvidence;
     const stagingControlledPreparationMetadataScanCostEvidence =
       result.stagingControlledPreparationMetadataScanCostEvidence;
+    const stagingControlledPreparationRevisionPayloadBatchEvidence =
+      result.stagingControlledPreparationRevisionPayloadBatchEvidence;
     const validatedSourceEvidence = result.validatedSourceEvidence;
     const staleValidatedRecoveryGate = result.staleValidatedRecoveryGate;
     const noStagingDiagnostics = stagingRevisionEvidence === undefined
@@ -411,6 +421,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
             'stagingControlledPreparationReferenceReadStageEvidence',
             'stagingControlledPreparationReconciliationReadStageEvidence',
             'stagingControlledPreparationMetadataScanCostEvidence',
+            'stagingControlledPreparationRevisionPayloadBatchEvidence',
           ])
           && noStagingDiagnostics
           && typeof stagingControlledPreparationEvidence === 'string'
@@ -435,6 +446,10 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           && STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE.has(
             stagingControlledPreparationMetadataScanCostEvidence,
           )
+          && typeof stagingControlledPreparationRevisionPayloadBatchEvidence === 'string'
+          && STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE.has(
+            stagingControlledPreparationRevisionPayloadBatchEvidence,
+          )
         : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
           && noStagingDiagnostics
           && stagingControlledPreparationEvidence === undefined
@@ -445,6 +460,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           && stagingControlledPreparationReferenceReadStageEvidence === undefined
           && stagingControlledPreparationReconciliationReadStageEvidence === undefined
           && stagingControlledPreparationMetadataScanCostEvidence === undefined
+          && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
         && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
@@ -460,6 +476,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
         && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && stagingControlledPreparationEvidence === undefined
@@ -470,6 +487,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
         && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT'
       ? exactKeys(result, [
           'status',
@@ -499,6 +517,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationReferenceReadStageEvidence === undefined
         && stagingControlledPreparationReconciliationReadStageEvidence === undefined
         && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && noStagingDiagnostics
         && stagingControlledPreparationEvidence === undefined
@@ -507,7 +526,9 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationGrpcStatusEvidence === undefined
         && stagingControlledPreparationPhaseEvidence === undefined
         && stagingControlledPreparationReferenceReadStageEvidence === undefined
-        && stagingControlledPreparationReconciliationReadStageEvidence === undefined;
+        && stagingControlledPreparationReconciliationReadStageEvidence === undefined
+        && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined;
     if (!validDiagnosticShape) return null;
     return Object.freeze({
       result: Object.freeze({
@@ -557,6 +578,9 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationMetadataScanCostEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingControlledPreparationMetadataScanCostEvidence ?? null
         : null,
+      stagingControlledPreparationRevisionPayloadBatchEvidence: result.reason === 'STAGING_RUN_PRESENT'
+        ? stagingControlledPreparationRevisionPayloadBatchEvidence ?? null
+        : null,
     });
   }
   if (
@@ -580,6 +604,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
       stagingControlledPreparationMetadataScanCostEvidence: null,
+      stagingControlledPreparationRevisionPayloadBatchEvidence: null,
     });
   }
   return null;
@@ -605,6 +630,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
       stagingControlledPreparationMetadataScanCostEvidence: null,
+      stagingControlledPreparationRevisionPayloadBatchEvidence: null,
     });
   }
 
@@ -641,6 +667,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationReferenceReadStageEvidence: null,
       stagingControlledPreparationReconciliationReadStageEvidence: null,
       stagingControlledPreparationMetadataScanCostEvidence: null,
+      stagingControlledPreparationRevisionPayloadBatchEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -728,6 +755,11 @@ if (invocation.stagingControlledPreparationReconciliationReadStageEvidence !== n
 if (invocation.stagingControlledPreparationMetadataScanCostEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${invocation.stagingControlledPreparationMetadataScanCostEvidence}\n`,
+  );
+}
+if (invocation.stagingControlledPreparationRevisionPayloadBatchEvidence !== null) {
+  process.stderr.write(
+    `R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=${invocation.stagingControlledPreparationRevisionPayloadBatchEvidence}\n`,
   );
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);

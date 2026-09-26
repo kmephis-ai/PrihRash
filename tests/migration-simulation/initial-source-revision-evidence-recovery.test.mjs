@@ -152,6 +152,23 @@ test('revision read-stage observer cannot alter recovery semantics when it throw
   assert.deepEqual(resume.missingRevisions, []);
 });
 
+test('revision payload batch observer is enum-only and cannot alter recovery semantics when it throws', async () => {
+  const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
+  const seen = [];
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader(expected.map(providerRow)),
+    expected,
+    undefined,
+    (evidence) => {
+      seen.push(evidence);
+      throw new Error('diagnostic observer failure');
+    },
+  );
+  assert.deepEqual(seen, ['ALL_BATCHES_WITHIN_64_KIB']);
+  assert.deepEqual(resume.existingSourceRecordIds, [SOURCE_ID_1]);
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
 test('primary-key collision from another migration run fails closed instead of planning a conflicting INSERT', async () => {
   const expected = [revision(SOURCE_ID_1, 2, 'synthetic-row-a', 'Synthetic A')];
   await expectRecoveryError(
@@ -227,6 +244,7 @@ test('large current-run payload verification uses primary-key range batches boun
   ));
   const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
   const statements = [];
+  const batchEvidence = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
       if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
@@ -236,6 +254,8 @@ test('large current-run payload verification uses primary-key range batches boun
         .map(providerRow);
     }, (statement) => statements.push(statement)),
     expected,
+    undefined,
+    (evidence) => batchEvidence.push(evidence),
   );
 
   assert.equal(statements.length > 2, true);
@@ -245,6 +265,8 @@ test('large current-run payload verification uses primary-key range batches boun
   const payloadReads = statements.slice(1);
   assert.equal(payloadReads.length > 1, true);
   assert.equal(payloadReads.length < 32, true);
+  assert.equal(batchEvidence.length > 1, true);
+  assert.deepEqual([...new Set(batchEvidence)], ['ALL_BATCHES_WITHIN_64_KIB']);
   assert.equal(new Set(payloadReads.map((statement) => statement.text)).size, 1);
   assert.equal(payloadReads.every((statement) => (
     statement.parameters.migration_run_id.value === RUN_ID
@@ -280,6 +302,7 @@ test('payload primary-key ranges follow YDB metadata order without client-side U
   ));
   const providerOrder = [expected[2], expected[0], expected[1]];
   const statements = [];
+  const batchEvidence = [];
   const byId = new Map(expected.map((item) => [item.sourceRecordId, item]));
   const providerRank = new Map(providerOrder.map((item, index) => [item.sourceRecordId, index]));
 
@@ -300,9 +323,16 @@ test('payload primary-key ranges follow YDB metadata order without client-side U
         .map(providerRow);
     }, (statement) => statements.push(statement)),
     expected,
+    undefined,
+    (evidence) => batchEvidence.push(evidence),
   );
 
   const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
+  assert.deepEqual(batchEvidence, [
+    'SINGLE_REVISION_EXCEEDS_64_KIB',
+    'SINGLE_REVISION_EXCEEDS_64_KIB',
+    'SINGLE_REVISION_EXCEEDS_64_KIB',
+  ]);
   assert.deepEqual(
     payloadReads.flatMap((statement) => (
       providerOrder.filter((item) => {

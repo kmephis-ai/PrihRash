@@ -39,6 +39,8 @@ import {
 } from '../migration/initialBootstrapDurableReconciliation.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
+  type InitialSourceRevisionEvidenceReadBatchEvidence,
+  type InitialSourceRevisionEvidenceReadBatchObserver,
   type InitialSourceRevisionEvidenceReadStage,
 } from '../migration/initialSourceRevisionEvidenceRecovery.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
@@ -197,6 +199,7 @@ export interface InitialBootstrapControlledPreparationResult {
   readonly referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
   readonly metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+  readonly revisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecoverySurfaceClassification {
@@ -215,6 +218,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingControlledPreparationReferenceReadStageEvidence?: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly stagingControlledPreparationReconciliationReadStageEvidence?: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
   readonly stagingControlledPreparationMetadataScanCostEvidence?: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+  readonly stagingControlledPreparationRevisionPayloadBatchEvidence?: InitialSourceRevisionEvidenceReadBatchEvidence;
 }
 
 export interface InitialBootstrapRecoveryJobRuntime {
@@ -816,6 +820,7 @@ async function diagnoseStagingControlledPreparation(
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
       metadataScanCostEvidence: 'UNOBSERVED' as const,
+      revisionPayloadBatchEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -838,6 +843,7 @@ async function diagnoseStagingControlledPreparation(
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
       metadataScanCostEvidence: 'UNOBSERVED' as const,
+      revisionPayloadBatchEvidence: 'UNOBSERVED' as const,
     });
   }
 
@@ -848,12 +854,20 @@ async function diagnoseStagingControlledPreparation(
   let phaseEvidence: InitialBootstrapControlledPreparationPhaseEvidence = 'UNOBSERVED';
   let referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence = 'UNOBSERVED';
   let reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence = 'UNOBSERVED';
+  let revisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence = 'UNOBSERVED';
   const metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
   let queryErrorTracker: InitialBootstrapControlledPreparationQueryErrorTracker | null = null;
   let phaseTracker: InitialBootstrapControlledPreparationPhaseTracker | null = null;
   let referenceReadStageTracker: InitialBootstrapControlledPreparationReferenceReadStageTracker | null = null;
   let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
+  const observeRevisionPayloadBatch: InitialSourceRevisionEvidenceReadBatchObserver = (evidence) => {
+    if (evidence === 'SINGLE_REVISION_EXCEEDS_64_KIB') {
+      revisionPayloadBatchEvidence = evidence;
+    } else if (revisionPayloadBatchEvidence === 'UNOBSERVED') {
+      revisionPayloadBatchEvidence = evidence;
+    }
+  };
   let stopRetryObservation: (() => void) | null = null;
   let stopQueryErrorObservation: (() => void) | null = null;
   try {
@@ -887,6 +901,7 @@ async function diagnoseStagingControlledPreparation(
       projectionContext,
       historicalEvidence,
       (stage) => reconciliationReadStageTracker?.observeStage(stage),
+      observeRevisionPayloadBatch,
     );
     phaseTracker = createInitialBootstrapControlledPreparationPhaseTracker();
     const prepared = await prepareInitialControlledRebuildContinuation(
@@ -939,6 +954,7 @@ async function diagnoseStagingControlledPreparation(
     referenceReadStageEvidence,
     reconciliationReadStageEvidence,
     metadataScanCostEvidence,
+    revisionPayloadBatchEvidence,
   });
 }
 
@@ -1066,6 +1082,7 @@ export async function executeInitialBootstrapRecoveryJob(
       let stagingControlledPreparationReferenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
       let stagingControlledPreparationReconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
       let stagingControlledPreparationMetadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+      let stagingControlledPreparationRevisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence;
       try {
         const digest = runtime.createDigest();
         const lease = await runtime.createSource(validated, digest).readFullSnapshotObservation();
@@ -1082,6 +1099,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence = diagnostic.referenceReadStageEvidence;
         stagingControlledPreparationReconciliationReadStageEvidence = diagnostic.reconciliationReadStageEvidence;
         stagingControlledPreparationMetadataScanCostEvidence = diagnostic.metadataScanCostEvidence;
+        stagingControlledPreparationRevisionPayloadBatchEvidence = diagnostic.revisionPayloadBatchEvidence;
       } catch {
         stagingControlledPreparationEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationRetryEvidence = 'DIAGNOSTIC_FAILED';
@@ -1091,6 +1109,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationReconciliationReadStageEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationMetadataScanCostEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationRevisionPayloadBatchEvidence = 'DIAGNOSTIC_FAILED';
       }
       return Object.freeze({
         ...before,
@@ -1102,6 +1121,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence,
         stagingControlledPreparationReconciliationReadStageEvidence,
         stagingControlledPreparationMetadataScanCostEvidence,
+        stagingControlledPreparationRevisionPayloadBatchEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {

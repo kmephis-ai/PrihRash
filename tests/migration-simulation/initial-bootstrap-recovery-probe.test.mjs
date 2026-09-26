@@ -205,6 +205,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
     stagingControlledPreparationMetadataScanCostEvidence: 'GE_10_LT_3000_RU',
     stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
+    stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
   };
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction(
@@ -253,6 +254,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
         }),
       ),
       {
@@ -276,6 +278,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidRetryEvidence === undefined
             ? {}
             : { stagingControlledPreparationRetryEvidence: invalidRetryEvidence }),
@@ -302,6 +305,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidQueryErrorEvidence === undefined
             ? {}
             : { stagingControlledPreparationQueryErrorEvidence: invalidQueryErrorEvidence }),
@@ -328,6 +332,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidGrpcStatusEvidence === undefined
             ? {}
             : { stagingControlledPreparationGrpcStatusEvidence: invalidGrpcStatusEvidence }),
@@ -355,6 +360,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidPhaseEvidence === undefined
             ? {}
             : { stagingControlledPreparationPhaseEvidence: invalidPhaseEvidence }),
@@ -381,6 +387,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
           stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidReferenceReadStageEvidence === undefined
             ? {}
             : {
@@ -415,6 +422,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
             : {
                 stagingControlledPreparationMetadataScanCostEvidence:
                   invalidMetadataScanCostEvidence,
+                stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
               }),
         }),
       ),
@@ -439,6 +447,7 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
           stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
           stagingControlledPreparationReferenceReadStageEvidence: 'UNOBSERVED',
           stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
+          stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
           ...(invalidReadStageEvidence === undefined
             ? {}
             : {

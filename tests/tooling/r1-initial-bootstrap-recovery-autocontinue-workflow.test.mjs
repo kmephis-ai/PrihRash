@@ -168,3 +168,18 @@ test('revision payload resource exhaustion fix arms only a read-only recovery su
   assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
   assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
 });
+
+test('64 KiB batch diagnostic records exact read-only evidence and cannot arm a write path', () => {
+  const evidence = runbook.match(
+    /### 64 KiB revision-batch diagnostic after repeated `RESOURCE_EXHAUSTED` on `05c5578d5c409f4268fe7dd321f6ccaf96f597c0`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-main controlled-preparation evidence must be recorded');
+  assert.match(evidence, /Full read-only recovery `36177432399`/);
+  assert.match(evidence, /Controlled-preparation-only recovery `36177689818`/);
+  assert.match(evidence, /REVISION_PAYLOAD_BATCH/);
+  assert.match(evidence, /`SINGLE_REVISION_EXCEEDS_64_KIB`/);
+  assert.match(evidence, /no row\s+values, payload sizes, source identifiers, or provider exception text/);
+  assert.match(evidence, /does not arm\s+controlled preparation, readiness, orchestrator, bootstrap, or controlled rebuild/);
+  assert.match(evidence, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
+});

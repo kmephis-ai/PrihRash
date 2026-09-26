@@ -892,6 +892,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         referenceReadStageEvidence: 'CATEGORIES_READ',
         reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
         metadataScanCostEvidence: 'GE_3000_RU',
+        revisionPayloadBatchEvidence: 'UNOBSERVED',
       });
     },
   });
@@ -908,6 +909,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationReferenceReadStageEvidence: 'CATEGORIES_READ',
       stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
       stagingControlledPreparationMetadataScanCostEvidence: 'GE_3000_RU',
+      stagingControlledPreparationRevisionPayloadBatchEvidence: 'UNOBSERVED',
     },
   );
   assert.equal(controlledPreparationCalls, 1);
