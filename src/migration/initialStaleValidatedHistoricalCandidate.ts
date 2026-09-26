@@ -193,16 +193,24 @@ function revisionMetadataStatement(runId: string) {
   );
 }
 
-function revisionPayloadRangeStatement(runId: string, firstSourceRecordId: string, lastSourceRecordId: string) {
+function revisionPayloadKeysStatement(runId: string, sourceRecordIds: readonly string[]) {
+  if (sourceRecordIds.length === 0 || sourceRecordIds.length > HISTORICAL_REVISION_READ_ROWS_LIMIT) {
+    throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
+  }
+  const sourceIdPredicates = sourceRecordIds.map((_, index) => (
+    `source_record_id = $source_record_id_${index}`
+  ));
+  const sourceIdParameters = Object.fromEntries(sourceRecordIds.map((sourceRecordId, index) => (
+    [`source_record_id_${index}`, uuidParameter(sourceRecordId)]
+  )));
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions '
-      + 'WHERE source_record_id >= $source_record_id_from AND source_record_id <= $source_record_id_to '
+      + `WHERE (${sourceIdPredicates.join(' OR ')}) `
       + 'AND revision = $revision AND migration_run_id = $migration_run_id',
     {
-      source_record_id_from: uuidParameter(firstSourceRecordId),
-      source_record_id_to: uuidParameter(lastSourceRecordId),
+      ...sourceIdParameters,
       migration_run_id: uuidParameter(runId),
       revision: uint64Parameter(1),
     },
@@ -322,7 +330,7 @@ function parseRevisionMetadataRows(
   }));
 }
 
-async function readHistoricalRevisionsInBoundedRanges(
+async function readHistoricalRevisionsInBoundedBatches(
   reader: YdbReadScope,
   run: Readonly<MigrationRun>,
   capturedAt: string,
@@ -336,14 +344,12 @@ async function readHistoricalRevisionsInBoundedRanges(
 
   for (let offset = 0; offset < metadata.length; offset += HISTORICAL_REVISION_READ_ROWS_LIMIT) {
     const batch = metadata.slice(offset, offset + HISTORICAL_REVISION_READ_ROWS_LIMIT);
-    const first = batch[0];
-    const last = batch.at(-1);
-    if (first === undefined || last === undefined) {
+    if (batch.length === 0) {
       throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
     }
     await waitForReadBudget(batch.length);
     const payloadResult = await reader.read<RevisionRow>(
-      revisionPayloadRangeStatement(run.id, first.sourceRecordId, last.sourceRecordId),
+      revisionPayloadKeysStatement(run.id, batch.map((row) => row.sourceRecordId)),
     );
     const parsed = parseRevisionRows(payloadResult.rows, run, capturedAt, expectedBySource, seen);
     const batchIds = new Set(batch.map((row) => row.sourceRecordId));
@@ -440,7 +446,7 @@ export async function reconstructInitialBootstrapDurableObservation(
   ] as const));
   let durableRevisions: readonly Readonly<HistoricalRevision>[];
   try {
-    durableRevisions = await readHistoricalRevisionsInBoundedRanges(
+    durableRevisions = await readHistoricalRevisionsInBoundedBatches(
       reader,
       run,
       capturedAt,
@@ -520,7 +526,7 @@ export async function reconstructInitialStaleValidatedHistoricalCandidate(
   ] as const));
   let durableRevisions: readonly Readonly<HistoricalRevision>[];
   try {
-    durableRevisions = await readHistoricalRevisionsInBoundedRanges(
+    durableRevisions = await readHistoricalRevisionsInBoundedBatches(
       reader,
       run,
       capturedAt,

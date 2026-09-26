@@ -1292,3 +1292,23 @@ fail-closes. Persisted schema, lifecycle и writer authority не меняютс
 или иной non-PASS требует новой repo-side causal diagnosis; writer не запускается.
 
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
+
+### Exact-key historical revision reads после recovery `36272896579`
+
+На exact main `e2a41d415635e757c17f4194dd083a43117a7c37` controlled-preparation-only read-only recovery
+`36272896579` прошла exact-main/provider preflight и recovery-only deployment, затем закончилась
+`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED` на единственном recovery invoke. Enum artifact отсутствует;
+этот результат **не** доказывает application phase, YDB status или изменение durable state. Workflow
+не запускал bootstrap/write path.
+
+Repository review обнаружил, что historical payload batches выбирались broad primary-key диапазоном
+от первого до последнего source id в batch. Source IDs разрежены; диапазон мог читать посторонние
+revision rows между exact targets. Successor использует ограниченный список scalar equality-предикатов
+по exact source ids вместе с exact `migration_run_id + revision`, сохраняя batch ≤9 и RU pacing.
+Каждый ответ всё ещё обязан совпасть exact по cardinality, identity, immutable metadata, canonical
+payload digest и reconstructed source digest; mismatch fail-closed. Synthetic large fixture проверяет
+один metadata scan, exact-key batches, полное покрытие и pacing без provider payload.
+
+После merge разрешён ровно один новый exact-main controlled-preparation-only read-only probe. Любой
+timeout/non-PASS требует новой repo-side причинной диагностики; controlled rebuild, bootstrap replay,
+retirement и cleanup остаются disarmed.
