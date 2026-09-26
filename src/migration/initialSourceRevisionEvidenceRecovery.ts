@@ -69,12 +69,32 @@ const SOURCE_KEY_COLUMNS = Object.freeze([
 ] satisfies readonly YdbListStructColumn[]);
 
 const TEXT_ENCODER = new TextEncoder();
-// A 512 KiB exact-payload batch reached YDB RESOURCE_EXHAUSTED in the read-only
-// controlled-preparation probe. Keep these read-only resume batches substantially
-// smaller; batching is still byte-derived, not a row cap. A single oversized row
-// remains unsplit and fails closed through the existing YDB error boundary.
+// Payload batches stay below the 10-RU/s Serverless read budget with a small
+// CPU-RU margin. The row limit also bounds the I/O-RU floor (one RU per row).
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
+const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 8;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
+// Stay below the verified 10-RU/s baseline and reserve two RU per query for CPU.
+const REVISION_EVIDENCE_READ_RU_PER_SECOND = 8;
+const REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN = 2;
+const YDB_READ_BLOCK_BYTES = 4 * 1024;
+
+export type InitialSourceRevisionEvidenceReadBudgetWaiter = (
+  estimatedRequestUnits: number,
+) => Promise<void>;
+
+export async function waitForInitialSourceRevisionEvidenceReadBudget(
+  estimatedRequestUnits: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(estimatedRequestUnits) || estimatedRequestUnits < 1) {
+    throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
+  }
+  const milliseconds = Math.ceil(
+    ((estimatedRequestUnits + REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN)
+      / REVISION_EVIDENCE_READ_RU_PER_SECOND) * 1_000,
+  );
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function observeReadStage(
   observer: InitialSourceRevisionEvidenceReadObserver | undefined,
@@ -269,7 +289,10 @@ function planRevisionReadBatches(
     const estimatedBytes = estimatedRevisionReadBytes(revision);
     if (
       current.length > 0
-      && currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+      && (
+        current.length >= REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT
+        || currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+      )
     ) {
       batches.push(current);
       current = [];
@@ -320,6 +343,7 @@ export async function planInitialSourceRevisionEvidenceResume(
   expectedRevisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
   observeReadStageEvidence?: InitialSourceRevisionEvidenceReadObserver,
   observeReadBatchEvidence?: InitialSourceRevisionEvidenceReadBatchObserver,
+  waitForReadBudget?: InitialSourceRevisionEvidenceReadBudgetWaiter,
 ): Promise<Readonly<InitialSourceRevisionResumePlan>> {
   const expected = expectedMap(expectedRevisions);
   if (expected.runId === null) {
@@ -367,6 +391,15 @@ export async function planInitialSourceRevisionEvidenceResume(
         ? 'SINGLE_REVISION_EXCEEDS_64_KIB'
         : 'ALL_BATCHES_WITHIN_64_KIB',
     );
+    if (waitForReadBudget !== undefined) {
+      const estimatedIoRequestUnits = Math.max(
+        batch.length,
+        Math.ceil(estimatedBatchBytes / YDB_READ_BLOCK_BYTES),
+      );
+      // The preceding run-scoped metadata scan can consume most of the idle RU
+      // burst. Refill budget before every payload range, including the first.
+      await waitForReadBudget(estimatedIoRequestUnits);
+    }
     observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
     const payloadResult = await reader.read<ExistingInitialRevisionRow>(
       exactPayloadRangeReadStatement(expected.runId, batch),

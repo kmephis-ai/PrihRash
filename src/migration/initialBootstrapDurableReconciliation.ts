@@ -14,6 +14,7 @@ import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
   planInitialSourceRevisionEvidenceResume,
+  type InitialSourceRevisionEvidenceReadBudgetWaiter,
   type InitialSourceRevisionEvidenceReadBatchObserver,
   type InitialSourceRevisionEvidenceReadObserver,
 } from './initialSourceRevisionEvidenceRecovery.js';
@@ -72,6 +73,7 @@ export function createInitialBootstrapDurableReconciliation(
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
   observeRevisionReadStage?: InitialSourceRevisionEvidenceReadObserver,
   observeRevisionReadBatch?: InitialSourceRevisionEvidenceReadBatchObserver,
+  waitForRevisionReadBudget?: InitialSourceRevisionEvidenceReadBudgetWaiter,
 ): Readonly<InitialBootstrapDurableReconciliation> {
   let expectedCommittedSnapshot: Readonly<InitialControlledRebuildReconciliationSnapshot> | null = null;
 
@@ -83,6 +85,7 @@ export function createInitialBootstrapDurableReconciliation(
         input.lineage.revisions,
         observeRevisionReadStage,
         observeRevisionReadBatch,
+        waitForRevisionReadBudget,
       );
       if (
         persistence.missingRevisions.length !== 0
