@@ -482,6 +482,7 @@ jobs:
             phase_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE=//p' "$diagnostics")"
             metadata_scan_cost_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=//p' "$diagnostics")"
             revision_payload_batch_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=//p' "$diagnostics")"
+            reference_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE=//p' "$diagnostics")"
             reference_read_stage_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE=//p' "$diagnostics")"
             reconciliation_read_stage_evidence="$(sed -n 's/^R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=//p' "$diagnostics")"
             case "$prep_evidence" in
@@ -512,6 +513,10 @@ jobs:
               UNOBSERVED|NO_PAYLOAD_BATCH|ALL_BATCHES_WITHIN_64_KIB|SINGLE_REVISION_EXCEEDS_64_KIB|DIAGNOSTIC_FAILED) ;;
               *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE_INVALID; exit 1 ;;
             esac
+            case "$reference_evidence" in
+              UNOBSERVED|REFERENCE_SNAPSHOT_VALIDATED|REFERENCE_READ_FAILED|REFERENCE_READER_MALFORMED_ACCOUNT_REFERENCE_EVIDENCE|REFERENCE_READER_MALFORMED_CATEGORY_REFERENCE_EVIDENCE|REFERENCE_READER_MALFORMED_VIKA_MEMBER_EVIDENCE|REFERENCE_READER_MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE|REFERENCE_READER_VIKA_MEMBER_NOT_FOUND|REFERENCE_READER_DUPLICATE_VIKA_MEMBER_EVIDENCE|REFERENCE_RESOLVER_INVALID_ACCOUNT_ID|REFERENCE_RESOLVER_INVALID_CATEGORY_ID|REFERENCE_RESOLVER_INVALID_VIKA_MEMBER_ID|REFERENCE_RESOLVER_INVALID_ACCOUNT_CURRENCY|REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_SOURCE_KEY|REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_TARGET_ID|REFERENCE_RESOLVER_DUPLICATE_CATEGORY_SOURCE_KEY|REFERENCE_RESOLVER_DUPLICATE_CATEGORY_TARGET_ID|DIAGNOSTIC_FAILED) ;;
+              *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE_INVALID; exit 1 ;;
+            esac
             case "$reference_read_stage_evidence" in
               UNOBSERVED|REFERENCE_SNAPSHOT_READ|DIAGNOSTIC_FAILED) ;;
               *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE_INVALID; exit 1 ;;
@@ -527,6 +532,7 @@ jobs:
             jq -cn --arg evidence "$phase_evidence" '{stagingControlledPreparationPhaseEvidence:$evidence}' > "$evidence_dir/controlled-preparation-phase.json"
             jq -cn --arg evidence "$metadata_scan_cost_evidence" '{stagingControlledPreparationMetadataScanCostEvidence:$evidence}' > "$evidence_dir/controlled-preparation-metadata-scan-cost.json"
             jq -cn --arg evidence "$revision_payload_batch_evidence" '{stagingControlledPreparationRevisionPayloadBatchEvidence:$evidence}' > "$evidence_dir/controlled-preparation-revision-payload-batch.json"
+            jq -cn --arg evidence "$reference_evidence" '{stagingControlledPreparationReferenceEvidence:$evidence}' > "$evidence_dir/controlled-preparation-reference-evidence.json"
             jq -cn --arg evidence "$reference_read_stage_evidence" '{stagingControlledPreparationReferenceReadStageEvidence:$evidence}' > "$evidence_dir/controlled-preparation-reference-read-stage.json"
             jq -cn --arg evidence "$reconciliation_read_stage_evidence" '{stagingControlledPreparationReconciliationReadStageEvidence:$evidence}' > "$evidence_dir/controlled-preparation-reconciliation-read-stage.json"
             cat "$evidence_dir/controlled-preparation.json"
@@ -536,6 +542,7 @@ jobs:
             cat "$evidence_dir/controlled-preparation-phase.json"
             cat "$evidence_dir/controlled-preparation-metadata-scan-cost.json"
             cat "$evidence_dir/controlled-preparation-revision-payload-batch.json"
+            cat "$evidence_dir/controlled-preparation-reference-evidence.json"
             cat "$evidence_dir/controlled-preparation-reference-read-stage.json"
             cat "$evidence_dir/controlled-preparation-reconciliation-read-stage.json"
           fi

@@ -6,15 +6,21 @@ import { createFakeNodeCli } from '../helpers/fake-node-cli.mjs';
 
 const execFileAsync = promisify(execFile);
 
-async function fakeYc(stdoutPayload, { omitRevisionPayloadBatchEvidence = false } = {}) {
-  const payload = !omitRevisionPayloadBatchEvidence
-    && 'stagingControlledPreparationEvidence' in stdoutPayload
-    && !('stagingControlledPreparationRevisionPayloadBatchEvidence' in stdoutPayload)
-    ? {
-        ...stdoutPayload,
-        stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
-      }
-    : stdoutPayload;
+async function fakeYc(stdoutPayload, {
+  omitRevisionPayloadBatchEvidence = false,
+  omitReferenceEvidence = false,
+} = {}) {
+  const payload = { ...stdoutPayload };
+  if (
+    !omitRevisionPayloadBatchEvidence
+    && 'stagingControlledPreparationEvidence' in payload
+    && !('stagingControlledPreparationRevisionPayloadBatchEvidence' in payload)
+  ) payload.stagingControlledPreparationRevisionPayloadBatchEvidence = 'ALL_BATCHES_WITHIN_64_KIB';
+  if (
+    !omitReferenceEvidence
+    && 'stagingControlledPreparationEvidence' in payload
+    && !('stagingControlledPreparationReferenceEvidence' in payload)
+  ) payload.stagingControlledPreparationReferenceEvidence = 'REFERENCE_SNAPSHOT_VALIDATED';
   return (await createFakeNodeCli(
     'prihrash-recovery-invoker-',
     `process.stdout.write(${JSON.stringify(`${JSON.stringify(payload)}\n`)});`,
@@ -264,12 +270,12 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence, revisionPayloadBatchEvidence] of [
-    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'REFERENCE_SNAPSHOT_READ', 'UNOBSERVED', 'UNOBSERVED', 'NO_PAYLOAD_BATCH'],
-    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU', 'ALL_BATCHES_WITHIN_64_KIB'],
-    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU', 'SINGLE_REVISION_EXCEEDS_64_KIB'],
-    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU', 'ALL_BATCHES_WITHIN_64_KIB'],
-    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
+  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence, revisionPayloadBatchEvidence, referenceEvidence] of [
+    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'REFERENCE_SNAPSHOT_READ', 'UNOBSERVED', 'UNOBSERVED', 'NO_PAYLOAD_BATCH', 'REFERENCE_SNAPSHOT_VALIDATED'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'REFERENCE_READ_FAILED'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU', 'SINGLE_REVISION_EXCEEDS_64_KIB', 'REFERENCE_READER_VIKA_MEMBER_NOT_FOUND'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_SOURCE_KEY'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
   ]) {
     const yc = await fakeYc({
       ...base,
@@ -282,6 +288,7 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
       stagingControlledPreparationReconciliationReadStageEvidence: readStageEvidence,
       stagingControlledPreparationMetadataScanCostEvidence: metadataScanCostEvidence,
       stagingControlledPreparationRevisionPayloadBatchEvidence: revisionPayloadBatchEvidence,
+      stagingControlledPreparationReferenceEvidence: referenceEvidence,
     });
     const result = await execFileAsync(
       process.execPath,
@@ -307,7 +314,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
         + `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE=${referenceReadStageEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=${readStageEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${metadataScanCostEvidence}\n`
-        + `R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=${revisionPayloadBatchEvidence}\n`,
+        + `R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=${revisionPayloadBatchEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE=${referenceEvidence}\n`,
     );
   }
 });
@@ -625,4 +633,53 @@ test('controlled preparation requires one bounded revision payload batch evidenc
       return true;
     },
   );
+});
+
+test('controlled preparation requires allowlisted reference validation evidence', async () => {
+  const payload = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingControlledPreparationEvidence: 'DIAGNOSTIC_FAILED',
+    stagingControlledPreparationRetryEvidence: 'NO_RETRY',
+    stagingControlledPreparationQueryErrorEvidence: 'UNOBSERVED',
+    stagingControlledPreparationGrpcStatusEvidence: 'UNOBSERVED',
+    stagingControlledPreparationPhaseEvidence: 'UNOBSERVED',
+    stagingControlledPreparationReferenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
+    stagingControlledPreparationReconciliationReadStageEvidence: 'UNOBSERVED',
+    stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
+  };
+  for (const [evidence, options] of [
+    [undefined, { omitReferenceEvidence: true }],
+    ['PRIVATE_REFERENCE_ENUM', {}],
+  ]) {
+    const yc = await fakeYc(
+      evidence === undefined
+        ? payload
+        : { ...payload, stagingControlledPreparationReferenceEvidence: evidence },
+      options,
+    );
+    await assert.rejects(
+      execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+          PRIHRASH_YC_BIN: yc,
+          RECOVERY_CONTROLLED_PREPARATION_ONLY: '1',
+        },
+      }),
+      (error) => {
+        assert.equal(error.code, 2);
+        assert.deepEqual(JSON.parse(error.stdout), {
+          status: 'FAIL',
+          code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
+        });
+        assert.equal(error.stdout.includes('PRIVATE_REFERENCE_ENUM'), false);
+        assert.equal(error.stderr.includes('PRIVATE_REFERENCE_ENUM'), false);
+        return true;
+      },
+    );
+  }
 });

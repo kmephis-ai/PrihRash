@@ -212,3 +212,17 @@ test('reference-read correction remains one read-only candidate tied to the obse
   assert.match(evidence, /one fresh full read-only recovery and one controlled-preparation-only read-only probe/);
   assert.match(evidence, /does not\nauthorize WU7, bootstrap replay, or cap increase/);
 });
+
+test('reference validation taxonomy follows the latest unclassified read-only result', () => {
+  const evidence = runbook.match(
+    /#### Reference snapshot validation classification gap on `450b6761bf59383c644c918223b5274542ae119d`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the post-correction read-only result must remain in the runbook');
+  assert.match(evidence, /full read-only recovery `36225185084`/);
+  assert.match(evidence, /controlled-preparation-only read-only probe `36225371541`/);
+  assert.match(evidence, /`REFERENCE_SNAPSHOT_READ`/);
+  assert.match(evidence, /query-error, gRPC status and revision batch `UNOBSERVED`/);
+  assert.match(evidence, /allowlisted\s+reference-validation enum/);
+  assert.match(evidence, /only `REFERENCE_SNAPSHOT_VALIDATED` plus `READY`/);
+});

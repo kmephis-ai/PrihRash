@@ -3,8 +3,11 @@ import test from 'node:test';
 
 import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import { InitialBootstrapApplicationError } from '../../dist/migration/initialBootstrapApplication.js';
+import { ReferenceResolverSnapshotError } from '../../dist/reference/resolver.js';
+import { YdbReferenceEvidenceReaderError } from '../../dist/reference/ydbReferenceEvidenceReader.js';
 import {
   classifyInitialBootstrapControlledPreparationFailure,
+  classifyInitialBootstrapControlledPreparationReferenceEvidence,
   classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
   createInitialBootstrapControlledPreparationMetadataScanCostTracker,
@@ -55,6 +58,31 @@ test('controlled preparation classifier preserves exact existing YDB transport e
   assert.equal(
     classifyInitialBootstrapControlledPreparationFailure(new Error('private provider text')),
     'DIAGNOSTIC_FAILED',
+  );
+});
+
+test('controlled preparation reference classifier exposes only typed reference error enums', () => {
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationReferenceEvidence(
+      new YdbReferenceEvidenceReaderError('VIKA_MEMBER_NOT_FOUND'),
+    ),
+    'REFERENCE_READER_VIKA_MEMBER_NOT_FOUND',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationReferenceEvidence(
+      new ReferenceResolverSnapshotError('DUPLICATE_ACCOUNT_SOURCE_KEY'),
+    ),
+    'REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_SOURCE_KEY',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationReferenceEvidence(
+      new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED'),
+    ),
+    'REFERENCE_READ_FAILED',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationReferenceEvidence(new Error('private provider text')),
+    null,
   );
 });
 
@@ -892,6 +920,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         referenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
         reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
         metadataScanCostEvidence: 'GE_3000_RU',
+        referenceEvidence: 'REFERENCE_SNAPSHOT_VALIDATED',
         revisionPayloadBatchEvidence: 'UNOBSERVED',
       });
     },
@@ -909,6 +938,7 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationReferenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
       stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
       stagingControlledPreparationMetadataScanCostEvidence: 'GE_3000_RU',
+      stagingControlledPreparationReferenceEvidence: 'REFERENCE_SNAPSHOT_VALIDATED',
       stagingControlledPreparationRevisionPayloadBatchEvidence: 'UNOBSERVED',
     },
   );
