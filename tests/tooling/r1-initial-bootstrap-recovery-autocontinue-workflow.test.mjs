@@ -240,3 +240,16 @@ test('tagged reference row-kind split remains privacy-safe and read-only', () =>
   assert.match(evidence, /never emits the tag value, row data, or provider text/);
   assert.match(evidence, /No writer\/WU7 path is permitted/);
 });
+
+test('numeric reference tags follow the exact unknown-kind evidence and stay read-only', () => {
+  const evidence = runbook.match(
+    /#### Numeric reference-row tags after `REFERENCE_SNAPSHOT_KIND_UNKNOWN` on `0e67ba079ff2d259c1054fd772d0b201065e595b`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-main unknown-tag result and hypothesis must be recorded');
+  assert.match(evidence, /probe `36228428540`/);
+  assert.match(evidence, /`REFERENCE_READER_REFERENCE_SNAPSHOT_KIND_UNKNOWN`/);
+  assert.match(evidence, /`CAST\(1\|2\|3 AS Uint32\)`/);
+  assert.match(evidence, /one new\s+controlled-preparation-only read-only probe/);
+  assert.match(evidence, /All other results stay read-only STOP/);
+});
