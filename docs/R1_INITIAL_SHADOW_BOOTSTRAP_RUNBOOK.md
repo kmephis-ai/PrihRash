@@ -567,6 +567,26 @@ After its merge and exact-main CI, one full read-only classification may run, fo
 controlled-preparation-only read-only probe on that new SHA. No writer/WU7 path is permitted from
 either result; inspect the new enum and fix the tagged response contract before any further probe.
 
+#### Numeric reference-row tags after `REFERENCE_SNAPSHOT_KIND_UNKNOWN` on `0e67ba079ff2d259c1054fd772d0b201065e595b`
+
+Full read-only recovery after #804 again classified only
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`.
+Controlled-preparation-only probe `36228428540` returned:
+
+- `DIAGNOSTIC_FAILED`;
+- reference evidence `REFERENCE_READER_REFERENCE_SNAPSHOT_KIND_UNKNOWN`;
+- stage `REFERENCE_SNAPSHOT_READ`;
+- transport/query and revision diagnostics `UNOBSERVED`.
+
+The tagged query returned a present row-kind value that did not match its allowlist. The successor
+uses explicit `CAST(1|2|3 AS Uint32)` tags for account/category/Vika rows and integer comparisons in
+the parser, keeping each SQL branch and all financial/reference validators unchanged. A synthetic
+adapter fixture verifies the exact integer-tag projection and still rejects every other tag. This
+candidate does not claim the provider's previous tag representation or YDB query type; one new
+controlled-preparation-only read-only probe will verify it on a distinct exact SHA. Only
+`REFERENCE_SNAPSHOT_VALIDATED` followed by `READY` and a revision phase past payload verification
+allows consideration of WU7 preflight. All other results stay read-only STOP.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

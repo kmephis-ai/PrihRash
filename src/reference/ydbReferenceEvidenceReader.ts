@@ -166,13 +166,13 @@ export async function readYdbReferenceResolverSnapshot(
 ): Promise<Readonly<ReferenceResolver>> {
   observeReadStage(observer, 'REFERENCE_SNAPSHOT_READ');
   const result = await adapter.read<ReferenceResolverSnapshotRow>(readStatement(
-    'SELECT "ACCOUNT" AS reference_type, id, normalized_source_label AS source_label, '
+    'SELECT CAST(1 AS Uint32) AS reference_type, id, normalized_source_label AS source_label, '
       + 'currency AS descriptor FROM accounts WHERE normalized_source_label IS NOT NULL '
       + 'UNION ALL '
-      + 'SELECT "CATEGORY" AS reference_type, id, normalized_source_label AS source_label, '
+      + 'SELECT CAST(2 AS Uint32) AS reference_type, id, normalized_source_label AS source_label, '
       + 'kind AS descriptor FROM categories WHERE normalized_source_label IS NOT NULL '
       + 'UNION ALL '
-      + 'SELECT "VIKA_MEMBER" AS reference_type, id, name AS source_label, '
+      + 'SELECT CAST(3 AS Uint32) AS reference_type, id, name AS source_label, '
       + 'status AS descriptor FROM family_members WHERE name = $name AND status = $status',
     {
       name: utf8Parameter(VIKA_MEMBER_NAME),
@@ -185,21 +185,21 @@ export async function readYdbReferenceResolverSnapshot(
   const members: Readonly<FamilyMemberReferenceRow>[] = [];
   for (const row of result.rows) {
     switch (row.reference_type) {
-      case 'ACCOUNT':
+      case 1:
         accounts.push(accountMapping({
           id: row.id,
           normalized_source_label: row.source_label,
           currency: row.descriptor,
         }));
         break;
-      case 'CATEGORY':
+      case 2:
         categories.push(categoryMapping({
           id: row.id,
           kind: row.descriptor,
           normalized_source_label: row.source_label,
         }));
         break;
-      case 'VIKA_MEMBER':
+      case 3:
         members.push({
           id: row.id,
           name: row.source_label,

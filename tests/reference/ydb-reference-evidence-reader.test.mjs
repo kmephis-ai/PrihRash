@@ -36,19 +36,19 @@ function makeSnapshotAdapter(accountRows, categoryRows, memberRows) {
   const observed = { outsideReads: 0, transactionCount: 0, calls: [] };
   const rows = [
     ...accountRows.map((row) => ({
-      reference_type: 'ACCOUNT',
+      reference_type: 1,
       id: row.id,
       source_label: row.normalized_source_label,
       descriptor: row.currency,
     })),
     ...categoryRows.map((row) => ({
-      reference_type: 'CATEGORY',
+      reference_type: 2,
       id: row.id,
       source_label: row.normalized_source_label,
       descriptor: row.kind,
     })),
     ...memberRows.map((row) => ({
-      reference_type: 'VIKA_MEMBER',
+      reference_type: 3,
       id: row.id,
       source_label: row.name,
       descriptor: row.status,
@@ -127,9 +127,11 @@ test('builds immutable resolver from one tagged YDB snapshot read including exac
   assert.equal(observed.transactionCount, 0);
   assert.equal(observed.calls.length, 1);
   assert.deepEqual(observed.calls.map((statement) => statement.kind), ['READ']);
+  assert.match(observed.calls[0].text, /SELECT CAST\(1 AS Uint32\) AS reference_type/);
   assert.match(observed.calls[0].text, /FROM accounts WHERE normalized_source_label IS NOT NULL/);
-  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*FROM categories WHERE normalized_source_label IS NOT NULL/);
-  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*FROM family_members WHERE name = \$name AND status = \$status/);
+  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*SELECT CAST\(2 AS Uint32\) AS reference_type/);
+  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*SELECT CAST\(3 AS Uint32\) AS reference_type/);
+  assert.match(observed.calls[0].text, /FROM family_members WHERE name = \$name AND status = \$status/);
   assert.deepEqual(observed.calls[0].parameters, {
     name: { type: 'Utf8', value: 'Вика' },
     status: { type: 'Utf8', value: 'ACTIVE' },
@@ -217,7 +219,7 @@ test('tagged snapshot reader distinguishes missing and unknown row-kind evidence
   });
 
   await assert.rejects(
-    () => readYdbReferenceResolverSnapshot(adapterFor([{ reference_type: 'PRIVATE_REFERENCE_KIND' }])),
+    () => readYdbReferenceResolverSnapshot(adapterFor([{ reference_type: 99 }])),
     (error) => error instanceof YdbReferenceEvidenceReaderError
       && error.code === 'REFERENCE_SNAPSHOT_KIND_UNKNOWN',
   );
