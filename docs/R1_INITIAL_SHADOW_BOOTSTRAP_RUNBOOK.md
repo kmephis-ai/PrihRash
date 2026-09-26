@@ -1218,9 +1218,9 @@ controlled-preparation-only read-only run с bounded 600 s; после timeout/n
 
 ### Следующий pacing candidate на `51834f052334e103e5dc3d602f4152aff8d6c447`
 
-Repository successor сохраняет byte envelope 64 KiB и row batch ≤8, но target pacing меняется с
-8 на подтверждённые 10 RU/s при неизменном CPU margin 2 RU. Для типового batch до 8 rows это
-оставляет 1 s перед следующим query; большие payload ranges ждут пропорционально оценке RU. Cap,
+Repository successor сохраняет byte envelope 64 KiB и row batch ≤9, target pacing остаётся на
+подтверждённых 10 RU/s, CPU margin — 1 RU. Для batch из 9 rows это оставляет 1 s перед следующим
+query; большие payload ranges ждут пропорционально оценке RU. Cap,
 provisioned RCU, IAM и writer authority не меняются.
 
 После merge этот successor может выполнить только один controlled-preparation-only read-only probe

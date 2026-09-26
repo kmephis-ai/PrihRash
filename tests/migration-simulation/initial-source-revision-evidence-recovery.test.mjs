@@ -367,15 +367,15 @@ test('payload batches are row-bounded and wait for the read-unit budget before e
   );
 
   const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
-  assert.equal(payloadReads.length, 3);
-  assert.deepEqual(waitedUnits, [8, 8, 1]);
+  assert.equal(payloadReads.length, 2);
+  assert.deepEqual(waitedUnits, [9, 8]);
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId));
   assert.deepEqual(resume.missingRevisions, []);
 });
 
-test('RU pacing preserves a two-unit CPU margin under the verified 10-RU/s baseline', () => {
-  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(8), 1_000);
-  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(16), 1_800);
+test('RU pacing preserves a one-unit CPU margin under the verified 10-RU/s baseline', () => {
+  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(8), 900);
+  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(16), 1_700);
   assert.throws(
     () => initialSourceRevisionEvidenceReadBudgetDelayMs(0),
     (error) => error instanceof InitialSourceRevisionEvidenceRecoveryError

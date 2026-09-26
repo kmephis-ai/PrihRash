@@ -72,11 +72,11 @@ const TEXT_ENCODER = new TextEncoder();
 // Payload batches stay below the 10-RU/s Serverless read budget with a small
 // CPU-RU margin. The row limit also bounds the I/O-RU floor (one RU per row).
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
-const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 8;
+const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 9;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
-// Target the verified 10-RU/s baseline and reserve two RU per query for CPU.
+// Target the verified 10-RU/s baseline and reserve one RU per query for CPU.
 const REVISION_EVIDENCE_READ_RU_PER_SECOND = 10;
-const REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN = 2;
+const REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN = 1;
 const YDB_READ_BLOCK_BYTES = 4 * 1024;
 
 export type InitialSourceRevisionEvidenceReadBudgetWaiter = (
