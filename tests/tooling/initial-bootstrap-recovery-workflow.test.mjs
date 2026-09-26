@@ -120,8 +120,11 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /controlled-preparation-phase\.json/);
   assert.match(workflow, /controlled-preparation-metadata-scan-cost\.json/);
   assert.match(workflow, /controlled-preparation-revision-payload-batch\.json/);
+  assert.match(workflow, /controlled-preparation-reference-evidence\.json/);
   assert.match(workflow, /ALL_BATCHES_WITHIN_64_KIB\|SINGLE_REVISION_EXCEEDS_64_KIB/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE_INVALID/);
+  assert.match(workflow, /REFERENCE_READER_VIKA_MEMBER_NOT_FOUND/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation-reference-read-stage\.json/);
   assert.match(workflow, /controlled-preparation-reconciliation-read-stage\.json/);
   assert.match(workflow, /retention-days: 30/);

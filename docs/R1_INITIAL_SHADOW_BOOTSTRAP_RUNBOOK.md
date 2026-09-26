@@ -532,6 +532,27 @@ the latter must reach `REFERENCE_SNAPSHOT_READ` and then prove controlled prepar
 revision payload phase. Any repeat `RESOURCE_EXHAUSTED` or absent evidence is STOP; it does not
 authorize WU7, bootstrap replay, or cap increase.
 
+#### Reference snapshot validation classification gap on `450b6761bf59383c644c918223b5274542ae119d`
+
+After #802, fresh full read-only recovery `36225185084` again returned
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`.
+One controlled-preparation-only read-only probe `36225371541` returned:
+
+- preparation `DIAGNOSTIC_FAILED`;
+- reference stage `REFERENCE_SNAPSHOT_READ`;
+- phase, query-error, gRPC status and revision batch `UNOBSERVED`;
+- retry `NO_RETRY`.
+
+The previous `RESOURCE_EXHAUSTED` did not recur, but this result does not prove the combined
+statement's parsed references were valid. The recovery surface currently collapses typed reference
+reader/resolver validation errors into `DIAGNOSTIC_FAILED`. The bounded successor adds an allowlisted
+reference-validation enum for those existing typed error codes; it does not publish SQL results,
+provider error text, IDs, labels, or financial payload. Do not repeat the provider probe until that
+diagnostic contract is merged and exact-main CI passes. Afterward, one new controlled-preparation-only
+read-only probe may classify this boundary; only `REFERENCE_SNAPSHOT_VALIDATED` plus `READY` and a
+revision phase beyond the payload read advances toward WU7 preflight. Any validation enum, diagnostic
+failure, or missing evidence remains STOP.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
