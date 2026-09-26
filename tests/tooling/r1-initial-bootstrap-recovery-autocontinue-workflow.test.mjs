@@ -183,3 +183,18 @@ test('64 KiB batch diagnostic records exact read-only evidence and cannot arm a 
   assert.match(evidence, /does not arm\s+controlled preparation, readiness, orchestrator, bootstrap, or controlled rebuild/);
   assert.match(evidence, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
 });
+
+test('the latest controlled-preparation failure stops before revision payload planning', () => {
+  const evidence = runbook.match(
+    /#### Controlled-preparation probe on `991bcd61f24afc510e3d3c8b1e07221fe5ddc958`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-SHA controlled-preparation result must be retained');
+  assert.match(evidence, /recovery `36221325448` completed/);
+  assert.match(evidence, /`APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`/);
+  assert.match(evidence, /`RESUME_CONTEXT_READ`/);
+  assert.match(evidence, /`VIKA_MEMBER_READ`/);
+  assert.match(evidence, /`RESOURCE_EXHAUSTED`/);
+  assert.match(evidence, /revision payload batch: `UNOBSERVED`/);
+  assert.match(evidence, /Do not repeat controlled preparation, dispatch WU7/);
+});

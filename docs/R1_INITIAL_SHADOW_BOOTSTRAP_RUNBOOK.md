@@ -494,6 +494,26 @@ That successor must use a distinct exact SHA and the canonical regression guard
 `tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs`; it does not arm
 controlled preparation, readiness, orchestrator, bootstrap, or controlled rebuild.
 
+#### Controlled-preparation probe on `991bcd61f24afc510e3d3c8b1e07221fe5ddc958`
+
+The single controlled-preparation-only read-only recovery `36221325448` completed, but did not
+reach revision payload planning. Its sanitized evidence was:
+
+- durable surface: `PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- preparation: `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
+- phase: `RESUME_CONTEXT_READ`;
+- reference read stage: `VIKA_MEMBER_READ`;
+- query error: `GRPC_STATUS`, status `RESOURCE_EXHAUSTED`, retry `RETRIED`;
+- revision payload batch: `UNOBSERVED`.
+
+Thus the 64 KiB payload-batch hypothesis was not evaluated by this probe; this result neither
+confirms nor refutes it. The fresh failure is earlier and localized to the Vika family-member
+reference read. Do not repeat controlled preparation, dispatch WU7, or infer resume/rebuild safety
+from the durable surface enum alone. The next action requires a deterministic repository-side cause
+for the bounded reference-read failure plus its synthetic adapter fixture and focused regression
+coverage, followed by one newly authorized read-only classification on a distinct exact SHA. No
+bootstrap invoke, replay, cleanup, timer, or cutover is authorized.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only
