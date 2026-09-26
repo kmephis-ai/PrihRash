@@ -226,3 +226,17 @@ test('reference validation taxonomy follows the latest unclassified read-only re
   assert.match(evidence, /allowlisted\s+reference-validation enum/);
   assert.match(evidence, /only `REFERENCE_SNAPSHOT_VALIDATED` plus `READY`/);
 });
+
+test('tagged reference row-kind split remains privacy-safe and read-only', () => {
+  const evidence = runbook.match(
+    /#### Reference row-kind diagnostic split on `8f99d2fb2657abbeab5138a0b827730560745c56`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest reference parser result and successor boundary must be recorded');
+  assert.match(evidence, /probe `36227316895`/);
+  assert.match(evidence, /`REFERENCE_READER_MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE`/);
+  assert.match(evidence, /`REFERENCE_SNAPSHOT_KIND_MISSING`/);
+  assert.match(evidence, /`REFERENCE_SNAPSHOT_KIND_UNKNOWN`/);
+  assert.match(evidence, /never emits the tag value, row data, or provider text/);
+  assert.match(evidence, /No writer\/WU7 path is permitted/);
+});
