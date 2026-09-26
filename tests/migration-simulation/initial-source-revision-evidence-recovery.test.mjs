@@ -107,10 +107,11 @@ test('restart after partial revision evidence separates run-scoped payload verif
   ]);
   assert.equal(statements.length, 3);
   assert.match(statements[0].text, /FROM source_record_revisions VIEW idx_source_record_revisions_run_revision/);
-  assert.match(statements[0].text, /migration_run_id = \$migration_run_id ORDER BY source_record_id$/);
+  assert.match(statements[0].text, /migration_run_id = \$migration_run_id AND source_record_id >= \$source_record_id_cursor ORDER BY source_record_id LIMIT 128$/);
   assert.doesNotMatch(statements[0].text, /raw_payload|AS_TABLE/);
   assert.equal(statements[0].parameters.revision.value, 1n);
   assert.equal(statements[0].parameters.migration_run_id.value, RUN_ID);
+  assert.equal(statements[0].parameters.source_record_id_cursor.value, '00000000-0000-0000-0000-000000000000');
 
   assert.match(statements[1].text, /raw_payload/);
   assert.match(statements[1].text, /source_record_id >= \$source_record_id_from/);
@@ -247,7 +248,13 @@ test('large current-run payload verification uses primary-key range batches boun
   const batchEvidence = [];
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
-      if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
+      if (!/raw_payload/.test(statement.text)) {
+        const cursor = statement.parameters.source_record_id_cursor.value;
+        const inclusive = /source_record_id >= \$source_record_id_cursor/.test(statement.text);
+        return expected.filter((item) => (
+          inclusive ? item.sourceRecordId >= cursor : item.sourceRecordId > cursor
+        )).slice(0, 128).map(providerRow);
+      }
       const from = statement.parameters.source_record_id_from.value;
       const to = statement.parameters.source_record_id_to.value;
       return expected.filter((item) => item.sourceRecordId >= from && item.sourceRecordId <= to)
@@ -258,11 +265,18 @@ test('large current-run payload verification uses primary-key range batches boun
     (evidence) => batchEvidence.push(evidence),
   );
 
-  assert.equal(statements.length > 2, true);
-  assert.deepEqual(Object.keys(statements[0].parameters).sort(), ['migration_run_id', 'revision']);
-  assert.doesNotMatch(statements[0].text, /AS_TABLE|raw_payload/);
+  const metadataReads = statements.filter((statement) => !/raw_payload/.test(statement.text));
+  assert.equal(metadataReads.length, 8);
+  assert.equal(Object.keys(metadataReads[0].parameters).sort().join(','), 'migration_run_id,revision,source_record_id_cursor');
+  assert.match(metadataReads[0].text, /source_record_id >= \$source_record_id_cursor/);
+  assert.equal(metadataReads[0].parameters.source_record_id_cursor.value, '00000000-0000-0000-0000-000000000000');
+  assert.equal(metadataReads.slice(1).every((statement) => (
+    /source_record_id > \$source_record_id_cursor/.test(statement.text)
+  )), true);
+  assert.equal(metadataReads.every((statement) => /ORDER BY source_record_id LIMIT 128$/.test(statement.text)), true);
+  assert.equal(metadataReads.every((statement) => !/AS_TABLE|raw_payload/.test(statement.text)), true);
 
-  const payloadReads = statements.slice(1);
+  const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
   assert.equal(payloadReads.length > 1, true);
   assert.equal(payloadReads.length < 32, true);
   assert.equal(batchEvidence.length > 1, true);
@@ -288,6 +302,49 @@ test('large current-run payload verification uses primary-key range batches boun
   assert.deepEqual(resume.missingRevisions, []);
 });
 
+test('RESOURCE_EXHAUSTED metadata scan is bounded by exact provider-ordered UUID pages', async () => {
+  const expected = Array.from({ length: 600 }, (_, index) => revision(
+    `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    index + 1,
+    `synthetic-page-row-${index + 1}`,
+    `Synthetic ${index + 1}`,
+  ));
+  const metadataPageSizes = [];
+  const adapter = new YdbAdapter({
+    async executeRead(statement) {
+      if (!/raw_payload/.test(statement.text)) {
+        assert.match(statement.text, /VIEW idx_source_record_revisions_run_revision/);
+        assert.match(statement.text, /ORDER BY source_record_id LIMIT 128$/);
+        const cursor = statement.parameters.source_record_id_cursor.value;
+        const inclusive = /source_record_id >= \$source_record_id_cursor/.test(statement.text);
+        const rows = expected.filter((item) => (
+          inclusive ? item.sourceRecordId >= cursor : item.sourceRecordId > cursor
+        )).slice(0, 128).map(providerRow);
+        const estimatedResponseBytes = rows.length * 256;
+        if (estimatedResponseBytes > 96 * 1024) {
+          throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED');
+        }
+        metadataPageSizes.push(rows.length);
+        return { rows };
+      }
+
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      return {
+        rows: expected.filter((item) => item.sourceRecordId >= from && item.sourceRecordId <= to)
+          .map(providerRow),
+      };
+    },
+    async serializableReadWrite() { throw new Error('write not expected'); },
+  });
+
+  const resume = await planInitialSourceRevisionEvidenceResume(adapter, expected);
+
+  assert.deepEqual(metadataPageSizes, [128, 128, 128, 128, 88]);
+  assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId));
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
 test('payload primary-key ranges follow YDB metadata order without client-side UUID sorting', async () => {
   const ids = [
     '10000000-0000-0000-0000-000000000001',
@@ -309,7 +366,8 @@ test('payload primary-key ranges follow YDB metadata order without client-side U
   const resume = await planInitialSourceRevisionEvidenceResume(
     reader((statement) => {
       if (!/raw_payload/.test(statement.text)) {
-        assert.match(statement.text, /ORDER BY source_record_id$/);
+        assert.match(statement.text, /source_record_id >= \$source_record_id_cursor/);
+        assert.match(statement.text, /ORDER BY source_record_id LIMIT 128$/);
         return providerOrder.map(providerRow);
       }
       const from = statement.parameters.source_record_id_from.value;
