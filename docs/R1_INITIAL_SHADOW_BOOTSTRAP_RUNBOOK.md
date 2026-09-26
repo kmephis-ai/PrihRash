@@ -456,6 +456,44 @@ confirms a valid resumable STAGING requiring promotion beyond the atomic budget,
 must proceed only under its separate open #630 authority and exact provider/circuit contract; do not
 infer that authority from `CONTROLLED_REBUILD_REQUIRED` alone.
 
+### 64 KiB revision-batch diagnostic after repeated `RESOURCE_EXHAUSTED` on `05c5578d5c409f4268fe7dd321f6ccaf96f597c0`
+
+Full read-only recovery `36177432399` on exact current `main` returned
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`.
+Controlled-preparation-only recovery `36177689818` on the same SHA also completed as a workflow,
+but classified the application preparation as
+`YDB_DATA_QUERY_EXECUTION_FAILED / RETRIED / GRPC_STATUS / RECONCILIATION_READ /
+REVISION_PAYLOAD_BATCH`. It did not authorize writes or change durable state.
+
+The previous 64 KiB correction did not remove the provider failure. The next bounded diagnostic
+reports only one enum describing the exact payload-read plan:
+
+- `NO_PAYLOAD_BATCH`;
+- `ALL_BATCHES_WITHIN_64_KIB`;
+- `SINGLE_REVISION_EXCEEDS_64_KIB`;
+- `UNOBSERVED` or `DIAGNOSTIC_FAILED` when planning evidence is unavailable.
+
+The observer cannot alter queries, retries, writes, or reconciliation results. It emits no row
+values, payload sizes, source identifiers, or provider exception text. `SINGLE_REVISION_EXCEEDS_64_KIB`
+is a sizing classification, not permission to split one payload or weaken exact verification. All
+other results likewise authorize no bootstrap/rebuild invoke; they only determine the next diagnostic
+boundary. The recovery workflow persists this allowlisted enum separately and remains manual,
+exact-main, and read-only.
+
+For this diagnostic successor, the permitted provider action is one fresh controlled-preparation-only
+read-only recovery on its exact merged main SHA after canonical CI. A `READY` result is not a pass
+unless its exact enum evidence is reviewed; `RESOURCE_EXHAUSTED` or absent evidence means STOP and a
+new bounded root-cause analysis. Full recovery must still be run separately after this probe because
+the controlled-preparation-only probe does not replace durable classification. No readiness,
+orchestrator, bootstrap, controlled rebuild, cleanup, timer, or cutover is authorized by this entry.
+
+The merged diagnostic PR may request only one full read-only classification through recovery
+autocontinue, using the existing marker pair `Expected-Transition:
+READ_ONLY_EXACT_REVISION_CLASSIFICATION` and `Recovery-State: STAGING_PRESENT_UNCLASSIFIED`.
+That successor must use a distinct exact SHA and the canonical regression guard
+`tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs`; it does not arm
+controlled preparation, readiness, orchestrator, bootstrap, or controlled rebuild.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

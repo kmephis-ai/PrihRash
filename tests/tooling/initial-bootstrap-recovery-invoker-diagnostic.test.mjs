@@ -6,10 +6,18 @@ import { createFakeNodeCli } from '../helpers/fake-node-cli.mjs';
 
 const execFileAsync = promisify(execFile);
 
-async function fakeYc(stdoutPayload) {
+async function fakeYc(stdoutPayload, { omitRevisionPayloadBatchEvidence = false } = {}) {
+  const payload = !omitRevisionPayloadBatchEvidence
+    && 'stagingControlledPreparationEvidence' in stdoutPayload
+    && !('stagingControlledPreparationRevisionPayloadBatchEvidence' in stdoutPayload)
+    ? {
+        ...stdoutPayload,
+        stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
+      }
+    : stdoutPayload;
   return (await createFakeNodeCli(
     'prihrash-recovery-invoker-',
-    `process.stdout.write(${JSON.stringify(`${JSON.stringify(stdoutPayload)}\n`)});`,
+    `process.stdout.write(${JSON.stringify(`${JSON.stringify(payload)}\n`)});`,
   )).path;
 }
 
@@ -256,12 +264,12 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence] of [
-    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'VIKA_MEMBER_READ', 'UNOBSERVED', 'UNOBSERVED'],
-    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'ACCOUNTS_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU'],
-    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'CATEGORIES_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU'],
-    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'VIKA_MEMBER_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU'],
-    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
+  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence, revisionPayloadBatchEvidence] of [
+    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'VIKA_MEMBER_READ', 'UNOBSERVED', 'UNOBSERVED', 'NO_PAYLOAD_BATCH'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'ACCOUNTS_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU', 'ALL_BATCHES_WITHIN_64_KIB'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'CATEGORIES_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU', 'SINGLE_REVISION_EXCEEDS_64_KIB'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'VIKA_MEMBER_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU', 'ALL_BATCHES_WITHIN_64_KIB'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
   ]) {
     const yc = await fakeYc({
       ...base,
@@ -273,6 +281,7 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
       stagingControlledPreparationReferenceReadStageEvidence: referenceReadStageEvidence,
       stagingControlledPreparationReconciliationReadStageEvidence: readStageEvidence,
       stagingControlledPreparationMetadataScanCostEvidence: metadataScanCostEvidence,
+      stagingControlledPreparationRevisionPayloadBatchEvidence: revisionPayloadBatchEvidence,
     });
     const result = await execFileAsync(
       process.execPath,
@@ -297,7 +306,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
         + `R1_STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE=${phaseEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE=${referenceReadStageEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=${readStageEvidence}\n`
-        + `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${metadataScanCostEvidence}\n`,
+        + `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${metadataScanCostEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=${revisionPayloadBatchEvidence}\n`,
     );
   }
 });
@@ -576,4 +586,43 @@ test('controlled preparation evidence is rejected outside its mode and unknown e
       },
     );
   }
+});
+
+test('controlled preparation requires one bounded revision payload batch evidence enum', async () => {
+  const payload = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingControlledPreparationEvidence: 'YDB_DATA_QUERY_EXECUTION_FAILED',
+    stagingControlledPreparationRetryEvidence: 'RETRIED',
+    stagingControlledPreparationQueryErrorEvidence: 'GRPC_STATUS',
+    stagingControlledPreparationGrpcStatusEvidence: 'RESOURCE_EXHAUSTED',
+    stagingControlledPreparationPhaseEvidence: 'RECONCILIATION_READ',
+    stagingControlledPreparationReferenceReadStageEvidence: 'VIKA_MEMBER_READ',
+    stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_PAYLOAD_BATCH',
+    stagingControlledPreparationMetadataScanCostEvidence: 'UNOBSERVED',
+  };
+  const yc = await fakeYc(payload, { omitRevisionPayloadBatchEvidence: true });
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+        PRIHRASH_YC_BIN: yc,
+        RECOVERY_CONTROLLED_PREPARATION_ONLY: '1',
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, 2);
+      assert.deepEqual(JSON.parse(error.stdout), {
+        status: 'FAIL',
+        code: 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_OUTPUT_INVALID',
+      });
+      assert.equal(error.stderr.includes('RESOURCE_EXHAUSTED'), false);
+      return true;
+    },
+  );
 });
