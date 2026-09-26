@@ -1140,4 +1140,20 @@ post-invoke recovery вернула только `RECOVERY_REQUIRED / STAGING_RU
 `Recovery-State: STAGING_PRESENT_UNCLASSIFIED`. До её результата запрещены readiness/orchestrator/
 bootstrap, resume, retirement и cleanup.
 
+### Результат full exact-revision recovery на `d4e97538803664431f448f381020d60f622ba0bb`
+
+Recovery `36240934391` завершилась PASS как workflow и вернула
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. Exact revision diagnostics повторили:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence — `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current — `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode — `NONE`;
+- exact current-run source proof — `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+Probe не доказал `AUTHORITATIVE_SOURCE_ADVANCED`, immutable cutoff validity или exact resumable
+identity. Он не разрешает продолжить retirement/rebase или повтор bootstrap. Следующая provider
+попытка остаётся disarmed до отдельного deterministic root-cause/evidence fix и новой допустимой
+authority boundary; Google остаётся authoritative, YDB — shadow.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
