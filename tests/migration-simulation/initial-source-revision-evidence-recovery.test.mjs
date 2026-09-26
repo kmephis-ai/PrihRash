@@ -4,6 +4,7 @@ import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import {
   InitialSourceRevisionEvidenceRecoveryError,
+  initialSourceRevisionEvidenceReadBudgetDelayMs,
   planInitialSourceRevisionEvidenceResume,
 } from '../../dist/migration/initialSourceRevisionEvidenceRecovery.js';
 import { prepareInitialSourceRevisionWrites } from '../../dist/migration/initialSourceLineagePersistence.js';
@@ -370,6 +371,16 @@ test('payload batches are row-bounded and wait for the read-unit budget before e
   assert.deepEqual(waitedUnits, [8, 8, 1]);
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId));
   assert.deepEqual(resume.missingRevisions, []);
+});
+
+test('RU pacing preserves a two-unit CPU margin under the verified 10-RU/s baseline', () => {
+  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(8), 1_000);
+  assert.equal(initialSourceRevisionEvidenceReadBudgetDelayMs(16), 1_800);
+  assert.throws(
+    () => initialSourceRevisionEvidenceReadBudgetDelayMs(0),
+    (error) => error instanceof InitialSourceRevisionEvidenceRecoveryError
+      && error.code === 'INVALID_EXPECTED_REVISION',
+  );
 });
 
 test('payload primary-key ranges follow YDB metadata order without client-side UUID sorting', async () => {

@@ -74,8 +74,8 @@ const TEXT_ENCODER = new TextEncoder();
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
 const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 8;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
-// Stay below the verified 10-RU/s baseline and reserve two RU per query for CPU.
-const REVISION_EVIDENCE_READ_RU_PER_SECOND = 8;
+// Target the verified 10-RU/s baseline and reserve two RU per query for CPU.
+const REVISION_EVIDENCE_READ_RU_PER_SECOND = 10;
 const REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN = 2;
 const YDB_READ_BLOCK_BYTES = 4 * 1024;
 
@@ -83,16 +83,22 @@ export type InitialSourceRevisionEvidenceReadBudgetWaiter = (
   estimatedRequestUnits: number,
 ) => Promise<void>;
 
-export async function waitForInitialSourceRevisionEvidenceReadBudget(
+export function initialSourceRevisionEvidenceReadBudgetDelayMs(
   estimatedRequestUnits: number,
-): Promise<void> {
+): number {
   if (!Number.isSafeInteger(estimatedRequestUnits) || estimatedRequestUnits < 1) {
     throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
   }
-  const milliseconds = Math.ceil(
+  return Math.ceil(
     ((estimatedRequestUnits + REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN)
       / REVISION_EVIDENCE_READ_RU_PER_SECOND) * 1_000,
   );
+}
+
+export async function waitForInitialSourceRevisionEvidenceReadBudget(
+  estimatedRequestUnits: number,
+): Promise<void> {
+  const milliseconds = initialSourceRevisionEvidenceReadBudgetDelayMs(estimatedRequestUnits);
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
