@@ -320,6 +320,55 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
   }
 });
 
+test('revision-cardinality-only invoker emits only the coarse allowlisted bucket', async () => {
+  const base = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+  };
+  const yc = await fakeYc(base);
+  const result = await execFileAsync(
+    process.execPath,
+    ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+        PRIHRASH_YC_BIN: yc,
+        RECOVERY_REVISION_CARDINALITY_ONLY: '1',
+      },
+    },
+  );
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+  assert.equal(result.stderr, 'R1_STAGING_REVISION_CARDINALITY_EVIDENCE=GE_3000_LT_5000_ROWS\n');
+
+  for (const evidence of ['4500_ROWS', 'PRIVATE_TEXT']) {
+    const invalidYc = await fakeYc({ ...base, stagingRevisionCardinalityEvidence: evidence });
+    await assert.rejects(() => execFileAsync(
+      process.execPath,
+      ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+          PRIHRASH_YC_BIN: invalidYc,
+          RECOVERY_REVISION_CARDINALITY_ONLY: '1',
+        },
+      },
+    ), (error) => error.code === 2 && !error.stdout.includes('PRIVATE_TEXT') && !error.stderr.includes('PRIVATE_TEXT'));
+  }
+});
+
 test('controlled preparation evidence is rejected outside its mode and unknown enums fail closed', async () => {
   const base = {
     status: 'PASS',

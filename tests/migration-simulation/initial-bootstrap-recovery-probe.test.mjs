@@ -182,6 +182,44 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     reason: 'STAGING_RUN_PRESENT',
   });
 
+  const revisionCardinalityOnly = await executeYandexInitialBootstrapRecoveryFunction(
+    { PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY: '1' },
+    async () => ({
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+    }),
+  );
+  assert.deepEqual(revisionCardinalityOnly, {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+  });
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+    })),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },
+  );
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction(
+      {
+        PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY: '1',
+        PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '1',
+      },
+      async () => ({
+        verdict: 'RECOVERY_REQUIRED',
+        reason: 'STAGING_RUN_PRESENT',
+        stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+      }),
+    ),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },
+  );
+
   const invalid = await executeYandexInitialBootstrapRecoveryFunction({}, async () => /** @type {any} */ ({
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',

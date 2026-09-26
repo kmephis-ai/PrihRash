@@ -38,6 +38,12 @@ export type InitialBootstrapStagingDurableRevisionDiagnostic = Exclude<
   | 'AUTHORITATIVE_BINDING_MISMATCH'
 >;
 
+export type InitialBootstrapStagingRevisionCardinalityEvidence =
+  | 'LT_3000_ROWS'
+  | 'GE_3000_LT_5000_ROWS'
+  | 'GE_5000_ROWS'
+  | 'DIAGNOSTIC_FAILED';
+
 type InitialBootstrapStagingManifestDiagnostic = Extract<
   InitialBootstrapStagingDurableRevisionDiagnostic,
   | 'STAGING_MANIFEST_CARDINALITY_MISMATCH'
@@ -229,6 +235,50 @@ function stagingManifestStatement(expectedState: 'STAGING' | 'VALIDATED' = 'STAG
         ? "WHERE r.state = 'STAGING' LIMIT 2"
         : "WHERE r.state IN ('STAGING', 'VALIDATED') LIMIT 2"),
   );
+}
+
+function stagingManifestCardinalityStatement() {
+  return readStatement(
+    'SELECT r.state AS run_state, r.rows_seen AS rows_seen, '
+      + 'm.binding_count AS binding_count, s.row_count AS snapshot_row_count '
+      + 'FROM migration_runs AS r '
+      + 'JOIN initial_bootstrap_identity_manifests AS m ON m.migration_run_id = r.id '
+      + 'JOIN source_snapshots AS s ON s.id = m.source_snapshot_id '
+      + "WHERE r.state = 'STAGING' LIMIT 2",
+  );
+}
+
+export async function diagnoseInitialBootstrapStagingRevisionCardinality(
+  reader: YdbReadScope,
+): Promise<InitialBootstrapStagingRevisionCardinalityEvidence> {
+  try {
+    const result = await reader.read<Readonly<{
+      run_state?: unknown;
+      rows_seen?: unknown;
+      binding_count?: unknown;
+      snapshot_row_count?: unknown;
+    }>>(stagingManifestCardinalityStatement());
+    if (result.rows.length !== 1) return 'DIAGNOSTIC_FAILED';
+    const row = result.rows[0];
+    const rowsSeen = safeInteger(row?.rows_seen, 0);
+    const bindingCount = safeInteger(row?.binding_count, 0);
+    const snapshotRowCount = safeInteger(row?.snapshot_row_count, 0);
+    if (
+      row?.run_state !== 'STAGING'
+      || rowsSeen === null
+      || bindingCount === null
+      || snapshotRowCount === null
+      || rowsSeen !== bindingCount
+      || rowsSeen !== snapshotRowCount
+    ) {
+      return 'DIAGNOSTIC_FAILED';
+    }
+    if (bindingCount < 3_000) return 'LT_3000_ROWS';
+    if (bindingCount < 5_000) return 'GE_3000_LT_5000_ROWS';
+    return 'GE_5000_ROWS';
+  } catch {
+    return 'DIAGNOSTIC_FAILED';
+  }
 }
 
 function parseStagingManifest(

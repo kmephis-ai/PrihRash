@@ -1301,14 +1301,32 @@ fail-closes. Persisted schema, lifecycle и writer authority не меняютс
 этот результат **не** доказывает application phase, YDB status или изменение durable state. Workflow
 не запускал bootstrap/write path.
 
-Repository review обнаружил, что historical payload batches выбирались broad primary-key диапазоном
-от первого до последнего source id в batch. Source IDs разрежены; диапазон мог читать посторонние
+Разбор кода показал, что historical payload batches выбирались широким primary-key диапазоном от
+первого до последнего source id в batch. Source IDs разрежены; такой диапазон мог читать посторонние
 revision rows между exact targets. Successor использует ограниченный список scalar equality-предикатов
 по exact source ids вместе с exact `migration_run_id + revision`, сохраняя batch ≤9 и RU pacing.
-Каждый ответ всё ещё обязан совпасть exact по cardinality, identity, immutable metadata, canonical
-payload digest и reconstructed source digest; mismatch fail-closed. Synthetic large fixture проверяет
-один metadata scan, exact-key batches, полное покрытие и pacing без provider payload.
+Каждый ответ по-прежнему обязан точно совпасть по cardinality, identity, immutable metadata, canonical
+payload digest и reconstructed source digest; mismatch остаётся fail-closed. Synthetic large fixture
+проверяет один metadata scan, exact-key batches, полное покрытие и pacing без provider payload.
 
 После merge разрешён ровно один новый exact-main controlled-preparation-only read-only probe. Любой
 timeout/non-PASS требует новой repo-side причинной диагностики; controlled rebuild, bootstrap replay,
 retirement и cleanup остаются disarmed.
+
+### Диагностика грубой cardinality STAGING revisions после `36275268952`
+
+Recovery `36275268952` на exact main `d5df31f54411359f55c67740b74baf97eb3d7086` после exact-key
+candidate снова завершилась `INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED` на единственном bounded
+read-only invoke; enum artifact отсутствует. Broad range amplification больше не объясняет задержку,
+но размер самой immutable STAGING manifest пока не измерен.
+
+Repository successor добавляет отдельный режим `staging_revision_cardinality_only`. Он сначала
+проверяет durable surface, затем выполняет один metadata-only join с единственным STAGING manifest
+и выдаёт только `LT_3000_ROWS`, `GE_3000_LT_5000_ROWS`, `GE_5000_ROWS` или `DIAGNOSTIC_FAILED`.
+Он не читает Google, revision payloads, source identifiers и не изменяет YDB. Перед выдачей bucket
+должны совпасть manifest `rows_seen`, `binding_count` и snapshot `row_count`; неоднозначные или
+несогласованные данные дают только `DIAGNOSTIC_FAILED`.
+
+После merge разрешена ровно одна свежая exact-main read-only диагностика cardinality. Результат
+служит только для выбора следующей repository-гипотезы: он не разрешает controlled preparation,
+WU7, retirement, cleanup, изменение quota или write path.

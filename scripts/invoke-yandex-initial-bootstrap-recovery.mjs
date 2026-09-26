@@ -99,6 +99,13 @@ const STAGING_EXACT_REVISION_EVIDENCE = new Set([
   'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED',
 ]);
 
+const STAGING_REVISION_CARDINALITY_EVIDENCE = new Set([
+  'LT_3000_ROWS',
+  'GE_3000_LT_5000_ROWS',
+  'GE_5000_ROWS',
+  'DIAGNOSTIC_FAILED',
+]);
+
 const STAGING_CONTROLLED_PREPARATION_EVIDENCE = new Set([
   'READY',
   'BASELINE_EXISTS',
@@ -383,7 +390,7 @@ function validPair(verdict, reason) {
     && reason !== 'EMPTY_DURABLE_STATE';
 }
 
-function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly = false) {
+function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly = false, revisionCardinalityOnly = false) {
   let value;
   try {
     value = JSON.parse(stdout.trim());
@@ -407,6 +414,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
     const stagingRetirementEvidence = result.stagingRetirementEvidence;
     const stagingSourceDecodeEvidence = result.stagingSourceDecodeEvidence;
     const stagingExactRevisionEvidence = result.stagingExactRevisionEvidence;
+    const stagingRevisionCardinalityEvidence = result.stagingRevisionCardinalityEvidence;
     const stagingControlledPreparationEvidence = result.stagingControlledPreparationEvidence;
     const stagingControlledPreparationRetryEvidence = result.stagingControlledPreparationRetryEvidence;
     const stagingControlledPreparationQueryErrorEvidence = result.stagingControlledPreparationQueryErrorEvidence;
@@ -429,7 +437,23 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       && stagingRetirementEvidence === undefined
       && stagingSourceDecodeEvidence === undefined
       && stagingExactRevisionEvidence === undefined;
-    const validDiagnosticShape = controlledPreparationOnly
+    const validDiagnosticShape = revisionCardinalityOnly
+      ? result.reason === 'STAGING_RUN_PRESENT'
+        && exactKeys(result, ['status', 'code', 'verdict', 'reason', 'stagingRevisionCardinalityEvidence'])
+        && typeof stagingRevisionCardinalityEvidence === 'string'
+        && STAGING_REVISION_CARDINALITY_EVIDENCE.has(stagingRevisionCardinalityEvidence)
+        && noStagingDiagnostics
+        && stagingControlledPreparationEvidence === undefined
+        && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined
+        && stagingControlledPreparationGrpcStatusEvidence === undefined
+        && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
+        && stagingControlledPreparationReconciliationReadStageEvidence === undefined
+        && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationReferenceEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
+      : controlledPreparationOnly
       ? result.reason === 'STAGING_RUN_PRESENT'
         ? exactKeys(result, [
             'status',
@@ -478,18 +502,19 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           && STAGING_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE.has(
             stagingControlledPreparationReferenceEvidence,
           )
-        : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
-          && noStagingDiagnostics
-          && stagingControlledPreparationEvidence === undefined
-          && stagingControlledPreparationRetryEvidence === undefined
-          && stagingControlledPreparationQueryErrorEvidence === undefined
-          && stagingControlledPreparationGrpcStatusEvidence === undefined
-          && stagingControlledPreparationPhaseEvidence === undefined
-          && stagingControlledPreparationReferenceReadStageEvidence === undefined
-          && stagingControlledPreparationReconciliationReadStageEvidence === undefined
-          && stagingControlledPreparationMetadataScanCostEvidence === undefined
-          && stagingControlledPreparationReferenceEvidence === undefined
-          && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
+      : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+        && noStagingDiagnostics
+        && stagingRevisionCardinalityEvidence === undefined
+        && stagingControlledPreparationEvidence === undefined
+        && stagingControlledPreparationRetryEvidence === undefined
+        && stagingControlledPreparationQueryErrorEvidence === undefined
+        && stagingControlledPreparationGrpcStatusEvidence === undefined
+        && stagingControlledPreparationPhaseEvidence === undefined
+        && stagingControlledPreparationReferenceReadStageEvidence === undefined
+        && stagingControlledPreparationReconciliationReadStageEvidence === undefined
+        && stagingControlledPreparationMetadataScanCostEvidence === undefined
+        && stagingControlledPreparationReferenceEvidence === undefined
+        && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : result.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason', 'validatedSourceEvidence', 'staleValidatedRecoveryGate'])
         && VALIDATED_SOURCE_EVIDENCE.has(validatedSourceEvidence)
@@ -497,6 +522,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && exactKeys(staleValidatedRecoveryGate, ['status', 'blocker'])
         && staleValidatedRecoveryGate.status === 'BLOCKED'
         && STALE_VALIDATED_GATE_BLOCKERS.has(staleValidatedRecoveryGate.blocker)
+        && stagingRevisionCardinalityEvidence === undefined
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
         && stagingControlledPreparationQueryErrorEvidence === undefined
@@ -509,6 +535,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : result.reason === 'STAGING_RUN_PRESENT' && surfaceOnly
       ? exactKeys(result, ['status', 'code', 'verdict', 'reason'])
+        && stagingRevisionCardinalityEvidence === undefined
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
         && stagingControlledPreparationQueryErrorEvidence === undefined
@@ -531,6 +558,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
           'stagingSourceDecodeEvidence',
           'stagingExactRevisionEvidence',
         ])
+        && stagingRevisionCardinalityEvidence === undefined
         && typeof stagingRevisionEvidence === 'string'
         && STAGING_REVISION_EVIDENCE.has(stagingRevisionEvidence)
         && typeof stagingDurableRevisionEvidence === 'string'
@@ -552,6 +580,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         && stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
       : exactKeys(result, ['status', 'code', 'verdict', 'reason'])
         && noStagingDiagnostics
+        && stagingRevisionCardinalityEvidence === undefined
         && stagingControlledPreparationEvidence === undefined
         && stagingControlledPreparationRetryEvidence === undefined
         && stagingControlledPreparationQueryErrorEvidence === undefined
@@ -586,6 +615,9 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
         : null,
       stagingExactRevisionEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingExactRevisionEvidence ?? null
+        : null,
+      stagingRevisionCardinalityEvidence: result.reason === 'STAGING_RUN_PRESENT' && revisionCardinalityOnly
+        ? stagingRevisionCardinalityEvidence ?? null
         : null,
       stagingControlledPreparationEvidence: result.reason === 'STAGING_RUN_PRESENT'
         ? stagingControlledPreparationEvidence ?? null
@@ -642,6 +674,7 @@ function parseExactResult(stdout, surfaceOnly = false, controlledPreparationOnly
       stagingControlledPreparationMetadataScanCostEvidence: null,
       stagingControlledPreparationReferenceEvidence: null,
       stagingControlledPreparationRevisionPayloadBatchEvidence: null,
+      stagingRevisionCardinalityEvidence: null,
     });
   }
   return null;
@@ -669,6 +702,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationMetadataScanCostEvidence: null,
       stagingControlledPreparationReferenceEvidence: null,
       stagingControlledPreparationRevisionPayloadBatchEvidence: null,
+      stagingRevisionCardinalityEvidence: null,
     });
   }
 
@@ -691,6 +725,7 @@ async function invokeRecovery(environment = process.env) {
       stdout,
       environment.RECOVERY_SURFACE_ONLY === '1',
       environment.RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
+      environment.RECOVERY_REVISION_CARDINALITY_ONLY === '1',
     ) ?? Object.freeze({
       result: SAFE_OUTPUT_FAILURE,
       stagingRevisionEvidence: null,
@@ -709,6 +744,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationMetadataScanCostEvidence: null,
       stagingControlledPreparationReferenceEvidence: null,
       stagingControlledPreparationRevisionPayloadBatchEvidence: null,
+      stagingRevisionCardinalityEvidence: null,
     });
   } catch {
     return Object.freeze({
@@ -728,6 +764,7 @@ async function invokeRecovery(environment = process.env) {
       stagingControlledPreparationMetadataScanCostEvidence: null,
       stagingControlledPreparationReferenceEvidence: null,
       stagingControlledPreparationRevisionPayloadBatchEvidence: null,
+      stagingRevisionCardinalityEvidence: null,
     });
   }
 }
@@ -809,6 +846,9 @@ if (invocation.stagingControlledPreparationReferenceEvidence !== null) {
   process.stderr.write(
     `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE=${invocation.stagingControlledPreparationReferenceEvidence}\n`,
   );
+}
+if (invocation.stagingRevisionCardinalityEvidence !== null) {
+  process.stderr.write(`R1_STAGING_REVISION_CARDINALITY_EVIDENCE=${invocation.stagingRevisionCardinalityEvidence}\n`);
 }
 process.stdout.write(`${JSON.stringify(invocation.result)}\n`);
 if (invocation.result.status !== 'PASS') process.exitCode = 2;
