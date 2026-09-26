@@ -19,6 +19,7 @@ import {
   type InitialSourceRevisionEvidenceReadObserver,
 } from './initialSourceRevisionEvidenceRecovery.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
+import { matchesInitialBootstrapDurableRevisionEvidenceProof } from './initialStaleValidatedHistoricalCandidate.js';
 import type { InitialReconciliationEvidence } from './initialValidationGate.js';
 
 export type InitialBootstrapDurableReconciliationErrorCode =
@@ -80,17 +81,25 @@ export function createInitialBootstrapDurableReconciliation(
   const port: InitialBootstrapReconciliationPort = Object.freeze({
     async reconcile(input: Readonly<InitialBootstrapReconciliationInput>) {
       historicalEvidence.assertCompatibleRowCount(input.lineage.revisions.length);
-      const persistence = await planInitialSourceRevisionEvidenceResume(
-        adapter,
-        input.lineage.revisions,
-        observeRevisionReadStage,
-        observeRevisionReadBatch,
-        waitForRevisionReadBudget,
-      );
-      if (
-        persistence.missingRevisions.length !== 0
-        || persistence.existingSourceRecordIds.length !== input.lineage.revisions.length
-      ) {
+      let revisionEvidenceComplete = false;
+      if (input.durableRevisionEvidenceProof !== undefined) {
+        revisionEvidenceComplete = matchesInitialBootstrapDurableRevisionEvidenceProof(
+          input.durableRevisionEvidenceProof,
+          input.run,
+          input.lineage.revisions,
+        );
+      } else {
+        const persistence = await planInitialSourceRevisionEvidenceResume(
+          adapter,
+          input.lineage.revisions,
+          observeRevisionReadStage,
+          observeRevisionReadBatch,
+          waitForRevisionReadBudget,
+        );
+        revisionEvidenceComplete = persistence.missingRevisions.length === 0
+          && persistence.existingSourceRecordIds.length === input.lineage.revisions.length;
+      }
+      if (!revisionEvidenceComplete) {
         throw new InitialBootstrapDurableReconciliationError('DURABLE_REVISION_EVIDENCE_INCOMPLETE');
       }
 

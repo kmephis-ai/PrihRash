@@ -24,7 +24,11 @@ import {
   readInitialBootstrapGateCBlockerCount,
 } from './initialBootstrapGateCGuard.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
-import { reconstructInitialBootstrapDurableObservation } from './initialStaleValidatedHistoricalCandidate.js';
+import {
+  matchesInitialBootstrapDurableRevisionEvidenceProof,
+  reconstructInitialBootstrapDurableObservation,
+  type InitialBootstrapDurableRevisionEvidenceProof,
+} from './initialStaleValidatedHistoricalCandidate.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
 import { projectInitialSnapshot } from './initialSnapshotProjection.js';
 import {
@@ -50,7 +54,10 @@ import {
   executeInitialRevisionEvidenceBatches,
   planInitialRevisionEvidenceBatches,
 } from './initialSourceRevisionEvidenceExecutor.js';
-import { planInitialSourceRevisionEvidenceResume } from './initialSourceRevisionEvidenceRecovery.js';
+import {
+  InitialSourceRevisionEvidenceRecoveryError,
+  planInitialSourceRevisionEvidenceResume,
+} from './initialSourceRevisionEvidenceRecovery.js';
 import {
   prepareMigrationRunValidatedWrite,
 } from './migrationRunPersistence.js';
@@ -102,6 +109,7 @@ export interface InitialBootstrapReconciliationInput {
   readonly run: Readonly<MigrationRun>;
   readonly projection: Readonly<InitialSnapshotProjection>;
   readonly lineage: Readonly<InitialSourceLineageProjection>;
+  readonly durableRevisionEvidenceProof?: Readonly<InitialBootstrapDurableRevisionEvidenceProof>;
 }
 
 // Production implementations must derive this evidence independently; candidate self-comparison is forbidden.
@@ -240,6 +248,7 @@ interface PreparedBootstrapContext {
   readonly projection: Readonly<InitialSnapshotProjection>;
   readonly assignments: readonly Readonly<InitialTransactionIdentityAssignment>[];
   readonly observation: Readonly<InitialBootstrapObservation>;
+  readonly durableRevisionEvidenceProof: Readonly<InitialBootstrapDurableRevisionEvidenceProof> | null;
 }
 
 function envelopeWithRun(
@@ -405,7 +414,7 @@ async function prepareFreshContext(
     }
     throw error;
   }
-  return Object.freeze({ candidate, projection, assignments, observation });
+  return Object.freeze({ candidate, projection, assignments, observation, durableRevisionEvidenceProof: null });
 }
 
 async function prepareResumeContext(
@@ -415,13 +424,20 @@ async function prepareResumeContext(
 ): Promise<Readonly<PreparedBootstrapContext>> {
   markApplicationPhase(dependencies, 'RESUME_CONTEXT_READ');
   let resumeObservation = observation;
+  let durableRevisionEvidenceProof: Readonly<InitialBootstrapDurableRevisionEvidenceProof> | null = null;
   if (run.sourceSnapshotDigest !== observation.snapshotDigest) {
     try {
-      resumeObservation = await reconstructInitialBootstrapDurableObservation(
+      const reconstructed = await reconstructInitialBootstrapDurableObservation(
         dependencies.adapter,
         run,
         dependencies.historicalEvidence,
       );
+      resumeObservation = Object.freeze({
+        capturedAt: reconstructed.capturedAt,
+        snapshotDigest: reconstructed.snapshotDigest,
+        rows: reconstructed.rows,
+      });
+      durableRevisionEvidenceProof = reconstructed.revisionEvidenceProof;
     } catch {
       throw new InitialBootstrapApplicationError('BOOTSTRAP_OBSERVATION_INVALID');
     }
@@ -461,6 +477,7 @@ async function prepareResumeContext(
     projection,
     assignments: recovered.transactionAssignments,
     observation: resumeObservation,
+    durableRevisionEvidenceProof,
   });
 }
 
@@ -475,6 +492,16 @@ async function persistRevisionEvidence(
     context.candidate,
     lineageObservations(context.candidate, observation),
   );
+  if (context.durableRevisionEvidenceProof !== null) {
+    if (!matchesInitialBootstrapDurableRevisionEvidenceProof(
+      context.durableRevisionEvidenceProof,
+      context.candidate.run,
+      lineage.revisions,
+    )) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
+    }
+    return null;
+  }
   const resume = await planInitialSourceRevisionEvidenceResume(adapter, lineage.revisions);
   const missingWrites = prepareInitialSourceRevisionWrites(resume.missingRevisions);
   const batches = planInitialRevisionEvidenceBatches(missingWrites);
@@ -575,6 +602,9 @@ export async function prepareInitialControlledRebuildContinuation(
       run: durableRun,
       projection: prepared.projection,
       lineage,
+      ...(prepared.durableRevisionEvidenceProof === null
+        ? {}
+        : { durableRevisionEvidenceProof: prepared.durableRevisionEvidenceProof }),
     }));
     markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
     validation = evaluateInitialControlledRebuildContinuationValidation(
@@ -691,6 +721,9 @@ async function runInitialBootstrapApplicationWithAdmission(
     run: refined,
     projection: prepared.projection,
     lineage,
+    ...(prepared.durableRevisionEvidenceProof === null
+      ? {}
+      : { durableRevisionEvidenceProof: prepared.durableRevisionEvidenceProof }),
   }));
   markApplicationPhase(dependencies, 'VALIDATION_EVALUATION');
   const validation = evaluateInitialValidation(refined, prepared.projection, reconciliation);
