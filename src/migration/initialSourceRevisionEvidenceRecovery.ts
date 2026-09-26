@@ -74,8 +74,6 @@ const TEXT_ENCODER = new TextEncoder();
 // smaller; batching is still byte-derived, not a row cap. A single oversized row
 // remains unsplit and fails closed through the existing YDB error boundary.
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
-const REVISION_EVIDENCE_METADATA_PAGE_ROWS_LIMIT = 128;
-const MINIMUM_UUID = '00000000-0000-0000-0000-000000000000';
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
 
 function observeReadStage(
@@ -284,22 +282,16 @@ function planRevisionReadBatches(
   return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
 }
 
-function runRevisionMetadataPageStatement(
-  runId: string,
-  cursor: string,
-  inclusive: boolean,
-) {
+function runRevisionMetadataStatement(runId: string) {
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
       + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
       + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
       + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
-      + `AND source_record_id ${inclusive ? '>=' : '>'} $source_record_id_cursor `
-      + `ORDER BY source_record_id LIMIT ${REVISION_EVIDENCE_METADATA_PAGE_ROWS_LIMIT}`,
+      + 'ORDER BY source_record_id',
     {
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(runId),
-      source_record_id_cursor: uuidParameter(cursor),
     },
   );
 }
@@ -339,31 +331,21 @@ export async function planInitialSourceRevisionEvidenceResume(
   }
 
   const existingSourceIds = new Set<string>();
-  const existingMetadataRows: ExistingInitialRevisionRow[] = [];
-  let metadataCursor = MINIMUM_UUID;
-  let firstMetadataPage = true;
-  while (true) {
-    observeReadStage(observeReadStageEvidence, 'REVISION_METADATA_SCAN');
-    const runResult = await reader.read<ExistingInitialRevisionRow>(
-      runRevisionMetadataPageStatement(expected.runId, metadataCursor, firstMetadataPage),
-    );
-    if (runResult.rows.length > REVISION_EVIDENCE_METADATA_PAGE_ROWS_LIMIT) malformed();
-    validateRevisionRows(runResult.rows, expected, existingSourceIds, false);
-    existingMetadataRows.push(...runResult.rows);
-    if (runResult.rows.length < REVISION_EVIDENCE_METADATA_PAGE_ROWS_LIMIT) break;
-
-    const lastRow = runResult.rows[runResult.rows.length - 1];
-    if (lastRow === undefined) malformed();
-    const nextCursor = uuid(lastRow.source_record_id);
-    if (nextCursor === metadataCursor) malformed();
-    metadataCursor = nextCursor;
-    firstMetadataPage = false;
-  }
+  // Keep the canonical run-scoped metadata proof in one indexed request. A
+  // sequence of small pages still pays per-query CPU/compilation RU and can
+  // exhaust Serverless burst capacity before exact payload verification starts.
+  // The result contains metadata only; raw_payload remains byte-bounded below.
+  observeReadStage(observeReadStageEvidence, 'REVISION_METADATA_SCAN');
+  const metadataResult = await reader.read<ExistingInitialRevisionRow>(
+    runRevisionMetadataStatement(expected.runId),
+  );
+  validateRevisionRows(metadataResult.rows, expected, existingSourceIds, false);
 
   // Exact payload equality remains mandatory. The metadata scan already returns
   // the exact current-run source IDs; payload verification reuses those exact keys
-  // so sparse UUID ranges cannot amplify read RU.
-  const existingRevisions = existingMetadataRows.map((row) => {
+  // so sparse UUID ranges cannot amplify read RU. Keep this scan metadata-only: the
+  // exact raw payload remains in byte-bounded primary-key range reads below.
+  const existingRevisions = metadataResult.rows.map((row) => {
     const sourceRecordId = uuid(row.source_record_id);
     const revision = expected.bySourceId.get(sourceRecordId);
     if (revision === undefined) {
