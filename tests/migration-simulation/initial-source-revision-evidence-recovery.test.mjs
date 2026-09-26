@@ -271,7 +271,7 @@ test('large metadata-only current-run scan is one indexed read; payload verifica
 
   const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
   assert.equal(payloadReads.length > 1, true);
-  assert.equal(payloadReads.length < 32, true);
+  assert.equal(payloadReads.length <= Math.ceil(expected.length / 8), true);
   assert.equal(batchEvidence.length > 1, true);
   assert.deepEqual([...new Set(batchEvidence)], ['ALL_BATCHES_WITHIN_64_KIB']);
   assert.equal(new Set(payloadReads.map((statement) => statement.text)).size, 1);
@@ -337,6 +337,37 @@ test('metadata RU proof uses one exact indexed scan instead of burst-draining pe
   const resume = await planInitialSourceRevisionEvidenceResume(adapter, expected);
 
   assert.equal(metadataStatements.length, 1);
+  assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId));
+  assert.deepEqual(resume.missingRevisions, []);
+});
+
+test('payload batches are row-bounded and wait for the read-unit budget before each range query', async () => {
+  const expected = Array.from({ length: 17 }, (_, index) => revision(
+    `00000000-0000-0000-0000-${String(index + 1).padStart(12, '0')}`,
+    index + 1,
+    `synthetic-paced-row-${index + 1}`,
+    `Synthetic ${index + 1}`,
+  ));
+  const statements = [];
+  const waitedUnits = [];
+  const resume = await planInitialSourceRevisionEvidenceResume(
+    reader((statement) => {
+      statements.push(statement);
+      if (!/raw_payload/.test(statement.text)) return expected.map(providerRow);
+      const from = statement.parameters.source_record_id_from.value;
+      const to = statement.parameters.source_record_id_to.value;
+      return expected.filter((item) => item.sourceRecordId >= from && item.sourceRecordId <= to)
+        .map(providerRow);
+    }),
+    expected,
+    undefined,
+    undefined,
+    async (units) => waitedUnits.push(units),
+  );
+
+  const payloadReads = statements.filter((statement) => /raw_payload/.test(statement.text));
+  assert.equal(payloadReads.length, 3);
+  assert.deepEqual(waitedUnits, [8, 8, 1]);
   assert.deepEqual(resume.existingSourceRecordIds, expected.map((item) => item.sourceRecordId));
   assert.deepEqual(resume.missingRevisions, []);
 });

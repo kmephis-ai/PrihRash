@@ -5,6 +5,7 @@ const execFileAsync = promisify(execFile);
 const RECOVERY_TAG = 'r1-initial-bootstrap-recovery';
 const MAX_CAPTURE_BYTES = 16 * 1024;
 const INVOKE_TIMEOUT_MS = 180_000;
+const CONTROLLED_PREPARATION_INVOKE_TIMEOUT_MS = 630_000;
 
 const SAFE_CONFIG_FAILURE = Object.freeze({
   status: 'FAIL',
@@ -679,7 +680,9 @@ async function invokeRecovery(environment = process.env) {
         encoding: 'utf8',
         shell: process.platform === 'win32' && ycBinary.toLowerCase().endsWith('.cmd'),
         env: safeChildEnvironment(environment),
-        timeout: INVOKE_TIMEOUT_MS,
+        timeout: environment.RECOVERY_CONTROLLED_PREPARATION_ONLY === '1'
+          ? CONTROLLED_PREPARATION_INVOKE_TIMEOUT_MS
+          : INVOKE_TIMEOUT_MS,
         maxBuffer: MAX_CAPTURE_BYTES,
         windowsHide: true,
       },

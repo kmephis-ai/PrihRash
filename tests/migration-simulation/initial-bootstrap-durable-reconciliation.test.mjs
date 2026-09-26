@@ -157,6 +157,22 @@ test('durable initial reconciliation reconstructs from persisted revision eviden
   assert.equal(Object.values(postCommit.checks).every((status) => status === 'MATCHED'), true);
 });
 
+test('controlled durable revision reconciliation waits for the injected RU pacing budget', async () => {
+  const waitedUnits = [];
+  const reconciliation = createInitialBootstrapDurableReconciliation(
+    new YdbAdapter(matchingTransport()),
+    projectionContext,
+    historicalEvidence,
+    undefined,
+    undefined,
+    async (estimatedRequestUnits) => { waitedUnits.push(estimatedRequestUnits); },
+  );
+
+  await reconciliation.port.reconcile(input());
+
+  assert.deepEqual(waitedUnits, [1]);
+});
+
 test('durable initial reconciliation refuses to infer MATCHED when persisted revision evidence is incomplete', async () => {
   const adapter = new YdbAdapter(matchingTransport({ includeRevision: false }));
   const reconciliation = createInitialBootstrapDurableReconciliation(

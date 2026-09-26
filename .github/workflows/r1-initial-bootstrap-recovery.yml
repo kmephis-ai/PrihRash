@@ -368,12 +368,16 @@ jobs:
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-deploy"
           mkdir -p "$tmp"
+          recovery_execution_timeout='150s'
+          if [ "$RECOVERY_CONTROLLED_PREPARATION_ONLY" = '1' ]; then
+            recovery_execution_timeout='600s'
+          fi
           if ! yc serverless function version create \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
             --entrypoint index.initialBootstrapRecoveryHandler \
             --memory 1g \
-            --execution-timeout 150s \
+            --execution-timeout "$recovery_execution_timeout" \
             --environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=${RECOVERY_SURFACE_ONLY}" \
             --environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=${RECOVERY_CONTROLLED_PREPARATION_ONLY}" \
             --source-path .artifacts/yandex-initial-bootstrap-recovery-function \

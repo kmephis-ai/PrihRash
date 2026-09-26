@@ -56,7 +56,9 @@ test('stale VALIDATED recovery holds the shared writer boundary and queued boots
 test('initial bootstrap recovery deploy keeps the same single read-only provider path', () => {
   assert.match(workflow, /--entrypoint index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--memory 1g/);
-  assert.match(workflow, /--execution-timeout 150s/);
+  assert.match(workflow, /recovery_execution_timeout='150s'/);
+  assert.match(workflow, /if \[ "\$RECOVERY_CONTROLLED_PREPARATION_ONLY" = '1' \]; then[\s\S]*recovery_execution_timeout='600s'/);
+  assert.match(workflow, /--execution-timeout "\$recovery_execution_timeout"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=\$\{RECOVERY_CONTROLLED_PREPARATION_ONLY\}"/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
@@ -135,6 +137,8 @@ test('initial bootstrap recovery persists only enum-only classification evidence
 test('initial bootstrap recovery invoker exposes enum-only classification evidence', () => {
   assert.match(invoker, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
   assert.match(invoker, /INVOKE_TIMEOUT_MS = 180_000/);
+  assert.match(invoker, /CONTROLLED_PREPARATION_INVOKE_TIMEOUT_MS = 630_000/);
+  assert.match(invoker, /RECOVERY_CONTROLLED_PREPARATION_ONLY === '1'[\s\S]*CONTROLLED_PREPARATION_INVOKE_TIMEOUT_MS/);
   assert.match(invoker, /exactKeys\(result, \['status', 'code', 'verdict', 'reason'\]\)/);
   assert.match(invoker, /COMMITTED_DURABLE_STATE/);
   assert.match(invoker, /RESIDUAL_REFERENCE_STATE_WITHOUT_RUN/);

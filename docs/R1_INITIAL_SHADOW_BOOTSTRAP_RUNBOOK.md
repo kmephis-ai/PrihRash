@@ -1179,4 +1179,27 @@ controlled-preparation-only read-only probe на exact main. Ни WU7, ни boot
 не вооружаются до `READY`, complete exact payload evidence и доказательства current cutoff; любая
 повторная `RESOURCE_EXHAUSTED` требует нового sanitized stage evidence до выбора следующего fix.
 
+### RESOURCE_EXHAUSTED переместился на payload batch на `7ea94aeaffb807564c6a220d926ed2723f82690f`
+
+Controlled-preparation-only recovery `36246991989` после one-query metadata correction доказала, что
+отказ переместился на следующий exact stage:
+
+- reference snapshot — `REFERENCE_SNAPSHOT_VALIDATED`;
+- phase — `RECONCILIATION_READ`;
+- substage — `REVISION_PAYLOAD_BATCH`;
+- gRPC status — `RESOURCE_EXHAUSTED`, retry — `RETRIED`.
+
+При текущем throttling 10 RU/s единичный 64 KiB payload range может потребовать до 16 I/O RU, а
+последовательные batch queries не учитывали восстановление RU budget. Следующая bounded correction
+ограничивает batch по строкам и bytes и перед каждым exact payload query ждёт пропорционально
+allowlisted оценке RU, включая запас на CPU. Raw-payload equality, полный набор source identities и
+64 KiB upper response envelope не ослабляются. Только read-only controlled-preparation mode получает
+600 s outer Function/invoker envelope, чтобы выполнить paced diagnostic; остальные recovery mode
+сохраняют 150 s, а inner YDB deadlines остаются 10/21/25 s.
+
+После merge разрешён ровно один fresh controlled-preparation-only read-only probe. Если он не
+докажет `READY` + complete exact payload evidence, provider writer остаётся disarmed до следующей
+причинной диагностики. Даже `READY` сам по себе не снимает requirement свежих exact cutoff/recovery,
+readiness и новой open one-shot authority перед WU7.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
