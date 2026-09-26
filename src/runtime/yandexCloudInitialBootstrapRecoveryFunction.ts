@@ -24,6 +24,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingRetirementEvidence?: InitialBootstrapRecoveryJobResult['stagingRetirementEvidence'];
       stagingSourceDecodeEvidence?: InitialBootstrapRecoveryJobResult['stagingSourceDecodeEvidence'];
       stagingExactRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingExactRevisionEvidence'];
+      stagingRevisionCardinalityEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionCardinalityEvidence'];
       stagingControlledPreparationEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence'];
       stagingControlledPreparationRetryEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationRetryEvidence'];
       stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence'];
@@ -132,6 +133,15 @@ const STAGING_EXACT_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapReco
   'EXACT_CURRENT_RUN_RAW_PAYLOAD_MALFORMED',
   'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED',
+]);
+
+const STAGING_REVISION_CARDINALITY_EVIDENCE = new Set<NonNullable<
+  InitialBootstrapRecoveryJobResult['stagingRevisionCardinalityEvidence']
+>>([
+  'LT_3000_ROWS',
+  'GE_3000_LT_5000_ROWS',
+  'GE_5000_ROWS',
+  'DIAGNOSTIC_FAILED',
 ]);
 
 const STAGING_CONTROLLED_PREPARATION_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence']>>([
@@ -384,7 +394,32 @@ function validClassification(
   value: Readonly<InitialBootstrapRecoveryJobResult>,
   surfaceOnly = false,
   controlledPreparationOnly = false,
+  revisionCardinalityOnly = false,
 ): boolean {
+  if (revisionCardinalityOnly) {
+    if (surfaceOnly || controlledPreparationOnly) return false;
+    return value.reason === 'STAGING_RUN_PRESENT'
+      && value.validatedSourceEvidence === undefined
+      && value.staleValidatedRecoveryGate === undefined
+      && value.stagingRevisionCardinalityEvidence !== undefined
+      && STAGING_REVISION_CARDINALITY_EVIDENCE.has(value.stagingRevisionCardinalityEvidence)
+      && value.stagingRevisionEvidence === undefined
+      && value.stagingDurableRevisionEvidence === undefined
+      && value.stagingRetirementEvidence === undefined
+      && value.stagingSourceDecodeEvidence === undefined
+      && value.stagingExactRevisionEvidence === undefined
+      && value.stagingControlledPreparationEvidence === undefined
+      && value.stagingControlledPreparationRetryEvidence === undefined
+      && value.stagingControlledPreparationQueryErrorEvidence === undefined
+      && value.stagingControlledPreparationGrpcStatusEvidence === undefined
+      && value.stagingControlledPreparationPhaseEvidence === undefined
+      && value.stagingControlledPreparationReferenceReadStageEvidence === undefined
+      && value.stagingControlledPreparationReconciliationReadStageEvidence === undefined
+      && value.stagingControlledPreparationMetadataScanCostEvidence === undefined
+      && value.stagingControlledPreparationReferenceEvidence === undefined
+      && value.stagingControlledPreparationRevisionPayloadBatchEvidence === undefined;
+  }
+  if (value.stagingRevisionCardinalityEvidence !== undefined) return false;
   if (value.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly) {
     if (value.validatedSourceEvidence === undefined || !VALIDATED_SOURCE_EVIDENCE.has(value.validatedSourceEvidence)) return false;
     if (!validStaleValidatedRecoveryGate(value.staleValidatedRecoveryGate)) return false;
@@ -512,6 +547,7 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       classification,
       environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
       environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
+      environment.PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY === '1',
     )) {
       return Object.freeze({
         status: 'FAIL' as const,
@@ -544,6 +580,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingExactRevisionEvidence === undefined
         ? {}
         : { stagingExactRevisionEvidence: classification.stagingExactRevisionEvidence }),
+      ...(classification.stagingRevisionCardinalityEvidence === undefined
+        ? {}
+        : { stagingRevisionCardinalityEvidence: classification.stagingRevisionCardinalityEvidence }),
       ...(classification.stagingControlledPreparationEvidence === undefined
         ? {}
         : { stagingControlledPreparationEvidence: classification.stagingControlledPreparationEvidence }),

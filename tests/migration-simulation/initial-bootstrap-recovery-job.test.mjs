@@ -951,10 +951,44 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
   assert.equal(fixture.counters().closes, 1);
 });
 
-test('recovery rejects conflicting surface-only and controlled-preparation-only modes before provider access', async () => {
+test('revision-cardinality-only recovery reads no Google or payload and exposes only a coarse bucket', async () => {
+  let cardinalityCalls = 0;
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+    async diagnoseStagingRevisionCardinality(adapter) {
+      cardinalityCalls += 1;
+      assert.equal(typeof adapter.read, 'function');
+      return 'GE_5000_ROWS';
+    },
+  });
+
+  assert.deepEqual(
+    await executeInitialBootstrapRecoveryJob(config, fixture.runtime, false, false, true),
+    {
+      verdict: 'RECOVERY_REQUIRED',
+      reason: 'STAGING_RUN_PRESENT',
+      stagingRevisionCardinalityEvidence: 'GE_5000_ROWS',
+    },
+  );
+  assert.equal(cardinalityCalls, 1);
+  assert.equal(fixture.counters().sourceReads, 0);
+  assert.equal(fixture.counters().stagingDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingDurableDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingRetirementDiagnosticCalls, 0);
+  assert.equal(fixture.counters().stagingExactRevisionDiagnosticCalls, 0);
+  assert.equal(fixture.counters().closes, 1);
+});
+
+test('recovery rejects conflicting read-only diagnostic modes before provider access', async () => {
   const fixture = runtime();
   await assert.rejects(
     () => executeInitialBootstrapRecoveryJob(config, fixture.runtime, true, true),
+    (error) => error?.code === 'INVALID_RECOVERY_MODE',
+  );
+  await assert.rejects(
+    () => executeInitialBootstrapRecoveryJob(config, fixture.runtime, false, true, true),
     (error) => error?.code === 'INVALID_RECOVERY_MODE',
   );
   assert.equal(fixture.counters().diagnoseCalls, 0);

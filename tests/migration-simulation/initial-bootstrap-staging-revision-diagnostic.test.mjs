@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   diagnoseInitialValidatedSourceEvidence,
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseInitialBootstrapStagingRevisionCardinality,
   diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
 } from '../../dist/migration/initialBootstrapStagingRevisionDiagnostic.js';
@@ -141,6 +142,42 @@ test('staging revision diagnostic distinguishes no, partial, complete and cross-
     await diagnoseInitialBootstrapStagingRevisionEvidence(collision, SNAPSHOT_DIGEST, sourceObservations),
     'CROSS_RUN_PK_COLLISION',
   );
+});
+
+test('staging revision cardinality emits only a coarse manifest bucket from one metadata-only read', async () => {
+  const calls = [];
+  const evidence = await diagnoseInitialBootstrapStagingRevisionCardinality(Object.freeze({
+    async read(statement) {
+      calls.push(statement);
+      return { rows: [{
+        run_state: 'STAGING',
+        rows_seen: 4_500n,
+        binding_count: 4_500n,
+        snapshot_row_count: 4_500n,
+      }] };
+    },
+  }));
+
+  assert.equal(evidence, 'GE_3000_LT_5000_ROWS');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /m\.binding_count AS binding_count/);
+  assert.doesNotMatch(calls[0].text, /m\.bindings|raw_payload|source_record_id/);
+  assert.equal(Object.keys(calls[0].parameters).length, 0);
+});
+
+test('staging revision cardinality fails closed on inconsistent manifest counts', async () => {
+  const evidence = await diagnoseInitialBootstrapStagingRevisionCardinality(Object.freeze({
+    async read() {
+      return { rows: [{
+        run_state: 'STAGING',
+        rows_seen: 4_500n,
+        binding_count: 4_499n,
+        snapshot_row_count: 4_500n,
+      }] };
+    },
+  }));
+
+  assert.equal(evidence, 'DIAGNOSTIC_FAILED');
 });
 
 test('staging revision diagnostic rejects duplicate transaction ids in manifest evidence', async () => {

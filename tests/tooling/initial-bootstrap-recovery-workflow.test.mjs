@@ -19,6 +19,11 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /RECOVERY_SURFACE_ONLY: \$\{\{ inputs\.surface_only/);
   assert.match(workflow, /controlled_preparation_only:/);
   assert.match(workflow, /RECOVERY_CONTROLLED_PREPARATION_ONLY: \$\{\{ inputs\.controlled_preparation_only/);
+  assert.match(workflow, /staging_revision_cardinality_only:/);
+  assert.match(workflow, /RECOVERY_REVISION_CARDINALITY_ONLY: \$\{\{ inputs\.staging_revision_cardinality_only/);
+  assert.match(workflow, /PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY=/);
+  assert.match(workflow, /R1_STAGING_REVISION_CARDINALITY_EVIDENCE=/);
+  assert.match(workflow, /recovery_mode_count=\$\(\(RECOVERY_SURFACE_ONLY \+ RECOVERY_CONTROLLED_PREPARATION_ONLY \+ RECOVERY_REVISION_CARDINALITY_ONLY\)\)/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
@@ -218,4 +223,19 @@ test('controlled preparation recovery diagnostic preserves the controlled timeou
   assert.doesNotMatch(runtime, /executeInitialControlledRebuildSetup/);
   assert.doesNotMatch(runtime, /executeControlledInitialSwap/);
   assert.doesNotMatch(workflow, /initial-controlled-rebuild:invoke/);
+});
+
+test('revision-cardinality diagnostic is one coarse metadata-only read without Google or payload', async () => {
+  const diagnostic = await readFile('src/migration/initialBootstrapStagingRevisionDiagnostic.ts', 'utf8');
+  const recoveryJob = await readFile('src/runtime/initialBootstrapRecoveryJob.ts', 'utf8');
+  assert.match(diagnostic, /stagingManifestCardinalityStatement/);
+  assert.match(diagnostic, /m\.binding_count AS binding_count/);
+  assert.match(diagnostic, /LT_3000_ROWS/);
+  assert.match(diagnostic, /GE_3000_LT_5000_ROWS/);
+  assert.match(diagnostic, /GE_5000_ROWS/);
+  assert.doesNotMatch(diagnostic, /stagingManifestCardinalityStatement\(\)[\s\S]{0,500}m\.bindings/);
+  assert.match(recoveryJob, /if \(revisionCardinalityOnly\)[\s\S]*diagnoseStagingRevisionCardinality/);
+  assert.match(workflow, /recovery_execution_timeout='150s'/);
+  assert.match(workflow, /if \[ "\$RECOVERY_CONTROLLED_PREPARATION_ONLY" = '1' \]/);
+  assert.match(workflow, /recovery_mode_count=\$\(\(RECOVERY_SURFACE_ONLY \+ RECOVERY_CONTROLLED_PREPARATION_ONLY \+ RECOVERY_REVISION_CARDINALITY_ONLY\)\)/);
 });

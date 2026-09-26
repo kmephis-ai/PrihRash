@@ -277,9 +277,25 @@ test('historical revision timeout candidate switches from sparse PK ranges to ex
   assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`/);
   assert.match(evidence, /Enum artifact отсутствует/);
   assert.match(evidence, /не запуска[лн] bootstrap\/write path/);
-  assert.match(evidence, /broad primary-key диапазоном/);
+  assert.match(evidence, /широким primary-key диапазоном/);
   assert.match(evidence, /exact source ids/);
   assert.match(evidence, /cardinality, identity, immutable metadata, canonical\s+payload digest/);
   assert.match(evidence, /ровно один новый exact-main controlled-preparation-only read-only probe/);
   assert.match(evidence, /controlled rebuild, bootstrap replay,\s+retirement и cleanup остаются disarmed/);
+});
+
+test('revision-cardinality successor is metadata-only, coarse-bucketed and read-only', () => {
+  const evidence = runbook.match(
+    /### Диагностика грубой cardinality STAGING revisions после `36275268952`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the repeated bounded invoke failure must lead to a privacy-safe cardinality probe');
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`/);
+  assert.match(evidence, /`LT_3000_ROWS`/);
+  assert.match(evidence, /`GE_3000_LT_5000_ROWS`/);
+  assert.match(evidence, /`GE_5000_ROWS`/);
+  assert.match(evidence, /не читает Google, revision payloads, source identifiers и не изменяет YDB/);
+  assert.match(evidence, /должны совпасть manifest `rows_seen`, `binding_count` и snapshot `row_count`/);
+  assert.match(evidence, /разрешена ровно одна свежая exact-main read-only диагностика cardinality/);
+  assert.match(evidence, /он не разрешает controlled preparation,\s+WU7, retirement, cleanup/);
 });

@@ -61,9 +61,11 @@ import {
   diagnoseInitialValidatedSourceEvidence,
   type InitialValidatedSourceDiagnostic,
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseInitialBootstrapStagingRevisionCardinality,
   diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseInitialBootstrapStagingRevisionEvidence,
   type InitialBootstrapStagingDurableRevisionDiagnostic,
+  type InitialBootstrapStagingRevisionCardinalityEvidence,
   type InitialBootstrapStagingExactRevisionDiagnostic,
   type InitialBootstrapStagingRevisionDiagnostic,
   type InitialBootstrapStagingRevisionObservation,
@@ -226,6 +228,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingRetirementEvidence?: InitialBootstrapStaleStagingRetirementDiagnostic;
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
   readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
+  readonly stagingRevisionCardinalityEvidence?: InitialBootstrapStagingRevisionCardinalityEvidence;
   readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
   readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryEvidence;
   readonly stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapControlledPreparationQueryErrorEvidence;
@@ -271,6 +274,9 @@ export interface InitialBootstrapRecoveryJobRuntime {
   diagnoseStagingDurableRevisionEvidence(
     adapter: YdbAdapter,
   ): Promise<InitialBootstrapStagingDurableRevisionDiagnostic>;
+  diagnoseStagingRevisionCardinality(
+    adapter: YdbAdapter,
+  ): Promise<InitialBootstrapStagingRevisionCardinalityEvidence>;
   diagnoseStagingExactRevisionEvidence(
     adapter: YdbAdapter,
     sourceSnapshotDigest: string,
@@ -1030,6 +1036,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   diagnoseValidatedSourceEvidence: diagnoseInitialValidatedSourceEvidence,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
   diagnoseStagingDurableRevisionEvidence: diagnoseInitialBootstrapStagingDurableRevisionEvidence,
+  diagnoseStagingRevisionCardinality: diagnoseInitialBootstrapStagingRevisionCardinality,
   diagnoseStagingExactRevisionEvidence: diagnoseInitialBootstrapStagingExactRevisionEvidence,
   diagnoseStaleStagingRetirementCurrentState: diagnoseInitialBootstrapStaleStagingRetirementCurrentState,
   diagnoseValidatedControlledRebuildState,
@@ -1101,8 +1108,11 @@ export async function executeInitialBootstrapRecoveryJob(
   runtime: Readonly<InitialBootstrapRecoveryJobRuntime>,
   surfaceOnly = false,
   controlledPreparationOnly = false,
+  revisionCardinalityOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
-  if (surfaceOnly && controlledPreparationOnly) {
+  if (
+    Number(surfaceOnly) + Number(controlledPreparationOnly) + Number(revisionCardinalityOnly) > 1
+  ) {
     throw new InitialBootstrapRecoveryJobError('INVALID_RECOVERY_MODE');
   }
   const validated = validateInitialBootstrapRecoveryConfig(config);
@@ -1167,6 +1177,19 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationMetadataScanCostEvidence,
         stagingControlledPreparationReferenceEvidence,
         stagingControlledPreparationRevisionPayloadBatchEvidence,
+      });
+    }
+    if (revisionCardinalityOnly) {
+      if (before.reason !== 'STAGING_RUN_PRESENT') return before;
+      let stagingRevisionCardinalityEvidence: InitialBootstrapStagingRevisionCardinalityEvidence;
+      try {
+        stagingRevisionCardinalityEvidence = await runtime.diagnoseStagingRevisionCardinality(adapter);
+      } catch {
+        stagingRevisionCardinalityEvidence = 'DIAGNOSTIC_FAILED';
+      }
+      return Object.freeze({
+        ...before,
+        stagingRevisionCardinalityEvidence,
       });
     }
     if (before.reason === 'VALIDATED_RUN_PRESENT') {
@@ -1334,12 +1357,14 @@ export function runInitialBootstrapRecoveryJob(
   config: Readonly<InitialBootstrapRecoveryJobConfig>,
   surfaceOnly = false,
   controlledPreparationOnly = false,
+  revisionCardinalityOnly = false,
 ): Promise<Readonly<InitialBootstrapRecoveryJobResult>> {
   return executeInitialBootstrapRecoveryJob(
     config,
     productionRuntime,
     surfaceOnly,
     controlledPreparationOnly,
+    revisionCardinalityOnly,
   );
 }
 
@@ -1350,5 +1375,6 @@ export function runInitialBootstrapRecoveryJobFromEnvironment(
     readInitialBootstrapRecoveryJobConfig(environment),
     environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
     environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
+    environment.PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY === '1',
   );
 }
