@@ -1202,4 +1202,29 @@ allowlisted оценке RU, включая запас на CPU. Raw-payload equ
 причинной диагностики. Даже `READY` сам по себе не снимает requirement свежих exact cutoff/recovery,
 readiness и новой open one-shot authority перед WU7.
 
+### Outer deadline read-only paced diagnostic на `51834f052334e103e5dc3d602f4152aff8d6c447`
+
+Recovery `36250109918` на exact main с `controlled_preparation_only=true` завершилась failure после
+исчерпания нового 600 s read-only diagnostic envelope; enum artifact не был создан. Этот путь не
+содержит lifecycle/data/scheme/current writes, поэтому durable YDB не менялся. Результат не считается
+`READY`, не является разрешением resume и не вооружает WU7.
+
+Последняя причина таймаута — pacing использовал 8 RU/s при provider baseline 10 RU/s. Successor
+оставляет все YDB resource settings на 10 RU/s, но повышает только локальную pacing target до
+10 RU/s, сохраняя 2 RU/query safety margin и лимит восьми строк на payload batch. Это не меняет
+provider cap или RU allowance. Следующий и единственный допустимый probe — fresh
+controlled-preparation-only read-only run с bounded 600 s; после timeout/non-PASS новых diagnostic
+или write invocations по тому же SHA нет.
+
+### Следующий pacing candidate на `51834f052334e103e5dc3d602f4152aff8d6c447`
+
+Repository successor сохраняет byte envelope 64 KiB и row batch ≤8, но target pacing меняется с
+8 на подтверждённые 10 RU/s при неизменном CPU margin 2 RU. Для типового batch до 8 rows это
+оставляет 1 s перед следующим query; большие payload ranges ждут пропорционально оценке RU. Cap,
+provisioned RCU, IAM и writer authority не меняются.
+
+После merge этот successor может выполнить только один controlled-preparation-only read-only probe
+на exact main в bounded 600 s envelope. Если он снова завершится timeout или не докажет `READY` и
+полную exact payload equality, diagnostic stops; WU7 остаётся disarmed до новой причинной гипотезы.
+
 После provider-complete Google всё ещё authoritative, timer всё ещё выключен, YDB остаётся shadow. Следующая крупная runtime/authority boundary требует отдельного rolling-wave decision; этот runbook её не разрешает.
