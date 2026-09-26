@@ -198,3 +198,17 @@ test('the latest controlled-preparation failure stops before revision payload pl
   assert.match(evidence, /revision payload batch: `UNOBSERVED`/);
   assert.match(evidence, /Do not repeat controlled preparation, dispatch WU7/);
 });
+
+test('reference-read correction remains one read-only candidate tied to the observed third-query failure', () => {
+  const evidence = runbook.match(
+    /#### Bounded reference-read correction candidate on `73b7ce18eb5b50c033289d3bbf8c89233a8ae5d9`([\s\S]*?)(?=\n### |\n## )/,
+  )?.[1];
+
+  assert.ok(evidence, 'the reference-read failure hypothesis must be bounded and evidenced');
+  assert.match(evidence, /third sequential `READ` \(`family_members`\)/);
+  assert.match(evidence, /one read-only tagged `UNION ALL` statement/);
+  assert.match(evidence, /synthetic adapter fixture reproduces `RESOURCE_EXHAUSTED`/);
+  assert.match(evidence, /not a claim that the provider quota or gRPC cause is proven/);
+  assert.match(evidence, /one fresh full read-only recovery and one controlled-preparation-only read-only probe/);
+  assert.match(evidence, /does not\nauthorize WU7, bootstrap replay, or cap increase/);
+});

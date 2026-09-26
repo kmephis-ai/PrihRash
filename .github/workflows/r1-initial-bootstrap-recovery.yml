@@ -513,7 +513,7 @@ jobs:
               *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE_INVALID; exit 1 ;;
             esac
             case "$reference_read_stage_evidence" in
-              UNOBSERVED|ACCOUNTS_READ|CATEGORIES_READ|VIKA_MEMBER_READ|DIAGNOSTIC_FAILED) ;;
+              UNOBSERVED|REFERENCE_SNAPSHOT_READ|DIAGNOSTIC_FAILED) ;;
               *) echo INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE_INVALID; exit 1 ;;
             esac
             case "$reconciliation_read_stage_evidence" in

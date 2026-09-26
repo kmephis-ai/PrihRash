@@ -514,6 +514,24 @@ for the bounded reference-read failure plus its synthetic adapter fixture and fo
 coverage, followed by one newly authorized read-only classification on a distinct exact SHA. No
 bootstrap invoke, replay, cleanup, timer, or cutover is authorized.
 
+#### Bounded reference-read correction candidate on `73b7ce18eb5b50c033289d3bbf8c89233a8ae5d9`
+
+The observed failure is the third sequential `READ` (`family_members`) inside one
+`serializableReadWrite` resolver transaction, after the account and category reads succeeded. The
+candidate correction reduces this resolver snapshot to one read-only tagged `UNION ALL` statement
+over the same three physical tables. It preserves exact account/category/member filters and existing
+row validators, uses the single statement's snapshot instead of a multi-query transaction snapshot,
+and makes no schema, data, writer, retry, RU-cap, or authority change.
+
+The synthetic adapter fixture reproduces `RESOURCE_EXHAUSTED` on the third legacy transaction query
+and verifies the new resolver issues one request and returns the exact same validated resolver.
+Unknown row tags still fail closed. This is a bounded hypothesis tied to the observed failing stage,
+not a claim that the provider quota or gRPC cause is proven. After merge and successful exact-main CI,
+one fresh full read-only recovery and one controlled-preparation-only read-only probe are required;
+the latter must reach `REFERENCE_SNAPSHOT_READ` and then prove controlled preparation passes the
+revision payload phase. Any repeat `RESOURCE_EXHAUSTED` or absent evidence is STOP; it does not
+authorize WU7, bootstrap replay, or cap increase.
+
 ### Unknown durable outcome after bootstrap invoke on `ca536788f712025e15476a9677da50138da555da`
 
 Orchestrator `35342705006` first classified the prior staging run as stale using fresh read-only

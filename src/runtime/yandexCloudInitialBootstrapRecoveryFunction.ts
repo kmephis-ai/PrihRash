@@ -251,9 +251,7 @@ const STAGING_CONTROLLED_PREPARATION_PHASE_EVIDENCE = new Set<NonNullable<Initia
 
 const STAGING_CONTROLLED_PREPARATION_REFERENCE_READ_STAGE_EVIDENCE = new Set<NonNullable<InitialBootstrapRecoveryJobResult['stagingControlledPreparationReferenceReadStageEvidence']>>([
   'UNOBSERVED',
-  'ACCOUNTS_READ',
-  'CATEGORIES_READ',
-  'VIKA_MEMBER_READ',
+  'REFERENCE_SNAPSHOT_READ',
   'DIAGNOSTIC_FAILED',
 ]);
 

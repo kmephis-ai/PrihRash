@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+import { readStatement, YdbAdapter } from '../../dist/integration/ydb/adapter.js';
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
+import { utf8Parameter } from '../../dist/integration/ydb/parameters.js';
 import { buildReferenceResolverSnapshot, ReferenceResolverSnapshotError } from '../../dist/reference/resolver.js';
 import {
   YdbReferenceEvidenceReaderError,
@@ -32,22 +34,35 @@ function makeAdapter(accountRows, categoryRows) {
 
 function makeSnapshotAdapter(accountRows, categoryRows, memberRows) {
   const observed = { outsideReads: 0, transactionCount: 0, calls: [] };
+  const rows = [
+    ...accountRows.map((row) => ({
+      reference_type: 'ACCOUNT',
+      id: row.id,
+      source_label: row.normalized_source_label,
+      descriptor: row.currency,
+    })),
+    ...categoryRows.map((row) => ({
+      reference_type: 'CATEGORY',
+      id: row.id,
+      source_label: row.normalized_source_label,
+      descriptor: row.kind,
+    })),
+    ...memberRows.map((row) => ({
+      reference_type: 'VIKA_MEMBER',
+      id: row.id,
+      source_label: row.name,
+      descriptor: row.status,
+    })),
+  ];
   const adapter = new YdbAdapter({
-    async executeRead() {
+    async executeRead(statement) {
       observed.outsideReads += 1;
-      throw new Error('OUTSIDE_TRANSACTION_READ_FORBIDDEN');
+      observed.calls.push(statement);
+      return { rows };
     },
     async serializableReadWrite(work) {
       observed.transactionCount += 1;
-      return work({
-        async execute(statement) {
-          observed.calls.push(statement);
-          if (/FROM accounts/.test(statement.text)) return { rows: accountRows };
-          if (/FROM categories/.test(statement.text)) return { rows: categoryRows };
-          if (/FROM family_members/.test(statement.text)) return { rows: memberRows };
-          throw new Error(`UNEXPECTED_STATEMENT: ${statement.text}`);
-        },
-      });
+      return work({ async execute() { throw new Error('TRANSACTION_READ_FORBIDDEN'); } });
     },
   });
   return { adapter, observed };
@@ -104,16 +119,18 @@ test('reads exactly two dedicated source-label projections and feeds exact resol
   assert.equal(resolver.resolveCategoryId('INCOME', 'Synthetic Shared'), CATEGORY_INCOME);
 });
 
-test('builds immutable resolver from one consistent YDB transaction including exact active Vika member', async () => {
+test('builds immutable resolver from one tagged YDB snapshot read including exact active Vika member', async () => {
   const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
   const resolver = await readYdbReferenceResolverSnapshot(adapter);
 
-  assert.equal(observed.outsideReads, 0);
-  assert.equal(observed.transactionCount, 1);
-  assert.equal(observed.calls.length, 3);
-  assert.deepEqual(observed.calls.map((statement) => statement.kind), ['READ', 'READ', 'READ']);
-  assert.match(observed.calls[2].text, /FROM family_members WHERE name = \$name AND status = \$status/);
-  assert.deepEqual(observed.calls[2].parameters, {
+  assert.equal(observed.outsideReads, 1);
+  assert.equal(observed.transactionCount, 0);
+  assert.equal(observed.calls.length, 1);
+  assert.deepEqual(observed.calls.map((statement) => statement.kind), ['READ']);
+  assert.match(observed.calls[0].text, /FROM accounts WHERE normalized_source_label IS NOT NULL/);
+  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*FROM categories WHERE normalized_source_label IS NOT NULL/);
+  assert.match(observed.calls[0].text, /UNION ALL[\s\S]*FROM family_members WHERE name = \$name AND status = \$status/);
+  assert.deepEqual(observed.calls[0].parameters, {
     name: { type: 'Utf8', value: 'Вика' },
     status: { type: 'Utf8', value: 'ACTIVE' },
   });
@@ -125,15 +142,15 @@ test('builds immutable resolver from one consistent YDB transaction including ex
   assert.equal(Object.isFrozen(resolver), true);
 });
 
-test('optional reference-read observer sees the exact existing read order without extra requests', async () => {
+test('reference-read observer reports the single statement without extra requests', async () => {
   const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
   const stages = [];
   await readYdbReferenceResolverSnapshot(adapter, (stage) => stages.push(stage));
 
-  assert.deepEqual(stages, ['ACCOUNTS_READ', 'CATEGORIES_READ', 'VIKA_MEMBER_READ']);
-  assert.equal(observed.outsideReads, 0);
-  assert.equal(observed.transactionCount, 1);
-  assert.equal(observed.calls.length, 3);
+  assert.deepEqual(stages, ['REFERENCE_SNAPSHOT_READ']);
+  assert.equal(observed.outsideReads, 1);
+  assert.equal(observed.transactionCount, 0);
+  assert.equal(observed.calls.length, 1);
 });
 
 test('reference-read observer failure cannot alter resolver semantics or request count', async () => {
@@ -144,9 +161,73 @@ test('reference-read observer failure cannot alter resolver semantics or request
     throw new Error('diagnostic observer failure');
   });
 
-  assert.deepEqual(seen, ['ACCOUNTS_READ', 'CATEGORIES_READ', 'VIKA_MEMBER_READ']);
-  assert.equal(observed.calls.length, 3);
+  assert.deepEqual(seen, ['REFERENCE_SNAPSHOT_READ']);
+  assert.equal(observed.calls.length, 1);
   assert.equal(resolver.vikaMemberId, MEMBER);
+});
+
+test('one tagged snapshot read avoids synthetic RESOURCE_EXHAUSTED at the third transaction query', async () => {
+  let transactionReadCount = 0;
+  const exhaustedAdapter = new YdbAdapter({
+    async executeRead() { throw new Error('UNEXPECTED_OUTSIDE_READ'); },
+    async serializableReadWrite(work) {
+      return work({
+        async execute(statement) {
+          transactionReadCount += 1;
+          if (transactionReadCount === 3) {
+            throw new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED');
+          }
+          if (/FROM accounts/.test(statement.text)) return { rows: validAccounts() };
+          if (/FROM categories/.test(statement.text)) return { rows: validCategories() };
+          throw new Error('UNEXPECTED_STATEMENT');
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => exhaustedAdapter.serializableReadWrite(async (transaction) => {
+      await readYdbReferenceMappingEvidence(transaction);
+      return transaction.read(readStatement(
+        'SELECT id, name, status FROM family_members WHERE name = $name AND status = $status',
+        {
+          name: utf8Parameter('Вика'),
+          status: utf8Parameter('ACTIVE'),
+        },
+      ));
+    }),
+    (error) => error instanceof YdbJsV6DataTransportError
+      && error.code === 'QUERY_EXECUTION_YDB_RESOURCE_EXHAUSTED',
+  );
+  assert.equal(transactionReadCount, 3);
+
+  const { adapter, observed } = makeSnapshotAdapter(validAccounts(), validCategories(), validMember());
+  const resolver = await readYdbReferenceResolverSnapshot(adapter);
+  assert.equal(resolver.vikaMemberId, MEMBER);
+  assert.equal(observed.calls.length, 1);
+  assert.equal(observed.transactionCount, 0);
+});
+
+test('tagged snapshot reader rejects unknown reference kinds without partial resolver output', async () => {
+  const adapter = new YdbAdapter({
+    async executeRead() {
+      return {
+        rows: [{
+          reference_type: 'PRIVATE_REFERENCE_KIND',
+          id: ACCOUNT_A,
+          source_label: 'Synthetic',
+          descriptor: 'RUB',
+        }],
+      };
+    },
+    async serializableReadWrite() { throw new Error('TRANSACTION_READ_FORBIDDEN'); },
+  });
+
+  await assert.rejects(
+    () => readYdbReferenceResolverSnapshot(adapter),
+    (error) => error instanceof YdbReferenceEvidenceReaderError
+      && error.code === 'MALFORMED_REFERENCE_SNAPSHOT_EVIDENCE',
+  );
 });
 
 for (const [name, memberRows, code] of [
