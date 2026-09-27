@@ -243,6 +243,17 @@ test('PR-849 classifier refinement records malformed version-list evidence witho
   assert.match(evidence, /The next repository-only discriminator splits/);
 });
 
+test('PR-850 read-only result and Yandex repeated-tag schema proof arm only the omitted-tags correction', () => {
+  const evidence = runbook.match(
+    /### PR #850 metadata-only refinement classified the invalid version-list field as tags on `adbbcc0fb1ff06bc12db7e3b31feae082569c8c1`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact read-only tags result and schema contract must be recorded');
+  assert.match(evidence, /published only `RECOVERY_VERSION_TAGS_INVALID`/);
+  assert.match(evidence, /`Version\.tags` is declared `repeated string`/);
+  assert.match(evidence, /omitted `tags` property means the known empty repeated field/);
+  assert.match(evidence, /explicit null or a wrong type remains invalid/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
