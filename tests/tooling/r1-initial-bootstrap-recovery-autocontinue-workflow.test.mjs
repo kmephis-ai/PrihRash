@@ -184,6 +184,17 @@ test('consumed deploy classification remains unknown and classifier enum refinem
   assert.match(evidence, /consumes no\s+additional provider classification for run `36341844854`/);
 });
 
+test('owner probe authority permits only one new-SHA metadata reclassification after the parser correction', () => {
+  const evidence = runbook.match(
+    /Owner subsequently authorized read-only probes across R1([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the explicit R1 read-only probe authorization must be documented');
+  assert.match(evidence, /one additional full provider\s+metadata classification for the same failed run on a new exact-main SHA/);
+  assert.match(evidence, /`Provider-Attempt: NOT_AUTHORIZED`/);
+  assert.match(evidence, /does not\s+re-run the failed deploy and does not invoke Function, Google or\s+YDB/);
+  assert.match(evidence, /if the corrected classification is still missing\/ambiguous, stop/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,

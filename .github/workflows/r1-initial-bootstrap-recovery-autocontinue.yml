@@ -129,6 +129,38 @@ jobs:
               echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID'
               exit 0
             fi
+
+            failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
+            failed_recoveries="$(curl --fail --silent --show-error \
+              --header "$auth_header" --header "$accept_header" \
+              "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100")" || {
+                echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_HISTORY_READ_FAILED'; exit 0;
+              }
+            latest_failed_id="$(jq -er '
+              [.workflow_runs[] | select(
+                .name == "R1 initial bootstrap recovery"
+                and .head_branch == "main"
+                and .event == "workflow_dispatch"
+                and .conclusion == "failure"
+                and (.id | type == "number")
+              )] | sort_by(.created_at, .id) | reverse | .[0].id // empty
+            ' <<<"$failed_recoveries" 2>/dev/null || true)"
+            if [ -z "$latest_failed_id" ] || [ "$failed_run_id" != "$latest_failed_id" ]; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_RUN_NOT_LATEST_FAILED'; exit 0
+            fi
+            failed_jobs="$(curl --fail --silent --show-error \
+              --header "$auth_header" --header "$accept_header" \
+              "$api/actions/runs/${failed_run_id}/jobs?filter=latest&per_page=100")" || {
+                echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_RUN_READ_FAILED'; exit 0;
+              }
+            if ! jq -e '
+              [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
+              | ($jobs | length) == 1
+              and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
+              and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
+            ' <<<"$failed_jobs" >/dev/null; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_RUN_PHASE_NOT_PROVEN'; exit 0
+            fi
           fi
 
           issue_state="$(curl --fail --silent --show-error             --header "$auth_header"             --header "$accept_header"             "$api/issues/453" | jq -er '.state')"

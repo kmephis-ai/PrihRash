@@ -177,6 +177,15 @@ Function, не вызывает Function/YDB и не разрешает след
 новый causal root-cause decision. Отсутствующее/неоднозначное provider evidence остаётся
 `RECOVERY_REQUIRED`; никаких inferred `NOT_APPLIED` или replay.
 
+Если Owner отдельно разрешил read-only probes для R1 и это разрешение внесено в активный tracking
+Issue, разрешён один дополнительный exact-main read-only классификатор для того же failed recovery
+run после repository-only изменения самого classifier. Такой successor обязан подтвердить exact
+latest failed run, failed deploy step, skipped invoke step, использовать новый exact SHA и сохранять
+`Provider-Attempt: NOT_AUTHORIZED`. Это исключение разрешает только новый read-only metadata query;
+никаких deploy/invoke/replay/cleanup/authority changes оно не разрешает. Если свежая классификация
+остаётся missing/ambiguous, дальнейший шаг снова требует отдельного causal decision; blind diagnostic
+replay запрещён.
+
 ### 8.2. R1 completion sprint и multi-agent handoff
 
 Пока R1 не имеет доказанного первого `COMMITTED` baseline, operational process определяется
