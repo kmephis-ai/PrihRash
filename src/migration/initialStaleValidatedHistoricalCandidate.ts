@@ -46,6 +46,11 @@ export type InitialBootstrapDurableObservationReadStage =
   | 'RESUME_SNAPSHOT_READ'
   | 'REVISION_EVIDENCE_PREPARATION';
 
+export type InitialBootstrapHistoricalRevisionReadObserver = (
+  completedPages: number,
+  estimatedRequestUnits: number,
+) => void;
+
 export class InitialStaleValidatedHistoricalCandidateError extends Error {
   readonly code: InitialStaleValidatedHistoricalCandidateErrorCode;
   readonly ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null;
@@ -288,15 +293,22 @@ async function readHistoricalRevisionsInBoundedBatches(
   expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
   waitForReadBudget: ReturnType<typeof createInitialSourceRevisionEvidenceReadBudgetWaiter>,
   observeReadStage?: (stage: InitialBootstrapDurableObservationReadStage) => void,
+  observeHistoricalRevisionRead?: InitialBootstrapHistoricalRevisionReadObserver,
 ): Promise<readonly Readonly<HistoricalRevision>[]> {
   const seen = new Set<string>();
   const revisions: HistoricalRevision[] = [];
   let afterSourceRecordId: string | null = null;
   let limit = Math.min(HISTORICAL_REVISION_READ_ROWS_LIMIT, Math.max(1, Math.min(2, expectedBySource.size + 1)));
   let estimatedRequestUnits = limit;
+  let completedPages = 0;
 
   while (true) {
     const pageLimit = limit;
+    try {
+      observeHistoricalRevisionRead?.(completedPages, estimatedRequestUnits);
+    } catch {
+      // Diagnostic callbacks cannot change historical reconstruction semantics.
+    }
     try {
       observeReadStage?.('REVISION_EVIDENCE_PREPARATION');
     } catch {
@@ -306,6 +318,7 @@ async function readHistoricalRevisionsInBoundedBatches(
     const payloadResult = await reader.read<RevisionRow>(
       revisionPayloadPageStatement(run.id, afterSourceRecordId, pageLimit),
     );
+    completedPages += 1;
     if (payloadResult.rows.length > pageLimit) {
       throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
     }
@@ -363,6 +376,7 @@ export async function reconstructInitialBootstrapDurableObservation(
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
   waitForReadBudget = createInitialSourceRevisionEvidenceReadBudgetWaiter(),
   observeReadStage?: (stage: InitialBootstrapDurableObservationReadStage) => void,
+  observeHistoricalRevisionRead?: InitialBootstrapHistoricalRevisionReadObserver,
 ): Promise<Readonly<{
   capturedAt: string;
   snapshotDigest: string;
@@ -429,6 +443,7 @@ export async function reconstructInitialBootstrapDurableObservation(
       expectedBySource,
       waitForReadBudget,
       observeReadStage,
+      observeHistoricalRevisionRead,
     );
   } catch (error) {
     if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;

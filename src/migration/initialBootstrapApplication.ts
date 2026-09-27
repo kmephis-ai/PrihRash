@@ -29,6 +29,7 @@ import {
   InitialStaleValidatedHistoricalCandidateError,
   matchesInitialBootstrapDurableRevisionEvidenceProof,
   reconstructInitialBootstrapDurableObservation,
+  type InitialBootstrapHistoricalRevisionReadObserver,
   type InitialBootstrapDurableObservationReadStage,
   type InitialBootstrapDurableRevisionEvidenceProof,
 } from './initialStaleValidatedHistoricalCandidate.js';
@@ -156,6 +157,7 @@ export interface InitialBootstrapApplicationDependencies {
   readonly reconciliation: InitialBootstrapReconciliationPort;
   readonly clock: InitialBootstrapApplicationClock;
   readonly observePhase?: (phase: InitialBootstrapApplicationPhase) => void;
+  readonly observeHistoricalRevisionRead?: InitialBootstrapHistoricalRevisionReadObserver;
 }
 
 function markApplicationPhase(
@@ -441,6 +443,7 @@ async function prepareResumeContext(
         dependencies.historicalEvidence,
         undefined,
         (stage: InitialBootstrapDurableObservationReadStage) => markApplicationPhase(dependencies, stage),
+        dependencies.observeHistoricalRevisionRead,
       );
       resumeObservation = Object.freeze({
         capturedAt: reconstructed.capturedAt,

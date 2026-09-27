@@ -270,12 +270,12 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   };
-  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence, revisionPayloadBatchEvidence, referenceEvidence] of [
-    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'REFERENCE_SNAPSHOT_READ', 'UNOBSERVED', 'UNOBSERVED', 'NO_PAYLOAD_BATCH', 'REFERENCE_SNAPSHOT_VALIDATED'],
-    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'REFERENCE_READ_FAILED'],
-    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU', 'SINGLE_REVISION_EXCEEDS_64_KIB', 'REFERENCE_READER_VIKA_MEMBER_NOT_FOUND'],
-    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_SOURCE_KEY'],
-    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
+  for (const [evidence, retryEvidence, queryErrorEvidence, grpcStatusEvidence, phaseEvidence, referenceReadStageEvidence, readStageEvidence, metadataScanCostEvidence, revisionPayloadBatchEvidence, historicalPageProgressEvidence, historicalEstimatedRuEvidence, referenceEvidence] of [
+    ['READY', 'NO_RETRY', 'UNOBSERVED', 'UNOBSERVED', 'CURRENT_WRITE_PREPARATION', 'REFERENCE_SNAPSHOT_READ', 'UNOBSERVED', 'UNOBSERVED', 'NO_PAYLOAD_BATCH', 'UNOBSERVED', 'UNOBSERVED', 'REFERENCE_SNAPSHOT_VALIDATED'],
+    ['YDB_QUERY_TIMEOUT', 'RETRIED', 'ABORT_TIMEOUT', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_METADATA_SCAN', 'LT_10_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'FIRST_PAGE', 'LT_10_RU', 'REFERENCE_READ_FAILED'],
+    ['YDB_DATA_QUERY_EXECUTION_FAILED', 'NON_RETRYABLE', 'GRPC_STATUS', 'UNAVAILABLE', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_PAYLOAD_BATCH', 'GE_10_LT_3000_RU', 'SINGLE_REVISION_EXCEEDS_64_KIB', 'AFTER_ONE_PAGE', 'GE_10_RU', 'REFERENCE_READER_VIKA_MEMBER_NOT_FOUND'],
+    ['YDB_DATA_QUERY_EXECUTION_YDB_UNAVAILABLE', 'EXHAUSTED', 'YDB_STATUS', 'NON_GRPC', 'RECONCILIATION_READ', 'REFERENCE_SNAPSHOT_READ', 'REVISION_COLLISION_READ', 'GE_3000_RU', 'ALL_BATCHES_WITHIN_64_KIB', 'AFTER_TWO_TO_FOUR_PAGES', 'GE_10_RU', 'REFERENCE_RESOLVER_DUPLICATE_ACCOUNT_SOURCE_KEY'],
+    ['DURABLE_RECONCILIATION_FAILURE', 'UNOBSERVED', 'OTHER', 'NON_GRPC', 'ADMISSION_READ', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED', 'AFTER_FIVE_OR_MORE_PAGES', 'DIAGNOSTIC_FAILED', 'DIAGNOSTIC_FAILED'],
   ]) {
     const yc = await fakeYc({
       ...base,
@@ -288,6 +288,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
       stagingControlledPreparationReconciliationReadStageEvidence: readStageEvidence,
       stagingControlledPreparationMetadataScanCostEvidence: metadataScanCostEvidence,
       stagingControlledPreparationRevisionPayloadBatchEvidence: revisionPayloadBatchEvidence,
+      stagingControlledPreparationHistoricalRevisionPageProgressEvidence: historicalPageProgressEvidence,
+      stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence: historicalEstimatedRuEvidence,
       stagingControlledPreparationReferenceEvidence: referenceEvidence,
     });
     const result = await execFileAsync(
@@ -315,6 +317,8 @@ test('controlled-preparation-only invoker preserves only allowlisted enum eviden
         + `R1_STAGING_CONTROLLED_PREPARATION_RECONCILIATION_READ_STAGE_EVIDENCE=${readStageEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_METADATA_SCAN_COST_EVIDENCE=${metadataScanCostEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE=${revisionPayloadBatchEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_HISTORICAL_REVISION_PAGE_PROGRESS_EVIDENCE=${historicalPageProgressEvidence}\n`
+        + `R1_STAGING_CONTROLLED_PREPARATION_HISTORICAL_REVISION_ESTIMATED_RU_EVIDENCE=${historicalEstimatedRuEvidence}\n`
         + `R1_STAGING_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE=${referenceEvidence}\n`,
     );
   }

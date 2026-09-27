@@ -244,6 +244,8 @@ test('Yandex recovery handler accepts controlled preparation evidence only in di
     stagingControlledPreparationMetadataScanCostEvidence: 'GE_10_LT_3000_RU',
     stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
     stagingControlledPreparationRevisionPayloadBatchEvidence: 'ALL_BATCHES_WITHIN_64_KIB',
+    stagingControlledPreparationHistoricalRevisionPageProgressEvidence: 'UNOBSERVED',
+    stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence: 'UNOBSERVED',
     stagingControlledPreparationReferenceEvidence: 'REFERENCE_SNAPSHOT_VALIDATED',
   };
   assert.deepEqual(
