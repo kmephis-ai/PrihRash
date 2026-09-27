@@ -597,3 +597,23 @@ exact-SHA integrity verification and existing readiness/authority/writer gates. 
 in `tests/tooling/exact-source-artifact.test.mjs` inventories the provider workflows, requires the
 exact-source restore, asserts no second full check/build/package, and verifies the Gate B package is
 published by canonical CI.
+
+### Post-#830 invoke-result classification correction
+
+The one newly authorized cap experiment `36299572884` completed `SET_14` and its controlled invoke,
+then restored throttling with terminal proof and independent exact `10 / enabled / provisioned=0`
+read-back. The public result was `INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID`; bounded phase
+telemetry was unavailable as `LOG_READ_FAILED`. Mandatory full read-only recovery `36299761011`
+returned `STAGING_RUN_PRESENT` with enum-only evidence: `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`,
+`COMPLETE_CURRENT_RUN_ONLY`, `STALE_STAGING_CURRENT_STATE_EMPTY`, source decode `NONE`, and
+`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`. The controlled one-shot and temporary-cap gate are consumed;
+this result does not authorize replay or cleanup.
+
+Code tracing shows `InitialBootstrapApplication` can fail while its last nested phase is
+`REVISION_EVIDENCE_PREPARATION`. That is an existing `InitialBootstrapApplicationPhase`, but the
+controlled invoker and both workflow result guards did not allow it as `bootstrapPhase`. Such a
+bounded pre-write runtime result was therefore collapsed into `INVOKE_OUTPUT_INVALID`. The
+repository-only correction accepts this exact known phase under controlled `PREPARATION`, preserving
+the already allowlisted YDB subtype only when present. It does not alter preparation, query, timeout,
+resource, financial or write behavior and does not arm another provider attempt. Any later controlled
+invoke still requires fresh exact-main/recovery/readiness gates and separate authority.
