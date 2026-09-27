@@ -507,3 +507,26 @@ After merge, allow at most one fresh exact-main controlled-preparation-only read
 an enum artifact proving the existing durable revision and current-source checks reach `READY`; a
 timeout/non-PASS remains unclassified and cannot arm another probe, WU7, cap changes, retirement,
 cleanup, bootstrap or authority changes without a separately established safe boundary.
+
+### #824 candidate: identify the bounded read inside RESUME_CONTEXT_READ
+
+Fresh controlled-preparation-only recovery `36288578835` on exact main
+`e84f3b095a232a2ca5fd99f86a4de48bf9e140d5` completed with sanitized evidence:
+
+- `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
+- retry `RETRIED`, query error `GRPC_STATUS`, gRPC `RESOURCE_EXHAUSTED`;
+- application phase `RESUME_CONTEXT_READ`;
+- reference snapshot `REFERENCE_SNAPSHOT_VALIDATED`;
+- reconciliation read stage and payload-batch evidence `UNOBSERVED`.
+
+This proves the bounded failure occurs before durable reconciliation, but `RESUME_CONTEXT_READ`
+still groups the historical identity-manifest read, snapshot read and ordered revision pages. The
+next repository-only diagnostic candidate reuses existing phase enums at those already-existing
+read boundaries: `RESUME_IDENTITY_MANIFEST_READ`, `RESUME_SNAPSHOT_READ` and
+`REVISION_EVIDENCE_PREPARATION`. It adds no SQL/provider requests, retry, timeout, RU pacing or
+financial behavior; observer failures are ignored. The purpose is to identify the first
+RESOURCE_EXHAUSTED boundary before choosing another optimization.
+
+After merge, allow one fresh exact-main controlled-preparation-only read-only probe for the new
+stage classification, then stop and select a cause-specific repository fix. This diagnostic does
+not arm WU7, quota changes, retirement/cleanup, bootstrap, timer, cutover or production Writer.

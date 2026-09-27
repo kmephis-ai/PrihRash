@@ -777,7 +777,7 @@ test('advanced live source fails closed when durable cutoff A is not fully recon
       && error.code === 'BOOTSTRAP_OBSERVATION_INVALID',
   );
 
-  assert.equal(phases.at(-1), 'RESUME_CONTEXT_READ');
+  assert.equal(phases.at(-1), 'REVISION_EVIDENCE_PREPARATION');
   assert.deepEqual(ids.calls, []);
   assert.equal(db.state.sourceRecords.size, 0);
   assert.equal(db.state.transactions.size, 0);
