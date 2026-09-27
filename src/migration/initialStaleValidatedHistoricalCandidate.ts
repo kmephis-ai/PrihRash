@@ -80,6 +80,10 @@ interface HistoricalRevision {
 const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const MINIMUM_UUID = '00000000-0000-0000-0000-000000000000';
 const HISTORICAL_REVISION_READ_ROWS_LIMIT = 9;
+const HISTORICAL_REVISION_READ_PAGE_BYTES_LIMIT = 64 * 1024;
+const HISTORICAL_REVISION_READ_FIXED_ROW_BYTES = 256;
+const YDB_READ_BLOCK_BYTES = 4 * 1024;
+const TEXT_ENCODER = new TextEncoder();
 const VERIFIED_REVISION_EVIDENCE_PROOF: unique symbol = Symbol('VERIFIED_REVISION_EVIDENCE_PROOF');
 
 export interface InitialBootstrapDurableRevisionEvidenceProof {
@@ -287,6 +291,14 @@ function parseRevisionRows(
   return Object.freeze(revisions);
 }
 
+function estimatedHistoricalRevisionReadBytes(revision: Readonly<HistoricalRevision>): number {
+  return HISTORICAL_REVISION_READ_FIXED_ROW_BYTES
+    + TEXT_ENCODER.encode(revision.sourceRecordId).byteLength
+    + TEXT_ENCODER.encode(revision.observedAt).byteLength
+    + TEXT_ENCODER.encode(revision.rowDigest).byteLength
+    + TEXT_ENCODER.encode(serializeRawPayload(revision.rawPayload)).byteLength;
+}
+
 async function readHistoricalRevisionsInBoundedBatches(
   reader: YdbReadScope,
   run: Readonly<MigrationRun>,
@@ -298,23 +310,21 @@ async function readHistoricalRevisionsInBoundedBatches(
   const seen = new Set<string>();
   const revisions: HistoricalRevision[] = [];
   let afterSourceRecordId: string | null = null;
+  let limit = Math.min(HISTORICAL_REVISION_READ_ROWS_LIMIT, Math.max(1, Math.min(2, expectedBySource.size + 1)));
+  let estimatedRequestUnits = limit;
 
   while (true) {
-    const remaining = expectedBySource.size - seen.size;
-    const limit = Math.min(
-      HISTORICAL_REVISION_READ_ROWS_LIMIT,
-      Math.max(1, remaining + 1),
-    );
+    const pageLimit = limit;
     try {
       observeReadStage?.('REVISION_EVIDENCE_PREPARATION');
     } catch {
       // Diagnostic callbacks cannot change historical reconstruction semantics.
     }
-    await waitForReadBudget(limit);
+    await waitForReadBudget(estimatedRequestUnits);
     const payloadResult = await reader.read<RevisionRow>(
-      revisionPayloadPageStatement(run.id, afterSourceRecordId, limit),
+      revisionPayloadPageStatement(run.id, afterSourceRecordId, pageLimit),
     );
-    if (payloadResult.rows.length > limit) {
+    if (payloadResult.rows.length > pageLimit) {
       throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
     }
     if (payloadResult.rows.length === 0) break;
@@ -325,7 +335,16 @@ async function readHistoricalRevisionsInBoundedBatches(
     }
     afterSourceRecordId = last.sourceRecordId;
     revisions.push(...parsed);
-    if (payloadResult.rows.length < limit) break;
+    const pageBytes = parsed.map(estimatedHistoricalRevisionReadBytes);
+    estimatedRequestUnits = Math.max(parsed.length, Math.ceil(
+      pageBytes.reduce((total, bytes) => total + bytes, 0) / YDB_READ_BLOCK_BYTES,
+    ));
+    const maximumRowBytes = Math.max(...pageBytes);
+    limit = Math.min(
+      HISTORICAL_REVISION_READ_ROWS_LIMIT,
+      Math.max(1, Math.floor(HISTORICAL_REVISION_READ_PAGE_BYTES_LIMIT / maximumRowBytes)),
+    );
+    if (payloadResult.rows.length < pageLimit) break;
   }
 
   if (seen.size !== expectedBySource.size) {

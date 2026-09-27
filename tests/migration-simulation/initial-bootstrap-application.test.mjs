@@ -304,7 +304,13 @@ function statementRows(statement, state) {
   }
   if (text.includes('FROM source_record_revisions') && text.includes('migration_run_id = $migration_run_id')) {
     const runId = parameter(statement, 'migration_run_id');
-    return [...state.revisions.values()].filter((revision) => revision.migration_run_id === runId);
+    const cursor = statement.parameters.source_record_id_after?.value;
+    const limit = Number(text.match(/LIMIT (\d+)$/)?.[1]);
+    return [...state.revisions.values()]
+      .filter((revision) => revision.revision === 1n && revision.migration_run_id === runId)
+      .filter((revision) => cursor === undefined || revision.source_record_id > cursor)
+      .sort((left, right) => left.source_record_id.localeCompare(right.source_record_id))
+      .slice(0, limit);
   }
   if (text.includes('FROM migration_runs WHERE id = $id')) {
     const run = state.migrationRuns.get(parameter(statement, 'id'));

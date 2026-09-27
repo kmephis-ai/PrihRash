@@ -508,25 +508,39 @@ an enum artifact proving the existing durable revision and current-source checks
 timeout/non-PASS remains unclassified and cannot arm another probe, WU7, cap changes, retirement,
 cleanup, bootstrap or authority changes without a separately established safe boundary.
 
-### #824 candidate: identify the bounded read inside RESUME_CONTEXT_READ
+### Post-#823 diagnostic result: historical revision-page ResourceExhausted identified
 
-Fresh controlled-preparation-only recovery `36288578835` on exact main
-`e84f3b095a232a2ca5fd99f86a4de48bf9e140d5` completed with sanitized evidence:
+PR #823 added only enum-safe observer calls around the already existing manifest, snapshot and
+historical revision-page reads. On the one fresh exact-main read-only controlled-preparation probe
+`36289945008`, the failure was narrowed from `RESUME_CONTEXT_READ` to
+`REVISION_EVIDENCE_PREPARATION`; reference validation had already completed. Sanitized error
+evidence remained `RETRIED / GRPC_STATUS / RESOURCE_EXHAUSTED`, while reconciliation-stage and
+revision-batch output were not reached. The call still performed no YDB writes.
+
+This is the direct evidence for the #825 pacing candidate below; do not dispatch another diagnostic
+on this SHA.
+
+### #824 candidate: pace historical pages by returned I/O size
+
+The stage-specific probe `36289945008` on exact main `b91d90e04bc445d5c54d1f258946c3b6a06c289a`
+now localizes the read-only failure:
 
 - `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
 - retry `RETRIED`, query error `GRPC_STATUS`, gRPC `RESOURCE_EXHAUSTED`;
-- application phase `RESUME_CONTEXT_READ`;
-- reference snapshot `REFERENCE_SNAPSHOT_VALIDATED`;
-- reconciliation read stage and payload-batch evidence `UNOBSERVED`.
+- phase `REVISION_EVIDENCE_PREPARATION`;
+- reference snapshot `REFERENCE_SNAPSHOT_VALIDATED`.
 
-This proves the bounded failure occurs before durable reconciliation, but `RESUME_CONTEXT_READ`
-still groups the historical identity-manifest read, snapshot read and ordered revision pages. The
-next repository-only diagnostic candidate reuses existing phase enums at those already-existing
-read boundaries: `RESUME_IDENTITY_MANIFEST_READ`, `RESUME_SNAPSHOT_READ` and
-`REVISION_EVIDENCE_PREPARATION`. It adds no SQL/provider requests, retry, timeout, RU pacing or
-financial behavior; observer failures are ignored. The purpose is to identify the first
-RESOURCE_EXHAUSTED boundary before choosing another optimization.
+The historical cursor reader already bounds each query to nine rows, but it passes only the row
+limit to the RU waiter. Payload I/O can cost more than one RU per row because YDB charges the larger
+of rows read or 4 KiB blocks. Thus an indexed page containing larger raw payloads can drain the
+burst faster than the current row-only pacing estimate. The repository candidate measures the
+returned page's canonical serialized payload/metadata bytes, uses its estimated I/O RU for the next
+wait, and adapts the following page limit to the largest observed row while keeping the existing
+64 KiB estimate target and nine-row ceiling. It adds no query, schema, cap, retry, timeout, or
+financial/write behavior. The first page is deliberately tiny; unknown extra evidence remains
+fail-closed and the cursor still exhausts the run-scoped index.
 
-After merge, allow one fresh exact-main controlled-preparation-only read-only probe for the new
-stage classification, then stop and select a cause-specific repository fix. This diagnostic does
-not arm WU7, quota changes, retirement/cleanup, bootstrap, timer, cutover or production Writer.
+After merge, permit at most one fresh exact-main controlled-preparation-only read-only probe to
+verify the precise `REVISION_EVIDENCE_PREPARATION` / `RESOURCE_EXHAUSTED` cause is resolved. Any
+non-PASS is followed only by required full read-only recovery; no same-SHA replay, WU7, quota change,
+retirement/cleanup, bootstrap or authority switch is armed.
