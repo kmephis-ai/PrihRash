@@ -640,3 +640,23 @@ improved enum path; it is strictly diagnostic and does not rearm the consumed #8
 controlled attempt or temporary-cap gate. Any new write-capable WU7 operation requires a fresh
 separately authorized gate, exact current-main CI/recovery/readiness and the full restore/read-back
 contract. Non-PASS read-only evidence is followed only by the prescribed full recovery.
+
+### #834 post-merge read-only probe outcome
+
+On exact main `10133e1eec8bdd2e06f1767706c0cdbbc999ac75`, post-merge CI run `36306613158` and
+Browser Quality run `36306613153` passed. The single permitted controlled-preparation-only probe
+`36306773328` completed with enum-only evidence:
+
+- durable classification: `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- controlled preparation: `YDB_DATA_QUERY_EXECUTION_FAILED`;
+- query failure: `GRPC_STATUS / RESOURCE_EXHAUSTED` after `RETRIED`;
+- phase: `REVISION_EVIDENCE_PREPARATION`;
+- reference snapshot: `VALIDATED`;
+- reconciliation read stage, metadata scan cost, and revision payload batch: `UNOBSERVED`.
+
+Mandatory full read-only recovery `36307099662` completed and again classified
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. No `COMMITTED` baseline is proven. The #834 diagnostic
+one-shot and #832/#833 cap/controlled-write one-shots are consumed. This result does not authorize
+another preparation probe, controlled invoke, replay, cap change, cleanup/retirement, timer, cutover,
+or production Writer. Any future provider operation requires a separately justified Owner decision
+and its complete fresh gate set. Google remains authoritative; YDB remains shadow.
