@@ -461,3 +461,26 @@ The one-shot WU7 authority in #779/#780 was bound to SHA `c28d6335bfefc68e8ad7f9
 and was consumed by this run. A successor write-capable attempt requires fresh exact-main
 preconditions and a current open authority gate; this checkpoint does not extend or re-arm that
 one-shot authority.
+
+### #821 candidate: one indexed pass for current-run revision metadata and payload
+
+The RU estimate in #820 (`GE_6000_RU`) bounds the paced payload-page work only. Repository tracing
+of the active controlled-preparation path found that `planInitialSourceRevisionEvidenceResume`
+first scanned all current-run metadata from `idx_source_record_revisions_run_revision`, then read
+those same records again in exact-payload pages. At the observed cardinality, this duplicates a
+full revision-row read before page pacing and can consume the idle RU burst before payload proof.
+
+The bounded candidate replaces those two passes with one ordered indexed cursor scan that returns
+metadata and `raw_payload` together, in pages capped at nine rows and the existing 64 KiB estimated
+request envelope (a single oversized revision remains explicitly classified). Each returned row is
+still checked against exact expected identity, run/revision, timestamp, row hint, digest, change
+class and canonical payload. Cursor exhaustion detects extra rows; final expected-ID coverage
+detects missing rows; any missing expected key still receives the existing cross-run collision
+read. UUID cursor ordering is delegated to YDB, never inferred from JavaScript string ordering.
+No lifecycle, source, staging, current, reference or schema write is added.
+
+Targeted migration simulation must prove bounded pages, exact payload equality, extra/duplicate/
+missing/cross-run fail-closed behavior, provider UUID ordering and RU wait calls. After merge,
+at most one fresh exact-main `controlled_preparation_only` read-only probe can determine whether
+the single-pass change resolves the historical `REVISION_PAYLOAD_BATCH` resource failure. It does
+not authorize WU7, quota changes, retirement, cleanup, bootstrap, timer, cutover or production Writer.
