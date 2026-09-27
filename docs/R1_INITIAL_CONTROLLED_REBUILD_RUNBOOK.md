@@ -660,3 +660,27 @@ one-shot and #832/#833 cap/controlled-write one-shots are consumed. This result 
 another preparation probe, controlled invoke, replay, cap change, cleanup/retirement, timer, cutover,
 or production Writer. Any future provider operation requires a separately justified Owner decision
 and its complete fresh gate set. Google remains authoritative; YDB remains shadow.
+
+### Owner-authorized coarse historical-page measurement
+
+Owner separately approved one repository-only diagnostic correction followed by exactly one new
+post-merge `controlled_preparation_only` read, with no controlled rebuild or throttling mutation. The
+latest evidence identifies failure in `readHistoricalRevisionsInBoundedBatches` on its existing
+indexed page query, but it does not reveal whether the failing request is the first page or follows
+successful pages, nor the local pre-read RU estimate bucket.
+
+The observer is called before each existing budget wait/read and publishes only:
+
+- completed-page bucket for the next page attempt: `FIRST_PAGE`, `AFTER_ONE_PAGE`,
+  `AFTER_TWO_TO_FOUR_PAGES`, or `AFTER_FIVE_OR_MORE_PAGES`;
+- the existing pre-read estimate bucket: `LT_10_RU` or `GE_10_RU`.
+
+These are estimate/progress enums, not YDB-measured RU, row counts, query details, identifiers, or
+financial payload. The observer adds no provider request and changes no query, page size, pacing,
+retry, timeout, lifecycle or write behavior. A synthetic adapter failure at the first indexed page
+asserts `completedPages=0`, the bounded estimate, and unchanged current/staging financial tables.
+
+After merge, exactly one new exact-main controlled-preparation-only read may collect these buckets.
+On non-PASS, run only the required full read-only recovery, then stop. This diagnostic cycle does not
+reopen #832/#833, authorize another controlled invoke or cap change, or prove a `COMMITTED` baseline.
+Google remains authoritative; YDB remains shadow; timer/cutover/production Writer remain forbidden.

@@ -39,6 +39,7 @@ import {
   type InitialBootstrapApplicationPhase,
   type InitialBootstrapObservation,
 } from '../migration/initialBootstrapApplication.js';
+import type { InitialBootstrapHistoricalRevisionReadObserver } from '../migration/initialStaleValidatedHistoricalCandidate.js';
 import {
   createInitialBootstrapDurableReconciliation,
   InitialBootstrapDurableReconciliationError,
@@ -199,6 +200,20 @@ export type InitialBootstrapControlledPreparationMetadataScanCostEvidence =
   | 'STATS_UNAVAILABLE'
   | 'DIAGNOSTIC_FAILED';
 
+export type InitialBootstrapHistoricalRevisionPageProgressEvidence =
+  | 'UNOBSERVED'
+  | 'FIRST_PAGE'
+  | 'AFTER_ONE_PAGE'
+  | 'AFTER_TWO_TO_FOUR_PAGES'
+  | 'AFTER_FIVE_OR_MORE_PAGES'
+  | 'DIAGNOSTIC_FAILED';
+
+export type InitialBootstrapHistoricalRevisionEstimatedRuEvidence =
+  | 'UNOBSERVED'
+  | 'LT_10_RU'
+  | 'GE_10_RU'
+  | 'DIAGNOSTIC_FAILED';
+
 export type InitialBootstrapControlledPreparationReferenceEvidence =
   | 'UNOBSERVED'
   | 'REFERENCE_SNAPSHOT_VALIDATED'
@@ -216,6 +231,8 @@ export interface InitialBootstrapControlledPreparationResult {
   readonly referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
   readonly metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+  readonly historicalRevisionPageProgressEvidence: InitialBootstrapHistoricalRevisionPageProgressEvidence;
+  readonly historicalRevisionEstimatedRuEvidence: InitialBootstrapHistoricalRevisionEstimatedRuEvidence;
   readonly referenceEvidence: InitialBootstrapControlledPreparationReferenceEvidence;
   readonly revisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence;
 }
@@ -237,6 +254,8 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingControlledPreparationReferenceReadStageEvidence?: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
   readonly stagingControlledPreparationReconciliationReadStageEvidence?: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
   readonly stagingControlledPreparationMetadataScanCostEvidence?: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+  readonly stagingControlledPreparationHistoricalRevisionPageProgressEvidence?: InitialBootstrapHistoricalRevisionPageProgressEvidence;
+  readonly stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence?: InitialBootstrapHistoricalRevisionEstimatedRuEvidence;
   readonly stagingControlledPreparationReferenceEvidence?: InitialBootstrapControlledPreparationReferenceEvidence;
   readonly stagingControlledPreparationRevisionPayloadBatchEvidence?: InitialSourceRevisionEvidenceReadBatchEvidence;
 }
@@ -508,6 +527,58 @@ export function createInitialBootstrapControlledPreparationMetadataScanCostTrack
     },
     evidence() {
       return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : latest;
+    },
+  });
+}
+
+interface InitialBootstrapHistoricalRevisionReadTracker {
+  observeRead(completedPages: unknown, estimatedRequestUnits: unknown): void;
+  markDiagnosticFailed(): void;
+  pageProgressEvidence(): InitialBootstrapHistoricalRevisionPageProgressEvidence;
+  estimatedRuEvidence(): InitialBootstrapHistoricalRevisionEstimatedRuEvidence;
+}
+
+export function createInitialBootstrapHistoricalRevisionReadTracker(): InitialBootstrapHistoricalRevisionReadTracker {
+  let pageProgress: InitialBootstrapHistoricalRevisionPageProgressEvidence = 'UNOBSERVED';
+  let estimatedRu: InitialBootstrapHistoricalRevisionEstimatedRuEvidence = 'UNOBSERVED';
+  let diagnosticFailed = false;
+
+  return Object.freeze({
+    observeRead(completedPages: unknown, estimatedRequestUnits: unknown) {
+      try {
+        if (
+          typeof completedPages !== 'number'
+          || !Number.isSafeInteger(completedPages)
+          || completedPages < 0
+          || typeof estimatedRequestUnits !== 'number'
+          || !Number.isSafeInteger(estimatedRequestUnits)
+          || estimatedRequestUnits < 1
+        ) {
+          diagnosticFailed = true;
+          return;
+        }
+        pageProgress = completedPages === 0
+          ? 'FIRST_PAGE'
+          : completedPages === 1
+            ? 'AFTER_ONE_PAGE'
+            : completedPages <= 4
+              ? 'AFTER_TWO_TO_FOUR_PAGES'
+              : 'AFTER_FIVE_OR_MORE_PAGES';
+        estimatedRu = estimatedRequestUnits >= INITIAL_RECOVERY_SERVERLESS_THROTTLING_RU_PER_SECOND
+          ? 'GE_10_RU'
+          : 'LT_10_RU';
+      } catch {
+        diagnosticFailed = true;
+      }
+    },
+    markDiagnosticFailed() {
+      diagnosticFailed = true;
+    },
+    pageProgressEvidence() {
+      return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : pageProgress;
+    },
+    estimatedRuEvidence() {
+      return diagnosticFailed ? 'DIAGNOSTIC_FAILED' : estimatedRu;
     },
   });
 }
@@ -856,6 +927,8 @@ async function diagnoseStagingControlledPreparation(
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
       metadataScanCostEvidence: 'UNOBSERVED' as const,
+      historicalRevisionPageProgressEvidence: 'UNOBSERVED' as const,
+      historicalRevisionEstimatedRuEvidence: 'UNOBSERVED' as const,
       referenceEvidence: 'UNOBSERVED' as const,
       revisionPayloadBatchEvidence: 'UNOBSERVED' as const,
     });
@@ -880,6 +953,8 @@ async function diagnoseStagingControlledPreparation(
       referenceReadStageEvidence: 'UNOBSERVED' as const,
       reconciliationReadStageEvidence: 'UNOBSERVED' as const,
       metadataScanCostEvidence: 'UNOBSERVED' as const,
+      historicalRevisionPageProgressEvidence: 'UNOBSERVED' as const,
+      historicalRevisionEstimatedRuEvidence: 'UNOBSERVED' as const,
       referenceEvidence: 'UNOBSERVED' as const,
       revisionPayloadBatchEvidence: 'UNOBSERVED' as const,
     });
@@ -893,6 +968,8 @@ async function diagnoseStagingControlledPreparation(
   let referenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence = 'UNOBSERVED';
   let reconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence = 'UNOBSERVED';
   let revisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence = 'UNOBSERVED';
+  let historicalRevisionPageProgressEvidence: InitialBootstrapHistoricalRevisionPageProgressEvidence = 'UNOBSERVED';
+  let historicalRevisionEstimatedRuEvidence: InitialBootstrapHistoricalRevisionEstimatedRuEvidence = 'UNOBSERVED';
   let referenceEvidence: InitialBootstrapControlledPreparationReferenceEvidence = 'UNOBSERVED';
   const metadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence = 'UNOBSERVED';
   let retryTracker: InitialBootstrapControlledPreparationRetryTracker | null = null;
@@ -900,6 +977,7 @@ async function diagnoseStagingControlledPreparation(
   let phaseTracker: InitialBootstrapControlledPreparationPhaseTracker | null = null;
   let referenceReadStageTracker: InitialBootstrapControlledPreparationReferenceReadStageTracker | null = null;
   let reconciliationReadStageTracker: InitialBootstrapControlledPreparationReconciliationReadStageTracker | null = null;
+  let historicalRevisionReadTracker: InitialBootstrapHistoricalRevisionReadTracker | null = null;
   const observeRevisionPayloadBatch: InitialSourceRevisionEvidenceReadBatchObserver = (evidence) => {
     if (evidence === 'SINGLE_REVISION_EXCEEDS_64_KIB') {
       revisionPayloadBatchEvidence = evidence;
@@ -943,6 +1021,7 @@ async function diagnoseStagingControlledPreparation(
       refs,
     });
     reconciliationReadStageTracker = createInitialBootstrapControlledPreparationReconciliationReadStageTracker();
+    historicalRevisionReadTracker = createInitialBootstrapHistoricalRevisionReadTracker();
     const reconciliation = createInitialBootstrapDurableReconciliation(
       adapter,
       projectionContext,
@@ -963,6 +1042,9 @@ async function diagnoseStagingControlledPreparation(
         clock: primitives.clock,
         observePhase(nextPhase: InitialBootstrapApplicationPhase) {
           phaseTracker?.observePhase(nextPhase);
+        },
+        observeHistoricalRevisionRead(completedPages: number, estimatedRequestUnits: number) {
+          historicalRevisionReadTracker?.observeRead(completedPages, estimatedRequestUnits);
         },
       }),
     );
@@ -986,6 +1068,10 @@ async function diagnoseStagingControlledPreparation(
       reconciliationReadStageEvidence = reconciliationReadStageTracker.evidence();
     }
     if (retryTracker !== null) retryEvidence = retryTracker.evidence();
+    if (historicalRevisionReadTracker !== null) {
+      historicalRevisionPageProgressEvidence = historicalRevisionReadTracker.pageProgressEvidence();
+      historicalRevisionEstimatedRuEvidence = historicalRevisionReadTracker.estimatedRuEvidence();
+    }
   }
 
   try {
@@ -1002,6 +1088,8 @@ async function diagnoseStagingControlledPreparation(
     referenceReadStageEvidence,
     reconciliationReadStageEvidence,
     metadataScanCostEvidence,
+    historicalRevisionPageProgressEvidence,
+    historicalRevisionEstimatedRuEvidence,
     referenceEvidence,
     revisionPayloadBatchEvidence,
   });
@@ -1135,6 +1223,8 @@ export async function executeInitialBootstrapRecoveryJob(
       let stagingControlledPreparationReferenceReadStageEvidence: InitialBootstrapControlledPreparationReferenceReadStageEvidence;
       let stagingControlledPreparationReconciliationReadStageEvidence: InitialBootstrapControlledPreparationReconciliationReadStageEvidence;
       let stagingControlledPreparationMetadataScanCostEvidence: InitialBootstrapControlledPreparationMetadataScanCostEvidence;
+      let stagingControlledPreparationHistoricalRevisionPageProgressEvidence: InitialBootstrapHistoricalRevisionPageProgressEvidence;
+      let stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence: InitialBootstrapHistoricalRevisionEstimatedRuEvidence;
       let stagingControlledPreparationReferenceEvidence: InitialBootstrapControlledPreparationReferenceEvidence;
       let stagingControlledPreparationRevisionPayloadBatchEvidence: InitialSourceRevisionEvidenceReadBatchEvidence;
       try {
@@ -1153,6 +1243,8 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence = diagnostic.referenceReadStageEvidence;
         stagingControlledPreparationReconciliationReadStageEvidence = diagnostic.reconciliationReadStageEvidence;
         stagingControlledPreparationMetadataScanCostEvidence = diagnostic.metadataScanCostEvidence;
+        stagingControlledPreparationHistoricalRevisionPageProgressEvidence = diagnostic.historicalRevisionPageProgressEvidence;
+        stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence = diagnostic.historicalRevisionEstimatedRuEvidence;
         stagingControlledPreparationReferenceEvidence = diagnostic.referenceEvidence;
         stagingControlledPreparationRevisionPayloadBatchEvidence = diagnostic.revisionPayloadBatchEvidence;
       } catch {
@@ -1164,6 +1256,8 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationReconciliationReadStageEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationMetadataScanCostEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationHistoricalRevisionPageProgressEvidence = 'DIAGNOSTIC_FAILED';
+        stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationReferenceEvidence = 'DIAGNOSTIC_FAILED';
         stagingControlledPreparationRevisionPayloadBatchEvidence = 'DIAGNOSTIC_FAILED';
       }
@@ -1177,6 +1271,8 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingControlledPreparationReferenceReadStageEvidence,
         stagingControlledPreparationReconciliationReadStageEvidence,
         stagingControlledPreparationMetadataScanCostEvidence,
+        stagingControlledPreparationHistoricalRevisionPageProgressEvidence,
+        stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence,
         stagingControlledPreparationReferenceEvidence,
         stagingControlledPreparationRevisionPayloadBatchEvidence,
       });

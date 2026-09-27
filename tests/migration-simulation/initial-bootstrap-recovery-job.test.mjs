@@ -11,6 +11,7 @@ import {
   classifyInitialBootstrapControlledPreparationGrpcStatus,
   classifyInitialBootstrapControlledPreparationQueryError,
   createInitialBootstrapControlledPreparationMetadataScanCostTracker,
+  createInitialBootstrapHistoricalRevisionReadTracker,
   createInitialBootstrapControlledPreparationPhaseTracker,
   createInitialBootstrapControlledPreparationReferenceReadStageTracker,
   createInitialBootstrapControlledPreparationReconciliationReadStageTracker,
@@ -241,6 +242,36 @@ test('controlled preparation metadata-scan cost tracker exposes only bounded RU 
   const explicitFailure = createInitialBootstrapControlledPreparationMetadataScanCostTracker();
   explicitFailure.markDiagnosticFailed();
   assert.equal(explicitFailure.evidence(), 'DIAGNOSTIC_FAILED');
+});
+
+test('historical revision read tracker exposes coarse completed-page and estimated-RU buckets only', () => {
+  const cases = [
+    [0, 2, 'FIRST_PAGE', 'LT_10_RU'],
+    [1, 9, 'AFTER_ONE_PAGE', 'LT_10_RU'],
+    [2, 10, 'AFTER_TWO_TO_FOUR_PAGES', 'GE_10_RU'],
+    [4, 16, 'AFTER_TWO_TO_FOUR_PAGES', 'GE_10_RU'],
+    [5, 10, 'AFTER_FIVE_OR_MORE_PAGES', 'GE_10_RU'],
+  ];
+  for (const [completedPages, estimatedRequestUnits, pageProgress, estimatedRu] of cases) {
+    const tracker = createInitialBootstrapHistoricalRevisionReadTracker();
+    assert.equal(tracker.pageProgressEvidence(), 'UNOBSERVED');
+    assert.equal(tracker.estimatedRuEvidence(), 'UNOBSERVED');
+    tracker.observeRead(completedPages, estimatedRequestUnits);
+    assert.equal(tracker.pageProgressEvidence(), pageProgress);
+    assert.equal(tracker.estimatedRuEvidence(), estimatedRu);
+  }
+
+  for (const invalid of [[-1, 1], [0.5, 1], [0, 0], [0, Number.NaN]]) {
+    const tracker = createInitialBootstrapHistoricalRevisionReadTracker();
+    tracker.observeRead(...invalid);
+    assert.equal(tracker.pageProgressEvidence(), 'DIAGNOSTIC_FAILED');
+    assert.equal(tracker.estimatedRuEvidence(), 'DIAGNOSTIC_FAILED');
+  }
+
+  const explicitFailure = createInitialBootstrapHistoricalRevisionReadTracker();
+  explicitFailure.markDiagnosticFailed();
+  assert.equal(explicitFailure.pageProgressEvidence(), 'DIAGNOSTIC_FAILED');
+  assert.equal(explicitFailure.estimatedRuEvidence(), 'DIAGNOSTIC_FAILED');
 });
 
 test('controlled preparation reconciliation read-stage tracker is non-throwing and fail-closed', () => {
@@ -929,6 +960,8 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
         referenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
         reconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
         metadataScanCostEvidence: 'GE_3000_RU',
+        historicalRevisionPageProgressEvidence: 'AFTER_ONE_PAGE',
+        historicalRevisionEstimatedRuEvidence: 'GE_10_RU',
         referenceEvidence: 'REFERENCE_SNAPSHOT_VALIDATED',
         revisionPayloadBatchEvidence: 'UNOBSERVED',
       });
@@ -947,6 +980,8 @@ test('controlled-preparation-only recovery stays read-only and exposes one bound
       stagingControlledPreparationReferenceReadStageEvidence: 'REFERENCE_SNAPSHOT_READ',
       stagingControlledPreparationReconciliationReadStageEvidence: 'REVISION_METADATA_SCAN',
       stagingControlledPreparationMetadataScanCostEvidence: 'GE_3000_RU',
+      stagingControlledPreparationHistoricalRevisionPageProgressEvidence: 'AFTER_ONE_PAGE',
+      stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence: 'GE_10_RU',
       stagingControlledPreparationReferenceEvidence: 'REFERENCE_SNAPSHOT_VALIDATED',
       stagingControlledPreparationRevisionPayloadBatchEvidence: 'UNOBSERVED',
     },

@@ -530,6 +530,7 @@ function dependencies(db, ids, lifecycleClock, overrides = {}) {
     }),
     clock: lifecycleClock,
     observePhase: overrides.observePhase,
+    observeHistoricalRevisionRead: overrides.observeHistoricalRevisionRead,
   });
 }
 
@@ -1143,11 +1144,16 @@ test('historical revision transport failure preserves bounded YDB subtype throug
     }]),
     snapshotDigest: 'synthetic-live-source-b-snapshot-digest',
   });
+  const historicalRevisionReadEvidence = [];
 
   await assert.rejects(
     () => prepareInitialControlledRebuildContinuation(
       liveObservation,
-      dependencies(db, allocator({ forbid: true }), clock()),
+      dependencies(db, allocator({ forbid: true }), clock(), {
+        observeHistoricalRevisionRead(completedPages, estimatedRequestUnits) {
+          historicalRevisionReadEvidence.push({ completedPages, estimatedRequestUnits });
+        },
+      }),
     ),
     (error) => error instanceof InitialBootstrapApplicationError
       && error.code === 'BOOTSTRAP_OBSERVATION_INVALID'
@@ -1158,6 +1164,7 @@ test('historical revision transport failure preserves bounded YDB subtype throug
   assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
   assert.equal(db.state.stagingSourceRecords.size, 0);
   assert.equal(db.state.stagingTransactions.size, 0);
+  assert.deepEqual(historicalRevisionReadEvidence, [{ completedPages: 0, estimatedRequestUnits: 2 }]);
 });
 
 

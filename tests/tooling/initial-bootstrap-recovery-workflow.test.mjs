@@ -127,6 +127,12 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /controlled-preparation-phase\.json/);
   assert.match(workflow, /controlled-preparation-metadata-scan-cost\.json/);
   assert.match(workflow, /controlled-preparation-revision-payload-batch\.json/);
+  assert.match(workflow, /AFTER_TWO_TO_FOUR_PAGES/);
+  assert.match(workflow, /UNOBSERVED\|LT_10_RU\|GE_10_RU\|DIAGNOSTIC_FAILED/);
+  assert.match(workflow, /controlled-preparation-historical-revision-page-progress\.json/);
+  assert.match(workflow, /controlled-preparation-historical-revision-estimated-ru\.json/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_HISTORICAL_REVISION_PAGE_PROGRESS_EVIDENCE_INVALID/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_HISTORICAL_REVISION_ESTIMATED_RU_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation-reference-evidence\.json/);
   assert.match(workflow, /ALL_BATCHES_WITHIN_64_KIB\|SINGLE_REVISION_EXCEEDS_64_KIB/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REVISION_PAYLOAD_BATCH_EVIDENCE_INVALID/);
