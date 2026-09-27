@@ -21,6 +21,10 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /RECOVERY_CONTROLLED_PREPARATION_ONLY: \$\{\{ inputs\.controlled_preparation_only/);
   assert.match(workflow, /staging_revision_cardinality_only:/);
   assert.match(workflow, /RECOVERY_REVISION_CARDINALITY_ONLY: \$\{\{ inputs\.staging_revision_cardinality_only/);
+  assert.match(workflow, /causal_bootstrap_run_id:/);
+  assert.match(workflow, /CAUSAL_BOOTSTRAP_RUN_ID.*!=.*selected_run_id/);
+  assert.match(workflow, /\.run_started_at/);
+  assert.match(workflow, /causal_bootstrap_started_at=/);
   assert.match(workflow, /PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY=/);
   assert.match(workflow, /R1_STAGING_REVISION_CARDINALITY_EVIDENCE=/);
   assert.match(workflow, /recovery_mode_count=\$\(\(RECOVERY_SURFACE_ONLY \+ RECOVERY_CONTROLLED_PREPARATION_ONLY \+ RECOVERY_REVISION_CARDINALITY_ONLY\)\)/);
@@ -66,6 +70,7 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /--execution-timeout "\$recovery_execution_timeout"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=\$\{RECOVERY_CONTROLLED_PREPARATION_ONLY\}"/);
+  assert.match(workflow, /PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT=\$\{CAUSAL_BOOTSTRAP_STARTED_AT\}/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
@@ -142,6 +147,16 @@ test('initial bootstrap recovery persists only enum-only classification evidence
   assert.match(workflow, /INITIAL_BOOTSTRAP_CONTROLLED_PREPARATION_REFERENCE_EVIDENCE_INVALID/);
   assert.match(workflow, /controlled-preparation-reference-read-stage\.json/);
   assert.match(workflow, /controlled-preparation-reconciliation-read-stage\.json/);
+  assert.match(workflow, /staging-run-lineage\.json/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_STAGING_RUN_LINEAGE_EVIDENCE_INVALID/);
+  assert.match(workflow, /causal_bootstrap_run_id:/);
+  assert.match(workflow, /CAUSAL_BOOTSTRAP_RUN_ID.*inputs\.causal_bootstrap_run_id/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_CAUSAL_RUN_NOT_LATEST_FAILED_CHILD/);
+  assert.match(workflow, /\.run_started_at/);
+  assert.match(workflow, /causal_bootstrap_started_at=/);
+  assert.match(workflow, /PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT/);
+  assert.match(workflow, /staging-run-lineage\.json/);
+  assert.match(workflow, /STAGING_STARTED_AFTER_BOOTSTRAP_CHILD\|STAGING_PREDATES_BOOTSTRAP_CHILD/);
   assert.match(workflow, /retention-days: 30/);
 });
 

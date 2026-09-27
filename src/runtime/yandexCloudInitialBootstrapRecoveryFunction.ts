@@ -25,6 +25,7 @@ export type YandexInitialBootstrapRecoveryFunctionResult =
       stagingSourceDecodeEvidence?: InitialBootstrapRecoveryJobResult['stagingSourceDecodeEvidence'];
       stagingExactRevisionEvidence?: InitialBootstrapRecoveryJobResult['stagingExactRevisionEvidence'];
       stagingRevisionCardinalityEvidence?: InitialBootstrapRecoveryJobResult['stagingRevisionCardinalityEvidence'];
+      stagingRunLineageEvidence?: InitialBootstrapRecoveryJobResult['stagingRunLineageEvidence'];
       stagingControlledPreparationEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationEvidence'];
       stagingControlledPreparationRetryEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationRetryEvidence'];
       stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapRecoveryJobResult['stagingControlledPreparationQueryErrorEvidence'];
@@ -144,6 +145,16 @@ const STAGING_REVISION_CARDINALITY_EVIDENCE = new Set<NonNullable<
   'GE_5000_LT_5500_RU',
   'GE_5500_LT_6000_RU',
   'GE_6000_RU',
+  'DIAGNOSTIC_FAILED',
+]);
+
+const STAGING_RUN_LINEAGE_EVIDENCE = new Set<NonNullable<
+  InitialBootstrapRecoveryJobResult['stagingRunLineageEvidence']
+>>([
+  'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD',
+  'STAGING_PREDATES_BOOTSTRAP_CHILD',
+  'STAGING_START_TIME_AMBIGUOUS',
+  'STAGING_RUN_CARDINALITY_INVALID',
   'DIAGNOSTIC_FAILED',
 ]);
 
@@ -414,9 +425,10 @@ function validClassification(
   surfaceOnly = false,
   controlledPreparationOnly = false,
   revisionCardinalityOnly = false,
+  stagingRunLineageOnly = false,
 ): boolean {
   if (revisionCardinalityOnly) {
-    if (surfaceOnly || controlledPreparationOnly) return false;
+    if (surfaceOnly || controlledPreparationOnly || stagingRunLineageOnly) return false;
     return value.reason === 'STAGING_RUN_PRESENT'
       && value.validatedSourceEvidence === undefined
       && value.staleValidatedRecoveryGate === undefined
@@ -438,8 +450,10 @@ function validClassification(
       && value.stagingControlledPreparationReferenceEvidence === undefined
       && value.stagingControlledPreparationHistoricalRevisionPageProgressEvidence === undefined
       && value.stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence === undefined
-      && value.stagingControlledPreparationRevisionPayloadBatchEvidence === undefined;
+      && value.stagingControlledPreparationRevisionPayloadBatchEvidence === undefined
+      && value.stagingRunLineageEvidence === undefined;
   }
+  if (stagingRunLineageOnly && (surfaceOnly || controlledPreparationOnly)) return false;
   if (value.stagingRevisionCardinalityEvidence !== undefined) return false;
   if (value.reason === 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' && !surfaceOnly) {
     if (value.validatedSourceEvidence === undefined || !VALIDATED_SOURCE_EVIDENCE.has(value.validatedSourceEvidence)) return false;
@@ -469,6 +483,7 @@ function validClassification(
     value.stagingControlledPreparationHistoricalRevisionPageProgressEvidence;
   const controlledPreparationHistoricalRevisionEstimatedRuDiagnostic =
     value.stagingControlledPreparationHistoricalRevisionEstimatedRuEvidence;
+  const stagingRunLineageDiagnostic = value.stagingRunLineageEvidence;
   if (value.reason === 'STAGING_RUN_PRESENT' && surfaceOnly) {
     if (diagnostic !== undefined || durableDiagnostic !== undefined || retirementDiagnostic !== undefined
       || sourceDecodeDiagnostic !== undefined || exactRevisionDiagnostic !== undefined
@@ -483,6 +498,7 @@ function validClassification(
       || controlledPreparationReferenceDiagnostic !== undefined
       || controlledPreparationHistoricalRevisionPageProgressDiagnostic !== undefined
       || controlledPreparationHistoricalRevisionEstimatedRuDiagnostic !== undefined
+      || stagingRunLineageDiagnostic !== undefined
       || controlledPreparationRevisionPayloadBatchDiagnostic !== undefined) return false;
   } else if (value.reason === 'STAGING_RUN_PRESENT' && controlledPreparationOnly) {
     if (
@@ -548,6 +564,9 @@ function validClassification(
       || controlledPreparationReferenceDiagnostic !== undefined
       || controlledPreparationHistoricalRevisionPageProgressDiagnostic !== undefined
       || controlledPreparationHistoricalRevisionEstimatedRuDiagnostic !== undefined
+      || (stagingRunLineageOnly
+        ? stagingRunLineageDiagnostic === undefined || !STAGING_RUN_LINEAGE_EVIDENCE.has(stagingRunLineageDiagnostic)
+        : stagingRunLineageDiagnostic !== undefined)
       || controlledPreparationRevisionPayloadBatchDiagnostic !== undefined
     ) return false;
   } else if (
@@ -587,6 +606,8 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY === '1',
       environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY === '1',
       environment.PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY === '1',
+      environment.PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT !== undefined
+        && environment.PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT.length > 0,
     )) {
       return Object.freeze({
         status: 'FAIL' as const,
@@ -622,6 +643,9 @@ export async function executeYandexInitialBootstrapRecoveryFunction(
       ...(classification.stagingRevisionCardinalityEvidence === undefined
         ? {}
         : { stagingRevisionCardinalityEvidence: classification.stagingRevisionCardinalityEvidence }),
+      ...(classification.stagingRunLineageEvidence === undefined
+        ? {}
+        : { stagingRunLineageEvidence: classification.stagingRunLineageEvidence }),
       ...(classification.stagingControlledPreparationEvidence === undefined
         ? {}
         : { stagingControlledPreparationEvidence: classification.stagingControlledPreparationEvidence }),

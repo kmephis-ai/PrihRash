@@ -1401,3 +1401,41 @@ source IDs и payload не публикуются. `GE_6000_RU` означает
 После merge разрешена ровно одна свежая exact-main cardinality-only read-only probe. Она выбирает
 следующую repository-гипотезу и не разрешает повтор controlled preparation, WU7, quota change,
 bootstrap replay, cleanup или authority change.
+
+### Read-only STAGING lineage check after stale-retirement rearm on `5d59d782a593cf6357bf0e9fee9e55782f7f126e`
+
+After PR #838, orchestrator `36327644264` proved a pre-write stale-STAGING candidate and dispatched
+exactly one bootstrap child `36327850242`. That child failed as `INITIAL_BOOTSTRAP_INVOKE_FAILED`
+without application phase or runtime code. Mandatory post-invoke recovery returned
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, with verified current empty and exact source diagnostics
+unproven. Public evidence cannot tell whether stale retirement completed and the visible STAGING is a
+fresh run from that child, or the original run remains.
+
+The next repository-only correction adds an optional **full read-only recovery** correlation against
+the exact latest failed bootstrap child. The workflow must verify that selected child is the failed
+`R1 initial shadow bootstrap` run and that its single bootstrap-invoke step failed; an optional
+`causal_bootstrap_run_id` must match that dynamically selected child. The recovery-only function reads
+only the unique `STAGING.started_at` and compares it with the GitHub child `run_started_at`, then emits
+one enum: `STAGING_STARTED_AFTER_BOOTSTRAP_CHILD`, `STAGING_PREDATES_BOOTSTRAP_CHILD`,
+`STAGING_START_TIME_AMBIGUOUS`, `STAGING_RUN_CARDINALITY_INVALID`, or `DIAGNOSTIC_FAILED`. A five-second
+cross-clock uncertainty window is fail-closed. No timestamp, run identifier, source digest, row,
+payload, or financial data is emitted by the Function artifact.
+The optional recovery JSON property is exactly `stagingRunLineageEvidence` and contains only one of
+those allowlisted enums.
+
+This classifier is temporal lineage evidence, not permission to resume or retire. The recovery remains
+read-only, runs under the existing exact-main/full-recovery gates, and performs no readiness, bootstrap,
+controlled rebuild, lifecycle, staging, or current-table mutation. Only one exact-main recovery is
+allowed for the #838 child; an ambiguous/unavailable result stops without replay or cleanup. The
+result distinguishes a pre-existing STAGING from a run started after that child, so the next root-cause
+hypothesis can focus on the correct branch. Google remains authoritative; YDB remains shadow.
+
+For the single post-merge recovery request, the PR carries:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Regression-Test: tests/migration-simulation/initial-bootstrap-recovery-probe.test.mjs
+```

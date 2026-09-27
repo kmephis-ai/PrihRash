@@ -1,4 +1,5 @@
 import { readStatement, type YdbAdapter } from '../integration/ydb/adapter.js';
+import { normalizeYdbTimestampReadback } from '../integration/ydb/readbackTimestamp.js';
 import { INITIAL_BOOTSTRAP_STALE_VALIDATED_FAILURE_CODE } from './initialBootstrapGateCGuard.js';
 import { INITIAL_BOOTSTRAP_STALE_STAGING_FAILURE_CODE } from './initialBootstrapStaleStagingRetirement.js';
 
@@ -43,6 +44,52 @@ export interface InitialBootstrapRecoveryEvidence {
   readonly accounts: number;
   readonly categories: number;
   readonly familyMembers: number;
+}
+
+export type InitialBootstrapStagingRunLineageEvidence =
+  | 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD'
+  | 'STAGING_PREDATES_BOOTSTRAP_CHILD'
+  | 'STAGING_START_TIME_AMBIGUOUS'
+  | 'STAGING_RUN_CARDINALITY_INVALID'
+  | 'DIAGNOSTIC_FAILED';
+
+interface StagingStartedAtRow {
+  readonly started_at?: unknown;
+}
+
+const STAGING_RUN_STARTED_AT_STATEMENT =
+  "SELECT started_at FROM migration_runs WHERE state = 'STAGING' LIMIT 2";
+const CROSS_PROVIDER_CLOCK_UNCERTAINTY_MS = 5_000;
+
+export function classifyInitialBootstrapStagingRunLineage(
+  stagingStartedAt: unknown,
+  bootstrapChildStartedAt: unknown,
+): InitialBootstrapStagingRunLineageEvidence {
+  const stagingStartedAtString = normalizeYdbTimestampReadback(stagingStartedAt);
+  const bootstrapStartedAtString = normalizeYdbTimestampReadback(bootstrapChildStartedAt);
+  if (stagingStartedAtString === null || bootstrapStartedAtString === null) {
+    return 'DIAGNOSTIC_FAILED';
+  }
+  const deltaMs = Date.parse(stagingStartedAtString) - Date.parse(bootstrapStartedAtString);
+  if (deltaMs > CROSS_PROVIDER_CLOCK_UNCERTAINTY_MS) return 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD';
+  if (deltaMs < -CROSS_PROVIDER_CLOCK_UNCERTAINTY_MS) return 'STAGING_PREDATES_BOOTSTRAP_CHILD';
+  return 'STAGING_START_TIME_AMBIGUOUS';
+}
+
+export async function diagnoseInitialBootstrapStagingRunLineage(
+  adapter: YdbAdapter,
+  bootstrapChildStartedAt: string,
+): Promise<InitialBootstrapStagingRunLineageEvidence> {
+  try {
+    const result = await adapter.read<StagingStartedAtRow>(readStatement(STAGING_RUN_STARTED_AT_STATEMENT));
+    if (result.rows.length !== 1) return 'STAGING_RUN_CARDINALITY_INVALID';
+    return classifyInitialBootstrapStagingRunLineage(
+      result.rows[0]?.started_at,
+      bootstrapChildStartedAt,
+    );
+  } catch {
+    return 'DIAGNOSTIC_FAILED';
+  }
 }
 
 interface CountRow {

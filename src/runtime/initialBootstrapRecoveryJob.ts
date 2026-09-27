@@ -79,6 +79,10 @@ import {
   reconcileInitialBootstrapReferenceState,
 } from '../migration/initialBootstrapReferenceReconciliation.js';
 import {
+  diagnoseInitialBootstrapStagingRunLineage,
+  type InitialBootstrapStagingRunLineageEvidence,
+} from '../migration/initialBootstrapRecoveryProbe.js';
+import {
   diagnoseInitialBootstrapRecoverySurface,
   type InitialBootstrapRecoverySurfaceClassification,
 } from '../migration/initialBootstrapResidualSurface.js';
@@ -246,6 +250,7 @@ export interface InitialBootstrapRecoveryJobResult extends InitialBootstrapRecov
   readonly stagingSourceDecodeEvidence?: InitialBootstrapSourceDecodeDiagnostic;
   readonly stagingExactRevisionEvidence?: InitialBootstrapStagingExactRevisionDiagnostic;
   readonly stagingRevisionCardinalityEvidence?: InitialBootstrapStagingRevisionCardinalityEvidence;
+  readonly stagingRunLineageEvidence?: InitialBootstrapStagingRunLineageEvidence;
   readonly stagingControlledPreparationEvidence?: InitialBootstrapControlledPreparationDiagnostic;
   readonly stagingControlledPreparationRetryEvidence?: InitialBootstrapControlledPreparationRetryEvidence;
   readonly stagingControlledPreparationQueryErrorEvidence?: InitialBootstrapControlledPreparationQueryErrorEvidence;
@@ -276,6 +281,10 @@ export interface InitialBootstrapRecoveryJobRuntime {
     historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
   ): Promise<Readonly<InitialStaleValidatedHistoricalSwapProofResult>>;
   diagnoseSurface(adapter: YdbAdapter): Promise<Readonly<InitialBootstrapRecoverySurfaceClassification>>;
+  diagnoseStagingRunLineage(
+    adapter: YdbAdapter,
+    bootstrapChildStartedAt: string,
+  ): Promise<InitialBootstrapStagingRunLineageEvidence>;
   reconcileReferenceState(
     adapter: YdbAdapter,
     rows: Parameters<typeof reconcileInitialBootstrapReferenceState>[1],
@@ -1122,6 +1131,7 @@ const productionRuntime: Readonly<InitialBootstrapRecoveryJobRuntime> = Object.f
   readReferenceResolver: readYdbReferenceResolverSnapshot,
   diagnoseHistoricalSwapProof: diagnoseInitialStaleValidatedHistoricalSwapProof,
   diagnoseSurface: diagnoseInitialBootstrapRecoverySurface,
+  diagnoseStagingRunLineage: diagnoseInitialBootstrapStagingRunLineage,
   reconcileReferenceState: reconcileInitialBootstrapReferenceState,
   diagnoseValidatedSourceEvidence: diagnoseInitialValidatedSourceEvidence,
   diagnoseStagingRevisionEvidence: diagnoseInitialBootstrapStagingRevisionEvidence,
@@ -1206,6 +1216,12 @@ export async function executeInitialBootstrapRecoveryJob(
     throw new InitialBootstrapRecoveryJobError('INVALID_RECOVERY_MODE');
   }
   const validated = validateInitialBootstrapRecoveryConfig(config);
+  if (
+    validated.causalBootstrapStartedAt !== undefined
+    && (surfaceOnly || controlledPreparationOnly || revisionCardinalityOnly)
+  ) {
+    throw new InitialBootstrapRecoveryJobError('INVALID_RECOVERY_MODE');
+  }
   const ydbClient = await runtime.createYdbClient(validated);
   const adapter = new YdbAdapter(ydbClient.transport);
   let primaryError: unknown = null;
@@ -1408,6 +1424,17 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingSourceDecodeEvidence = 'SOURCE_DECODE_DIAGNOSTIC_FAILED';
         stagingExactRevisionEvidence = 'EXACT_CURRENT_RUN_DIAGNOSTIC_FAILED';
       }
+      let stagingRunLineageEvidence: InitialBootstrapStagingRunLineageEvidence | undefined;
+      if (validated.causalBootstrapStartedAt !== undefined) {
+        try {
+          stagingRunLineageEvidence = await runtime.diagnoseStagingRunLineage(
+            adapter,
+            validated.causalBootstrapStartedAt,
+          );
+        } catch {
+          stagingRunLineageEvidence = 'DIAGNOSTIC_FAILED';
+        }
+      }
       return Object.freeze({
         ...before,
         stagingRevisionEvidence,
@@ -1415,6 +1442,7 @@ export async function executeInitialBootstrapRecoveryJob(
         stagingRetirementEvidence,
         stagingSourceDecodeEvidence,
         stagingExactRevisionEvidence,
+        ...(stagingRunLineageEvidence === undefined ? {} : { stagingRunLineageEvidence }),
       });
     }
     if (before.reason !== 'RESIDUAL_REFERENCE_STATE_WITHOUT_RUN') return before;

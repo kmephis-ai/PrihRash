@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      causal_bootstrap_run_id:
+        description: Optional exact failed bootstrap child run whose start time bounds STAGING lineage evidence
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -38,6 +43,7 @@ jobs:
       RECOVERY_SURFACE_ONLY: ${{ inputs.surface_only && '1' || '0' }}
       RECOVERY_CONTROLLED_PREPARATION_ONLY: ${{ inputs.controlled_preparation_only && '1' || '0' }}
       RECOVERY_REVISION_CARDINALITY_ONLY: ${{ inputs.staging_revision_cardinality_only && '1' || '0' }}
+      CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -68,6 +74,16 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT'
             exit 1
           fi
+          if [ -n "$CAUSAL_BOOTSTRAP_RUN_ID" ]; then
+            [[ "$CAUSAL_BOOTSTRAP_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_CAUSAL_RUN_ID_INVALID'
+              exit 1
+            }
+            if [ "$recovery_mode_count" -ne 0 ]; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_CAUSAL_LINEAGE_MODE_CONFLICT'
+              exit 1
+            fi
+          fi
 
       - name: Setup Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -88,9 +104,11 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Require exact current main and dynamically proven failed bootstrap attempt
+        id: recovery_prerequisites
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
+          CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-gates"
@@ -136,6 +154,10 @@ jobs:
           fi
           selected_run_id="$(jq -er '.id' <<<"$target")"
           selected_run_sha="$(jq -er '.head_sha' <<<"$target")"
+          if [ -n "$CAUSAL_BOOTSTRAP_RUN_ID" ] && [ "$CAUSAL_BOOTSTRAP_RUN_ID" != "$selected_run_id" ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_CAUSAL_RUN_NOT_LATEST_FAILED_CHILD'
+            exit 1
+          fi
 
           curl --fail --silent --show-error --header "$auth_header" \
             --header 'Accept: application/vnd.github+json' \
@@ -156,6 +178,13 @@ jobs:
             "$tmp/bootstrap-run.json" >/dev/null 2>&1; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_FAILED_ATTEMPT_MISSING'
             exit 1
+          fi
+          if [ -n "$CAUSAL_BOOTSTRAP_RUN_ID" ]; then
+            selected_run_started_at="$(jq -er '.run_started_at | select(type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{3})?Z$"))' "$tmp/bootstrap-run.json")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_CAUSAL_RUN_START_TIME_INVALID'
+              exit 1
+            }
+            printf 'causal_bootstrap_started_at=%s\n' "$selected_run_started_at" >> "$GITHUB_OUTPUT"
           fi
 
           curl --fail --silent --show-error --header "$auth_header" \
@@ -371,6 +400,8 @@ jobs:
 
       - name: Deploy recovery-only Function version
         shell: bash
+        env:
+          CAUSAL_BOOTSTRAP_STARTED_AT: ${{ steps.recovery_prerequisites.outputs.causal_bootstrap_started_at }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-deploy"
@@ -388,6 +419,7 @@ jobs:
             --environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=${RECOVERY_SURFACE_ONLY}" \
             --environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=${RECOVERY_CONTROLLED_PREPARATION_ONLY}" \
             --environment "PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY=${RECOVERY_REVISION_CARDINALITY_ONLY}" \
+            --environment "PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT=${CAUSAL_BOOTSTRAP_STARTED_AT}" \
             --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags r1-initial-bootstrap-recovery \
@@ -572,6 +604,18 @@ jobs:
             cat "$evidence_dir/controlled-preparation-reference-evidence.json"
             cat "$evidence_dir/controlled-preparation-reference-read-stage.json"
             cat "$evidence_dir/controlled-preparation-reconciliation-read-stage.json"
+          fi
+          if [ -n "$RECOVERY_CAUSAL_BOOTSTRAP_RUN_ID" ] \
+            && jq -e '.reason == "STAGING_RUN_PRESENT"' "$evidence_dir/classification.json" >/dev/null; then
+            lineage_evidence="$(sed -n 's/^R1_STAGING_RUN_LINEAGE_EVIDENCE=//p' "$diagnostics")"
+            case "$lineage_evidence" in
+              STAGING_STARTED_AFTER_BOOTSTRAP_CHILD|STAGING_PREDATES_BOOTSTRAP_CHILD|STAGING_START_TIME_AMBIGUOUS|STAGING_RUN_CARDINALITY_INVALID|DIAGNOSTIC_FAILED) ;;
+              *) echo 'INITIAL_BOOTSTRAP_STAGING_RUN_LINEAGE_EVIDENCE_INVALID'; exit 1 ;;
+            esac
+            jq -cn --arg evidence "$lineage_evidence" \
+              '{stagingRunLineageEvidence:$evidence}' \
+              > "$evidence_dir/staging-run-lineage.json"
+            cat "$evidence_dir/staging-run-lineage.json"
           fi
           if [ "$RECOVERY_REVISION_CARDINALITY_ONLY" = "1" ]; then
             cardinality_evidence="$(sed -n 's/^R1_STAGING_REVISION_CARDINALITY_EVIDENCE=//p' "$diagnostics")"
