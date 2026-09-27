@@ -208,7 +208,7 @@ test('large durable reconstruction streams one indexed payload scan without a du
     ],
   }));
   const revisionRows = Array.from({ length: rowCount }, (_, index) => {
-    const raw = payload(`Historical ${index + 1}`);
+    const raw = payload(`Historical ${index + 1} ${'x'.repeat(5_000)}`);
     return Object.freeze({
       source_record_id: id(700_000 + index),
       revision: 1n,
@@ -273,9 +273,9 @@ test('large durable reconstruction streams one indexed payload scan without a du
   for (const statement of payloadReads) {
     assert.doesNotMatch(statement.text, /source_record_id >=|source_record_id <=/);
     assert.match(statement.text, /VIEW idx_source_record_revisions_run_revision/);
-    assert.match(statement.text, /ORDER BY source_record_id LIMIT (?:9|1)$/);
+    assert.match(statement.text, /ORDER BY source_record_id LIMIT (?:2|9)$/);
   }
-  assert.deepEqual(waitedUnits, [9, 9, 9, 1]);
+  assert.deepEqual(waitedUnits, [2, 3, 13, 13]);
   assert.equal(reconstructed.rows.length, rowCount);
   assert.equal(matchesInitialBootstrapDurableRevisionEvidenceProof(
     reconstructed.revisionEvidenceProof,
