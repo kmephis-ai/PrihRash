@@ -1439,3 +1439,40 @@ Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
 Recovery-State: STAGING_PRESENT_UNCLASSIFIED
 Regression-Test: tests/migration-simulation/initial-bootstrap-recovery-probe.test.mjs
 ```
+
+### Recovery Function deploy outcome remains unknown after exact-main run `36341844854`
+
+PR #840 merged as `85c8a04b0b1fb7899c31aa2cc1e1bb65d0d79086`. Its exact-main canonical CI and
+Browser Quality passed. Recovery autocontinue dispatched one read-only recovery run
+`36341844854`, which failed at `Deploy recovery-only Function version`; the later
+`Invoke exact read-only recovery tag once` step was `skipped`. The safe workflow signature is
+`INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`. Therefore the YDB recovery Function was not invoked,
+but the outcome of the Yandex Function-version create operation is unknown. The causal bootstrap
+run ID also did not reach this deploy attempt; no STAGING lineage classification was produced.
+
+Do not repeat the Function-version create or invoke its tag. The sole next provider action is an
+exact-main read-only Function deployment recovery bound to failed run `36341844854`. The recovery
+workflow proves that this is the latest failed recovery run, that the deploy step failed and that the
+invoke step was skipped; it then reads only Function version/operation metadata and emits enum-only
+evidence. It performs no Function-version create, Function invoke, Google read, or YDB read/write.
+Its exact-version classifier requires a unique create operation within the failed run window, exact
+operation-to-version identity, an active recovery tag, `nodejs22`, the recovery entrypoint and the
+exact runtime service account. Missing, ambiguous, failed or incomplete evidence remains
+unclassified and does not authorize replay.
+
+For this single metadata classification, the PR carries exactly:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs
+```
+
+The missing causal run propagation and optional empty Function environment value are corrected in
+repository code, but are not evidence of why Yandex rejected the failed create. Any later recovery
+deploy or Function invoke requires fresh deployment classification and a new causal decision. No
+bootstrap/orchestrator, staging resume/retirement, cleanup, timer or authority change follows from this
+failure.

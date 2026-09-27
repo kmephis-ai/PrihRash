@@ -162,6 +162,21 @@ SHA может использовать `Recovery-State: STAGING_STALE_RETIREABL
 bootstrap и не разрешает cleanup; он существует только для fresh Google-aware + exact revision
 diagnostics после surface-only durable classification.
 
+Если exact-main `R1 initial bootstrap recovery` доказанно завершился `failure` на
+`Deploy recovery-only Function version`, а `Invoke exact read-only recovery tag once` остался
+`skipped`, durable outcome Function-version create неизвестен, но YDB recovery invoke не достигнут.
+До любого повторного deploy требуется ровно одна read-only provider metadata classification для
+этого exact failed recovery run. Successor PR может запросить её только с
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION`,
+`Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED` и exact `Recovery-Run-ID` из свежего Issue/run
+evidence. Autocontinue dispatch-ит только `r1-initial-bootstrap-recovery-deploy-recovery.yml`;
+workflow проверяет exact latest failed run, что deployment step failed и invoke step skipped, затем
+только читает Function versions/operations и публикует enum-only artifact. Этот probe не разворачивает
+Function, не вызывает Function/YDB и не разрешает следующий deploy/invoke: после классификации нужен
+новый causal root-cause decision. Отсутствующее/неоднозначное provider evidence остаётся
+`RECOVERY_REQUIRED`; никаких inferred `NOT_APPLIED` или replay.
+
 ### 8.2. R1 completion sprint и multi-agent handoff
 
 Пока R1 не имеет доказанного первого `COMMITTED` baseline, operational process определяется
