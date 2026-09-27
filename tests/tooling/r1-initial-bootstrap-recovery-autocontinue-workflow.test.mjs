@@ -209,6 +209,18 @@ test('owner-delegated follow-up distinguishes recovery-tagged version candidates
   assert.match(evidence, /Regression-Test: tests\/tooling\/initial-bootstrap-recovery-deploy-classifier\.test\.mjs/);
 });
 
+test('PR-847 changeset gate stop preserves Owner authority and permits only a classifier refinement successor', () => {
+  const evidence = runbook.match(
+    /### PR #847 read-only version-window probe remained pre-dispatch gated on `0b07238c0d152c803fa04019e1e899422cd58eb1`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the PR-847 pre-dispatch result and no-provider boundary must be retained');
+  assert.match(evidence, /`R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`/);
+  assert.match(evidence, /no provider state was read/);
+  assert.match(evidence, /successor changeset guard now accepts either a marker-only caller correction/);
+  assert.match(evidence, /classifier\/root-cause correction/);
+  assert.match(evidence, /Owner-authorized\s+version\/tag-window\s+classification remains unconsumed/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,

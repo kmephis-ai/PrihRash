@@ -1567,3 +1567,19 @@ exact marker's regression test, the autocontinue caller workflow, and this runbo
 bound to failed run `36341844854`; this is still the same single read-only classification, not a second
 provider recovery, because neither prior autocontinue reached the provider. Bootstrap, recovery
 Function deployment/invocation, YDB/Google access, cleanup and authority changes remain disarmed.
+
+### PR #847 read-only version-window probe remained pre-dispatch gated on `0b07238c0d152c803fa04019e1e899422cd58eb1`
+
+PR #847 passed exact-main CI, Browser Quality and CodeQL. Autocontinue `36354465989` correctly proved
+the exact latest failed recovery run and failed-deploy/skipped-invoke phase, but the changeset guard
+still required the already-merged caller workflow itself to change. PR #847 modified the recovery
+workflow, classifier implementation, regression fixture and runbook, but not the caller. The marker
+was rejected as `R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`; the deployment
+recovery workflow was not dispatched and no provider state was read.
+
+The successor changeset guard now accepts either a marker-only caller correction (exact regression
+test + autocontinue workflow + runbook) or a classifier/root-cause correction (exact regression test
++ recovery-deploy workflow + classifier script + runbook). It does not require the already-verified
+autocontinue caller to change again for every new classifier discriminator. The Owner-authorized
+version/tag-window classification remains unconsumed. No deploy, invoke, Google/YDB access, replay or
+cleanup follows.
