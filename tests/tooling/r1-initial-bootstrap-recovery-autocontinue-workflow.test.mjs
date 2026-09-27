@@ -216,8 +216,9 @@ test('PR-847 changeset gate stop preserves Owner authority and permits only a cl
   assert.ok(evidence, 'the PR-847 pre-dispatch result and no-provider boundary must be retained');
   assert.match(evidence, /`R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`/);
   assert.match(evidence, /no provider state was read/);
-  assert.match(evidence, /recovery workflow, classifier implementation, its\s+synthetic regression test and runbook/);
-  assert.match(evidence, /Owner-authorized version\/tag-window\s+classification remains unconsumed/);
+  assert.match(evidence, /successor changeset guard now accepts either a marker-only caller correction/);
+  assert.match(evidence, /classifier\/root-cause correction/);
+  assert.match(evidence, /Owner-authorized\s+version\/tag-window\s+classification remains unconsumed/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {

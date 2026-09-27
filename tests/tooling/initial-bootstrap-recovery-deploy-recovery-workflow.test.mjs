@@ -50,9 +50,10 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID/);
   assert.match(autocontinue, /any\(\.\[]; \.filename == \$test and \.status != "removed"\)/);
+  assert.match(autocontinue, /\.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
   assert.match(autocontinue, /\.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml"/);
   assert.match(autocontinue, /\.filename == "scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs"/);
-  assert.doesNotMatch(autocontinue, /\.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
+  assert.match(autocontinue, /or\s+\([\s\S]*any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml"/);
   assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml/);
   assert.match(autocontinue, /scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
   assert.doesNotMatch(autocontinue, /\.filename == "AGENTS\.md"/);

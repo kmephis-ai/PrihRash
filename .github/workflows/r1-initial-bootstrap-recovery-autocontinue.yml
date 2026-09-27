@@ -123,9 +123,14 @@ jobs:
             if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e \
               --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
                 any(.[]; .filename == $test and .status != "removed")
-                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml" and .status != "removed")
-                and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+                and (
+                  any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
+                  or (
+                    any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml" and .status != "removed")
+                    and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
+                  )
+                )
               ' <<<"$source_files" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID'
               exit 0

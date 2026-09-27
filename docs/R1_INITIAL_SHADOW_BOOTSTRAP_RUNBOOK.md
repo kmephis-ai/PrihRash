@@ -1577,7 +1577,9 @@ workflow, classifier implementation, regression fixture and runbook, but not the
 was rejected as `R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`; the deployment
 recovery workflow was not dispatched and no provider state was read.
 
-The next changeset guard requires the exact recovery workflow, classifier implementation, its
-synthetic regression test and runbook. It no longer requires a caller edit when the caller already
-provides the exact-run/failed-phase dispatch guard. The Owner-authorized version/tag-window
-classification remains unconsumed. No deploy, invoke, Google/YDB access, replay or cleanup follows.
+The successor changeset guard now accepts either a marker-only caller correction (exact regression
+test + autocontinue workflow + runbook) or a classifier/root-cause correction (exact regression test
++ recovery-deploy workflow + classifier script + runbook). It does not require the already-verified
+autocontinue caller to change again for every new classifier discriminator. The Owner-authorized
+version/tag-window classification remains unconsumed. No deploy, invoke, Google/YDB access, replay or
+cleanup follows.
