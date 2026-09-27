@@ -78,6 +78,11 @@ R1 также обязан доказать live-mutable behavior на synthetic
 - unexplained high-impact mismatch отсутствуют;
 - Google всё ещё authoritative.
 
+Пока первый `COMMITTED` baseline R1 не доказан, execution overlay для blocker work —
+[`R1_COMPLETION_SPRINT.md`](R1_COMPLETION_SPRINT.md): один active writer, один `Incident-M` causal PR,
+максимум один provider attempt на merged root-cause change и GitHub-visible handoff между ChatGPT/OpenCode.
+Этот overlay ускоряет completion, но не ослабляет `MIGRATION_CONTRACT`, privacy/fail-closed или authority gates.
+
 > Пока открыт provider gate #453, synthetic R2/R3A можно готовить отдельно,
 > но не сдвигать `main` нерелевантными merge в середине exact-main provider attempt.
 > После `COMMITTED`, независимой сверки и retirement временных прав можно продолжать
