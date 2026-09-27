@@ -550,3 +550,32 @@ After merge, permit at most one fresh exact-main controlled-preparation-only rea
 verify the precise `REVISION_EVIDENCE_PREPARATION` / `RESOURCE_EXHAUSTED` cause is resolved. Any
 non-PASS is followed only by required full read-only recovery; no same-SHA replay, WU7, quota change,
 retirement/cleanup, bootstrap or authority switch is armed.
+
+### Post-#825 controlled-preparation result and stop boundary
+
+The single post-#825 exact-main read-only probe `36293119385` ran on
+`c8740edb96099bcc4b97a16f40e972deed8e6999` and did not resolve the failure:
+
+- recovery classification: `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- preparation: `APPLICATION_BOOTSTRAP_OBSERVATION_INVALID`;
+- retry/query evidence: `RETRIED / GRPC_STATUS / RESOURCE_EXHAUSTED`;
+- phase: `REVISION_EVIDENCE_PREPARATION`;
+- reference evidence: `REFERENCE_SNAPSHOT_VALIDATED`;
+- reconciliation stage, metadata scan cost, and revision payload batch: `UNOBSERVED`.
+
+This read-only invocation performed no lifecycle, staging, current, source, reference, swap,
+promotion, or commit-marker write. The probe is consumed. Mandatory full read-only recovery
+`36293593175` on the same exact protected main completed its provider-boundary checks and returned
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`; it did not arm another preparation attempt. The earlier
+privacy-safe detailed durable-state evidence remains the last detailed classification, not a fresh
+claim about mutable Google state.
+
+The failure remains localized to historical revision-evidence preparation, but the available
+evidence does not identify the exact YDB request RU consumption. PRs #824 and #825 did not establish
+that their read-cost optimizations resolve it. The historical `GE_6000_RU` estimate is not permission
+to raise the configured 10 RU/s cap; canonical authority still says `Cap-Increase: FORBIDDEN`, and
+the associated one-shot cardinality diagnostic is consumed. No further controlled-preparation
+probe, WU7, bootstrap, Gate C, staging retirement/cleanup, or provider-budget change is armed by this
+result. Any successor provider attempt requires a separately evidenced repository fix and its own
+fresh canonical gates; changing the provider limit requires a distinct explicit Owner decision.
+Google remains authoritative, YDB remains shadow, and no verified `COMMITTED` baseline is proven.

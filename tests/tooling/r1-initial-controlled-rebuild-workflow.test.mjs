@@ -20,6 +20,23 @@ test('R1 controlled rebuild workflow is manual exact-main and explicit-authority
   assert.doesNotMatch(workflow, /issues\/630/);
 });
 
+test('post-#825 non-PASS records consumed probe and keeps provider writes disarmed', async () => {
+  const runbook = await read('docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md');
+  const evidence = runbook.match(
+    /### Post-#825 controlled-preparation result and stop boundary([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-main probe and mandatory recovery must be recorded');
+  assert.match(evidence, /probe `36293119385`/);
+  assert.match(evidence, /`RETRIED \/ GRPC_STATUS \/ RESOURCE_EXHAUSTED`/);
+  assert.match(evidence, /full read-only recovery\s+`36293593175`/);
+  assert.match(evidence, /The probe is consumed/);
+  assert.match(evidence, /does not identify the exact YDB request RU consumption/);
+  assert.match(evidence, /no further controlled-preparation\s+probe, WU7, bootstrap, Gate C/i);
+  assert.match(evidence, /`Cap-Increase: FORBIDDEN`/);
+  assert.match(evidence, /no verified `COMMITTED` baseline is proven/);
+});
+
 test('R1 controlled rebuild binds exact recovery and readiness artifacts before provider mutation', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   const recoveryGate = workflow.indexOf('Prove exact safe resumable recovery and READINESS_READY evidence');
