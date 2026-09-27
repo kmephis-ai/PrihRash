@@ -153,13 +153,27 @@ test('recovery deploy classifier fails closed on malformed provider metadata and
   );
 });
 
-test('recovery deploy classifier publishes only bounded enums for malformed list entries', () => {
+test('recovery deploy classifier distinguishes malformed version entry, tags, and timestamp without echo', () => {
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       operations: [],
       versions: [{ id: 'synthetic-unrelated-version' }],
     })),
-    'RECOVERY_VERSION_LIST_ENTRY_INVALID',
+    'RECOVERY_VERSION_TAGS_INVALID',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'synthetic-unrelated-version', tags: [] }],
+    })),
+    'RECOVERY_VERSION_TIMESTAMP_INVALID',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [null],
+    })),
+    'RECOVERY_VERSION_ENTRY_INVALID',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ versions: { items: [] } })),

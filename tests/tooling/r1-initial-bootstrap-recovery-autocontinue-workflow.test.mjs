@@ -232,6 +232,17 @@ test('PR-848 read-only diagnostic failure is recorded as consumed and arms only 
   assert.match(evidence, /does not infer which condition occurred/);
 });
 
+test('PR-849 classifier refinement records malformed version-list evidence without inferring deployment outcome', () => {
+  const evidence = runbook.match(
+    /### PR #849 read-only refinement isolated version-list entry metadata on `853413ce3cff72923e4d76476a2ad6953e176d04`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact read-only classifier refinement result must be retained');
+  assert.match(evidence, /published only `RECOVERY_VERSION_LIST_ENTRY_INVALID`/);
+  assert.match(evidence, /does not determine which record field was malformed/);
+  assert.match(evidence, /does not classify deploy application state/);
+  assert.match(evidence, /The next repository-only discriminator splits/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
