@@ -110,7 +110,7 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
       'Expected-Transition': 'READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION',
       'Recovery-State': 'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
       'Recovery-Run-ID': '36341844854',
-      'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
+      'Regression-Test': 'tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
       ...overrides,
     };
     const body = Object.entries(lines).map(([key, value]) => `${key}: ${value}`).join('\n');
@@ -124,7 +124,7 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
     surfaceOnly: false,
     functionDeployRecovery: true,
     recoveryRunId: '36341844854',
-    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
+    regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
   });
   assert.equal(parse({ 'Recovery-Run-ID': '0' }).valid, false);
   assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
@@ -146,6 +146,19 @@ test('post-PR-840 deployment failure remains unclassified and disarms deployment
   assert.match(evidence, /Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED/);
   assert.match(evidence, /Recovery-Run-ID: 36341844854/);
   assert.match(evidence, /no Function-version create, Function invoke, Google read, or YDB read\/write/);
+});
+
+test('PR-841 autocontinue changeset guard uses the real recovery-deploy regression path', () => {
+  const evidence = runbook.match(
+    /### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact pre-dispatch stop and safe retry boundary must be recorded');
+  assert.match(evidence, /`R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`/);
+  assert.match(evidence, /`R1 initial bootstrap recovery deploy recovery` run was created/);
+  assert.match(evidence, /no Yandex provider query, deploy,/);
+  assert.match(evidence, /read-only classification did not reach the provider,\s+exactly one retry/);
+  assert.match(evidence, /Regression-Test: tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs/);
+  assert.doesNotMatch(evidence, /Regression-Test: tests\/tooling\/r1-initial-bootstrap-recovery-deploy-recovery\.test\.mjs/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {

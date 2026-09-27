@@ -123,7 +123,7 @@ jobs:
             if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e \
               --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
                 any(.[]; .filename == $test and .status != "removed")
-                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml" and .status != "removed")
+                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
                 and any(.[]; .filename == "AGENTS.md" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
               ' <<<"$source_files" >/dev/null; then
