@@ -69,8 +69,9 @@ const SOURCE_KEY_COLUMNS = Object.freeze([
 ] satisfies readonly YdbListStructColumn[]);
 
 const TEXT_ENCODER = new TextEncoder();
-// Payload batches stay below the 10-RU/s Serverless read budget with a small
-// CPU-RU margin. The row limit also bounds the I/O-RU floor (one RU per row).
+// A single indexed cursor pass returns exact revision metadata and raw payload
+// together; bounded pages avoid charging a second full pass for metadata.
+// Each page stays within the 10-RU/s budget with a small CPU-RU margin.
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
 const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 9;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
@@ -270,70 +271,45 @@ function estimatedRevisionReadBytes(
     + TEXT_ENCODER.encode(revision.rawPayload).byteLength;
 }
 
-function exactPayloadRangeReadStatement(
-  runId: string,
-  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
-) {
-  const first = revisions[0];
-  const last = revisions.at(-1);
-  if (first === undefined || last === undefined) {
+function revisionPayloadPageStatement(runId: string, afterSourceRecordId: string | null, limit: number) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT) {
     throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
   }
-  return readStatement(
-    'SELECT r.source_record_id, r.revision, r.migration_run_id, r.observed_at, r.row_hint, '
-      + 'CAST(r.row_digest AS Utf8) AS row_digest, r.change_class, r.raw_payload '
-      + 'FROM source_record_revisions AS r '
-      + 'WHERE r.source_record_id >= $source_record_id_from '
-      + 'AND r.source_record_id <= $source_record_id_to '
-      + 'AND r.revision = $revision AND r.migration_run_id = $migration_run_id',
-    {
-      source_record_id_from: uuidParameter(first.sourceRecordId),
-      source_record_id_to: uuidParameter(last.sourceRecordId),
-      revision: uint64Parameter(1),
-      migration_run_id: uuidParameter(runId),
-    },
-  );
-}
-
-function planRevisionReadBatches(
-  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
-): readonly (readonly Readonly<InitialSourceRecordRevisionProjection>[])[] {
-  const batches: Readonly<InitialSourceRecordRevisionProjection>[][] = [];
-  let current: Readonly<InitialSourceRecordRevisionProjection>[] = [];
-  let currentBytes = 0;
-
-  for (const revision of revisions) {
-    const estimatedBytes = estimatedRevisionReadBytes(revision);
-    if (
-      current.length > 0
-      && (
-        current.length >= REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT
-        || currentBytes + estimatedBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
-      )
-    ) {
-      batches.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(revision);
-    currentBytes += estimatedBytes;
-  }
-  if (current.length > 0) batches.push(current);
-  return Object.freeze(batches.map((batch) => Object.freeze([...batch])));
-}
-
-function runRevisionMetadataStatement(runId: string) {
+  const cursorPredicate = afterSourceRecordId === null
+    ? ''
+    : 'AND source_record_id > $source_record_id_after ';
   return readStatement(
     'SELECT source_record_id, revision, migration_run_id, observed_at, row_hint, '
-      + 'CAST(row_digest AS Utf8) AS row_digest, change_class '
+      + 'CAST(row_digest AS Utf8) AS row_digest, change_class, raw_payload '
       + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
-      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id '
-      + 'ORDER BY source_record_id',
+      + 'WHERE migration_run_id = $migration_run_id AND revision = $revision '
+      + cursorPredicate
+      + `ORDER BY source_record_id LIMIT ${limit}`,
     {
+      ...(afterSourceRecordId === null ? {} : { source_record_id_after: uuidParameter(afterSourceRecordId) }),
       revision: uint64Parameter(1),
       migration_run_id: uuidParameter(runId),
     },
   );
+}
+
+function boundedRevisionReadPage(
+  revisions: readonly Readonly<InitialSourceRecordRevisionProjection>[],
+): Readonly<{ limit: number; estimatedRequestUnits: number }> {
+  const rowBytes = revisions.map(estimatedRevisionReadBytes).sort((left, right) => right - left);
+  const targetLimit = Math.min(REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT, revisions.length + 1);
+  let limit = 1;
+  let pageBytes = rowBytes[0] ?? REVISION_EVIDENCE_READ_FIXED_ROW_BYTES;
+  for (let candidate = 2; candidate <= targetLimit; candidate += 1) {
+    const candidateBytes = rowBytes.slice(0, candidate).reduce((total, bytes) => total + bytes, 0);
+    if (candidateBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT) break;
+    limit = candidate;
+    pageBytes = candidateBytes;
+  }
+  return Object.freeze({
+    limit,
+    estimatedRequestUnits: Math.max(limit, Math.ceil(pageBytes / YDB_READ_BLOCK_BYTES)),
+  });
 }
 
 function sourceKeyReadStatement(
@@ -372,62 +348,45 @@ export async function planInitialSourceRevisionEvidenceResume(
   }
 
   const existingSourceIds = new Set<string>();
-  // Keep the canonical run-scoped metadata proof in one indexed request. A
-  // sequence of small pages still pays per-query CPU/compilation RU and can
-  // exhaust Serverless burst capacity before exact payload verification starts.
-  // The result contains metadata only; raw_payload remains byte-bounded below.
-  observeReadStage(observeReadStageEvidence, 'REVISION_METADATA_SCAN');
-  const metadataResult = await reader.read<ExistingInitialRevisionRow>(
-    runRevisionMetadataStatement(expected.runId),
-  );
-  validateRevisionRows(metadataResult.rows, expected, existingSourceIds, false);
-
-  // Exact payload equality remains mandatory. The metadata scan already returns
-  // the exact current-run source IDs; payload verification reuses those exact keys
-  // so sparse UUID ranges cannot amplify read RU. Keep this scan metadata-only: the
-  // exact raw payload remains in byte-bounded primary-key range reads below.
-  const existingRevisions = metadataResult.rows.map((row) => {
-    const sourceRecordId = uuid(row.source_record_id);
-    const revision = expected.bySourceId.get(sourceRecordId);
-    if (revision === undefined) {
+  const pageBudget = boundedRevisionReadPage(expectedRevisions);
+  let afterSourceRecordId: string | null = null;
+  let readCount = 0;
+  while (true) {
+    if (waitForReadBudget !== undefined) {
+      await waitForReadBudget(pageBudget.estimatedRequestUnits);
+    }
+    observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
+    const pageResult = await reader.read<ExistingInitialRevisionRow>(
+      revisionPayloadPageStatement(expected.runId, afterSourceRecordId, pageBudget.limit),
+    );
+    if (pageResult.rows.length > pageBudget.limit) {
       throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
     }
-    return revision;
-  });
-  const payloadVerifiedSourceIds = new Set<string>();
-  const batches = planRevisionReadBatches(existingRevisions);
-  if (batches.length === 0) observeBatchEvidence(observeReadBatchEvidence, 'NO_PAYLOAD_BATCH');
-  for (const batch of batches) {
-    const estimatedBatchBytes = batch.reduce(
-      (total, revision) => total + estimatedRevisionReadBytes(revision),
-      0,
-    );
+    if (pageResult.rows.length === 0) break;
+    validateRevisionRows(pageResult.rows, expected, existingSourceIds, true);
+    const pageBytes = pageResult.rows.reduce((total, row) => {
+      const sourceRecordId = uuid(row.source_record_id);
+      const revision = expected.bySourceId.get(sourceRecordId);
+      if (revision === undefined) {
+        throw new InitialSourceRevisionEvidenceRecoveryError('EXTRA_EXISTING_REVISION');
+      }
+      return total + estimatedRevisionReadBytes(revision);
+    }, 0);
+    const lastSourceRecordId = uuid(pageResult.rows.at(-1)?.source_record_id);
+    if (lastSourceRecordId === null) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('MALFORMED_EXISTING_REVISION');
+    }
+    afterSourceRecordId = lastSourceRecordId;
+    readCount += pageResult.rows.length;
     observeBatchEvidence(
       observeReadBatchEvidence,
-      batch.length === 1 && estimatedBatchBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
+      pageResult.rows.length === 1 && pageBytes > REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT
         ? 'SINGLE_REVISION_EXCEEDS_64_KIB'
         : 'ALL_BATCHES_WITHIN_64_KIB',
     );
-    if (waitForReadBudget !== undefined) {
-      const estimatedIoRequestUnits = Math.max(
-        batch.length,
-        Math.ceil(estimatedBatchBytes / YDB_READ_BLOCK_BYTES),
-      );
-      // The preceding run-scoped metadata scan can consume most of the idle RU
-      // burst. Refill budget before every payload range, including the first.
-      await waitForReadBudget(estimatedIoRequestUnits);
-    }
-    observeReadStage(observeReadStageEvidence, 'REVISION_PAYLOAD_BATCH');
-    const payloadResult = await reader.read<ExistingInitialRevisionRow>(
-      exactPayloadRangeReadStatement(expected.runId, batch),
-    );
-    validateRevisionRows(payloadResult.rows, expected, payloadVerifiedSourceIds, true);
+    if (pageResult.rows.length < pageBudget.limit) break;
   }
-  for (const sourceRecordId of existingSourceIds) {
-    if (!payloadVerifiedSourceIds.has(sourceRecordId)) {
-      throw new InitialSourceRevisionEvidenceRecoveryError('EXISTING_REVISION_MISMATCH');
-    }
-  }
+  if (readCount === 0) observeBatchEvidence(observeReadBatchEvidence, 'NO_PAYLOAD_BATCH');
 
   const missingRevisions = expectedRevisions.filter(
     (revision) => !existingSourceIds.has(revision.sourceRecordId.toLowerCase()),

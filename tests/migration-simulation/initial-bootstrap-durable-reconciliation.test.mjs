@@ -178,7 +178,7 @@ test('controlled durable revision reconciliation waits for the injected RU pacin
 
   await reconciliation.port.reconcile(input());
 
-  assert.deepEqual(waitedUnits, [1]);
+  assert.deepEqual(waitedUnits, [2]);
 });
 
 test('durable reconstruction proof prevents a redundant second exact revision scan', async () => {
