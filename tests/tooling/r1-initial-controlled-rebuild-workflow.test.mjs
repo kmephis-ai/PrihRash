@@ -54,6 +54,32 @@ test('post-#830 invoke-shape fix accepts only the existing revision-preparation 
   assert.match(evidence, /fresh exact-main\/recovery\/readiness gates and separate authority/);
 });
 
+test('bounded YDB transport enum survives historical reconstruction without changing writes', async () => {
+  const runbook = await read('docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md');
+  const job = await read('src/runtime/initialControlledRebuildJob.ts');
+  const evidence = runbook.match(
+    /### #834 preserve bounded YDB transport subtype across historical reconstruction([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the exact recovery-stage classification seam must be documented');
+  assert.match(evidence, /`QUERY_EXECUTION_YDB_OVERLOADED`/);
+  assert.match(evidence, /no SQL, reads, pacing, retry, timeout, cap/);
+  assert.match(evidence, /does not rearm the consumed #832\/#833 one-shot/);
+  assert.match(job, /error instanceof InitialBootstrapApplicationError[\s\S]*error\.ydbDataFailureCode/);
+});
+
+test('historical YDB subtype follow-up arms only one read-only check and no WU7 replay', async () => {
+  const runbook = await read('docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md');
+  const evidence = runbook.match(
+    /### #834 preserve bounded YDB transport subtype across historical reconstruction([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence);
+  assert.match(evidence, /one new exact-main `controlled_preparation_only` recovery-only read/);
+  assert.match(evidence, /strictly diagnostic and does not rearm the consumed #832\/#833 one-shot/);
+  assert.match(evidence, /Any new write-capable WU7 operation requires a fresh/);
+});
+
 test('R1 controlled rebuild binds exact recovery and readiness artifacts before provider mutation', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   const recoveryGate = workflow.indexOf('Prove exact safe resumable recovery and READINESS_READY evidence');
@@ -154,7 +180,10 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.match(workflow, /QUERY_EXECUTION_YDB_TIMEOUT/);
   const ydbSubtypeGuards = workflow.match(/ydbDataFailureCode/g) ?? [];
   assert.equal(ydbSubtypeGuards.length >= 4, true);
-  assert.match(await read('src/runtime/initialControlledRebuildJob.ts'), /error instanceof YdbJsV6DataTransportError \? error\.code : null/);
+  assert.match(
+    await read('src/runtime/initialControlledRebuildJob.ts'),
+    /error instanceof YdbJsV6DataTransportError[\s\S]*InitialBootstrapApplicationError[\s\S]*error\.ydbDataFailureCode/,
+  );
   assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
   assert.match(workflow, /RESUME_CONTEXT_PREPARATION[\s\S]*REVISION_EVIDENCE_PREPARATION[\s\S]*LINEAGE_PREPARATION/);
   const reconciliationGuards = workflow.match(/\.bootstrapPhase \| IN\([^)]*"RECONCILIATION_READ"/g) ?? [];

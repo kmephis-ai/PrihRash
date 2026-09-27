@@ -1,5 +1,9 @@
 import { createCanonicalSourceDigest } from '../integration/google/canonicalSourceDigest.js';
 import { readStatement, type YdbReadScope } from '../integration/ydb/adapter.js';
+import {
+  YdbJsV6DataTransportError,
+  type YdbJsV6DataTransportErrorCode,
+} from '../integration/ydb/ydbJsV6DataTransport.js';
 import { uint64Parameter, uuidParameter } from '../integration/ydb/parameters.js';
 import { normalizeYdbTimestampReadback, ydbTimestampReadbackMatches } from '../integration/ydb/readbackTimestamp.js';
 import type { ReferenceResolver } from '../normalization/types.js';
@@ -44,11 +48,16 @@ export type InitialBootstrapDurableObservationReadStage =
 
 export class InitialStaleValidatedHistoricalCandidateError extends Error {
   readonly code: InitialStaleValidatedHistoricalCandidateErrorCode;
+  readonly ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null;
 
-  constructor(code: InitialStaleValidatedHistoricalCandidateErrorCode) {
+  constructor(
+    code: InitialStaleValidatedHistoricalCandidateErrorCode,
+    ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null = null,
+  ) {
     super(code);
     this.name = 'InitialStaleValidatedHistoricalCandidateError';
     this.code = code;
+    this.ydbDataFailureCode = ydbDataFailureCode;
   }
 }
 
@@ -423,6 +432,9 @@ export async function reconstructInitialBootstrapDurableObservation(
     );
   } catch (error) {
     if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;
+    if (error instanceof YdbJsV6DataTransportError) {
+      throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID', error.code);
+    }
     throw new InitialStaleValidatedHistoricalCandidateError('REVISION_EVIDENCE_INVALID');
   }
 

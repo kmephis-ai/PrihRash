@@ -821,7 +821,9 @@ export function classifyInitialBootstrapControlledPreparationFailure(
     return 'PRIVATE_EVIDENCE_FAILURE';
   }
   if (error instanceof InitialBootstrapApplicationError) {
-    return `APPLICATION_${error.code}`;
+    return error.ydbDataFailureCode === null
+      ? `APPLICATION_${error.code}`
+      : `YDB_DATA_${error.ydbDataFailureCode}`;
   }
   return 'DIAGNOSTIC_FAILED';
 }

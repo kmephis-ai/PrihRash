@@ -4,6 +4,7 @@ import {
   YdbAdapter,
   YdbTransportCommitOutcomeUnknownError,
 } from '../../dist/integration/ydb/adapter.js';
+import { YdbJsV6DataTransportError } from '../../dist/integration/ydb/ydbJsV6DataTransport.js';
 import { YdbSchemeAdapter, YdbSchemeTransportOutcomeUnknownError } from '../../dist/integration/ydb/scheme.js';
 import { createCanonicalSourceDigest } from '../../dist/integration/google/canonicalSourceDigest.js';
 import {
@@ -464,13 +465,17 @@ function applyWrite(statement, state) {
   throw new Error(`unexpected write: ${text}`);
 }
 
-function fakeDatabase({ seed = {}, unknownCommitAt = null } = {}) {
+function fakeDatabase({ seed = {}, unknownCommitAt = null, readError = null } = {}) {
   const state = createState(seed);
   const events = [];
   let transactionCount = 0;
   const transport = {
     async executeRead(statement) {
       events.push(`read:${statement.text.slice(0, 24)}`);
+      if (
+        readError instanceof YdbJsV6DataTransportError
+        && statement.text.includes('VIEW idx_source_record_revisions_run_revision')
+      ) throw readError;
       return { rows: statementRows(statement, state) };
     },
     async serializableReadWrite(work) {
@@ -1105,6 +1110,54 @@ test('controlled continuation reconstructs one deterministic candidate across ST
     .map((write) => write.statement.parameters.created_at?.value);
   assert.deepEqual(validatedCreatedAt, stagingCreatedAt);
   assert.deepEqual(resumeIds.calls, []);
+});
+
+test('historical revision transport failure preserves bounded YDB subtype through controlled preparation', async () => {
+  const raw = expense();
+  const digest = canonicalRowDigest(raw);
+  const seed = stagingSeed();
+  const storedManifest = seed.manifests[0][1];
+  const bindings = JSON.parse(storedManifest.bindings);
+  bindings.bindings[0].row_digest = digest;
+  storedManifest.bindings = JSON.stringify(bindings);
+  seed.revisions = [[`${SOURCE_1}|1`, {
+    source_record_id: SOURCE_1,
+    revision: 1n,
+    migration_run_id: RUN_ID,
+    observed_at: new Date(CAPTURED_AT),
+    row_hint: 2n,
+    row_digest: digest,
+    change_class: null,
+    raw_payload: raw,
+  }]];
+  const db = fakeDatabase({
+    seed,
+    readError: new YdbJsV6DataTransportError('QUERY_EXECUTION_YDB_OVERLOADED'),
+  });
+  const liveObservation = Object.freeze({
+    ...observation([{
+      rowHint: 2,
+      digest: 'synthetic-live-source-b-digest',
+      rawPayload: expense('Live source B'),
+      aggregatePeriodMonth: null,
+    }]),
+    snapshotDigest: 'synthetic-live-source-b-snapshot-digest',
+  });
+
+  await assert.rejects(
+    () => prepareInitialControlledRebuildContinuation(
+      liveObservation,
+      dependencies(db, allocator({ forbid: true }), clock()),
+    ),
+    (error) => error instanceof InitialBootstrapApplicationError
+      && error.code === 'BOOTSTRAP_OBSERVATION_INVALID'
+      && error.ydbDataFailureCode === 'QUERY_EXECUTION_YDB_OVERLOADED',
+  );
+  assert.equal(db.state.sourceRecords.size, 0);
+  assert.equal(db.state.transactions.size, 0);
+  assert.equal(db.state.migrationRuns.get(RUN_ID).state, 'STAGING');
+  assert.equal(db.state.stagingSourceRecords.size, 0);
+  assert.equal(db.state.stagingTransactions.size, 0);
 });
 
 

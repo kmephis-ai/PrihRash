@@ -51,6 +51,15 @@ test('controlled preparation classifier preserves exact existing YDB transport e
   );
   assert.equal(
     classifyInitialBootstrapControlledPreparationFailure(
+      new InitialBootstrapApplicationError(
+        'BOOTSTRAP_OBSERVATION_INVALID',
+        'QUERY_EXECUTION_YDB_OVERLOADED',
+      ),
+    ),
+    'YDB_DATA_QUERY_EXECUTION_YDB_OVERLOADED',
+  );
+  assert.equal(
+    classifyInitialBootstrapControlledPreparationFailure(
       new InitialBootstrapApplicationError('CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED'),
     ),
     'APPLICATION_CONTROLLED_CONTINUATION_ROUTE_NOT_REQUIRED',
