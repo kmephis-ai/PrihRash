@@ -13,6 +13,10 @@ const ENUMS = new Set([
   'RECOVERY_TAGGED_VERSION_AMBIGUOUS',
   'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN',
   'DIAGNOSTIC_FAILED',
+  'RECOVERY_DEPLOY_INPUT_INVALID',
+  'RECOVERY_VERSION_LIST_ENTRY_INVALID',
+  'RECOVERY_METADATA_JSON_INVALID',
+  'RECOVERY_CLASSIFIER_INTERNAL_ERROR',
 ]);
 
 function object(value) {
@@ -50,7 +54,7 @@ export function classifyRecoveryFunctionDeployOutcome({
       || deploymentServiceAccountId.length === 0
       || !Array.isArray(versions)
       || !Array.isArray(operations)
-    ) return 'DIAGNOSTIC_FAILED';
+    ) return 'RECOVERY_DEPLOY_INPUT_INVALID';
 
     const lowerBound = start - 5_000;
     const upperBound = finish + 5_000;
@@ -66,9 +70,9 @@ export function classifyRecoveryFunctionDeployOutcome({
     if (matchingOperations.length === 0) {
       const taggedCandidates = [];
       for (const version of versions) {
-        if (!object(version) || !Array.isArray(version.tags)) return 'DIAGNOSTIC_FAILED';
+        if (!object(version) || !Array.isArray(version.tags)) return 'RECOVERY_VERSION_LIST_ENTRY_INVALID';
         const createdAt = timestamp(version.created_at);
-        if (createdAt === null) return 'DIAGNOSTIC_FAILED';
+        if (createdAt === null) return 'RECOVERY_VERSION_LIST_ENTRY_INVALID';
         if (
           version.tags.includes('r1-initial-bootstrap-recovery')
           && createdAt >= lowerBound
@@ -123,22 +127,28 @@ export function classifyRecoveryFunctionDeployOutcome({
 
     return 'EXACT_RECOVERY_VERSION_CREATED';
   } catch {
-    return 'DIAGNOSTIC_FAILED';
+    return 'RECOVERY_CLASSIFIER_INTERNAL_ERROR';
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [versionsPath, operationsPath, taggedVersionPath, runStartedAt, runFinishedAt, deploymentServiceAccountId] = process.argv.slice(2);
   if (!versionsPath || !operationsPath || !taggedVersionPath || !runStartedAt || !runFinishedAt || !deploymentServiceAccountId) {
-    process.stdout.write('DIAGNOSTIC_FAILED\n');
+    process.stdout.write('RECOVERY_DEPLOY_INPUT_INVALID\n');
     process.exitCode = 2;
   } else {
+    let inputs;
     try {
-      const [versions, operations, taggedVersion] = await Promise.all([
+      inputs = await Promise.all([
         readJson(versionsPath),
         readJson(operationsPath),
         readJson(taggedVersionPath),
       ]);
+    } catch {
+      process.stdout.write('RECOVERY_METADATA_JSON_INVALID\n');
+    }
+    if (inputs) {
+      const [versions, operations, taggedVersion] = inputs;
       const result = classifyRecoveryFunctionDeployOutcome({
         versions,
         operations,
@@ -149,9 +159,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       });
       process.stdout.write(`${ENUMS.has(result) ? result : 'DIAGNOSTIC_FAILED'}\n`);
       if (result === 'DIAGNOSTIC_FAILED') process.exitCode = 2;
-    } catch {
-      process.stdout.write('DIAGNOSTIC_FAILED\n');
-      process.exitCode = 2;
     }
   }
 }

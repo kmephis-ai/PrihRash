@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 import { classifyRecoveryFunctionDeployOutcome } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
@@ -140,14 +141,44 @@ test('recovery deploy classifier accepts only the already-proven snake_case and 
 test('recovery deploy classifier fails closed on malformed provider metadata and timestamps', () => {
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ runStartedAt: 'private timestamp' })),
-    'DIAGNOSTIC_FAILED',
+    'RECOVERY_DEPLOY_INPUT_INVALID',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: null })),
-    'DIAGNOSTIC_FAILED',
+    'RECOVERY_DEPLOY_INPUT_INVALID',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ deploymentServiceAccountId: '' })),
-    'DIAGNOSTIC_FAILED',
+    'RECOVERY_DEPLOY_INPUT_INVALID',
   );
+});
+
+test('recovery deploy classifier publishes only bounded enums for malformed list entries', () => {
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'synthetic-unrelated-version' }],
+    })),
+    'RECOVERY_VERSION_LIST_ENTRY_INVALID',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ versions: { items: [] } })),
+    'RECOVERY_DEPLOY_INPUT_INVALID',
+  );
+});
+
+test('recovery deploy CLI reports invalid metadata JSON without echoing parser details', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
+    'missing-versions.json',
+    'missing-operations.json',
+    'missing-tag.json',
+    runStartedAt,
+    runFinishedAt,
+    serviceAccount,
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'RECOVERY_METADATA_JSON_INVALID\n');
+  assert.equal(result.stderr, '');
 });

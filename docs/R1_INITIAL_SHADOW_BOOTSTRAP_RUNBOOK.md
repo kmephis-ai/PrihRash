@@ -1577,9 +1577,27 @@ workflow, classifier implementation, regression fixture and runbook, but not the
 was rejected as `R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`; the deployment
 recovery workflow was not dispatched and no provider state was read.
 
-The successor changeset guard now accepts either a marker-only caller correction (exact regression
-test + autocontinue workflow + runbook) or a classifier/root-cause correction (exact regression test
-+ recovery-deploy workflow + classifier script + runbook). It does not require the already-verified
+The successor changeset guard accepts either a marker-only caller correction (exact regression test +
+autocontinue workflow + runbook) or a classifier/root-cause correction (exact regression test +
+recovery-deploy workflow + classifier script + runbook). It does not require the already-verified
 autocontinue caller to change again for every new classifier discriminator. The Owner-authorized
-version/tag-window classification remains unconsumed. No deploy, invoke, Google/YDB access, replay or
-cleanup follows.
+version/tag-window classification remained unconsumed at this point. No deploy, invoke, Google/YDB
+access, replay or cleanup followed this pre-dispatch stop.
+
+### PR #848 exact-run read-only classifier completed with diagnostic failure on `2052041417e58ac7d183a2eaca0b63d3ec0b815f`
+
+PR #848 passed exact-main CI, Browser Quality and CodeQL; the merged main SHA also passed all three.
+
+Autocontinue `36356292384` dispatched the Owner-authorized read-only classification
+for exact failed run `36341844854`. Recovery workflow `36356312191` re-proved exact main, latest failed
+run and deploy-failed/invoke-skipped phase, completed its Function metadata reads, and published only
+`DIAGNOSTIC_FAILED`. This does not classify the deploy as applied or not applied. No Function version
+was created or invoked; no Google or YDB access, replay, cleanup or authority change occurred. The
+probe is consumed. Gate C `36356292388` stopped at its missing authority marker before readiness,
+deploy or invoke.
+
+The next repository-only refinement preserves fail-closed behavior but distinguishes invalid top-level
+classifier inputs, malformed version-list entries, invalid metadata JSON, and unexpected internal
+classifier errors as separate enum-only diagnostics. It does not infer which condition occurred in
+`36356312191`; it enables a new-SHA, exact-run read-only refinement only after synthetic regression
+coverage and fresh exact-main gates.
