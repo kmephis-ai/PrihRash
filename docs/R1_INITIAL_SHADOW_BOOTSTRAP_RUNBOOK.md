@@ -1488,7 +1488,7 @@ Regression-Test path included a nonexistent `r1-` prefix; the actual added test 
 Function invoke, Google read or YDB read/write occurred.
 
 The successor corrects the marker to the exact existing regression path and makes the changeset guard
-require the autocontinue caller workflow, its test, `AGENTS.md`, and this runbook. This repairs the
+require the autocontinue caller workflow, its test, and this runbook. This repairs the
 pre-dispatch gate only; it does not change provider classification or authorize a deployment. Since
 the read-only classification did not reach the provider, exactly one retry of that same read-only
 classification for failed recovery run `36341844854` may be requested on a new exact-main SHA. The
@@ -1504,3 +1504,17 @@ Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
 Recovery-Run-ID: 36341844854
 Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs
 ```
+
+### Second read-only deploy-classification dispatch was gated before provider on `d284ee221602f80e528a510d3f1d45272f987997`
+
+PR #842 passed exact-main CI, Browser Quality and CodeQL. Autocontinue `36346118685` parsed the exact
+read-only marker and stopped again with `R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`.
+The corrected test path and caller workflow were present in the PR; the guard's additional requirement
+that `AGENTS.md` also change was unrelated to this caller-only path correction and prevented dispatch.
+No deploy-recovery workflow run was created; no Yandex, Function, Google or YDB action occurred.
+
+The next change removes only that unrelated file requirement. The changeset proof still requires the
+exact marker's regression test, the autocontinue caller workflow, and this runbook. The marker remains
+bound to failed run `36341844854`; this is still the same single read-only classification, not a second
+provider recovery, because neither prior autocontinue reached the provider. Bootstrap, recovery
+Function deployment/invocation, YDB/Google access, cleanup and authority changes remain disarmed.

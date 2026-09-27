@@ -148,7 +148,7 @@ test('post-PR-840 deployment failure remains unclassified and disarms deployment
   assert.match(evidence, /no Function-version create, Function invoke, Google read, or YDB read\/write/);
 });
 
-test('PR-841 autocontinue changeset guard uses the real recovery-deploy regression path', () => {
+test('PR-841 records the exact regression-path pre-dispatch stop without provider activity', () => {
   const evidence = runbook.match(
     /### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`([\s\S]*?)(?=\n### |\n## |$)/,
   )?.[1];
@@ -159,6 +159,17 @@ test('PR-841 autocontinue changeset guard uses the real recovery-deploy regressi
   assert.match(evidence, /read-only classification did not reach the provider,\s+exactly one retry/);
   assert.match(evidence, /Regression-Test: tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs/);
   assert.doesNotMatch(evidence, /Regression-Test: tests\/tooling\/r1-initial-bootstrap-recovery-deploy-recovery\.test\.mjs/);
+});
+
+test('PR-842 changeset pre-dispatch stop identifies only the unrelated AGENTS requirement', () => {
+  const evidence = runbook.match(
+    /### Second read-only deploy-classification dispatch was gated before provider on `d284ee221602f80e528a510d3f1d45272f987997`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the second pre-provider autocontinue stop must be documented');
+  assert.match(evidence, /`R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`/);
+  assert.match(evidence, /guard's additional requirement\s+that `AGENTS\.md` also change was unrelated/);
+  assert.match(evidence, /No deploy-recovery workflow run was created/);
+  assert.match(evidence, /neither prior autocontinue reached the provider/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {

@@ -124,7 +124,6 @@ jobs:
               --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
                 any(.[]; .filename == $test and .status != "removed")
                 and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
-                and any(.[]; .filename == "AGENTS.md" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
               ' <<<"$source_files" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID'

@@ -46,4 +46,5 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /any\(\.\[]; \.filename == \$test and \.status != "removed"\)/);
   assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml/);
   assert.doesNotMatch(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml" and \.status != "removed"/);
+  assert.doesNotMatch(autocontinue, /\.filename == "AGENTS\.md"/);
 });
