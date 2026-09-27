@@ -172,6 +172,18 @@ test('PR-842 changeset pre-dispatch stop identifies only the unrelated AGENTS re
   assert.match(evidence, /neither prior autocontinue reached the provider/);
 });
 
+test('consumed deploy classification remains unknown and classifier enum refinement does not re-arm provider work', () => {
+  const evidence = runbook.match(
+    /#### Read-only deploy classifier result was not sufficiently discriminating([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the consumed read-only provider evidence and limit must remain explicit');
+  assert.match(evidence, /`CREATE_OPERATION_NOT_UNIQUE`/);
+  assert.match(evidence, /does not prove which condition occurred/);
+  assert.match(evidence, /Do not replay the consumed provider query/);
+  assert.match(evidence, /`CREATE_OPERATION_NOT_OBSERVED` and\s+`CREATE_OPERATION_AMBIGUOUS`/);
+  assert.match(evidence, /consumes no\s+additional provider classification for run `36341844854`/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,

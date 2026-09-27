@@ -1477,6 +1477,22 @@ deploy or Function invoke requires fresh deployment classification and a new cau
 bootstrap/orchestrator, staging resume/retirement, cleanup, timer or authority change follows from this
 failure.
 
+#### Read-only deploy classifier result was not sufficiently discriminating
+
+The one exact-run deploy recovery `36347087928` published only
+`CREATE_OPERATION_NOT_UNIQUE`. In that classifier revision the enum covered both zero and multiple
+matching Yandex operations, so this result does not prove which condition occurred and does not
+classify the Function-version create outcome. Do not replay the consumed provider query.
+
+Repository review found that the existing controlled-rebuild deploy-recovery implementation already
+reads both proven Yandex operation field spellings `created_by` / `createdBy` and `created_at` /
+`createdAt`. The initial-bootstrap deploy classifier had accepted only snake_case, creating a
+repository-side false no-match possibility. The bounded correction aligns it to those existing
+field contracts and splits future diagnostics into `CREATE_OPERATION_NOT_OBSERVED` and
+`CREATE_OPERATION_AMBIGUOUS`; both remain `RECOVERY_REQUIRED` and neither permits replay. Synthetic
+fixtures cover each spelling and each cardinality. This correction is repository-only; it consumes no
+additional provider classification for run `36341844854`, whose outcome remains unknown.
+
 ### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`
 
 Exact-main CI, Browser Quality and CodeQL passed after PR #841. Recovery autocontinue `36344477909`

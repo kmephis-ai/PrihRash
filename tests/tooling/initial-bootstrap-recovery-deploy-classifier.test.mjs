@@ -62,16 +62,16 @@ test('recovery deploy classifier proves only a unique exact version correlated t
   );
 });
 
-test('recovery deploy classifier keeps missing, ambiguous, pending, and failed operations unclassified for mutation', () => {
+test('recovery deploy classifier distinguishes missing, ambiguous, pending, and failed operations', () => {
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [] })),
-    'CREATE_OPERATION_NOT_UNIQUE',
+    'CREATE_OPERATION_NOT_OBSERVED',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       operations: [...exactEvidence().operations, { ...exactEvidence().operations[0] }],
     })),
-    'CREATE_OPERATION_NOT_UNIQUE',
+    'CREATE_OPERATION_AMBIGUOUS',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
@@ -84,6 +84,20 @@ test('recovery deploy classifier keeps missing, ambiguous, pending, and failed o
       operations: [{ ...exactEvidence().operations[0], error: { code: 3 } }],
     })),
     'CREATE_OPERATION_FAILED',
+  );
+});
+
+test('recovery deploy classifier accepts only the already-proven snake_case and camelCase Yandex operation metadata fields', () => {
+  const operation = exactEvidence().operations[0];
+  const camelCaseOperation = {
+    createdBy: operation.created_by,
+    createdAt: operation.created_at,
+    done: operation.done,
+    response: operation.response,
+  };
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [camelCaseOperation] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
   );
 });
 
