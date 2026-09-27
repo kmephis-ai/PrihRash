@@ -3,7 +3,8 @@ import { pathToFileURL } from 'node:url';
 
 const ENUMS = new Set([
   'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
-  'CREATE_OPERATION_NOT_UNIQUE',
+  'CREATE_OPERATION_NOT_OBSERVED',
+  'CREATE_OPERATION_AMBIGUOUS',
   'CREATE_OPERATION_IN_PROGRESS',
   'CREATE_OPERATION_FAILED',
   'CREATED_VERSION_NOT_PROVEN',
@@ -52,13 +53,15 @@ export function classifyRecoveryFunctionDeployOutcome({
     const upperBound = finish + 5_000;
     const matchingOperations = operations.filter((operation) => {
       if (!object(operation)) return false;
-      const createdAt = timestamp(operation.created_at);
-      return operation.created_by === deploymentServiceAccountId
+      const createdAt = timestamp(operation.created_at ?? operation.createdAt);
+      const createdBy = operation.created_by ?? operation.createdBy;
+      return createdBy === deploymentServiceAccountId
         && createdAt !== null
         && createdAt >= lowerBound
         && createdAt <= upperBound;
     });
-    if (matchingOperations.length !== 1) return 'CREATE_OPERATION_NOT_UNIQUE';
+    if (matchingOperations.length === 0) return 'CREATE_OPERATION_NOT_OBSERVED';
+    if (matchingOperations.length > 1) return 'CREATE_OPERATION_AMBIGUOUS';
 
     const [operation] = matchingOperations;
     if (operation.done === false) return 'CREATE_OPERATION_IN_PROGRESS';
