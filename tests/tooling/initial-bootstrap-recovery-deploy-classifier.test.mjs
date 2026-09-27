@@ -157,14 +157,10 @@ test('recovery deploy classifier distinguishes malformed version entry, tags, an
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       operations: [],
-      versions: [{ id: 'synthetic-unrelated-version' }],
-    })),
-    'RECOVERY_VERSION_TAGS_INVALID',
-  );
-  assert.equal(
-    classifyRecoveryFunctionDeployOutcome(exactEvidence({
-      operations: [],
-      versions: [{ id: 'synthetic-unrelated-version', tags: [] }],
+      versions: [{
+        id: 'synthetic-recovery-version',
+        tags: ['r1-initial-bootstrap-recovery'],
+      }],
     })),
     'RECOVERY_VERSION_TIMESTAMP_INVALID',
   );
@@ -178,6 +174,30 @@ test('recovery deploy classifier distinguishes malformed version entry, tags, an
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({ versions: { items: [] } })),
     'RECOVERY_DEPLOY_INPUT_INVALID',
+  );
+});
+
+test('recovery deploy classifier treats omitted repeated tags as empty and ignores unrelated timestamps', () => {
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'synthetic-untagged-version' }],
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'synthetic-untagged-version', tags: [] }],
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'synthetic-version', tags: null }],
+    })),
+    'RECOVERY_VERSION_TAGS_INVALID',
   );
 });
 

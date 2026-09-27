@@ -73,14 +73,12 @@ export function classifyRecoveryFunctionDeployOutcome({
       const taggedCandidates = [];
       for (const version of versions) {
         if (!object(version)) return 'RECOVERY_VERSION_ENTRY_INVALID';
-        if (!Array.isArray(version.tags)) return 'RECOVERY_VERSION_TAGS_INVALID';
+        const tags = version.tags === undefined ? [] : version.tags;
+        if (!Array.isArray(tags)) return 'RECOVERY_VERSION_TAGS_INVALID';
+        if (!tags.includes('r1-initial-bootstrap-recovery')) continue;
         const createdAt = timestamp(version.created_at);
         if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
-        if (
-          version.tags.includes('r1-initial-bootstrap-recovery')
-          && createdAt >= lowerBound
-          && createdAt <= upperBound
-        ) taggedCandidates.push(version);
+        if (createdAt >= lowerBound && createdAt <= upperBound) taggedCandidates.push(version);
       }
       if (taggedCandidates.length === 0) return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
       if (taggedCandidates.length > 1) return 'RECOVERY_TAGGED_VERSION_AMBIGUOUS';
