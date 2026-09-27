@@ -206,6 +206,29 @@ micro-PR ради отдельных enum/telemetry строк. Один merged 
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.
 
+### 8.3. Постоянная делегация Owner до завершения R1
+
+Owner делегирует агенту автономно принимать и выполнять все repository/process/provider решения,
+необходимые для завершения R1, пока completion target из `docs/R1_COMPLETION_SPRINT.md` не доказан.
+Не запрашивать Owner confirmation для каждого следующего causal гипотезы, разрешённого read-only
+probe, root-cause PR, gated initial/bootstrap/controlled-rebuild попытки или их обязательного recovery;
+после свежей reconciliation выбирать следующий безопасный шаг самостоятельно и отражать решение в
+active tracking Issue.
+
+Делегация разрешает использовать уже описанные R1 one-shot write/recovery paths только при их точных
+Issue/PR/marker/exact-main/CI/readiness/circuit/provider gates. Она не ослабляет fail-closed, financial
+semantics, `MIGRATION_CONTRACT`, LIVE-MUTABLE-SOURCE, privacy, single-writer, no blind/same-SHA replay,
+exact failed-run identity/phase checks или обязательный read-back. `COMMITTED` требует независимой
+reconciliation; неизвестный/неоднозначный provider outcome не становится `APPLIED`/`NOT_APPLIED` по
+догадке. При ambiguous state разрешены только stage-appropriate read-only classification probes и
+reproducible repository root-cause work; никакого inferred cleanup/retirement.
+
+Эта делегация не включает CUTOVER, timer activation, YDB-authoritative production Writer, Google
+mutation/authority switch, `MEMBER` activation, cap/IAM widening или отмену resource retirement.
+Они остаются вне R1 completion target и требуют своих отдельных gates. Все временные R1 permissions,
+workflow/autocontinue surfaces и delegated authority retires после доказанного initial
+`COMMITTED` + required catch-up/reconciliation completion.
+
 ## 9. CI
 
 На старте GitHub Actions должны проверять минимум:
