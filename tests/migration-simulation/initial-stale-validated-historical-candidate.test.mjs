@@ -114,11 +114,7 @@ function fixture(overrides = {}) {
     run_snapshot_digest: SNAPSHOT_DIGEST,
     snapshot_digest: overrides.manifestSnapshotDigest ?? SNAPSHOT_DIGEST,
     snapshot_row_count: 1n,
-  };
-  const snapshotRow = {
-    captured_at: new Date(CAPTURED_AT),
-    snapshot_digest: SNAPSHOT_DIGEST,
-    row_count: 1n,
+    snapshot_captured_at: overrides.snapshotCapturedAt ?? new Date(CAPTURED_AT),
   };
   const revisionRows = overrides.revisionRows ?? [{
     source_record_id: SOURCE_ID,
@@ -138,9 +134,6 @@ function fixture(overrides = {}) {
         reads.push(statement.text);
         if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
           return { rows: [manifestRow] };
-        }
-        if (statement.text.includes('FROM source_snapshots WHERE id = $id')) {
-          return { rows: [snapshotRow] };
         }
         if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
           return { rows: revisionPage(statement, revisionRows) };
@@ -169,12 +162,12 @@ test('durable STAGING reconstruction verifies paged payload rows and returns an 
     'RESUME_SNAPSHOT_READ',
     'REVISION_EVIDENCE_PREPARATION',
   ]);
-  assert.equal(f.reads.length, 3);
-  assert.match(f.reads[2], /VIEW idx_source_record_revisions_run_revision/);
-  assert.match(f.reads[2], /ORDER BY source_record_id LIMIT 2/);
-  assert.doesNotMatch(f.reads[2], /source_record_id >=|source_record_id <=/);
-  assert.match(f.reads[2], /migration_run_id = \$migration_run_id/);
-  assert.match(f.reads[2], /raw_payload/);
+  assert.equal(f.reads.length, 2);
+  assert.match(f.reads[1], /VIEW idx_source_record_revisions_run_revision/);
+  assert.match(f.reads[1], /ORDER BY source_record_id LIMIT 2/);
+  assert.doesNotMatch(f.reads[1], /source_record_id >=|source_record_id <=/);
+  assert.match(f.reads[1], /migration_run_id = \$migration_run_id/);
+  assert.match(f.reads[1], /raw_payload/);
 
   const exactRevision = Object.freeze({
     sourceRecordId: SOURCE_ID,
@@ -196,6 +189,20 @@ test('durable STAGING reconstruction verifies paged payload rows and returns an 
     stagingRun,
     [Object.freeze({ ...exactRevision, rawPayload: serializeRawPayload(payload('Changed')) })],
   ), false);
+});
+
+test('durable resume validates joined snapshot captured_at without a separate snapshot request', async () => {
+  const f = fixture({ runState: 'STAGING', snapshotCapturedAt: 'invalid-timestamp' });
+  await assert.rejects(
+    () => reconstructInitialBootstrapDurableObservation(
+      f.reader,
+      run({ state: 'STAGING' }),
+      evidence(),
+    ),
+    (error) => error instanceof InitialStaleValidatedHistoricalCandidateError
+      && error.code === 'SNAPSHOT_EVIDENCE_INVALID',
+  );
+  assert.equal(f.reads.length, 1);
 });
 
 test('large durable reconstruction streams one indexed payload scan without a duplicate metadata pass', async () => {
@@ -237,20 +244,13 @@ test('large durable reconstruction streams one indexed payload scan without a du
     snapshot_digest: SNAPSHOT_DIGEST,
     snapshot_row_count: BigInt(rowCount),
   };
-  const snapshotRow = {
-    captured_at: new Date(CAPTURED_AT),
-    snapshot_digest: SNAPSHOT_DIGEST,
-    row_count: BigInt(rowCount),
-  };
+  manifestRow.snapshot_captured_at = new Date(CAPTURED_AT);
   const statements = [];
   const reader = Object.freeze({
     async read(statement) {
       statements.push(statement);
       if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) {
         return { rows: [manifestRow] };
-      }
-      if (statement.text.includes('FROM source_snapshots WHERE id = $id')) {
-        return { rows: [snapshotRow] };
       }
       if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
         return { rows: revisionPage(statement, revisionRows) };
@@ -304,7 +304,7 @@ test('reconstructs exact historical candidate from durable evidence without any 
   assert.equal(result.verifiedPlan.transactions.length, 1);
   assert.equal(result.verifiedPlan.transactions[0].transactionId, TRANSACTION_ID);
   assert.equal(result.verifiedPlan.transactions[0].transaction.amountMinor, 1234);
-  assert.equal(f.reads.length, 3);
+  assert.equal(f.reads.length, 2);
   assert.equal(f.reads.some((sql) => /google|sheets/i.test(sql)), false);
 });
 

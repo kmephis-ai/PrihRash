@@ -199,11 +199,7 @@ test('durable reconstruction proof prevents a redundant second exact revision sc
     run_snapshot_digest: 'synthetic-snapshot',
     snapshot_digest: 'synthetic-snapshot',
     snapshot_row_count: 1n,
-  };
-  const snapshotRow = {
-    captured_at: new Date(OBSERVED),
-    snapshot_digest: 'synthetic-snapshot',
-    row_count: 1n,
+    snapshot_captured_at: new Date(OBSERVED),
   };
   const revisionRow = {
     source_record_id: SOURCE,
@@ -218,7 +214,6 @@ test('durable reconstruction proof prevents a redundant second exact revision sc
   const reconstructionReader = Object.freeze({
     async read(statement) {
       if (statement.text.includes('FROM initial_bootstrap_identity_manifests AS m')) return { rows: [manifestRow] };
-      if (statement.text.includes('FROM source_snapshots WHERE id = $id')) return { rows: [snapshotRow] };
       if (statement.text.includes('VIEW idx_source_record_revisions_run_revision')) {
         return { rows: [revisionRow] };
       }

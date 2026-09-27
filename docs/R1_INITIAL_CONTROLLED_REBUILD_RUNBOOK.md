@@ -540,6 +540,12 @@ wait, and adapts the following page limit to the largest observed row while keep
 financial/write behavior. The first page is deliberately tiny; unknown extra evidence remains
 fail-closed and the cursor still exhausts the run-scoped index.
 
+The same historical reconstruction already obtains `snapshot_captured_at`, `snapshot_digest` and
+`snapshot_row_count` from the identity-manifest JOIN. This change also removes its redundant second
+primary-key `source_snapshots` read and continues to normalize/validate the joined timestamp and
+the exact digest/count/lifecycle invariants before revision proof. Missing or malformed joined
+evidence remains fail-closed.
+
 After merge, permit at most one fresh exact-main controlled-preparation-only read-only probe to
 verify the precise `REVISION_EVIDENCE_PREPARATION` / `RESOURCE_EXHAUSTED` cause is resolved. Any
 non-PASS is followed only by required full read-only recovery; no same-SHA replay, WU7, quota change,

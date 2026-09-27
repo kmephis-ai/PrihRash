@@ -52,12 +52,6 @@ export class InitialStaleValidatedHistoricalCandidateError extends Error {
   }
 }
 
-interface SnapshotRow {
-  readonly captured_at?: unknown;
-  readonly snapshot_digest?: unknown;
-  readonly row_count?: unknown;
-}
-
 interface RevisionRow {
   readonly source_record_id?: unknown;
   readonly revision?: unknown;
@@ -216,30 +210,9 @@ function revisionPayloadPageStatement(
   );
 }
 
-function snapshotStatement(snapshotId: string) {
-  return readStatement(
-    'SELECT captured_at, CAST(snapshot_digest AS Utf8) AS snapshot_digest, row_count '
-      + 'FROM source_snapshots WHERE id = $id',
-    { id: uuidParameter(snapshotId) },
-  );
-}
-
-function parseSnapshot(
-  rows: readonly Readonly<SnapshotRow>[],
-  expectedDigest: string,
-  expectedRowCount: number,
-): string {
-  if (rows.length !== 1) {
-    throw new InitialStaleValidatedHistoricalCandidateError('SNAPSHOT_EVIDENCE_INVALID');
-  }
-  const row = rows[0];
-  const capturedAt = normalizeYdbTimestampReadback(row?.captured_at);
-  if (
-    row === undefined
-    || capturedAt === null
-    || row.snapshot_digest !== expectedDigest
-    || integer(row.row_count, 0) !== expectedRowCount
-  ) {
+function parseSnapshotCapturedAt(value: unknown): string {
+  const capturedAt = normalizeYdbTimestampReadback(value);
+  if (capturedAt === null) {
     throw new InitialStaleValidatedHistoricalCandidateError('SNAPSHOT_EVIDENCE_INVALID');
   }
   return capturedAt;
@@ -431,8 +404,7 @@ export async function reconstructInitialBootstrapDurableObservation(
   } catch {
     // Diagnostic callbacks cannot change historical reconstruction semantics.
   }
-  const snapshotResult = await reader.read<SnapshotRow>(snapshotStatement(readback.manifest.sourceSnapshotId));
-  const capturedAt = parseSnapshot(snapshotResult.rows, run.sourceSnapshotDigest, run.rowsSeen);
+  const capturedAt = parseSnapshotCapturedAt(readback.snapshotCapturedAt);
   historicalEvidence.assertCompatibleRowCount(run.rowsSeen);
 
   const expectedBySource = new Map(readback.manifest.bindings.map((binding) => [
@@ -512,8 +484,7 @@ export async function reconstructInitialStaleValidatedHistoricalCandidate(
     throw new InitialStaleValidatedHistoricalCandidateError('MANIFEST_EVIDENCE_INVALID');
   }
 
-  const snapshotResult = await reader.read<SnapshotRow>(snapshotStatement(readback.manifest.sourceSnapshotId));
-  const capturedAt = parseSnapshot(snapshotResult.rows, run.sourceSnapshotDigest, run.rowsSeen);
+  const capturedAt = parseSnapshotCapturedAt(readback.snapshotCapturedAt);
   historicalEvidence.assertCompatibleRowCount(run.rowsSeen);
 
   const expectedBySource = new Map(readback.manifest.bindings.map((binding) => [
