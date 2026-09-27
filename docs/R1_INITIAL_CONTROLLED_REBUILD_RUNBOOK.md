@@ -703,3 +703,27 @@ does not measure actual RU or prove a specific root cause. Mandatory full read-o
 one-shot is consumed. No further controlled-preparation probe or WU7 invoke is armed. `COMMITTED`
 baseline remains unproven; #832/#833 stay closed as consumed. Google remains authoritative; YDB
 remains shadow; timer/cutover/production Writer remain forbidden.
+
+## Incident-M completion route: stale STAGING retirement before fresh bootstrap
+
+Post-#836 evidence localized the stale historical reconstruction failure to
+`REVISION_EVIDENCE_PREPARATION / RESOURCE_EXHAUSTED` after multiple successful indexed pages.
+The stale-STAGING retirement contract already exists and independently proves all retirement
+preconditions, but the Function wrapper previously attempted that bounded retirement only when
+the surfaced semantic failure phase was exactly `RESUME_CONTEXT_READ`. More precise phase
+observation therefore skipped the retirement path and kept scanning obsolete historical revisions.
+
+For the R1 completion Incident-M, `REFERENCE_APPLICATION_SEMANTIC_FAILED` may enter the existing
+one-shot stale-STAGING retirement fallback from either `RESUME_CONTEXT_READ` or
+`REVISION_EVIDENCE_PREPARATION`. This does not weaken the retirement gate: the retirement job must
+still independently prove one incomplete `STAGING`, no `COMMITTED` baseline,
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`, exact empty verified current, and an exact optimistic
+`STAGING -> FAILED` lifecycle read-back. Snapshot/manifest/revision evidence stays immutable for audit.
+A refusal or ambiguous lifecycle outcome stays fail-closed and no fresh bootstrap retry occurs.
+
+After exact terminalization, the wrapper performs at most one fresh bootstrap attempt from a newly
+captured authoritative Google observation. Google remains mutable and authoritative; changes after
+that immutable cutoff belong to canonical incremental catch-up rather than bootstrap restart.
+The completion target is `INITIAL_BOOTSTRAP_COMMITTED`; any other write-capable non-success enters
+mandatory read-only recovery. No second retirement, third bootstrap attempt, blind replay, timer,
+cutover, or production Writer is authorized by this route.
