@@ -216,9 +216,20 @@ test('PR-847 changeset gate stop preserves Owner authority and permits only a cl
   assert.ok(evidence, 'the PR-847 pre-dispatch result and no-provider boundary must be retained');
   assert.match(evidence, /`R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`/);
   assert.match(evidence, /no provider state was read/);
-  assert.match(evidence, /successor changeset guard now accepts either a marker-only caller correction/);
+  assert.match(evidence, /successor changeset guard accepts either a marker-only caller correction/);
   assert.match(evidence, /classifier\/root-cause correction/);
-  assert.match(evidence, /Owner-authorized\s+version\/tag-window\s+classification remains unconsumed/);
+  assert.match(evidence, /Owner-authorized\s+version\/tag-window\s+classification remained unconsumed/);
+});
+
+test('PR-848 read-only diagnostic failure is recorded as consumed and arms only classifier refinement', () => {
+  const evidence = runbook.match(
+    /### PR #848 exact-run read-only classifier completed with diagnostic failure on `2052041417e58ac7d183a2eaca0b63d3ec0b815f`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact provider read-only result must be recorded');
+  assert.match(evidence, /published only\s+`DIAGNOSTIC_FAILED`/);
+  assert.match(evidence, /probe is consumed/);
+  assert.match(evidence, /No Function version\s+was created or invoked/);
+  assert.match(evidence, /does not infer which condition occurred/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
