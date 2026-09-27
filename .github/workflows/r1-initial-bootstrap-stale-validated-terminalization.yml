@@ -130,13 +130,6 @@ jobs:
           source-sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
-      - name: Build Gate B-only package
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run build --silent
-          npm run package:initial-bootstrap-stale-validated-terminalization:from-build --silent
-
       - name: Install Yandex Cloud CLI
         shell: bash
         run: |

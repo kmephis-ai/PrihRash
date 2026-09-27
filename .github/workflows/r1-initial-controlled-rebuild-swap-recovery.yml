@@ -129,11 +129,6 @@ jobs:
         with:
           source-sha: ${{ github.sha }}
           github-token: ${{ github.token }}
-      - name: Build diagnostic package
-        run: |
-          npm run build --silent
-          npm run package:initial-controlled-rebuild:from-build
-
       - name: Install Yandex Cloud CLI
         shell: bash
         run: |

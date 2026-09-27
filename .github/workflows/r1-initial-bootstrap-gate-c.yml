@@ -220,13 +220,6 @@ jobs:
           state="$(curl --fail --silent --show-error -H "$h" -H 'Accept: application/vnd.github+json' "$api/issues/${TRACKING_ISSUE}" | jq -er '.state')"
           test "$state" = open || { echo GATE_C_AUTHORITY_REVOKED_BEFORE_PROVIDER; exit 1; }
 
-      - name: Build reviewed bootstrap package with Gate C entrypoint
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run build --silent
-          npm run package:initial-bootstrap:from-build --silent
-
       - name: Install Yandex Cloud CLI
         shell: bash
         run: |

@@ -24,7 +24,8 @@ test('swap recovery surface is manual exact-main WU7 only', async () => {
 
 test('swap recovery deploy exposes read-only diagnostic handler with exact-source reconstruction secrets', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild-swap-recovery.yml');
-  assert.match(workflow, /Build diagnostic package[\s\S]*npm run build --silent[\s\S]*npm run package:initial-controlled-rebuild:from-build/);
+  assert.match(workflow, /restore-exact-source/);
+  assert.doesNotMatch(workflow, /npm run build|npm run package:initial-controlled-rebuild:from-build/);
   assert.match(workflow, /--entrypoint index\.initialControlledRebuildSwapRecoveryDiagnosticHandler/);
   assert.match(workflow, /--tags r1-initial-controlled-rebuild-swap-recovery/);
   assert.match(workflow, /PRIHRASH_GOOGLE_SPREADSHEET_ID/);
