@@ -684,3 +684,22 @@ After merge, exactly one new exact-main controlled-preparation-only read may col
 On non-PASS, run only the required full read-only recovery, then stop. This diagnostic cycle does not
 reopen #832/#833, authorize another controlled invoke or cap change, or prove a `COMMITTED` baseline.
 Google remains authoritative; YDB remains shadow; timer/cutover/production Writer remain forbidden.
+
+### #836 coarse historical-page diagnostic outcome
+
+On exact main `415ad96f9ecbc3cab8d89b269e58c2efb823138a`, post-merge CI `36323060619` and Browser
+Quality `36323060609` passed. The one Owner-authorized read-only probe `36323260628` reported:
+
+- durable state `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- `YDB_DATA_QUERY_EXECUTION_FAILED`, `GRPC_STATUS / RESOURCE_EXHAUSTED`, retry `RETRIED`;
+- application phase `REVISION_EVIDENCE_PREPARATION`;
+- historical revision page progress `AFTER_FIVE_OR_MORE_PAGES`;
+- pre-read RU estimate `LT_10_RU`;
+- reference snapshot validated; reconciliation stage, metadata scan cost and revision payload batch `UNOBSERVED`.
+
+Thus the failing request followed multiple completed pages and had a local estimate below 10 RU; this
+does not measure actual RU or prove a specific root cause. Mandatory full read-only recovery
+`36323562883` again classified `RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. The #836 diagnostic
+one-shot is consumed. No further controlled-preparation probe or WU7 invoke is armed. `COMMITTED`
+baseline remains unproven; #832/#833 stay closed as consumed. Google remains authoritative; YDB
+remains shadow; timer/cutover/production Writer remain forbidden.
