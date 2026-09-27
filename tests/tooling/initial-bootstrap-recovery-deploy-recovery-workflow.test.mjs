@@ -26,7 +26,8 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /yc serverless function list-operations/);
   assert.match(workflow, /yc serverless function version get-by-tag/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
-  assert.match(workflow, /CREATE_OPERATION_NOT_OBSERVED\|CREATE_OPERATION_AMBIGUOUS/);
+  assert.match(workflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS/);
+  assert.match(workflow, /RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT\|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW/);
   assert.match(workflow, /r1-initial-bootstrap-recovery-deploy-evidence-/);
   assert.match(workflow, /actions\/upload-artifact@/);
   assert.doesNotMatch(workflow, /yc serverless function version create/);

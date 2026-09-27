@@ -3,12 +3,15 @@ import { pathToFileURL } from 'node:url';
 
 const ENUMS = new Set([
   'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
-  'CREATE_OPERATION_NOT_OBSERVED',
   'CREATE_OPERATION_AMBIGUOUS',
   'CREATE_OPERATION_IN_PROGRESS',
   'CREATE_OPERATION_FAILED',
   'CREATED_VERSION_NOT_PROVEN',
   'EXACT_RECOVERY_VERSION_CREATED',
+  'RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT',
+  'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  'RECOVERY_TAGGED_VERSION_AMBIGUOUS',
+  'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN',
   'DIAGNOSTIC_FAILED',
 ]);
 
@@ -60,7 +63,32 @@ export function classifyRecoveryFunctionDeployOutcome({
         && createdAt >= lowerBound
         && createdAt <= upperBound;
     });
-    if (matchingOperations.length === 0) return 'CREATE_OPERATION_NOT_OBSERVED';
+    if (matchingOperations.length === 0) {
+      const taggedCandidates = [];
+      for (const version of versions) {
+        if (!object(version) || !Array.isArray(version.tags)) return 'DIAGNOSTIC_FAILED';
+        const createdAt = timestamp(version.created_at);
+        if (createdAt === null) return 'DIAGNOSTIC_FAILED';
+        if (
+          version.tags.includes('r1-initial-bootstrap-recovery')
+          && createdAt >= lowerBound
+          && createdAt <= upperBound
+        ) taggedCandidates.push(version);
+      }
+      if (taggedCandidates.length === 0) return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
+      if (taggedCandidates.length > 1) return 'RECOVERY_TAGGED_VERSION_AMBIGUOUS';
+
+      const [candidate] = taggedCandidates;
+      if (
+        !object(taggedVersion)
+        || candidate.id !== taggedVersion.id
+        || taggedVersion.status !== 'ACTIVE'
+        || taggedVersion.runtime !== 'nodejs22'
+        || taggedVersion.entrypoint !== 'index.initialBootstrapRecoveryHandler'
+        || taggedVersion.serviceAccountId !== deploymentServiceAccountId
+      ) return 'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN';
+      return 'RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT';
+    }
     if (matchingOperations.length > 1) return 'CREATE_OPERATION_AMBIGUOUS';
 
     const [operation] = matchingOperations;

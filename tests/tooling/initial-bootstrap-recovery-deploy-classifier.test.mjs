@@ -64,8 +64,12 @@ test('recovery deploy classifier proves only a unique exact version correlated t
 
 test('recovery deploy classifier distinguishes missing, ambiguous, pending, and failed operations', () => {
   assert.equal(
-    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [] })),
-    'CREATE_OPERATION_NOT_OBSERVED',
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'older-version', tags: ['r1-initial-bootstrap-recovery'], created_at: '2026-09-27T18:40:00Z' }],
+      taggedVersion: { id: 'older-version' },
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
@@ -84,6 +88,38 @@ test('recovery deploy classifier distinguishes missing, ambiguous, pending, and 
       operations: [{ ...exactEvidence().operations[0], error: { code: 3 } }],
     })),
     'CREATE_OPERATION_FAILED',
+  );
+});
+
+test('recovery deploy classifier uses bounded version/tag evidence when no operation matches without declaring APPLIED or NOT_APPLIED', () => {
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [] })),
+    'RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ id: 'older-version', tags: ['r1-initial-bootstrap-recovery'], created_at: '2026-09-27T18:40:00Z' }],
+      taggedVersion: { id: 'older-version' },
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [
+        ...exactEvidence().versions,
+        { ...exactEvidence().versions[0], id: 'second-version' },
+      ],
+    })),
+    'RECOVERY_TAGGED_VERSION_AMBIGUOUS',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      taggedVersion: { ...exactEvidence().taggedVersion, id: 'different-version' },
+    })),
+    'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN',
   );
 });
 

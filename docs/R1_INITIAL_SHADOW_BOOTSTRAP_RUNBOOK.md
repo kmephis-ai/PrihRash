@@ -1500,7 +1500,31 @@ metadata classification for the same failed run on a new exact-main SHA. It uses
 `READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION` marker with the exact `Recovery-Run-ID` and remains
 `Provider-Attempt: NOT_AUTHORIZED`. The autocontinue now re-proves the failed deploy/skipped invoke
 phase before dispatch. This does not re-run the failed deploy and does not invoke Function, Google or
-YDB; if the corrected classification is still missing/ambiguous, stop for another causal decision.
+YDB. Each subsequent refinement must follow the standing delegation in `AGENTS.md` and
+`docs/R1_COMPLETION_SPRINT.md`: new exact SHA, changed diagnostic discriminator, synthetic fixture and
+the exact failed-run/phase guards. Same-query blind replay remains prohibited; write paths remain
+disarmed.
+
+Owner's standing R1 probe delegation permits one next exact-main diagnostic because PR #845 added a
+new read-only discriminator for the proven `CREATE_OPERATION_NOT_OBSERVED` result. The classifier now
+also evaluates the already-read version-list/tag evidence within the exact failed run's bounded
+time window. It may emit `RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT`,
+`RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`, `RECOVERY_TAGGED_VERSION_AMBIGUOUS`, or
+`RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN`; none of these declare `APPLIED`/`NOT_APPLIED` or authorize
+Function invocation. This probe reads only Function metadata/operations and does not invoke Function,
+read Google or access YDB; it still proves the exact failed run phase before dispatch. Same SHA and
+unchanged query/code replay remain forbidden.
+
+This additional probe's marker selects only the same failed run:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs
+```
 
 ### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`
 
