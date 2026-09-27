@@ -192,7 +192,21 @@ test('owner probe authority permits only one new-SHA metadata reclassification a
   assert.match(evidence, /one additional full provider\s+metadata classification for the same failed run on a new exact-main SHA/);
   assert.match(evidence, /`Provider-Attempt: NOT_AUTHORIZED`/);
   assert.match(evidence, /does not\s+re-run the failed deploy and does not invoke Function, Google or\s+YDB/);
-  assert.match(evidence, /if the corrected classification is still missing\/ambiguous, stop/);
+  assert.match(evidence, /Each subsequent refinement must follow the standing delegation/);
+  assert.match(evidence, /Same-query blind replay remains prohibited/);
+});
+
+test('owner-delegated follow-up distinguishes recovery-tagged version candidates without inferring application', () => {
+  const evidence = runbook.match(
+    /Owner's standing R1 probe delegation permits one next exact-main diagnostic([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the bounded post-parser read-only probe must be documented');
+  assert.match(evidence, /`CREATE_OPERATION_NOT_OBSERVED`/);
+  assert.match(evidence, /`RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT`/);
+  assert.match(evidence, /`RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`/);
+  assert.match(evidence, /none of these declare `APPLIED`\/`NOT_APPLIED`/);
+  assert.match(evidence, /does not invoke Function,\s+read Google or access YDB/);
+  assert.match(evidence, /Regression-Test: tests\/tooling\/initial-bootstrap-recovery-deploy-classifier\.test\.mjs/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
