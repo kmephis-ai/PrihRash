@@ -1468,7 +1468,7 @@ Recovery-Probe: READY
 Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION
 Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
 Recovery-Run-ID: 36341844854
-Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs
 ```
 
 The missing causal run propagation and optional empty Function environment value are corrected in
@@ -1476,3 +1476,31 @@ repository code, but are not evidence of why Yandex rejected the failed create. 
 deploy or Function invoke requires fresh deployment classification and a new causal decision. No
 bootstrap/orchestrator, staging resume/retirement, cleanup, timer or authority change follows from this
 failure.
+
+### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`
+
+Exact-main CI, Browser Quality and CodeQL passed after PR #841. Recovery autocontinue `36344477909`
+verified the single merged R1 PR and parsed its read-only deployment-classification marker, but stopped
+before dispatch with `R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID`. The marker's
+Regression-Test path included a nonexistent `r1-` prefix; the actual added test is
+`tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs`. No
+`R1 initial bootstrap recovery deploy recovery` run was created, and no Yandex provider query, deploy,
+Function invoke, Google read or YDB read/write occurred.
+
+The successor corrects the marker to the exact existing regression path and makes the changeset guard
+require the autocontinue caller workflow, its test, `AGENTS.md`, and this runbook. This repairs the
+pre-dispatch gate only; it does not change provider classification or authorize a deployment. Since
+the read-only classification did not reach the provider, exactly one retry of that same read-only
+classification for failed recovery run `36341844854` may be requested on a new exact-main SHA. The
+write-capable bootstrap/recovery deploy and invoke paths remain disarmed.
+
+The successor PR carries one read-only marker:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs
+```

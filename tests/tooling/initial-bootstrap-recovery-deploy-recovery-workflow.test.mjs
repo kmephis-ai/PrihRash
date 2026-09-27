@@ -44,4 +44,6 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID/);
   assert.match(autocontinue, /any\(\.\[]; \.filename == \$test and \.status != "removed"\)/);
+  assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml/);
+  assert.doesNotMatch(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml" and \.status != "removed"/);
 });
