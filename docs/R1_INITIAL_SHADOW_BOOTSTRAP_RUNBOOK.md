@@ -1601,3 +1601,9 @@ classifier inputs, malformed version-list entries, invalid metadata JSON, and un
 classifier errors as separate enum-only diagnostics. It does not infer which condition occurred in
 `36356312191`; it enables a new-SHA, exact-run read-only refinement only after synthetic regression
 coverage and fresh exact-main gates.
+
+### PR #849 read-only refinement isolated version-list entry metadata on `853413ce3cff72923e4d76476a2ad6953e176d04`
+
+PR #849 passed exact-main CI, Browser Quality and CodeQL; post-merge checks on main `853413ce3cff72923e4d76476a2ad6953e176d04` also passed. Recovery autocontinue `36357377893` passed the exact failed-run and phase gates and dispatched one metadata-only classification. Recovery workflow `36357395136` completed and published only `RECOVERY_VERSION_LIST_ENTRY_INVALID` after reading Function version/operation metadata. It does not determine which record field was malformed and does not classify deploy application state. No Function version was created or invoked; Google/YDB, cleanup and replay were not accessed.
+
+The next repository-only discriminator splits the known invalid-entry branch into non-object entry, tag-array shape and timestamp shape enums with synthetic fixtures. Unknown or malformed metadata remains fail-closed; no aliases or payload output are added. A new exact-SHA read-only refinement for failed run `36341844854` is the only permitted provider continuation after the correction passes all gates.

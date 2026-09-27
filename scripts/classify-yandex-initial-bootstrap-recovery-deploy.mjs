@@ -14,7 +14,9 @@ const ENUMS = new Set([
   'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN',
   'DIAGNOSTIC_FAILED',
   'RECOVERY_DEPLOY_INPUT_INVALID',
-  'RECOVERY_VERSION_LIST_ENTRY_INVALID',
+  'RECOVERY_VERSION_ENTRY_INVALID',
+  'RECOVERY_VERSION_TAGS_INVALID',
+  'RECOVERY_VERSION_TIMESTAMP_INVALID',
   'RECOVERY_METADATA_JSON_INVALID',
   'RECOVERY_CLASSIFIER_INTERNAL_ERROR',
 ]);
@@ -70,9 +72,10 @@ export function classifyRecoveryFunctionDeployOutcome({
     if (matchingOperations.length === 0) {
       const taggedCandidates = [];
       for (const version of versions) {
-        if (!object(version) || !Array.isArray(version.tags)) return 'RECOVERY_VERSION_LIST_ENTRY_INVALID';
+        if (!object(version)) return 'RECOVERY_VERSION_ENTRY_INVALID';
+        if (!Array.isArray(version.tags)) return 'RECOVERY_VERSION_TAGS_INVALID';
         const createdAt = timestamp(version.created_at);
-        if (createdAt === null) return 'RECOVERY_VERSION_LIST_ENTRY_INVALID';
+        if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
         if (
           version.tags.includes('r1-initial-bootstrap-recovery')
           && createdAt >= lowerBound
