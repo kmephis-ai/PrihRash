@@ -37,6 +37,23 @@ test('post-#825 non-PASS records consumed probe and keeps provider writes disarm
   assert.match(evidence, /no verified `COMMITTED` baseline is proven/);
 });
 
+test('post-#830 invoke-shape fix accepts only the existing revision-preparation enum without arming replay', async () => {
+  const runbook = await read('docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md');
+  const evidence = runbook.match(
+    /### Post-#830 invoke-result classification correction([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the consumed one-shot result and repository-only phase fix must be recorded');
+  assert.match(evidence, /`36299572884`/);
+  assert.match(evidence, /`INITIAL_CONTROLLED_REBUILD_INVOKE_OUTPUT_INVALID`/);
+  assert.match(evidence, /`LOG_READ_FAILED`/);
+  assert.match(evidence, /`36299761011`/);
+  assert.match(evidence, /`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`/);
+  assert.match(evidence, /`REVISION_EVIDENCE_PREPARATION`/);
+  assert.match(evidence, /does not arm another provider attempt/);
+  assert.match(evidence, /fresh exact-main\/recovery\/readiness gates and separate authority/);
+});
+
 test('R1 controlled rebuild binds exact recovery and readiness artifacts before provider mutation', async () => {
   const workflow = await read('.github/workflows/r1-initial-controlled-rebuild.yml');
   const recoveryGate = workflow.indexOf('Prove exact safe resumable recovery and READINESS_READY evidence');
@@ -139,6 +156,7 @@ test('controlled rebuild invokes synchronously once and requires exact COMMITTED
   assert.equal(ydbSubtypeGuards.length >= 4, true);
   assert.match(await read('src/runtime/initialControlledRebuildJob.ts'), /error instanceof YdbJsV6DataTransportError \? error\.code : null/);
   assert.match(workflow, /ADMISSION_READ[\s\S]*RESUME_CONTEXT_READ[\s\S]*RESUME_IDENTITY_MANIFEST_READ[\s\S]*RESUME_SNAPSHOT_READ[\s\S]*CURRENT_WRITE_PREPARATION/);
+  assert.match(workflow, /RESUME_CONTEXT_PREPARATION[\s\S]*REVISION_EVIDENCE_PREPARATION[\s\S]*LINEAGE_PREPARATION/);
   const reconciliationGuards = workflow.match(/\.bootstrapPhase \| IN\([^)]*"RECONCILIATION_READ"/g) ?? [];
   assert.equal(reconciliationGuards.length, 2);
   assert.match(workflow, /MODULE_LOAD_FAILED[\s\S]*HANDLER_UNCAUGHT/);
