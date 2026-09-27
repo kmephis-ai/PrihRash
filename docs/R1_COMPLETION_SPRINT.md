@@ -65,6 +65,31 @@ Same-SHA replay запрещён.
 Provider attempts не являются способом собирать telemetry. Telemetry должна быть собрана
 настолько полно, насколько разумно, в рамках causal PR и его единственного attempt.
 
+## Постоянная делегация Owner до завершения R1
+
+Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,
+необходимые для доказательства completion target ниже. Не запрашивать Owner confirmation для каждой
+causal hypothesis, явно разрешённого read-only probe, root-cause PR или one-shot provider action,
+уже разрешённых существующими exact-main/marker/readiness/circuit gates. После fresh reconciliation
+provider и Issue state выбрать следующий безопасный шаг и записать его в active R1 tracking Issue.
+
+Эта постоянная делегация не обходит `AGENTS.md`, `MIGRATION_CONTRACT`, exact-main/CI/readiness,
+single-writer, signature/circuit, fail-closed, privacy, financial invariants или обязательный recovery.
+Неизвестное состояние остаётся неизвестным: нельзя предполагать `APPLIED`/`NOT_APPLIED`, выполнять
+blind replay, cleanup или угадывать финансовые переходы. При ambiguous state разрешены только
+stage-appropriate read-only classification и воспроизводимая repository root-cause работа. CUTOVER,
+timer activation, YDB-authoritative production Writer, Google mutations/authority switch, `MEMBER`
+activation, cap/IAM widening и retirement неоднозначных данных остаются вне делегации. Она
+завершается только после доказательства R1 baseline, independent reconciliation, требуемого catch-up
+и retirement временной R1 authority.
+
+В пределах делегации разрешено без новых Owner confirmation продолжать bounded read-only diagnostic
+refinement, в том числе для одного ранее неизвестного provider outcome, если каждый следующий probe
+привязан к новому exact SHA и к новой causal гипотезе/изменённому diagnostic discriminator с
+synthetic regression fixture. Same-SHA или неизменённый query повторять запрещено. Read-only probes
+не увеличивают write-attempt circuit и не разрешают deploy/invoke; write-capable action по-прежнему
+требует своего exact machine marker, CI/readiness, cause fix и mandatory recovery.
+
 ## Живой Google source
 
 R1 не требует source freeze. Пользователь продолжает обычные записи в Google Sheets.

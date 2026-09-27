@@ -177,14 +177,15 @@ Function, не вызывает Function/YDB и не разрешает след
 новый causal root-cause decision. Отсутствующее/неоднозначное provider evidence остаётся
 `RECOVERY_REQUIRED`; никаких inferred `NOT_APPLIED` или replay.
 
-Если Owner отдельно разрешил read-only probes для R1 и это разрешение внесено в активный tracking
-Issue, разрешён один дополнительный exact-main read-only классификатор для того же failed recovery
-run после repository-only изменения самого classifier. Такой successor обязан подтвердить exact
-latest failed run, failed deploy step, skipped invoke step, использовать новый exact SHA и сохранять
-`Provider-Attempt: NOT_AUTHORIZED`. Это исключение разрешает только новый read-only metadata query;
-никаких deploy/invoke/replay/cleanup/authority changes оно не разрешает. Если свежая классификация
-остаётся missing/ambiguous, дальнейший шаг снова требует отдельного causal decision; blind diagnostic
-replay запрещён.
+Standing delegation из §8.3 разрешает автономно выбирать и выполнять последующие stage-appropriate
+read-only probes без нового per-probe Owner confirmation. Для того же failed recovery run после
+`missing`/`ambiguous` probe каждый successor требует нового exact SHA и новой repository causal
+гипотезы/diagnostic discriminator с synthetic regression fixture. Run ID и failed phase остаются
+exact-bound; PR использует `Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY` и allowlisted
+stage-specific transition. Повтор неизменённого query/кода, same-SHA replay или telemetry-only blind
+replay запрещены. Любое количество таких read-only refinement cycles не увеличивает write-attempt
+circuit и не разрешает deploy/invoke/replay/cleanup/authority changes. Если enum всё ещё missing или
+ambiguous, меняй причинную гипотезу и продолжавай только с read-only/repository-only actions.
 
 ### 8.2. R1 completion sprint и multi-agent handoff
 
@@ -205,6 +206,29 @@ micro-PR ради отдельных enum/telemetry строк. Один merged 
 При смене ChatGPT ↔ OpenCode новый агент делает minimal fresh reconciliation, читает exact
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.
+
+### 8.3. Постоянная делегация Owner до завершения R1
+
+Owner делегирует агенту автономно принимать и выполнять все repository/process/provider решения,
+необходимые для завершения R1, пока completion target из `docs/R1_COMPLETION_SPRINT.md` не доказан.
+Не запрашивать Owner confirmation для каждого следующего causal гипотезы, разрешённого read-only
+probe, root-cause PR, gated initial/bootstrap/controlled-rebuild попытки или их обязательного recovery;
+после свежей reconciliation выбирать следующий безопасный шаг самостоятельно и отражать решение в
+active tracking Issue.
+
+Делегация разрешает использовать уже описанные R1 one-shot write/recovery paths только при их точных
+Issue/PR/marker/exact-main/CI/readiness/circuit/provider gates. Она не ослабляет fail-closed, financial
+semantics, `MIGRATION_CONTRACT`, LIVE-MUTABLE-SOURCE, privacy, single-writer, no blind/same-SHA replay,
+exact failed-run identity/phase checks или обязательный read-back. `COMMITTED` требует независимой
+reconciliation; неизвестный/неоднозначный provider outcome не становится `APPLIED`/`NOT_APPLIED` по
+догадке. При ambiguous state разрешены только stage-appropriate read-only classification probes и
+reproducible repository root-cause work; никакого inferred cleanup/retirement.
+
+Эта делегация не включает CUTOVER, timer activation, YDB-authoritative production Writer, Google
+mutation/authority switch, `MEMBER` activation, cap/IAM widening или отмену resource retirement.
+Они остаются вне R1 completion target и требуют своих отдельных gates. Все временные R1 permissions,
+workflow/autocontinue surfaces и delegated authority retires после доказанного initial
+`COMMITTED` + required catch-up/reconciliation completion.
 
 ## 9. CI
 
