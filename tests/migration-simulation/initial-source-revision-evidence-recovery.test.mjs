@@ -342,7 +342,7 @@ test('RU pacing preserves a one-unit CPU margin under the verified 10-RU/s basel
   );
 });
 
-test('RU pacer accounts for time spent in the preceding query instead of adding a full batch delay', async () => {
+test('RU pacer spends only a bounded idle burst, then refills at the verified 10 RU/s rate', async () => {
   let now = 0;
   const waits = [];
   const pacer = createInitialSourceRevisionEvidenceReadBudgetWaiter(
@@ -353,13 +353,24 @@ test('RU pacer accounts for time spent in the preceding query instead of adding 
     },
   );
 
-  await pacer(8);
+  for (let index = 0; index < 250; index += 1) await pacer(9);
+  assert.deepEqual(waits, []);
+
+  await pacer(9);
+  assert.deepEqual(waits, [1_000]);
+
   now += 400;
   await pacer(8);
-  now += 1_000;
-  await pacer(1);
+  assert.deepEqual(waits, [1_000, 500]);
+});
 
-  assert.deepEqual(waits, [900, 500]);
+test('RU pacer rejects a single request larger than the maximum five-minute burst', async () => {
+  const pacer = createInitialSourceRevisionEvidenceReadBudgetWaiter(() => 0, async () => {});
+  await assert.rejects(
+    pacer(3_000),
+    (error) => error instanceof InitialSourceRevisionEvidenceRecoveryError
+      && error.code === 'INVALID_EXPECTED_REVISION',
+  );
 });
 
 test('revision cursor follows YDB UUID ordering without client-side comparison and classifies an oversized row locally', async () => {

@@ -484,3 +484,26 @@ missing/cross-run fail-closed behavior, provider UUID ordering and RU wait calls
 at most one fresh exact-main `controlled_preparation_only` read-only probe can determine whether
 the single-pass change resolves the historical `REVISION_PAYLOAD_BATCH` resource failure. It does
 not authorize WU7, quota changes, retirement, cleanup, bootstrap, timer, cutover or production Writer.
+
+### #822 candidate: spend bounded accumulated RU before waiting for refill
+
+The fresh single-pass diagnostic `36286846326` on exact main `4a9a4ff96b584e6dab08c3b2c5b0bfc76e9282f6`
+passed the recovery-only deployment and exact-main gates, then ended after the 600-second Function
+envelope as `INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`, without an enum artifact. Mandatory fresh
+read-only recovery `36287561898` still found the same durable STAGING and current source digest
+mismatch. Because the timed-out invocation emitted no stage evidence, its last application stage is
+unknown; do not claim that it reached or completed the revision cursor scan.
+
+The remaining repository-only hypothesis is narrower: the revision reader spaces every request as
+if only the steady 10 RU/s refill were available, even though YDB Serverless can retain up to five
+minutes of unused RU. For the 10 RU/s configured limit, the theoretical accumulated budget is at
+most 3,000 RU. The candidate waiter models that bucket, starts with a conservative 2,500 RU allowance
+(holding 500 RU aside for earlier preparation/reference reads), charges estimated I/O plus one CPU
+RU per query, and refills no faster than 10 RU/s up to the 3,000 RU ceiling. It changes no provider
+limit, timeout, retry, financial state, or write authority. If actual available RU is lower, the
+existing YDB transport/retry path remains fail-closed and any non-PASS diagnostic ends the probe.
+
+After merge, allow at most one fresh exact-main controlled-preparation-only read-only probe. Require
+an enum artifact proving the existing durable revision and current-source checks reach `READY`; a
+timeout/non-PASS remains unclassified and cannot arm another probe, WU7, cap changes, retirement,
+cleanup, bootstrap or authority changes without a separately established safe boundary.
