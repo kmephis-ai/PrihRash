@@ -1493,6 +1493,15 @@ field contracts and splits future diagnostics into `CREATE_OPERATION_NOT_OBSERVE
 fixtures cover each spelling and each cardinality. This correction is repository-only; it consumes no
 additional provider classification for run `36341844854`, whose outcome remains unknown.
 
+Owner subsequently authorized read-only probes across R1, recorded in active Issue #630. Because the
+previous classifier ran before this repository-only metadata-shape correction and its enum conflated
+zero/multiple operation matches, that authorization permits exactly one additional full provider
+metadata classification for the same failed run on a new exact-main SHA. It uses the existing
+`READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION` marker with the exact `Recovery-Run-ID` and remains
+`Provider-Attempt: NOT_AUTHORIZED`. The autocontinue now re-proves the failed deploy/skipped invoke
+phase before dispatch. This does not re-run the failed deploy and does not invoke Function, Google or
+YDB; if the corrected classification is still missing/ambiguous, stop for another causal decision.
+
 ### Read-only deploy-classification autocontinue stopped before provider dispatch on `2b6658171b01d5a99f4373e6be8b6152eb2edd29`
 
 Exact-main CI, Browser Quality and CodeQL passed after PR #841. Recovery autocontinue `36344477909`

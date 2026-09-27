@@ -40,6 +40,10 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION/);
   assert.match(autocontinue, /DEPLOYMENT_OUTCOME_UNCLASSIFIED/);
   assert.match(autocontinue, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
+  assert.match(autocontinue, /DEPLOY_RUN_NOT_LATEST_FAILED/);
+  assert.match(autocontinue, /DEPLOY_RUN_PHASE_NOT_PROVEN/);
+  assert.match(autocontinue, /Deploy recovery-only Function version" and \.conclusion == "failure"/);
+  assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
   assert.match(autocontinue, /r1-initial-bootstrap-recovery-deploy-recovery\.yml/);
   assert.match(autocontinue, /inputs:\{failed_run_id:\$run_id\}/);
   assert.match(autocontinue, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
@@ -48,4 +52,9 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml/);
   assert.doesNotMatch(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml" and \.status != "removed"/);
   assert.doesNotMatch(autocontinue, /\.filename == "AGENTS\.md"/);
+  assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_RUN_NOT_LATEST_FAILED/);
+  assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_RUN_PHASE_NOT_PROVEN/);
+  assert.match(autocontinue, /actions\/workflows\/r1-initial-bootstrap-recovery\.yml\/runs\?branch=main&event=workflow_dispatch&status=failure/);
+  assert.match(autocontinue, /Deploy recovery-only Function version" and \.conclusion == "failure"/);
+  assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
 });
