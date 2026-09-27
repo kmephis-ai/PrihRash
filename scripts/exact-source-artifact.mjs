@@ -3,7 +3,7 @@ import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { resolve, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const EXACT_SOURCE_ARTIFACT_SCHEMA_VERSION = 1;
+export const EXACT_SOURCE_ARTIFACT_SCHEMA_VERSION = 2;
 export const EXACT_SOURCE_PACKAGE_DIRECTORIES = Object.freeze([
   'yandex-scheduled-sync-function',
   'yandex-schema-bootstrap-function',
@@ -11,6 +11,7 @@ export const EXACT_SOURCE_PACKAGE_DIRECTORIES = Object.freeze([
   'yandex-schema-upgrade-004-function',
   'yandex-initial-bootstrap-function',
   'yandex-initial-bootstrap-recovery-function',
+  'yandex-initial-bootstrap-stale-validated-terminalization-function',
   'yandex-initial-controlled-rebuild-function',
   'yandex-wu7-temporary-throttling-function',
 ]);

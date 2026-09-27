@@ -579,3 +579,21 @@ probe, WU7, bootstrap, Gate C, staging retirement/cleanup, or provider-budget ch
 result. Any successor provider attempt requires a separately evidenced repository fix and its own
 fresh canonical gates; changing the provider limit requires a distinct explicit Owner decision.
 Google remains authoritative, YDB remains shadow, and no verified `COMMITTED` baseline is proven.
+
+### Issue #786 exact-SHA package audit
+
+There is one canonical `npm run check` per commit in CI; provider workflows do not rerun it. CI builds
+and verifies the provider packages once, then publishes them in the exact-source artifact bound to
+that SHA. Provider workflows keep `npm ci` where runtime scripts need the repository dependencies, and
+restore verifies the unique successful CI run, source SHA, package inventory and package digests
+before a provider operation.
+
+The audited Gate B stale-VALIDATED terminalization, swap-recovery and Gate C workflows previously
+ran another TypeScript build and repackaged code already produced by canonical CI. The exact-source
+artifact now includes the Gate B-only package (manifest schema v2); all three workflows consume the
+restored package and no longer run `npm run build` or `npm run package:*`. This removes three
+same-SHA rebuild/repackage steps per matching provider cycle while preserving package isolation,
+exact-SHA integrity verification and existing readiness/authority/writer gates. Regression coverage
+in `tests/tooling/exact-source-artifact.test.mjs` inventories the provider workflows, requires the
+exact-source restore, asserts no second full check/build/package, and verifies the Gate B package is
+published by canonical CI.

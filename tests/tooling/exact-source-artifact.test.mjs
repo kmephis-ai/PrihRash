@@ -30,6 +30,7 @@ test('exact-source manifest binds the complete package allowlist to one SHA', as
   await withSyntheticArtifact(async (artifactRoot) => {
     const created = await createExactSourceManifest({ artifactRoot, sourceSha: SHA });
     assert.equal(created.sourceSha, SHA);
+    assert.equal(created.schemaVersion, 2);
     assert.deepEqual(Object.keys(created.packages).sort(), [...EXACT_SOURCE_PACKAGE_DIRECTORIES].sort());
     await verifyExactSourceManifest({ artifactRoot, sourceSha: SHA });
   });
@@ -69,6 +70,9 @@ const providerWorkflowPaths = [
   'r1-ydb-schema-bootstrap.yml',
   'r1-ydb-schema-upgrade-003.yml',
   'r1-ydb-schema-upgrade-004.yml',
+  'r1-initial-bootstrap-stale-validated-terminalization.yml',
+  'r1-initial-controlled-rebuild-swap-recovery.yml',
+  'r1-initial-bootstrap-gate-c.yml',
 ];
 
 test('canonical CI publishes one exact-SHA provider artifact after the full check', async () => {
@@ -93,12 +97,36 @@ test('provider workflows restore the successful exact-SHA CI artifact instead of
   for (const workflowName of providerWorkflowPaths) {
     const workflow = await readFile(new URL(`../../.github/workflows/${workflowName}`, import.meta.url), 'utf8');
     assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
-    assert.match(workflow, /source-sha: \$\{\{ github\.sha \}\}/);
+    assert.match(workflow, /source-sha: \$\{\{ github\.(?:sha|event\.workflow_run\.head_sha) \}\}/);
     assert.match(workflow, /github-token: \$\{\{ github\.token \}\}/);
-    assert.doesNotMatch(workflow, /npm run check|npm run package:/);
+    assert.doesNotMatch(workflow, /npm run check|npm run build|npm run package:/);
     assert.match(workflow, /actions: (?:read|write)/);
     assert.match(workflow, /cancel-in-progress: false/);
   }
+});
+
+test('provider package inventory keeps the only full check in canonical CI and reuses packaged functions', async () => {
+  const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const runbook = await readFile(
+    new URL('../../docs/R1_INITIAL_CONTROLLED_REBUILD_RUNBOOK.md', import.meta.url),
+    'utf8',
+  );
+  const repackagedWorkflows = [
+    'r1-initial-bootstrap-stale-validated-terminalization.yml',
+    'r1-initial-controlled-rebuild-swap-recovery.yml',
+    'r1-initial-bootstrap-gate-c.yml',
+  ];
+
+  assert.equal((ci.match(/npm run check/g) ?? []).length, 1);
+  assert.match(ci, /\.artifacts\/yandex-initial-bootstrap-stale-validated-terminalization-function\//);
+  for (const workflowName of repackagedWorkflows) {
+    const workflow = await readFile(new URL(`../../.github/workflows/${workflowName}`, import.meta.url), 'utf8');
+    assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
+    assert.doesNotMatch(workflow, /npm run build|npm run package:/);
+  }
+  assert.match(runbook, /Issue #786 exact-SHA package audit/);
+  assert.match(runbook, /Gate B stale-VALIDATED terminalization,\s+swap-recovery and Gate C workflows/);
+  assert.match(runbook, /one canonical `npm run check` per commit/);
 });
 
 test('restore action requires one successful canonical CI push for the exact current main SHA', async () => {
