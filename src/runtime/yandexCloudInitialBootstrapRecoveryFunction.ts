@@ -138,9 +138,10 @@ const STAGING_EXACT_REVISION_EVIDENCE = new Set<NonNullable<InitialBootstrapReco
 const STAGING_REVISION_CARDINALITY_EVIDENCE = new Set<NonNullable<
   InitialBootstrapRecoveryJobResult['stagingRevisionCardinalityEvidence']
 >>([
-  'LT_3000_ROWS',
-  'GE_3000_LT_5000_ROWS',
-  'GE_5000_ROWS',
+  'LT_5000_RU',
+  'GE_5000_LT_5500_RU',
+  'GE_5500_LT_6000_RU',
+  'GE_6000_RU',
   'DIAGNOSTIC_FAILED',
 ]);
 

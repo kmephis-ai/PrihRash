@@ -326,7 +326,7 @@ test('revision-cardinality-only invoker emits only the coarse allowlisted bucket
     code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+    stagingRevisionCardinalityEvidence: 'GE_5000_LT_5500_RU',
   };
   const yc = await fakeYc(base);
   const result = await execFileAsync(
@@ -349,7 +349,7 @@ test('revision-cardinality-only invoker emits only the coarse allowlisted bucket
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
   });
-  assert.equal(result.stderr, 'R1_STAGING_REVISION_CARDINALITY_EVIDENCE=GE_3000_LT_5000_ROWS\n');
+  assert.equal(result.stderr, 'R1_STAGING_REVISION_CARDINALITY_EVIDENCE=GE_5000_LT_5500_RU\n');
 
   for (const evidence of ['4500_ROWS', 'PRIVATE_TEXT']) {
     const invalidYc = await fakeYc({ ...base, stagingRevisionCardinalityEvidence: evidence });

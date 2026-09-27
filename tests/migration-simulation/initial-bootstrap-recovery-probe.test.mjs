@@ -187,7 +187,7 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     async () => ({
       verdict: 'RECOVERY_REQUIRED',
       reason: 'STAGING_RUN_PRESENT',
-      stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+      stagingRevisionCardinalityEvidence: 'GE_5000_LT_5500_RU',
     }),
   );
   assert.deepEqual(revisionCardinalityOnly, {
@@ -195,13 +195,13 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
     verdict: 'RECOVERY_REQUIRED',
     reason: 'STAGING_RUN_PRESENT',
-    stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+    stagingRevisionCardinalityEvidence: 'GE_5000_LT_5500_RU',
   });
   assert.deepEqual(
     await executeYandexInitialBootstrapRecoveryFunction({}, async () => ({
       verdict: 'RECOVERY_REQUIRED',
       reason: 'STAGING_RUN_PRESENT',
-      stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+      stagingRevisionCardinalityEvidence: 'GE_5000_LT_5500_RU',
     })),
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },
   );
@@ -214,7 +214,7 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
       async () => ({
         verdict: 'RECOVERY_REQUIRED',
         reason: 'STAGING_RUN_PRESENT',
-        stagingRevisionCardinalityEvidence: 'GE_3000_LT_5000_ROWS',
+        stagingRevisionCardinalityEvidence: 'GE_5000_LT_5500_RU',
       }),
     ),
     { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },

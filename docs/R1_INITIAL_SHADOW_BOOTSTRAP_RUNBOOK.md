@@ -1365,3 +1365,39 @@ metadata response не нужен.
 После merge допускается ровно один новый exact-main controlled-preparation-only read-only probe.
 Успех требует полного исторического восстановления и `READY`; timeout/non-PASS запускает новую
 repo-side причинную диагностику. WU7, bootstrap replay, retirement и cleanup не разрешаются этим probe.
+
+### RU-budget estimate buckets после timeout `36281170917`
+
+Controlled-preparation-only recovery `36281170917` на exact main
+`7b03fa08435bc1b35ba00f3b6f84097c26eaaee8` после однопроходной paging candidate снова завершилась
+`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`; stage artifact отсутствует. Ранее полученный `GE_5000_ROWS`
+не позволял отличить budget выше function ceiling от стоимости других стадий.
+
+Следующий read-only diagnostic вычисляет приблизительный paced RU envelope только из manifest
+binding cardinality: rows + число ≤9-row pages + pacing/query margins. Наружу выдаётся лишь один bucket:
+`LT_5000_RU`, `GE_5000_LT_5500_RU`, `GE_5500_LT_6000_RU`, `GE_6000_RU` либо
+`DIAGNOSTIC_FAILED`. Это не точный RU счётчик и не provider quota change; значение ≥6000 указывает,
+что ожидаемые payload reads сами используют весь теоретический 600s × 10 RU/s потолок до подготовки
+источника и остальных запросов. Exact row count, IDs и payload не публикуются.
+
+После merge разрешена ровно одна свежая exact-main `staging_revision_cardinality_only` read-only
+диагностика. Она выбирает следующую repo-гипотезу, но не разрешает controlled-preparation replay,
+WU7, bootstrap, quota change, retirement или cleanup.
+
+### RU-budget bucket после controlled-preparation timeout `36281170917`
+
+Recovery `36281170917` на exact main `7b03fa08435bc1b35ba00f3b6f84097c26eaaee8` после однопроходной
+paged reconstruction снова завершилась `INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED` на единственном
+read-only invoke. Cardinality bucket `GE_5000_ROWS` с предыдущей версии оказался слишком широким,
+чтобы установить, приближается ли один только paced revision read к timeout boundary.
+
+Следующий repository-only diagnostic не запускает application reconstruction. На одном metadata-only
+manifest read он вычисляет нижнюю оценку paced RU envelope из binding cardinality и текущего ограничения
+9 rows/page плюс CPU-RU margin, затем выводит только один из bucket: `LT_5000_RU`,
+`GE_5000_LT_5500_RU`, `GE_5500_LT_6000_RU`, `GE_6000_RU` либо `DIAGNOSTIC_FAILED`. Точное число,
+source IDs и payload не публикуются. `GE_6000_RU` означает, что estimated read work alone reaches the
+600 s × 10 RU/s ceiling before reference/application overhead.
+
+После merge разрешена ровно одна свежая exact-main cardinality-only read-only probe. Она выбирает
+следующую repository-гипотезу и не разрешает повтор controlled preparation, WU7, quota change,
+bootstrap replay, cleanup или authority change.

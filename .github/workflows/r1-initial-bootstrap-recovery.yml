@@ -562,7 +562,7 @@ jobs:
           if [ "$RECOVERY_REVISION_CARDINALITY_ONLY" = "1" ]; then
             cardinality_evidence="$(sed -n 's/^R1_STAGING_REVISION_CARDINALITY_EVIDENCE=//p' "$diagnostics")"
             case "$cardinality_evidence" in
-              LT_3000_ROWS|GE_3000_LT_5000_ROWS|GE_5000_ROWS|DIAGNOSTIC_FAILED) ;;
+              LT_5000_RU|GE_5000_LT_5500_RU|GE_5500_LT_6000_RU|GE_6000_RU|DIAGNOSTIC_FAILED) ;;
               *) echo INITIAL_BOOTSTRAP_STAGING_REVISION_CARDINALITY_EVIDENCE_INVALID; exit 1 ;;
             esac
             jq -cn --arg evidence "$cardinality_evidence" \
