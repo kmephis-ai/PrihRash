@@ -29,7 +29,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /"surface_only":"true"/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
-  assert.match(workflow, /r1-initial-bootstrap-recovery\.yml\/dispatches/);
+  assert.match(workflow, /r1-initial-bootstrap-recovery\.yml/);
+  assert.match(workflow, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
@@ -60,7 +61,13 @@ test('unknown durable outcome accepts only the read-only classification marker p
     return JSON.parse(result.stdout);
   };
 
-  assert.deepEqual(valid(), { valid: true, surfaceOnly: true });
+  assert.deepEqual(valid(), {
+    valid: true,
+    surfaceOnly: true,
+    functionDeployRecovery: false,
+    recoveryRunId: null,
+    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  });
   assert.equal(valid({ 'Provider-Attempt': 'READY' }).valid, false);
   assert.equal(valid({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }).valid, false);
   assert.equal(valid({ 'Recovery-State': 'UNKNOWN_AFTER_NON_SUCCESS\nRecovery-State: UNKNOWN_AFTER_NON_SUCCESS' }).valid, false);
@@ -68,11 +75,77 @@ test('unknown durable outcome accepts only the read-only classification marker p
   assert.deepEqual(valid({
     'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
     'Recovery-State': 'STAGING_PRESENT_UNCLASSIFIED',
-  }), { valid: true, surfaceOnly: false });
+  }), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: false,
+    recoveryRunId: null,
+    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  });
   assert.deepEqual(valid({
     'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION',
     'Recovery-State': 'STAGING_RESUMABLE',
-  }), { valid: true, surfaceOnly: false });
+  }), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: false,
+    recoveryRunId: null,
+    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  });
+});
+
+test('unknown recovery Function deploy accepts only one exact-run read-only classification marker', (t) => {
+  const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
+  assert.ok(filter, 'extract the live jq marker filter from the workflow');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+
+  const parse = (overrides = {}) => {
+    const lines = {
+      'Provider-Attempt': 'NOT_AUTHORIZED',
+      'Recovery-Probe': 'READY',
+      'Expected-Transition': 'READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION',
+      'Recovery-State': 'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
+      'Recovery-Run-ID': '36341844854',
+      'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
+      ...overrides,
+    };
+    const body = Object.entries(lines).map(([key, value]) => `${key}: ${value}`).join('\n');
+    const result = spawnSync('jq', ['-Rn', '--arg', 'body', body, filter], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+
+  assert.deepEqual(parse(), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: true,
+    recoveryRunId: '36341844854',
+    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
+  });
+  assert.equal(parse({ 'Recovery-Run-ID': '0' }).valid, false);
+  assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
+  assert.equal(parse({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }).valid, false);
+  assert.equal(parse({ 'Provider-Attempt': 'READY' }).valid, false);
+});
+
+test('post-PR-840 deployment failure remains unclassified and disarms deployment/invocation', () => {
+  const evidence = runbook.match(
+    /### Recovery Function deploy outcome remains unknown after exact-main run `36341844854`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the failed recovery Function-version create needs a fresh exact-run read-only path');
+  assert.match(evidence, /`Deploy recovery-only Function version`/);
+  assert.match(evidence, /`Invoke exact read-only recovery tag once` step was `skipped`/);
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`/);
+  assert.match(evidence, /outcome of the Yandex Function-version create operation is unknown/);
+  assert.match(evidence, /Do not repeat the Function-version create or invoke its tag/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED/);
+  assert.match(evidence, /Recovery-Run-ID: 36341844854/);
+  assert.match(evidence, /no Function-version create, Function invoke, Google read, or YDB read\/write/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {

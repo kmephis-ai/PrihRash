@@ -23,6 +23,7 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /RECOVERY_REVISION_CARDINALITY_ONLY: \$\{\{ inputs\.staging_revision_cardinality_only/);
   assert.match(workflow, /causal_bootstrap_run_id:/);
   assert.match(workflow, /CAUSAL_BOOTSTRAP_RUN_ID.*!=.*selected_run_id/);
+  assert.match(workflow, /export RECOVERY_CAUSAL_BOOTSTRAP_RUN_ID="\$CAUSAL_BOOTSTRAP_RUN_ID"/);
   assert.match(workflow, /\.run_started_at/);
   assert.match(workflow, /causal_bootstrap_started_at=/);
   assert.match(workflow, /PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY=/);
@@ -70,7 +71,8 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /--execution-timeout "\$recovery_execution_timeout"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_SURFACE_ONLY=\$\{RECOVERY_SURFACE_ONLY\}"/);
   assert.match(workflow, /--environment "PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=\$\{RECOVERY_CONTROLLED_PREPARATION_ONLY\}"/);
-  assert.match(workflow, /PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT=\$\{CAUSAL_BOOTSTRAP_STARTED_AT\}/);
+  assert.match(workflow, /if \[ -n "\$CAUSAL_BOOTSTRAP_STARTED_AT" \]; then[\s\S]*PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT=\$\{CAUSAL_BOOTSTRAP_STARTED_AT\}/);
+  assert.match(workflow, /"\$\{recovery_environment\[@\]\}"/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);

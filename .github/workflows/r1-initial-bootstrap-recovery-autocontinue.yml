@@ -64,6 +64,7 @@ jobs:
             | (exact_line("Recovery-Probe: ")) as $probe
             | (exact_line("Expected-Transition: ")) as $expected
             | (exact_line("Recovery-State: ")) as $recovery
+            | (exact_line("Recovery-Run-ID: ")) as $recovery_run
             | (exact_line("Regression-Test: ")) as $test
             | {
                 valid: (
@@ -71,29 +72,64 @@ jobs:
                   and $probe == ["Recovery-Probe: READY"]
                   and (
                     ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
-                      and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"])
+                      and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"]
+                      and ($recovery_run | length) == 0)
                     or
                     ($expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
                       and ($recovery | length) == 1
+                      and ($recovery_run | length) == 0
                       and ($recovery[0] | IN(
                         "Recovery-State: EMPTY_DURABLE_STATE",
                         "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
                         "Recovery-State: STAGING_PRESENT_UNCLASSIFIED",
                         "Recovery-State: STAGING_RESUMABLE",
                         "Recovery-State: STAGING_STALE_RETIREABLE",
-                        "Recovery-State: STALE_STAGING_RETIRED"
+                      "Recovery-State: STALE_STAGING_RETIRED"
                       )))
+                    or (
+                      $expected == ["Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION"]
+                      and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
+                      and ($recovery_run | length) == 1
+                      and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
+                    )
                   )
                   and ($test | length) == 1
                   and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
                 ),
                 surfaceOnly: ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
-                  and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"])
+                  and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"]),
+                functionDeployRecovery: ($expected == ["Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION"]
+                  and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
+                  and ($recovery_run | length) == 1
+                  and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))),
+                recoveryRunId: (if ($recovery_run | length) == 1
+                  and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
+                  then ($recovery_run[0] | sub("^Recovery-Run-ID: "; "")) else null end),
+                regressionTest: (if ($test | length) == 1
+                  then ($test[0] | sub("^Regression-Test: "; "")) else null end)
               }
           ')"
           if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
             echo 'R1_RECOVERY_AUTOCONTINUE_MARKER_INVALID'
             exit 0
+          fi
+          if [ "$(jq -r '.functionDeployRecovery' <<<"$marker")" = 'true' ]; then
+            source_pr_number="$(jq -er '.number | select(type == "number")' <<<"$source_pr")"
+            source_files="$(curl --fail --silent --show-error \
+              --header "$auth_header" --header "$accept_header" \
+              "$api/pulls/${source_pr_number}/files?per_page=100")" || {
+                echo 'R1_RECOVERY_AUTOCONTINUE_PR_FILES_READ_FAILED'; exit 0;
+              }
+            if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e \
+              --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
+                any(.[]; .filename == $test and .status != "removed")
+                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml" and .status != "removed")
+                and any(.[]; .filename == "AGENTS.md" and .status != "removed")
+                and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+              ' <<<"$source_files" >/dev/null; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID'
+              exit 0
+            fi
           fi
 
           issue_state="$(curl --fail --silent --show-error             --header "$auth_header"             --header "$accept_header"             "$api/issues/453" | jq -er '.state')"
@@ -103,7 +139,7 @@ jobs:
           fi
 
           writer_active='false'
-          for workflow in r1-initial-bootstrap-orchestrator.yml r1-initial-shadow-bootstrap.yml; do
+          for workflow in r1-initial-bootstrap-orchestrator.yml r1-initial-shadow-bootstrap.yml r1-initial-bootstrap-recovery.yml r1-initial-bootstrap-recovery-deploy-recovery.yml; do
             writer_runs="$(curl --fail --silent --show-error               --header "$auth_header"               --header "$accept_header"               "$api/actions/workflows/$workflow/runs?branch=main&per_page=100")"
             if jq -e --arg sha "$SOURCE_SHA" '
               .workflow_runs | any(
@@ -120,7 +156,11 @@ jobs:
             exit 0
           fi
 
-          existing="$(curl --fail --silent --show-error             --header "$auth_header"             --header "$accept_header"             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          recovery_workflow='r1-initial-bootstrap-recovery.yml'
+          if [ "$(jq -r '.functionDeployRecovery' <<<"$marker")" = 'true' ]; then
+            recovery_workflow='r1-initial-bootstrap-recovery-deploy-recovery.yml'
+          fi
+          existing="$(curl --fail --silent --show-error             --header "$auth_header"             --header "$accept_header"             "$api/actions/workflows/$recovery_workflow/runs?branch=main&event=workflow_dispatch&per_page=100")"
           if jq -e --arg sha "$SOURCE_SHA" '
             .workflow_runs | any(.head_sha == $sha)
           ' <<<"$existing" >/dev/null; then
@@ -131,6 +171,9 @@ jobs:
           dispatch_payload='{"ref":"main"}'
           if [ "$(jq -r '.surfaceOnly' <<<"$marker")" = 'true' ]; then
             dispatch_payload='{"ref":"main","inputs":{"surface_only":"true"}}'
+          elif [ "$(jq -r '.functionDeployRecovery' <<<"$marker")" = 'true' ]; then
+            failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
+            dispatch_payload="$(jq -cn --arg run_id "$failed_run_id" '{ref:"main",inputs:{failed_run_id:$run_id}}')"
           fi
-          curl --fail --silent --show-error             --request POST             --header "$auth_header"             --header "$accept_header"             --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/dispatches"             --data "$dispatch_payload"
+          curl --fail --silent --show-error             --request POST             --header "$auth_header"             --header "$accept_header"             --header 'X-GitHub-Api-Version: 2022-11-28'             "$api/actions/workflows/$recovery_workflow/dispatches"             --data "$dispatch_payload"
           echo 'R1_RECOVERY_AUTOCONTINUE_DISPATCHED'
