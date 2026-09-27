@@ -202,14 +202,27 @@ jobs:
             --format json-rest --retry 0 --no-user-output >"$tmp/tagged-version.json" 2>"$tmp/tagged-version.err"; then
             printf '{}\n' >"$tmp/tagged-version.json"
           fi
-          if ! evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-            "$tmp/versions.json" "$tmp/operations.json" "$tmp/tagged-version.json" \
+          tag_history_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${function_id}:tagHistory"
+          tag_history_status='READY'
+          if ! curl --fail --silent --show-error --get \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "tag=${TARGET_TAG}" \
+            --data-urlencode 'pageSize=1000' \
+            "$tag_history_api" --output "$tmp/tag-history.json" 2>"$tmp/tag-history.err"; then
+            tag_history_status='RECOVERY_TAG_HISTORY_READ_FAILED'
+            printf '{}\n' >"$tmp/tag-history.json"
+          fi
+          if [ "$tag_history_status" != 'READY' ]; then
+            evidence="$tag_history_status"
+          elif ! evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+            "$tmp/versions.json" "$tmp/operations.json" "$tmp/tagged-version.json" "$tmp/tag-history.json" \
             "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$YC_WIF_SERVICE_ACCOUNT_ID")"; then
             evidence='DIAGNOSTIC_FAILED'
           fi
           case "$evidence" in
             DEPLOYMENT_OUTCOME_UNCLASSIFIED|CREATE_OPERATION_AMBIGUOUS|CREATE_OPERATION_IN_PROGRESS|CREATE_OPERATION_FAILED|CREATED_VERSION_NOT_PROVEN|EXACT_RECOVERY_VERSION_CREATED|RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW|RECOVERY_TAGGED_VERSION_AMBIGUOUS|RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN) ;;
-            DIAGNOSTIC_FAILED|RECOVERY_DEPLOY_INPUT_INVALID|RECOVERY_VERSION_ENTRY_INVALID|RECOVERY_VERSION_TAGS_INVALID|RECOVERY_VERSION_TIMESTAMP_INVALID|RECOVERY_METADATA_JSON_INVALID|RECOVERY_CLASSIFIER_INTERNAL_ERROR) ;;
+            DIAGNOSTIC_FAILED|RECOVERY_DEPLOY_INPUT_INVALID|RECOVERY_VERSION_ENTRY_INVALID|RECOVERY_VERSION_TAGS_INVALID|RECOVERY_VERSION_TIMESTAMP_INVALID|RECOVERY_METADATA_JSON_INVALID|RECOVERY_CLASSIFIER_INTERNAL_ERROR|RECOVERY_TAG_HISTORY_READ_FAILED|RECOVERY_TAG_HISTORY_METADATA_INVALID|RECOVERY_TAG_HISTORY_INCOMPLETE|RECOVERY_TAG_HISTORY_AMBIGUOUS|RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED|RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT) ;;
             *) echo 'RECOVERY_DEPLOY_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
           esac
           jq -cn --arg evidence "$evidence" '{stagingFunctionDeployEvidence:$evidence}' \

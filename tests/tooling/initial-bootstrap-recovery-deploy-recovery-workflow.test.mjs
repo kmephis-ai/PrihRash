@@ -25,10 +25,13 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /yc serverless function version list/);
   assert.match(workflow, /yc serverless function list-operations/);
   assert.match(workflow, /yc serverless function version get-by-tag/);
+  assert.match(workflow, /serverless-functions\.api\.cloud\.yandex\.net\/functions\/v1\/functions\/\$\{function_id\}:tagHistory/);
+  assert.match(workflow, /data-urlencode "tag=\$\{TARGET_TAG\}"/);
+  assert.match(workflow, /data-urlencode 'pageSize=1000'/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
   assert.match(workflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS/);
   assert.match(workflow, /RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT\|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW/);
-  assert.match(workflow, /RECOVERY_DEPLOY_INPUT_INVALID\|RECOVERY_VERSION_ENTRY_INVALID\|RECOVERY_VERSION_TAGS_INVALID\|RECOVERY_VERSION_TIMESTAMP_INVALID\|RECOVERY_METADATA_JSON_INVALID\|RECOVERY_CLASSIFIER_INTERNAL_ERROR\) ;;/);
+  assert.match(workflow, /RECOVERY_DEPLOY_INPUT_INVALID\|RECOVERY_VERSION_ENTRY_INVALID\|RECOVERY_VERSION_TAGS_INVALID\|RECOVERY_VERSION_TIMESTAMP_INVALID\|RECOVERY_METADATA_JSON_INVALID\|RECOVERY_CLASSIFIER_INTERNAL_ERROR\|RECOVERY_TAG_HISTORY_READ_FAILED\|RECOVERY_TAG_HISTORY_METADATA_INVALID\|RECOVERY_TAG_HISTORY_INCOMPLETE\|RECOVERY_TAG_HISTORY_AMBIGUOUS\|RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED\|RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT\) ;;/);
   assert.match(workflow, /r1-initial-bootstrap-recovery-deploy-evidence-/);
   assert.match(workflow, /actions\/upload-artifact@/);
   assert.doesNotMatch(workflow, /yc serverless function version create/);

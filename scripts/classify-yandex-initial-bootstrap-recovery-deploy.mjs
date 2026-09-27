@@ -19,6 +19,11 @@ const ENUMS = new Set([
   'RECOVERY_VERSION_TIMESTAMP_INVALID',
   'RECOVERY_METADATA_JSON_INVALID',
   'RECOVERY_CLASSIFIER_INTERNAL_ERROR',
+  'RECOVERY_TAG_HISTORY_METADATA_INVALID',
+  'RECOVERY_TAG_HISTORY_INCOMPLETE',
+  'RECOVERY_TAG_HISTORY_AMBIGUOUS',
+  'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED',
+  'RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT',
 ]);
 
 function object(value) {
@@ -41,6 +46,7 @@ export function classifyRecoveryFunctionDeployOutcome({
   versions,
   operations,
   taggedVersion,
+  tagHistory,
   runStartedAt,
   runFinishedAt,
   deploymentServiceAccountId,
@@ -80,7 +86,50 @@ export function classifyRecoveryFunctionDeployOutcome({
         if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
         if (createdAt >= lowerBound && createdAt <= upperBound) taggedCandidates.push(version);
       }
-      if (taggedCandidates.length === 0) return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
+      if (taggedCandidates.length === 0) {
+        if (!object(tagHistory)) {
+          return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+        }
+        const historyRecords = tagHistory.functionTagHistoryRecord === undefined
+          ? []
+          : tagHistory.functionTagHistoryRecord;
+        if (!Array.isArray(historyRecords)) return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+        if (tagHistory.nextPageToken !== undefined) {
+          if (typeof tagHistory.nextPageToken !== 'string') return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+          if (tagHistory.nextPageToken.length > 0) return 'RECOVERY_TAG_HISTORY_INCOMPLETE';
+        }
+
+        const matchingHistory = [];
+        for (const record of historyRecords) {
+          if (!object(record) || typeof record.tag !== 'string') return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+          const versionId = record.functionVersionId;
+          const effectiveFrom = timestamp(record.effectiveFrom);
+          if (typeof versionId !== 'string' || versionId.length === 0 || effectiveFrom === null) {
+            return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+          }
+          if (record.effectiveTo !== undefined && timestamp(record.effectiveTo) === null) {
+            return 'RECOVERY_TAG_HISTORY_METADATA_INVALID';
+          }
+          if (
+            record.tag === 'r1-initial-bootstrap-recovery'
+            && effectiveFrom >= lowerBound
+            && effectiveFrom <= upperBound
+          ) matchingHistory.push(record);
+        }
+        if (matchingHistory.length === 0) return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
+        if (matchingHistory.length > 1) return 'RECOVERY_TAG_HISTORY_AMBIGUOUS';
+
+        const matchingVersionId = matchingHistory[0].functionVersionId;
+        const historyVersions = versions.filter((version) => object(version) && version.id === matchingVersionId);
+        if (historyVersions.length === 0) return 'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED';
+        if (historyVersions.length > 1) return 'RECOVERY_TAG_HISTORY_AMBIGUOUS';
+        const versionCreatedAt = timestamp(historyVersions[0].created_at);
+        if (versionCreatedAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
+        if (versionCreatedAt < lowerBound || versionCreatedAt > upperBound) {
+          return 'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED';
+        }
+        return 'RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT';
+      }
       if (taggedCandidates.length > 1) return 'RECOVERY_TAGGED_VERSION_AMBIGUOUS';
 
       const [candidate] = taggedCandidates;
@@ -133,8 +182,8 @@ export function classifyRecoveryFunctionDeployOutcome({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [versionsPath, operationsPath, taggedVersionPath, runStartedAt, runFinishedAt, deploymentServiceAccountId] = process.argv.slice(2);
-  if (!versionsPath || !operationsPath || !taggedVersionPath || !runStartedAt || !runFinishedAt || !deploymentServiceAccountId) {
+  const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, deploymentServiceAccountId] = process.argv.slice(2);
+  if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !deploymentServiceAccountId) {
     process.stdout.write('RECOVERY_DEPLOY_INPUT_INVALID\n');
     process.exitCode = 2;
   } else {
@@ -144,16 +193,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         readJson(versionsPath),
         readJson(operationsPath),
         readJson(taggedVersionPath),
+        readJson(tagHistoryPath),
       ]);
     } catch {
       process.stdout.write('RECOVERY_METADATA_JSON_INVALID\n');
     }
     if (inputs) {
-      const [versions, operations, taggedVersion] = inputs;
+      const [versions, operations, taggedVersion, tagHistory] = inputs;
       const result = classifyRecoveryFunctionDeployOutcome({
         versions,
         operations,
         taggedVersion,
+        tagHistory,
         runStartedAt,
         runFinishedAt,
         deploymentServiceAccountId,

@@ -31,6 +31,7 @@ function exactEvidence(overrides = {}) {
     versions: [version],
     operations: [operation],
     taggedVersion,
+    tagHistory: { functionTagHistoryRecord: [] },
     runStartedAt,
     runFinishedAt,
     deploymentServiceAccountId: serviceAccount,
@@ -201,12 +202,77 @@ test('recovery deploy classifier treats omitted repeated tags as empty and ignor
   );
 });
 
+test('recovery deploy classifier uses bounded exact-window tag history without inferring deployment outcome', () => {
+  const historicalCandidate = {
+    functionVersionId: 'synthetic-version',
+    tag: 'r1-initial-bootstrap-recovery',
+    effectiveFrom: '2026-09-27T18:46:34Z',
+  };
+  const versions = [{
+    id: 'synthetic-version',
+    created_at: '2026-09-27T18:46:34Z',
+  }];
+
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: { functionTagHistoryRecord: [historicalCandidate] },
+    })),
+    'RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: {},
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: { functionTagHistoryRecord: [
+        historicalCandidate,
+        { ...historicalCandidate, effectiveFrom: '2026-09-27T18:46:35Z' },
+      ] },
+    })),
+    'RECOVERY_TAG_HISTORY_AMBIGUOUS',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: { functionTagHistoryRecord: [historicalCandidate], nextPageToken: 'synthetic-more' },
+    })),
+    'RECOVERY_TAG_HISTORY_INCOMPLETE',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: { functionTagHistoryRecord: [{ ...historicalCandidate, effectiveFrom: 'invalid' }] },
+    })),
+    'RECOVERY_TAG_HISTORY_METADATA_INVALID',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions,
+      tagHistory: { functionTagHistoryRecord: null },
+    })),
+    'RECOVERY_TAG_HISTORY_METADATA_INVALID',
+  );
+});
+
 test('recovery deploy CLI reports invalid metadata JSON without echoing parser details', () => {
   const result = spawnSync(process.execPath, [
     'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
     'missing-versions.json',
     'missing-operations.json',
     'missing-tag.json',
+    'missing-tag-history.json',
     runStartedAt,
     runFinishedAt,
     serviceAccount,
