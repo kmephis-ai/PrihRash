@@ -75,9 +75,15 @@ const TEXT_ENCODER = new TextEncoder();
 const REVISION_EVIDENCE_READ_BATCH_BYTES_LIMIT = 64 * 1024;
 const REVISION_EVIDENCE_READ_BATCH_ROWS_LIMIT = 9;
 const REVISION_EVIDENCE_READ_FIXED_ROW_BYTES = 256;
-// Target the verified 10-RU/s baseline and reserve one RU per query for CPU.
+// Serverless can retain up to five minutes of unused RU. Use a conservative
+// initial allowance and reserve the remainder for preparation/reference reads
+// that happen before this revision-only waiter is constructed.
 const REVISION_EVIDENCE_READ_RU_PER_SECOND = 10;
 const REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN = 1;
+const REVISION_EVIDENCE_READ_RU_BURST_WINDOW_SECONDS = 5 * 60;
+const REVISION_EVIDENCE_READ_RU_BURST_CAPACITY =
+  REVISION_EVIDENCE_READ_RU_PER_SECOND * REVISION_EVIDENCE_READ_RU_BURST_WINDOW_SECONDS;
+const REVISION_EVIDENCE_READ_RU_INITIAL_BURST = REVISION_EVIDENCE_READ_RU_BURST_CAPACITY - 500;
 const YDB_READ_BLOCK_BYTES = 4 * 1024;
 
 export type InitialSourceRevisionEvidenceReadBudgetWaiter = (
@@ -102,15 +108,31 @@ export function createInitialSourceRevisionEvidenceReadBudgetWaiter(
     new Promise<void>((resolve) => setTimeout(resolve, milliseconds))
   ),
 ): InitialSourceRevisionEvidenceReadBudgetWaiter {
-  let nextReadStartAt: number | null = null;
+  let availableUnits = REVISION_EVIDENCE_READ_RU_INITIAL_BURST;
+  let lastRefillAt = now();
   return async (estimatedRequestUnits) => {
-    const delayMs = initialSourceRevisionEvidenceReadBudgetDelayMs(estimatedRequestUnits);
-    const currentTime = now();
-    const waitMs = nextReadStartAt === null
-      ? delayMs
-      : Math.max(0, nextReadStartAt - currentTime);
-    if (waitMs > 0) await sleep(waitMs);
-    nextReadStartAt = now() + delayMs;
+    if (!Number.isSafeInteger(estimatedRequestUnits) || estimatedRequestUnits < 1) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
+    }
+    const requiredUnits = estimatedRequestUnits + REVISION_EVIDENCE_READ_RU_SAFETY_MARGIN;
+    if (requiredUnits > REVISION_EVIDENCE_READ_RU_BURST_CAPACITY) {
+      throw new InitialSourceRevisionEvidenceRecoveryError('INVALID_EXPECTED_REVISION');
+    }
+    while (availableUnits < requiredUnits) {
+      const currentTime = now();
+      const elapsedMs = Math.max(0, currentTime - lastRefillAt);
+      availableUnits = Math.min(
+        REVISION_EVIDENCE_READ_RU_BURST_CAPACITY,
+        availableUnits + (elapsedMs * REVISION_EVIDENCE_READ_RU_PER_SECOND) / 1_000,
+      );
+      lastRefillAt = currentTime;
+      if (availableUnits >= requiredUnits) break;
+      const waitMs = Math.ceil(
+        ((requiredUnits - availableUnits) / REVISION_EVIDENCE_READ_RU_PER_SECOND) * 1_000,
+      );
+      await sleep(waitMs);
+    }
+    availableUnits -= requiredUnits;
   };
 }
 
