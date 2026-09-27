@@ -39,6 +39,13 @@ function staleResumeFailure() {
   );
 }
 
+function staleRevisionEvidencePreparationFailure() {
+  return new InitialBootstrapReferenceAwareRuntimeError(
+    'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+    'REVISION_EVIDENCE_PREPARATION',
+  );
+}
+
 test('exact resume-context semantic failure retires once and performs exactly one fresh bootstrap retry', async () => {
   const firstFailure = staleResumeFailure();
   let attempts = 0;
@@ -58,6 +65,54 @@ test('exact resume-context semantic failure retires once and performs exactly on
 
   assert.deepEqual(result, { status: 'COMMITTED' });
   assert.equal(attempts, 2);
+  assert.equal(retirements, 1);
+});
+
+test('revision-evidence preparation semantic failure retires once and performs exactly one fresh bootstrap retry', async () => {
+  const firstFailure = staleRevisionEvidencePreparationFailure();
+  let attempts = 0;
+  let retirements = 0;
+
+  const result = await runInitialBootstrapJobWithOneStaleStagingRetirement(
+    {},
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw firstFailure;
+      return { status: 'COMMITTED' };
+    },
+    async () => {
+      retirements += 1;
+    },
+  );
+
+  assert.deepEqual(result, { status: 'COMMITTED' });
+  assert.equal(attempts, 2);
+  assert.equal(retirements, 1);
+});
+
+test('revision-evidence retirement refusal preserves the exact failure phase and does not retry', async () => {
+  let attempts = 0;
+  let retirements = 0;
+
+  await assert.rejects(
+    runInitialBootstrapJobWithOneStaleStagingRetirement(
+      {},
+      async () => {
+        attempts += 1;
+        throw staleRevisionEvidencePreparationFailure();
+      },
+      async () => {
+        retirements += 1;
+        throw new InitialBootstrapStaleStagingRetirementError('STALE_SNAPSHOT_NOT_PROVEN');
+      },
+    ),
+    (error) => error instanceof InitialBootstrapReferenceAwareRuntimeError
+      && error.code === 'REFERENCE_STALE_STAGING_RETIREMENT_FAILED'
+      && error.applicationPhase === 'REVISION_EVIDENCE_PREPARATION'
+      && error.staleRetirementFailureCode === 'STALE_SNAPSHOT_NOT_PROVEN',
+  );
+
+  assert.equal(attempts, 1);
   assert.equal(retirements, 1);
 });
 
@@ -235,6 +290,29 @@ test('unrelated bootstrap failures never cross the retirement authority boundary
   const unrelated = new InitialBootstrapReferenceAwareRuntimeError(
     'REFERENCE_APPLICATION_YDB_DATA_FAILED',
     'REVISION_EVIDENCE_WRITE',
+  );
+  let retirements = 0;
+
+  await assert.rejects(
+    runInitialBootstrapJobWithOneStaleStagingRetirement(
+      {},
+      async () => {
+        throw unrelated;
+      },
+      async () => {
+        retirements += 1;
+      },
+    ),
+    (error) => error === unrelated,
+  );
+
+  assert.equal(retirements, 0);
+});
+
+test('other semantic preparation failures do not cross the stale-retirement authority boundary', async () => {
+  const unrelated = new InitialBootstrapReferenceAwareRuntimeError(
+    'REFERENCE_APPLICATION_SEMANTIC_FAILED',
+    'LINEAGE_PREPARATION',
   );
   let retirements = 0;
 

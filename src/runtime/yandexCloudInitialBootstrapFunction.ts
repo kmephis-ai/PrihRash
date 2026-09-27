@@ -264,17 +264,21 @@ export async function runInitialBootstrapJobWithOneStaleStagingRetirement(
     if (
       !(error instanceof InitialBootstrapReferenceAwareRuntimeError)
       || error.code !== 'REFERENCE_APPLICATION_SEMANTIC_FAILED'
-      || error.applicationPhase !== 'RESUME_CONTEXT_READ'
+      || (
+        error.applicationPhase !== 'RESUME_CONTEXT_READ'
+        && error.applicationPhase !== 'REVISION_EVIDENCE_PREPARATION'
+      )
     ) {
       throw error;
     }
 
+    const staleRetirementPhase = error.applicationPhase;
     try {
       await retireStaleStaging(environment);
     } catch (retirementError) {
       throw new InitialBootstrapReferenceAwareRuntimeError(
         'REFERENCE_STALE_STAGING_RETIREMENT_FAILED',
-        'RESUME_CONTEXT_READ',
+        staleRetirementPhase,
         classifyInitialBootstrapMetadataFailureCode(retirementError),
         classifyInitialBootstrapYdbDataFailureCode(retirementError),
         classifyInitialBootstrapStaleRetirementFailureCode(retirementError),
