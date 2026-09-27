@@ -27,6 +27,7 @@ import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstr
 import {
   matchesInitialBootstrapDurableRevisionEvidenceProof,
   reconstructInitialBootstrapDurableObservation,
+  type InitialBootstrapDurableObservationReadStage,
   type InitialBootstrapDurableRevisionEvidenceProof,
 } from './initialStaleValidatedHistoricalCandidate.js';
 import type { InitialSnapshotProjection, InitialSnapshotProjectionContext } from './initialSnapshotProjection.js';
@@ -431,6 +432,8 @@ async function prepareResumeContext(
         dependencies.adapter,
         run,
         dependencies.historicalEvidence,
+        undefined,
+        (stage: InitialBootstrapDurableObservationReadStage) => markApplicationPhase(dependencies, stage),
       );
       resumeObservation = Object.freeze({
         capturedAt: reconstructed.capturedAt,

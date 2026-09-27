@@ -154,13 +154,21 @@ function fixture(overrides = {}) {
 test('durable STAGING reconstruction verifies paged payload rows and returns an exact proof', async () => {
   const f = fixture({ runState: 'STAGING' });
   const stagingRun = run({ state: 'STAGING' });
+  const readStages = [];
   const reconstructed = await reconstructInitialBootstrapDurableObservation(
     f.reader,
     stagingRun,
     evidence(),
+    undefined,
+    (stage) => readStages.push(stage),
   );
 
   assert.equal(reconstructed.rows.length, 1);
+  assert.deepEqual(readStages, [
+    'RESUME_IDENTITY_MANIFEST_READ',
+    'RESUME_SNAPSHOT_READ',
+    'REVISION_EVIDENCE_PREPARATION',
+  ]);
   assert.equal(f.reads.length, 3);
   assert.match(f.reads[2], /VIEW idx_source_record_revisions_run_revision/);
   assert.match(f.reads[2], /ORDER BY source_record_id LIMIT 2/);

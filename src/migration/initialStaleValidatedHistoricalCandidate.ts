@@ -37,6 +37,11 @@ export type InitialStaleValidatedHistoricalCandidateErrorCode =
   | 'VALIDATED_RUN_INVARIANTS_MISMATCH'
   | 'VERIFIED_PLAN_RECONSTRUCTION_FAILED';
 
+export type InitialBootstrapDurableObservationReadStage =
+  | 'RESUME_IDENTITY_MANIFEST_READ'
+  | 'RESUME_SNAPSHOT_READ'
+  | 'REVISION_EVIDENCE_PREPARATION';
+
 export class InitialStaleValidatedHistoricalCandidateError extends Error {
   readonly code: InitialStaleValidatedHistoricalCandidateErrorCode;
 
@@ -288,6 +293,7 @@ async function readHistoricalRevisionsInBoundedBatches(
   capturedAt: string,
   expectedBySource: ReadonlyMap<string, Readonly<{ rowHint: number; rowDigest: string }>>,
   waitForReadBudget: ReturnType<typeof createInitialSourceRevisionEvidenceReadBudgetWaiter>,
+  observeReadStage?: (stage: InitialBootstrapDurableObservationReadStage) => void,
 ): Promise<readonly Readonly<HistoricalRevision>[]> {
   const seen = new Set<string>();
   const revisions: HistoricalRevision[] = [];
@@ -299,6 +305,11 @@ async function readHistoricalRevisionsInBoundedBatches(
       HISTORICAL_REVISION_READ_ROWS_LIMIT,
       Math.max(1, remaining + 1),
     );
+    try {
+      observeReadStage?.('REVISION_EVIDENCE_PREPARATION');
+    } catch {
+      // Diagnostic callbacks cannot change historical reconstruction semantics.
+    }
     await waitForReadBudget(limit);
     const payloadResult = await reader.read<RevisionRow>(
       revisionPayloadPageStatement(run.id, afterSourceRecordId, limit),
@@ -350,6 +361,7 @@ export async function reconstructInitialBootstrapDurableObservation(
   run: Readonly<MigrationRun>,
   historicalEvidence: Readonly<InitialBootstrapPrivateHistoricalEvidence>,
   waitForReadBudget = createInitialSourceRevisionEvidenceReadBudgetWaiter(),
+  observeReadStage?: (stage: InitialBootstrapDurableObservationReadStage) => void,
 ): Promise<Readonly<{
   capturedAt: string;
   snapshotDigest: string;
@@ -371,6 +383,11 @@ export async function reconstructInitialBootstrapDurableObservation(
 
   let readback;
   try {
+    try {
+      observeReadStage?.('RESUME_IDENTITY_MANIFEST_READ');
+    } catch {
+      // Diagnostic callbacks cannot change historical reconstruction semantics.
+    }
     const manifestResult = await reader.read<Record<string, unknown>>(
       initialBootstrapIdentityManifestReadStatement(run.id),
     );
@@ -390,6 +407,11 @@ export async function reconstructInitialBootstrapDurableObservation(
     throw new InitialStaleValidatedHistoricalCandidateError('MANIFEST_EVIDENCE_INVALID');
   }
 
+  try {
+    observeReadStage?.('RESUME_SNAPSHOT_READ');
+  } catch {
+    // Diagnostic callbacks cannot change historical reconstruction semantics.
+  }
   const snapshotResult = await reader.read<SnapshotRow>(snapshotStatement(readback.manifest.sourceSnapshotId));
   const capturedAt = parseSnapshot(snapshotResult.rows, run.sourceSnapshotDigest, run.rowsSeen);
   historicalEvidence.assertCompatibleRowCount(run.rowsSeen);
@@ -406,6 +428,7 @@ export async function reconstructInitialBootstrapDurableObservation(
       capturedAt,
       expectedBySource,
       waitForReadBudget,
+      observeReadStage,
     );
   } catch (error) {
     if (error instanceof InitialStaleValidatedHistoricalCandidateError) throw error;
