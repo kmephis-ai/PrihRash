@@ -254,6 +254,17 @@ test('PR-850 read-only result and Yandex repeated-tag schema proof arm only the 
   assert.match(evidence, /explicit null or a wrong type remains invalid/);
 });
 
+test('PR-851 no-current-tag result stays unknown and arms only bounded tag-history classification', () => {
+  const evidence = runbook.match(
+    /### PR #851 read-only current-version classification found no tagged candidate in the failed-run window on `a18d67c6b44b6c2e7da5cc67aa4f1c9957c30f72`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the current-tag absence result and next diagnostic boundary must be retained');
+  assert.match(evidence, /published only `RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`/);
+  assert.match(evidence, /does not prove `NOT_APPLIED`/);
+  assert.match(evidence, /`ListTagHistory` API/);
+  assert.match(evidence, /`next_page_token` is empty/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
