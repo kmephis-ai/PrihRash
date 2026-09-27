@@ -83,6 +83,13 @@ activation, cap/IAM widening и retirement неоднозначных данны
 завершается только после доказательства R1 baseline, independent reconciliation, требуемого catch-up
 и retirement временной R1 authority.
 
+В пределах делегации разрешено без новых Owner confirmation продолжать bounded read-only diagnostic
+refinement, в том числе для одного ранее неизвестного provider outcome, если каждый следующий probe
+привязан к новому exact SHA и к новой causal гипотезе/изменённому diagnostic discriminator с
+synthetic regression fixture. Same-SHA или неизменённый query повторять запрещено. Read-only probes
+не увеличивают write-attempt circuit и не разрешают deploy/invoke; write-capable action по-прежнему
+требует своего exact machine marker, CI/readiness, cause fix и mandatory recovery.
+
 ## Живой Google source
 
 R1 не требует source freeze. Пользователь продолжает обычные записи в Google Sheets.

@@ -177,14 +177,15 @@ Function, не вызывает Function/YDB и не разрешает след
 новый causal root-cause decision. Отсутствующее/неоднозначное provider evidence остаётся
 `RECOVERY_REQUIRED`; никаких inferred `NOT_APPLIED` или replay.
 
-Если Owner отдельно разрешил read-only probes для R1 и это разрешение внесено в активный tracking
-Issue, разрешён один дополнительный exact-main read-only классификатор для того же failed recovery
-run после repository-only изменения самого classifier. Такой successor обязан подтвердить exact
-latest failed run, failed deploy step, skipped invoke step, использовать новый exact SHA и сохранять
-`Provider-Attempt: NOT_AUTHORIZED`. Это исключение разрешает только новый read-only metadata query;
-никаких deploy/invoke/replay/cleanup/authority changes оно не разрешает. Если свежая классификация
-остаётся missing/ambiguous, дальнейший шаг снова требует отдельного causal decision; blind diagnostic
-replay запрещён.
+Standing delegation из §8.3 разрешает автономно выбирать и выполнять последующие stage-appropriate
+read-only probes без нового per-probe Owner confirmation. Для того же failed recovery run после
+`missing`/`ambiguous` probe каждый successor требует нового exact SHA и новой repository causal
+гипотезы/diagnostic discriminator с synthetic regression fixture. Run ID и failed phase остаются
+exact-bound; PR использует `Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY` и allowlisted
+stage-specific transition. Повтор неизменённого query/кода, same-SHA replay или telemetry-only blind
+replay запрещены. Любое количество таких read-only refinement cycles не увеличивает write-attempt
+circuit и не разрешает deploy/invoke/replay/cleanup/authority changes. Если enum всё ещё missing или
+ambiguous, меняй причинную гипотезу и продолжавай только с read-only/repository-only actions.
 
 ### 8.2. R1 completion sprint и multi-agent handoff
 

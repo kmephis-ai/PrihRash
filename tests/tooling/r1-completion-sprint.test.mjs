@@ -9,6 +9,9 @@ test('standing Owner delegation covers autonomous R1 decisions only until the co
   assert.match(agents, /Standing Owner delegation through R1 completion|Постоянная делегация Owner до завершения R1/);
   assert.match(agents, /Owner делегирует агенту автономно принимать и выполнять все repository\/process\/provider решения/);
   assert.match(agents, /Не запрашивать Owner confirmation для каждого следующего causal гипотезы/);
+  assert.match(agents, /Standing delegation.*read-only probes без нового per-probe Owner confirmation/s);
+  assert.match(agents, /нового exact SHA и новой repository causal\s+гипотезы\/diagnostic discriminator/);
+  assert.match(agents, /Повтор неизменённого query\/кода, same-SHA replay или telemetry-only blind\s+replay запрещены/);
   assert.match(agents, /делегация не включает CUTOVER, timer activation, YDB-authoritative production Writer/);
   assert.match(agents, /retires после доказанного initial/);
 
@@ -18,4 +21,7 @@ test('standing Owner delegation covers autonomous R1 decisions only until the co
   assert.match(sprint, /неизвестное состояние остаётся неизвестным/i);
   assert.match(sprint, /timer activation/);
   assert.match(sprint, /Она\s+завершается только после доказательства R1 baseline/);
+  assert.match(sprint, /без новых Owner confirmation продолжать bounded read-only diagnostic/);
+  assert.match(sprint, /Same-SHA или неизменённый query повторять запрещено/);
+  assert.match(sprint, /Read-only probes\s+не увеличивают write-attempt circuit/);
 });
