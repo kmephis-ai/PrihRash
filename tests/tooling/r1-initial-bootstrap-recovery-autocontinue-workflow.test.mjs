@@ -124,7 +124,7 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
     surfaceOnly: false,
     functionDeployRecovery: true,
     recoveryRunId: '36341844854',
-    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
+    regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
   });
   assert.equal(parse({ 'Recovery-Run-ID': '0' }).valid, false);
   assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
