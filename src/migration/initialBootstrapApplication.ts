@@ -2,6 +2,7 @@ import {
   YdbAdapter,
   YdbCommitOutcomeUnknownError,
 } from '../integration/ydb/adapter.js';
+import type { YdbJsV6DataTransportErrorCode } from '../integration/ydb/ydbJsV6DataTransport.js';
 import { promoteAtomicDelta } from './atomicPromotion.js';
 import {
   buildInitialBootstrapCandidate,
@@ -25,6 +26,7 @@ import {
 } from './initialBootstrapGateCGuard.js';
 import type { InitialBootstrapPrivateHistoricalEvidence } from './initialBootstrapPrivateEvidence.js';
 import {
+  InitialStaleValidatedHistoricalCandidateError,
   matchesInitialBootstrapDurableRevisionEvidenceProof,
   reconstructInitialBootstrapDurableObservation,
   type InitialBootstrapDurableObservationReadStage,
@@ -236,11 +238,16 @@ export type InitialBootstrapApplicationErrorCode =
 
 export class InitialBootstrapApplicationError extends Error {
   readonly code: InitialBootstrapApplicationErrorCode;
+  readonly ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null;
 
-  constructor(code: InitialBootstrapApplicationErrorCode) {
+  constructor(
+    code: InitialBootstrapApplicationErrorCode,
+    ydbDataFailureCode: YdbJsV6DataTransportErrorCode | null = null,
+  ) {
     super(code);
     this.name = 'InitialBootstrapApplicationError';
     this.code = code;
+    this.ydbDataFailureCode = ydbDataFailureCode;
   }
 }
 
@@ -441,8 +448,13 @@ async function prepareResumeContext(
         rows: reconstructed.rows,
       });
       durableRevisionEvidenceProof = reconstructed.revisionEvidenceProof;
-    } catch {
-      throw new InitialBootstrapApplicationError('BOOTSTRAP_OBSERVATION_INVALID');
+    } catch (error) {
+      throw new InitialBootstrapApplicationError(
+        'BOOTSTRAP_OBSERVATION_INVALID',
+        error instanceof InitialStaleValidatedHistoricalCandidateError
+          ? error.ydbDataFailureCode
+          : null,
+      );
     }
   }
   markApplicationPhase(dependencies, 'RESUME_IDENTITY_MANIFEST_READ');

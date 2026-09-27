@@ -60,5 +60,5 @@ test('swap recovery runtime keeps bootstrap subphase only inside controlled PREP
   assert.match(source, /bootstrapPhase = nextPhase;/);
   assert.match(source, /if \(nextPhase !== 'PREPARATION'\) bootstrapPhase = null;/);
   assert.match(source, /InitialControlledRebuildJobError\([\s\S]*?'APPLICATION_FAILED',[\s\S]*?controlledPhase,[\s\S]*?bootstrapPhase/);
-  assert.match(source, /error instanceof YdbJsV6DataTransportError \? error\.code : null/);
+  assert.match(source, /error instanceof YdbJsV6DataTransportError[\s\S]*InitialBootstrapApplicationError[\s\S]*error\.ydbDataFailureCode/);
 });

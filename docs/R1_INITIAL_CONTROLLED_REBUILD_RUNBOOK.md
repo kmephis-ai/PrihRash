@@ -617,3 +617,26 @@ repository-only correction accepts this exact known phase under controlled `PREP
 the already allowlisted YDB subtype only when present. It does not alter preparation, query, timeout,
 resource, financial or write behavior and does not arm another provider attempt. Any later controlled
 invoke still requires fresh exact-main/recovery/readiness gates and separate authority.
+
+### #834 preserve bounded YDB transport subtype across historical reconstruction
+
+The post-#831 controlled attempt `36303272610` now preserved the exact nested application phase
+`PREPARATION / REVISION_EVIDENCE_PREPARATION`, but its result omitted `ydbDataFailureCode`. Code
+inspection identified an error-classification gap: `reconstructInitialBootstrapDurableObservation`
+caught every non-domain error from the indexed revision read and replaced it with
+`REVISION_EVIDENCE_INVALID`; `prepareResumeContext` then projected that to
+`BOOTSTRAP_OBSERVATION_INVALID`, dropping the existing typed YDB transport enum.
+
+The repository-only correction carries an allowlisted `YdbJsV6DataTransportErrorCode` alongside the
+existing fail-closed domain error through `InitialBootstrapApplicationError`, then into the existing
+controlled runtime enum. The recovery-only controlled-preparation classifier likewise reports its
+existing `YDB_DATA_<enum>` bucket when that typed cause is available. Synthetic tests reproduce a
+`QUERY_EXECUTION_YDB_OVERLOADED` at the indexed revision page and prove the subtype reaches the
+controlled-preparation boundary while current and staging financial tables remain unchanged. This
+changes no SQL, reads, pacing, retry, timeout, cap, financial semantics or write authority.
+
+After merge, one new exact-main `controlled_preparation_only` recovery-only read may verify the
+improved enum path; it is strictly diagnostic and does not rearm the consumed #832/#833 one-shot
+controlled attempt or temporary-cap gate. Any new write-capable WU7 operation requires a fresh
+separately authorized gate, exact current-main CI/recovery/readiness and the full restore/read-back
+contract. Non-PASS read-only evidence is followed only by the prescribed full recovery.

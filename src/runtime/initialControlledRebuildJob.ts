@@ -18,7 +18,10 @@ import {
 } from '../migration/initialControlledRebuildApplication.js';
 import { createInitialBootstrapDurableReconciliation } from '../migration/initialBootstrapDurableReconciliation.js';
 import { createInitialSourceRevisionEvidenceReadBudgetWaiter } from '../migration/initialSourceRevisionEvidenceRecovery.js';
-import type { InitialBootstrapApplicationPhase } from '../migration/initialBootstrapApplication.js';
+import {
+  InitialBootstrapApplicationError,
+  type InitialBootstrapApplicationPhase,
+} from '../migration/initialBootstrapApplication.js';
 import { parseInitialBootstrapPrivateHistoricalEvidence } from '../migration/initialBootstrapPrivateEvidence.js';
 import { createNodeInitialBootstrapRuntimePrimitives } from '../migration/initialBootstrapRuntimePrimitives.js';
 import type { InitialSnapshotProjectionContext } from '../migration/initialSnapshotProjection.js';
@@ -247,7 +250,11 @@ export async function runInitialControlledRebuildJob(
         'APPLICATION_FAILED',
         controlledPhase,
         bootstrapPhase,
-        error instanceof YdbJsV6DataTransportError ? error.code : null,
+        error instanceof YdbJsV6DataTransportError
+          ? error.code
+          : error instanceof InitialBootstrapApplicationError
+            ? error.ydbDataFailureCode
+            : null,
       );
     }
     observeRuntimePhase(observer, 'APPLICATION_DONE');
