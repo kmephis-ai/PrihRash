@@ -252,6 +252,59 @@ test('surface-only invoker accepts bare STAGING enum only when explicitly select
 });
 
 
+test('full recovery invoker accepts bounded staging lineage only when tied to the selected failed child', async () => {
+  const base = {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    stagingDurableRevisionEvidence: 'COMPLETE_CURRENT_RUN_ONLY',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
+    stagingRunLineageEvidence: 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD',
+  };
+  const yc = await fakeYc(base);
+  const env = {
+    ...process.env,
+    PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: 'synthetic-function-id',
+    PRIHRASH_YC_BIN: yc,
+    RECOVERY_CAUSAL_BOOTSTRAP_RUN_ID: '36327850242',
+  };
+  const accepted = await execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+    cwd: process.cwd(),
+    env,
+  });
+  assert.deepEqual(JSON.parse(accepted.stdout), {
+    status: 'PASS',
+    code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+  });
+  assert.equal(
+    accepted.stderr,
+    'R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH\n'
+      + 'R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY\n'
+      + 'R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY\n'
+      + 'R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE\n'
+      + 'R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN\n'
+      + 'R1_STAGING_RUN_LINEAGE_EVIDENCE=STAGING_STARTED_AFTER_BOOTSTRAP_CHILD\n',
+  );
+
+  for (const [candidate, causalRunId] of [
+    [base, ''],
+    [{ ...base, stagingRunLineageEvidence: 'PRIVATE_RUN_ID' }, '36327850242'],
+  ]) {
+    const invalidYc = await fakeYc(candidate);
+    await assert.rejects(() => execFileAsync(process.execPath, ['scripts/invoke-yandex-initial-bootstrap-recovery.mjs'], {
+      cwd: process.cwd(),
+      env: { ...env, PRIHRASH_YC_BIN: invalidYc, RECOVERY_CAUSAL_BOOTSTRAP_RUN_ID: causalRunId },
+    }), (error) => error.code === 2 && !error.stdout.includes('PRIVATE_RUN_ID') && !error.stderr.includes('PRIVATE_RUN_ID'));
+  }
+});
+
+
 test('VALIDATED source invoker rejects missing, unknown, extra and wrong-state evidence without echo', async () => {
   const base = { status: 'PASS', code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED', verdict: 'RECOVERY_REQUIRED', reason: 'VALIDATED_CURRENT_EMPTY_STAGING_NONEMPTY' };
   for (const value of [base, { ...base, validatedSourceEvidence: 'private text' }, { ...base, validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_MATCH', private: 'private text' }, { ...base, reason: 'VALIDATED_CURRENT_EMPTY_STAGING_EMPTY', validatedSourceEvidence: 'AUTHORITATIVE_SNAPSHOT_MATCH' }]) {

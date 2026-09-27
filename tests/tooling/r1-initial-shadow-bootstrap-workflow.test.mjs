@@ -208,6 +208,13 @@ test('runbook keeps Google authoritative, forbids blind retry/timer and requires
   assert.match(runbook, /Retirement после successful bootstrap/);
   assert.match(runbook, /Timer остаётся выключен|timer всё ещё выключен/);
   assert.match(runbook, /YDB остаётся shadow/);
+  assert.match(runbook, /Read-only STAGING lineage check after stale-retirement rearm/);
+  assert.match(runbook, /STAGING_STARTED_AFTER_BOOTSTRAP_CHILD/);
+  assert.match(runbook, /STAGING_PREDATES_BOOTSTRAP_CHILD/);
+  assert.match(runbook, /No timestamp, run identifier, source digest/);
+  assert.match(runbook, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(runbook, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(runbook, /stagingRunLineageEvidence/);
   assert.doesNotMatch(runbook, /auto-rebuild.*разреш/u);
 });
 

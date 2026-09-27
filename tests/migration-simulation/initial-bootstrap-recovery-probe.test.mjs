@@ -4,8 +4,10 @@ import test from 'node:test';
 import { YdbAdapter } from '../../dist/integration/ydb/adapter.js';
 import {
   classifyInitialBootstrapRecoveryEvidence,
+  classifyInitialBootstrapStagingRunLineage,
   diagnoseInitialBootstrapRecovery,
   diagnoseInitialBootstrapRecoveryEvidence,
+  diagnoseInitialBootstrapStagingRunLineage,
   probeInitialBootstrapRecovery,
 } from '../../dist/migration/initialBootstrapRecoveryProbe.js';
 import {
@@ -106,6 +108,47 @@ test('bootstrap recovery probe remains read-only and never opens a read-write tr
   assert.equal(statements.every((statement) => statement.kind === 'READ'), true);
 });
 
+test('staging lineage comparator uses a bounded cross-provider timestamp uncertainty window', async () => {
+  const cutoff = '2026-09-27T14:58:41Z';
+  assert.equal(
+    classifyInitialBootstrapStagingRunLineage('2026-09-27T14:58:30.000Z', cutoff),
+    'STAGING_PREDATES_BOOTSTRAP_CHILD',
+  );
+  assert.equal(
+    classifyInitialBootstrapStagingRunLineage('2026-09-27T14:58:50.000Z', cutoff),
+    'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD',
+  );
+  assert.equal(
+    classifyInitialBootstrapStagingRunLineage('2026-09-27T14:58:44.000Z', cutoff),
+    'STAGING_START_TIME_AMBIGUOUS',
+  );
+  assert.equal(classifyInitialBootstrapStagingRunLineage('private', cutoff), 'DIAGNOSTIC_FAILED');
+
+  const statements = [];
+  const adapter = new YdbAdapter({
+    async executeRead(statement) {
+      statements.push(statement);
+      return { rows: [{ started_at: new Date('2026-09-27T14:59:00.000Z') }] };
+    },
+    async serializableReadWrite() {
+      throw new Error('lineage diagnosis must stay read-only');
+    },
+  });
+  assert.equal(
+    await diagnoseInitialBootstrapStagingRunLineage(adapter, cutoff),
+    'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD',
+  );
+  assert.equal(statements.length, 1);
+  assert.match(statements[0].text, /SELECT started_at FROM migration_runs WHERE state = 'STAGING' LIMIT 2/);
+  assert.equal(/migration_run_id|source_record_id|raw_payload/.test(statements[0].text), false);
+
+  const cardinality = await diagnoseInitialBootstrapStagingRunLineage(new YdbAdapter({
+    async executeRead() { return { rows: [{ started_at: '2026-09-27T14:59:00Z' }, { started_at: '2026-09-27T14:59:01Z' }] }; },
+    async serializableReadWrite() { throw new Error('unexpected transaction'); },
+  }), cutoff);
+  assert.equal(cardinality, 'STAGING_RUN_CARDINALITY_INVALID');
+});
+
 test('bootstrap recovery converts read failures to sanitized READ_FAILED classification', async () => {
   const adapter = new YdbAdapter({
     async executeRead() {
@@ -170,6 +213,39 @@ test('Yandex recovery handler exposes only validated verdict plus reason enums',
     ],
     stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_RAW_PAYLOAD_MISMATCH',
   });
+
+  const lineageEvidence = {
+    verdict: 'RECOVERY_REQUIRED',
+    reason: 'STAGING_RUN_PRESENT',
+    stagingRevisionEvidence: 'AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH',
+    stagingDurableRevisionEvidence: 'COMPLETE_CURRENT_RUN_ONLY',
+    stagingRetirementEvidence: 'STALE_STAGING_CURRENT_STATE_EMPTY',
+    stagingSourceDecodeEvidence: [],
+    stagingExactRevisionEvidence: 'EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN',
+    stagingRunLineageEvidence: 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD',
+  };
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction(
+      { PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT: '2026-09-27T14:58:41Z' },
+      async () => lineageEvidence,
+    ),
+    {
+      status: 'PASS',
+      code: 'INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED',
+      ...lineageEvidence,
+    },
+  );
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction({}, async () => lineageEvidence),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },
+  );
+  assert.deepEqual(
+    await executeYandexInitialBootstrapRecoveryFunction(
+      { PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT: '2026-09-27T14:58:41Z' },
+      async () => ({ ...lineageEvidence, stagingRunLineageEvidence: 'PRIVATE_RUN_ID' }),
+    ),
+    { status: 'FAIL', code: 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_FAILED' },
+  );
 
   const surfaceOnly = await executeYandexInitialBootstrapRecoveryFunction(
     { PRIHRASH_R1_RECOVERY_SURFACE_ONLY: '1' },

@@ -660,6 +660,45 @@ test('recovery job adds enum-only revision and retirement evidence for a single 
   assert.equal(fixture.counters().closes, 1);
 });
 
+test('exact causal bootstrap cutoff adds only bounded staging lineage evidence to full read-only recovery', async () => {
+  const causalBootstrapStartedAt = '2026-09-27T14:58:41Z';
+  let lineageCalls = 0;
+  const fixture = runtime({
+    async diagnoseSurface() {
+      return { verdict: 'RECOVERY_REQUIRED', reason: 'STAGING_RUN_PRESENT' };
+    },
+    async diagnoseStagingRunLineage(adapter, receivedBootstrapStartedAt) {
+      lineageCalls += 1;
+      assert.equal(typeof adapter.read, 'function');
+      assert.equal(receivedBootstrapStartedAt, causalBootstrapStartedAt);
+      return 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD';
+    },
+  });
+
+  const result = await executeInitialBootstrapRecoveryJob({
+    ...config,
+    causalBootstrapStartedAt,
+  }, fixture.runtime);
+
+  assert.equal(result.verdict, 'RECOVERY_REQUIRED');
+  assert.equal(result.reason, 'STAGING_RUN_PRESENT');
+  assert.equal(result.stagingRunLineageEvidence, 'STAGING_STARTED_AFTER_BOOTSTRAP_CHILD');
+  assert.equal(lineageCalls, 1);
+  assert.equal(fixture.counters().closes, 1);
+});
+
+test('causal bootstrap timestamp is rejected outside full recovery mode', async () => {
+  const fixture = runtime();
+  await assert.rejects(
+    () => executeInitialBootstrapRecoveryJob({
+      ...config,
+      causalBootstrapStartedAt: '2026-09-27T14:58:41Z',
+    }, fixture.runtime, true),
+    (error) => error?.code === 'INVALID_RECOVERY_MODE',
+  );
+  assert.equal(fixture.counters().closes, 0);
+});
+
 test('surface-only recovery classifies STAGING without Google or per-revision reads', async () => {
   const fixture = runtime({
     async diagnoseSurface() {
@@ -898,6 +937,25 @@ test('recovery config requires read-only Google credentials plus YDB connection'
     PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
     PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE: config.privateHistoricalEvidence,
   }), config);
+  const causalBootstrapStartedAt = '2026-09-27T14:58:41Z';
+  assert.deepEqual(readInitialBootstrapRecoveryJobConfig({
+    PRIHRASH_GOOGLE_SPREADSHEET_ID: config.spreadsheetId,
+    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
+    PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
+    PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
+    PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE: config.privateHistoricalEvidence,
+    PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT: causalBootstrapStartedAt,
+  }), { ...config, causalBootstrapStartedAt });
+  assert.throws(
+    () => readInitialBootstrapRecoveryJobConfig({
+      PRIHRASH_GOOGLE_SPREADSHEET_ID: config.spreadsheetId,
+      PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL: config.googleServiceAccountEmail,
+      PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: config.googleServiceAccountPrivateKey,
+      PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString,
+      PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT: 'not-a-timestamp',
+    }),
+    (error) => error?.code === 'INVALID_CAUSAL_BOOTSTRAP_START_TIME',
+  );
   assert.throws(
     () => readInitialBootstrapRecoveryJobConfig({ PRIHRASH_YDB_CONNECTION_STRING: config.ydbConnectionString }),
     (error) => error?.code === 'INVALID_SPREADSHEET_ID',
