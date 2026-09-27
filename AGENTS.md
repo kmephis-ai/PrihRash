@@ -162,6 +162,25 @@ SHA может использовать `Recovery-State: STAGING_STALE_RETIREABL
 bootstrap и не разрешает cleanup; он существует только для fresh Google-aware + exact revision
 diagnostics после surface-only durable classification.
 
+### 8.2. R1 completion sprint и multi-agent handoff
+
+Пока R1 не имеет доказанного первого `COMMITTED` baseline, operational process определяется
+[`docs/R1_COMPLETION_SPRINT.md`](docs/R1_COMPLETION_SPRINT.md). Для R1 этот protocol имеет
+приоритет над обычным S-sized дроблением work item, но не над `MIGRATION_CONTRACT`, financial
+semantics, privacy/fail-closed или provider authority gates.
+
+ChatGPT/OpenCode не работают одновременно как writers одного R1 conflict domain. Перед первым
+write агент обязан проверить latest `R1 SESSION HANDOVER`, active branch/PR/provider run и exact
+`main`. Local-only изменения не являются handoff: полезная незавершённая работа должна быть
+commit+push либо явно сохранена/отброшена с checkpoint в active tracking Issue.
+
+Единица R1 blocker work — один `Incident-M` causal PR. Не дробить одну причинную гипотезу на
+micro-PR ради отдельных enum/telemetry строк. Один merged root-cause change разрешает максимум
+один separately gated provider attempt; после него обязателен recovery/read-back и новый handover.
+
+При смене ChatGPT ↔ OpenCode новый агент делает minimal fresh reconciliation, читает exact
+`AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
+определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.
 
 ## 9. CI
 
