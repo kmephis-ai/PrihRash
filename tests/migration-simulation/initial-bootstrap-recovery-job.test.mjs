@@ -960,7 +960,7 @@ test('revision-cardinality-only recovery reads no Google or payload and exposes 
     async diagnoseStagingRevisionCardinality(adapter) {
       cardinalityCalls += 1;
       assert.equal(typeof adapter.read, 'function');
-      return 'GE_5000_ROWS';
+      return 'GE_6000_RU';
     },
   });
 
@@ -969,7 +969,7 @@ test('revision-cardinality-only recovery reads no Google or payload and exposes 
     {
       verdict: 'RECOVERY_REQUIRED',
       reason: 'STAGING_RUN_PRESENT',
-      stagingRevisionCardinalityEvidence: 'GE_5000_ROWS',
+      stagingRevisionCardinalityEvidence: 'GE_6000_RU',
     },
   );
   assert.equal(cardinalityCalls, 1);

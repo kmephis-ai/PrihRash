@@ -39,9 +39,10 @@ export type InitialBootstrapStagingDurableRevisionDiagnostic = Exclude<
 >;
 
 export type InitialBootstrapStagingRevisionCardinalityEvidence =
-  | 'LT_3000_ROWS'
-  | 'GE_3000_LT_5000_ROWS'
-  | 'GE_5000_ROWS'
+  | 'LT_5000_RU'
+  | 'GE_5000_LT_5500_RU'
+  | 'GE_5500_LT_6000_RU'
+  | 'GE_6000_RU'
   | 'DIAGNOSTIC_FAILED';
 
 type InitialBootstrapStagingManifestDiagnostic = Extract<
@@ -273,9 +274,13 @@ export async function diagnoseInitialBootstrapStagingRevisionCardinality(
     ) {
       return 'DIAGNOSTIC_FAILED';
     }
-    if (bindingCount < 3_000) return 'LT_3000_ROWS';
-    if (bindingCount < 5_000) return 'GE_3000_LT_5000_ROWS';
-    return 'GE_5000_ROWS';
+    // Each page is paced for up to nine I/O RUs plus one CPU RU. The final
+    // cursor probe is included, while exact counts remain private.
+    const estimatedPacedReadUnits = bindingCount + Math.floor(bindingCount / 9) + 2;
+    if (estimatedPacedReadUnits < 5_000) return 'LT_5000_RU';
+    if (estimatedPacedReadUnits < 5_500) return 'GE_5000_LT_5500_RU';
+    if (estimatedPacedReadUnits < 6_000) return 'GE_5500_LT_6000_RU';
+    return 'GE_6000_RU';
   } catch {
     return 'DIAGNOSTIC_FAILED';
   }

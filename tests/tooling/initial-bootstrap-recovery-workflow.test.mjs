@@ -230,9 +230,11 @@ test('revision-cardinality diagnostic is one coarse metadata-only read without G
   const recoveryJob = await readFile('src/runtime/initialBootstrapRecoveryJob.ts', 'utf8');
   assert.match(diagnostic, /stagingManifestCardinalityStatement/);
   assert.match(diagnostic, /m\.binding_count AS binding_count/);
-  assert.match(diagnostic, /LT_3000_ROWS/);
-  assert.match(diagnostic, /GE_3000_LT_5000_ROWS/);
-  assert.match(diagnostic, /GE_5000_ROWS/);
+  assert.match(diagnostic, /LT_5000_RU/);
+  assert.match(diagnostic, /GE_5000_LT_5500_RU/);
+  assert.match(diagnostic, /GE_5500_LT_6000_RU/);
+  assert.match(diagnostic, /GE_6000_RU/);
+  assert.match(diagnostic, /bindingCount \+ Math\.floor\(bindingCount \/ 9\) \+ 2/);
   assert.doesNotMatch(diagnostic, /stagingManifestCardinalityStatement\(\)[\s\S]{0,500}m\.bindings/);
   assert.match(recoveryJob, /if \(revisionCardinalityOnly\)[\s\S]*diagnoseStagingRevisionCardinality/);
   assert.match(workflow, /recovery_execution_timeout='150s'/);

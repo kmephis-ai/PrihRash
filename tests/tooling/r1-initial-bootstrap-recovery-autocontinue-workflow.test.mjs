@@ -315,3 +315,34 @@ test('large revision bucket leads to one-pass paged exact-manifest reconstructio
   assert.match(evidence, /ровно один свежий exact-main controlled-preparation-only read-only probe/);
   assert.match(evidence, /controlled rebuild\/WU7, bootstrap replay и cleanup не armed/);
 });
+
+test('single-pass timeout leads to a coarse paced-RU estimate rather than a raw row count', () => {
+  const evidence = runbook.match(
+    /### RU-budget estimate buckets после timeout `36281170917`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-main single-pass timeout must drive a bounded diagnostic refinement');
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`/);
+  assert.match(evidence, /`GE_5000_ROWS`\s+не позволял отличить budget/);
+  assert.match(evidence, /`LT_5000_RU`, `GE_5000_LT_5500_RU`, `GE_5500_LT_6000_RU`, `GE_6000_RU`/);
+  assert.match(evidence, /rows \+ число ≤9-row pages \+ pacing\/query margins/);
+  assert.match(evidence, /Exact row count, IDs и payload не публикуются/);
+  assert.match(evidence, /разрешена ровно одна свежая exact-main `staging_revision_cardinality_only` read-only/);
+  assert.match(evidence, /не разрешает controlled-preparation replay,\s+WU7, bootstrap/);
+});
+
+test('repeated single-pass timeout leads to a bounded paced-RU bucket before another application probe', () => {
+  const evidence = runbook.match(
+    /### RU-budget bucket после controlled-preparation timeout `36281170917`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'the latest exact-main timeout must select a new read-only cardinality refinement');
+  assert.match(evidence, /`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILED`/);
+  assert.match(evidence, /`GE_5000_ROWS` с предыдущей версии оказался слишком широким/);
+  assert.match(evidence, /`LT_5000_RU`,\s+`GE_5000_LT_5500_RU`, `GE_5500_LT_6000_RU`, `GE_6000_RU`/);
+  assert.match(evidence, /9 rows\/page/);
+  assert.match(evidence, /На одном metadata-only\s+manifest read/);
+  assert.match(evidence, /GE_6000_RU.*600 s × 10 RU\/s/s);
+  assert.match(evidence, /ровно одна свежая exact-main cardinality-only read-only probe/);
+  assert.match(evidence, /не разрешает повтор controlled preparation, WU7, quota change/);
+});

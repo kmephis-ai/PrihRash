@@ -158,7 +158,7 @@ test('staging revision cardinality emits only a coarse manifest bucket from one 
     },
   }));
 
-  assert.equal(evidence, 'GE_3000_LT_5000_ROWS');
+  assert.equal(evidence, 'GE_5000_LT_5500_RU');
   assert.equal(calls.length, 1);
   assert.match(calls[0].text, /m\.binding_count AS binding_count/);
   assert.doesNotMatch(calls[0].text, /m\.bindings|raw_payload|source_record_id/);
