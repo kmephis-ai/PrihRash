@@ -209,26 +209,18 @@ micro-PR ради отдельных enum/telemetry строк. Один merged 
 
 ### 8.3. Постоянная делегация Owner до завершения R1
 
-Owner делегирует агенту автономно принимать и выполнять все repository/process/provider решения,
-необходимые для завершения R1, пока completion target из `docs/R1_COMPLETION_SPRINT.md` не доказан.
-Не запрашивать Owner confirmation для каждого следующего causal гипотезы, разрешённого read-only
-probe, root-cause PR, gated initial/bootstrap/controlled-rebuild попытки или их обязательного recovery;
-после свежей reconciliation выбирать следующий безопасный шаг самостоятельно и отражать решение в
-active tracking Issue.
+Для активного R1 действует [`docs/R1_OWNER_AUTHORITY.md`](docs/R1_OWNER_AUTHORITY.md). Owner заранее
+делегирует текущему single writer все необходимые repository/local/provider полномочия для достижения
+R1 без промежуточных Owner confirmations, включая local filesystem/tooling, GitHub, Yandex Cloud/YDB
+IAM/roles, probes, deploy/invoke/recovery, quotas/caps и платные R1 resources в пределах общего
+`R1_MONTHLY_COST_LIMIT_RUB = 500`. Новый тип permission или IAM role сам по себе не является Owner gate.
 
-Делегация разрешает использовать уже описанные R1 one-shot write/recovery paths только при их точных
-Issue/PR/marker/exact-main/CI/readiness/circuit/provider gates. Она не ослабляет fail-closed, financial
-semantics, `MIGRATION_CONTRACT`, LIVE-MUTABLE-SOURCE, privacy, single-writer, no blind/same-SHA replay,
-exact failed-run identity/phase checks или обязательный read-back. `COMMITTED` требует независимой
-reconciliation; неизвестный/неоднозначный provider outcome не становится `APPLIED`/`NOT_APPLIED` по
-догадке. При ambiguous state разрешены только stage-appropriate read-only classification probes и
-reproducible repository root-cause work; никакого inferred cleanup/retirement.
-
-Эта делегация не включает CUTOVER, timer activation, YDB-authoritative production Writer, Google
-mutation/authority switch, `MEMBER` activation, cap/IAM widening или отмену resource retirement.
-Они остаются вне R1 completion target и требуют своих отдельных gates. Все временные R1 permissions,
-workflow/autocontinue surfaces и delegated authority retires после доказанного initial
-`COMMITTED` + required catch-up/reconciliation completion.
+Writer обязан самостоятельно получить минимально достаточную authority, выполнить bounded action,
+проверить outcome/read-back и продолжить. `OWNER_GATE` внутри R1 допустим только для budget >500 ₽/месяц
+(или недоказуемого <=500 ceiling) либо authority вне R1 completion target. Делегация не ослабляет
+fail-closed, financial semantics, `MIGRATION_CONTRACT`, privacy, single-writer, exact-main/CI/readiness,
+no blind replay и mandatory recovery. CUTOVER, timer activation, YDB-authoritative production Writer,
+Google mutation/authority switch и `MEMBER` activation остаются отдельными post-R1 gates.
 
 ## 9. CI
 
@@ -285,7 +277,10 @@ owner policy limit without new owner decision: 500 ₽/месяц
 
 Небольшой платный ресурс допустим, если он даёт заметную ценность, стоимость понятна и ограничиваема.
 
-500 ₽ — owner policy limit, а не бюджет для освоения; Billing budget не считать автоматическим hard stop.
+Для активного R1 действует специальная standing authority из `docs/R1_OWNER_AUTHORITY.md`: writer может
+автономно использовать платные provider resources и менять quotas/caps без нового Owner confirmation,
+пока доказанная совокупная месячная стоимость R1 не превышает 500 ₽. За пределами R1 сохраняется
+обычная FREE_FIRST политика. Billing budget не считать автоматическим hard stop без provider proof.
 
 Не жертвуй отзывчивостью продукта ради символической экономии.
 

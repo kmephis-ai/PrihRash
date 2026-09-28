@@ -67,28 +67,19 @@ Provider attempts не являются способом собирать teleme
 
 ## Постоянная делегация Owner до завершения R1
 
-Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,
-необходимые для доказательства completion target ниже. Не запрашивать Owner confirmation для каждой
-causal hypothesis, явно разрешённого read-only probe, root-cause PR или one-shot provider action,
-уже разрешённых существующими exact-main/marker/readiness/circuit gates. После fresh reconciliation
-provider и Issue state выбрать следующий безопасный шаг и записать его в active R1 tracking Issue.
+Полный standing authority contract находится в [`R1_OWNER_AUTHORITY.md`](R1_OWNER_AUTHORITY.md) и
+обязателен для OpenCode, ChatGPT и любого другого текущего single writer. Внутри R1 writer не должен
+останавливаться за отдельным Owner confirmation для local filesystem/tooling, GitHub, Yandex Cloud/YDB
+IAM/roles, probes, deploy/invoke/recovery, quota/cap changes или платных provider resources, пока
+доказанный общий R1 ceiling остаётся `<= 500 ₽/месяц`. При необходимости writer сам расширяет
+минимально достаточную permission surface, делает read-back и затем retires временные права.
 
-Эта постоянная делегация не обходит `AGENTS.md`, `MIGRATION_CONTRACT`, exact-main/CI/readiness,
-single-writer, signature/circuit, fail-closed, privacy, financial invariants или обязательный recovery.
-Неизвестное состояние остаётся неизвестным: нельзя предполагать `APPLIED`/`NOT_APPLIED`, выполнять
-blind replay, cleanup или угадывать финансовые переходы. При ambiguous state разрешены только
-stage-appropriate read-only classification и воспроизводимая repository root-cause работа. CUTOVER,
-timer activation, YDB-authoritative production Writer, Google mutations/authority switch, `MEMBER`
-activation, cap/IAM widening и retirement неоднозначных данных остаются вне делегации. Она
-завершается только после доказательства R1 baseline, independent reconciliation, требуемого catch-up
-и retirement временной R1 authority.
-
-В пределах делегации разрешено без новых Owner confirmation продолжать bounded read-only diagnostic
-refinement, в том числе для одного ранее неизвестного provider outcome, если каждый следующий probe
-привязан к новому exact SHA и к новой causal гипотезе/изменённому diagnostic discriminator с
-synthetic regression fixture. Same-SHA или неизменённый query повторять запрещено. Read-only probes
-не увеличивают write-attempt circuit и не разрешают deploy/invoke; write-capable action по-прежнему
-требует своего exact machine marker, CI/readiness, cause fix и mandatory recovery.
+Эта authority устраняет промежуточные permission Owner gates, но не обходит exact-main/CI/readiness,
+single-writer, signature/circuit, fail-closed, privacy, `MIGRATION_CONTRACT` или mandatory recovery.
+Unknown write outcome остаётся recovery boundary; blind replay/cleanup запрещён. CUTOVER, timer
+activation, YDB-authoritative production Writer, Google mutation/authority switch и `MEMBER` activation
+не входят в R1 completion authority. Budget >500 ₽/месяц или недоказуемый <=500 ceiling требует нового
+Owner decision.
 
 ## Живой Google source
 
