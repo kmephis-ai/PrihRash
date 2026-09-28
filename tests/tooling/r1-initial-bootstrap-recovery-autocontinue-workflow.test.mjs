@@ -308,17 +308,31 @@ test('PR-857 permission denial records the exact audit source blocker and preser
   assert.match(evidence, /`logging\.reader` only on its exact Cloud Logging group/);
 });
 
-test('Owner-authorized temporary viewer binding is exact-scope, read-only, and pending one new-SHA probe', () => {
+test('Owner-authorized temporary viewer binding was exact-scope and read-only before the new-SHA probe', () => {
   const evidence = runbook.match(
     /### Owner-authorized temporary Audit Trails viewer and HTTP failure refinement([\s\S]*?)(?=\n### |\n## |$)/,
   )?.[1];
   assert.ok(evidence, 'the authorized temporary role and its classification stop boundary must be recorded');
   assert.match(evidence, /latest failed recovery/);
   assert.match(evidence, /`audit-trails\.viewer` binding was added only to that WIF identity at the Function folder/);
-  assert.match(evidence, /no provider source query has run since the grant/);
+  assert.match(evidence, /Before PR #859's new-SHA probe, no provider source query had run since the grant/);
   assert.match(evidence, /`AUDIT_TRAIL_AUTHENTICATION_REQUIRED` for 401/);
   assert.match(evidence, /`AUDIT_TRAIL_LIST_PERMISSION_DENIED` for 403/);
   assert.match(evidence, /all temporary bindings must be removed with independent after-read verification/);
+});
+
+test('PR-859 Audit Trails classification records the missing source and verified temporary-role removal', () => {
+  const evidence = runbook.match(
+    /### PR #859 exact-main Audit Trails query found no Function-folder source; temporary viewer was removed([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact-main audit-source result and role-revocation proof must be retained');
+  assert.match(evidence, /Workflow `36442125610`/);
+  assert.match(evidence, /`AUDIT_TRAIL_SOURCE_NOT_CONFIGURED`/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /No Cloud Logging event read was attempted/);
+  assert.match(evidence, /an independent folder binding read confirms it is absent/);
+  assert.match(evidence, /No `logging\.reader` role was added/);
+  assert.match(evidence, /does not classify the Function-version deployment as `APPLIED` or `NOT_APPLIED`/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
