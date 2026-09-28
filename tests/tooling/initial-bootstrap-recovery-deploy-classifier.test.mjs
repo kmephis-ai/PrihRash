@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-import { classifyRecoveryFunctionDeployOutcome } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
+import {
+  classifyRecoveryAuditCreateEvents,
+  classifyRecoveryAuditTrailSource,
+  classifyRecoveryFunctionDeployOutcome,
+} from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
 
 const runStartedAt = '2026-09-27T18:46:30Z';
 const runFinishedAt = '2026-09-27T18:46:38Z';
@@ -337,6 +341,97 @@ test('recovery deploy classifier refuses absence claims from a full bounded prov
     })),
     'RECOVERY_OPERATION_LIST_INCOMPLETE',
   );
+});
+
+test('audit trail source discovery accepts only one pre-existing active documented destination', () => {
+  const runFinishedAt = '2026-09-27T18:46:38Z';
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [] }, runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [], nextPageToken: 'more' }, runFinishedAt), 'AUDIT_TRAIL_LIST_INCOMPLETE');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [{
+    status: 'ACTIVE',
+    createdAt: '2026-09-28T00:00:00Z',
+    updatedAt: '2026-09-28T00:00:00Z',
+    destination: { cloudLogging: { logGroupId: 'synthetic-log-group' } },
+  }] }, runFinishedAt), 'AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [{
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    destination: { cloudLogging: { logGroupId: 'synthetic-log-group' } },
+  }] }, runFinishedAt), 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [{
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    destination: { objectStorage: { bucketId: 'synthetic-bucket' } },
+  }] }, runFinishedAt), 'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [{
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    destination: { cloudLogging: { logGroupId: 'synthetic-one' } },
+  }, {
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    destination: { cloudLogging: { logGroupId: 'synthetic-two' } },
+  }] }, runFinishedAt), 'AUDIT_TRAIL_SOURCE_AMBIGUOUS');
+  assert.equal(classifyRecoveryAuditTrailSource({ trails: [{
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-28T00:00:00Z',
+    destination: { cloudLogging: { logGroupId: 'synthetic-log-group' } },
+  }] }, runFinishedAt), 'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET');
+});
+
+test('audit log classifier identifies only an exact actor/function/time CreateFunctionVersion event', () => {
+  const version = {
+    id: 'synthetic-version',
+    created_at: '2026-09-27T18:46:34Z',
+    runtime: 'nodejs22',
+    entrypoint: 'index.initialBootstrapRecoveryHandler',
+    service_account_id: runtimeServiceAccount,
+    tags: ['r1-initial-bootstrap-recovery'],
+    status: 'ACTIVE',
+  };
+  const event = {
+    eventId: 'synthetic-event',
+    eventType: 'yandex.cloud.audit.serverless.functions.CreateFunctionVersion',
+    eventTime: '2026-09-27T18:46:34Z',
+    eventStatus: 'DONE',
+    authentication: { subjectId: serviceAccount },
+    details: {
+      functionId: 'synthetic-function',
+      functionVersionId: version.id,
+      runtime: version.runtime,
+      functionVersionEntrypoint: version.entrypoint,
+      serviceAccountId: runtimeServiceAccount,
+      functionVersionTags: version.tags,
+    },
+  };
+  const context = {
+    entries: [{ json_payload: event }],
+    versions: [version],
+    functionId: 'synthetic-function',
+    operationCreatorServiceAccountId: serviceAccount,
+    runtimeServiceAccountId: runtimeServiceAccount,
+    runStartedAt,
+    runFinishedAt,
+  };
+  assert.equal(classifyRecoveryAuditCreateEvents(context), 'EXACT_RECOVERY_VERSION_CREATED');
+  assert.equal(classifyRecoveryAuditCreateEvents({ ...context, entries: [] }), 'AUDIT_CREATE_EVENT_NOT_OBSERVED');
+  assert.equal(classifyRecoveryAuditCreateEvents({
+    ...context,
+    entries: [{ json_payload: { ...event, eventStatus: 'ERROR' } }],
+  }), 'AUDIT_CREATE_EVENT_FAILED');
+  assert.equal(classifyRecoveryAuditCreateEvents({
+    ...context,
+    entries: [{ json_payload: { ...event, authentication: { subjectId: runtimeServiceAccount } } }],
+  }), 'AUDIT_CREATE_EVENT_WRITER_MISMATCH');
+  assert.equal(classifyRecoveryAuditCreateEvents({
+    ...context,
+    entries: Array.from({ length: 1_000 }, () => ({ json_payload: event })),
+  }), 'AUDIT_LOG_LIST_INCOMPLETE');
 });
 
 test('recovery deploy CLI reports invalid metadata JSON without echoing parser details', () => {

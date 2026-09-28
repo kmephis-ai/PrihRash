@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const ENUMS = new Set([
@@ -29,6 +29,34 @@ const ENUMS = new Set([
   'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN',
   'RECOVERY_VERSION_LIST_INCOMPLETE',
   'RECOVERY_OPERATION_LIST_INCOMPLETE',
+  'AUDIT_TRAIL_METADATA_INVALID',
+  'AUDIT_TRAIL_LIST_INCOMPLETE',
+  'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED',
+  'AUDIT_TRAIL_SOURCE_NOT_ACTIVE',
+  'AUDIT_TRAIL_SOURCE_AMBIGUOUS',
+  'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT',
+  'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT',
+  'AUDIT_TRAIL_SOURCE_UNSUPPORTED',
+  'AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET',
+  'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET',
+  'AUDIT_TRAIL_SOURCE_OPEN_FAILED',
+  'AUDIT_TRAIL_LIST_READ_FAILED',
+  'AUDIT_TRAIL_LIST_PERMISSION_DENIED',
+  'AUDIT_TRAIL_CLASSIFIER_FAILED',
+  'AUDIT_LOG_READ_FAILED',
+  'AUDIT_LOG_READ_PERMISSION_DENIED',
+  'AUDIT_LOG_LIST_INCOMPLETE',
+  'AUDIT_LOG_METADATA_INVALID',
+  'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  'AUDIT_LOG_CLASSIFIER_FAILED',
+  'AUDIT_CREATE_EVENT_NOT_OBSERVED',
+  'AUDIT_CREATE_EVENT_AMBIGUOUS',
+  'AUDIT_CREATE_EVENT_WRITER_MISMATCH',
+  'AUDIT_CREATE_EVENT_IN_PROGRESS',
+  'AUDIT_CREATE_EVENT_CANCELLED',
+  'AUDIT_CREATE_EVENT_FAILED',
+  'AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED',
+  'AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN',
 ]);
 
 function object(value) {
@@ -218,12 +246,227 @@ export function classifyRecoveryFunctionDeployOutcome({
   }
 }
 
+function inspectRecoveryAuditTrailSource(response, runFinishedAt) {
+  try {
+    const targetFinishedAt = timestamp(runFinishedAt);
+    if (targetFinishedAt === null) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    if (!object(response)) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    const trails = response.trails === undefined ? [] : response.trails;
+    if (!Array.isArray(trails)) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    if (response.nextPageToken !== undefined) {
+      if (typeof response.nextPageToken !== 'string') return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      if (response.nextPageToken.length > 0 || trails.length >= 1_000) {
+        return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
+      }
+    } else if (trails.length >= 1_000) {
+      return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
+    }
+    if (trails.length === 0) return { evidence: 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED' };
+
+    const activeTrails = [];
+    let trailsCreatedAfterTarget = 0;
+    let trailsChangedAfterTarget = 0;
+    for (const trail of trails) {
+      if (!object(trail) || typeof trail.status !== 'string' || !object(trail.destination)) {
+        return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      }
+      const trailCreatedAt = timestamp(trail.createdAt);
+      const trailUpdatedAt = timestamp(trail.updatedAt);
+      if (trailCreatedAt === null || trailUpdatedAt === null) {
+        return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      }
+      if (trailCreatedAt > targetFinishedAt) {
+        trailsCreatedAfterTarget += 1;
+        continue;
+      }
+      if (trailUpdatedAt > targetFinishedAt) {
+        trailsChangedAfterTarget += 1;
+        continue;
+      }
+      if (trail.status !== 'ACTIVE') continue;
+
+      const destination = trail.destination;
+      const destinationKeys = ['cloudLogging', 'objectStorage', 'dataStream', 'eventrouter', 'monium'];
+      const selectedDestinations = destinationKeys.filter((key) => destination[key] !== undefined);
+      const unknownDestinations = Object.keys(destination).some((key) => !destinationKeys.includes(key));
+      if (unknownDestinations || selectedDestinations.length !== 1) {
+        return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      }
+      activeTrails.push(destination);
+    }
+    if (activeTrails.length === 0) {
+      return {
+        evidence: trailsCreatedAfterTarget === trails.length
+          ? 'AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET'
+          : trailsChangedAfterTarget > 0
+            ? 'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET'
+            : 'AUDIT_TRAIL_SOURCE_NOT_ACTIVE',
+      };
+    }
+    if (activeTrails.length > 1) return { evidence: 'AUDIT_TRAIL_SOURCE_AMBIGUOUS' };
+
+    const [destination] = activeTrails;
+    if (object(destination.cloudLogging) && typeof destination.cloudLogging.logGroupId === 'string'
+      && destination.cloudLogging.logGroupId.length > 0) {
+      return { evidence: 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', logGroupId: destination.cloudLogging.logGroupId };
+    }
+    if (object(destination.objectStorage) && typeof destination.objectStorage.bucketId === 'string'
+      && destination.objectStorage.bucketId.length > 0) {
+      return { evidence: 'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT' };
+    }
+    return { evidence: 'AUDIT_TRAIL_SOURCE_UNSUPPORTED' };
+  } catch {
+    return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+  }
+}
+
+export function classifyRecoveryAuditTrailSource(response, runFinishedAt) {
+  return inspectRecoveryAuditTrailSource(response, runFinishedAt).evidence;
+}
+
+export function classifyRecoveryAuditCreateEvents({
+  entries,
+  functionId,
+  operationCreatorServiceAccountId,
+  runtimeServiceAccountId,
+  versions,
+  runStartedAt,
+  runFinishedAt,
+}) {
+  try {
+    const start = timestamp(runStartedAt);
+    const finish = timestamp(runFinishedAt);
+    if (
+      !Array.isArray(entries)
+      || !Array.isArray(versions)
+      || typeof functionId !== 'string'
+      || functionId.length === 0
+      || typeof operationCreatorServiceAccountId !== 'string'
+      || operationCreatorServiceAccountId.length === 0
+      || typeof runtimeServiceAccountId !== 'string'
+      || runtimeServiceAccountId.length === 0
+      || start === null
+      || finish === null
+      || finish < start
+    ) return 'AUDIT_LOG_METADATA_INVALID';
+    if (entries.length >= 1_000) return 'AUDIT_LOG_LIST_INCOMPLETE';
+
+    const lowerBound = start - 5_000;
+    const upperBound = finish + 5_000;
+    const matchingEvents = [];
+    for (const entry of entries) {
+      if (!object(entry) || !object(entry.json_payload)) return 'AUDIT_LOG_METADATA_INVALID';
+      const event = entry.json_payload;
+      if (event.eventType !== 'yandex.cloud.audit.serverless.functions.CreateFunctionVersion') continue;
+      const eventTime = timestamp(event.eventTime);
+      if (eventTime === null || !object(event.details) || !object(event.authentication)) {
+        return 'AUDIT_LOG_METADATA_INVALID';
+      }
+      if (event.details.functionId !== functionId) continue;
+      if (eventTime < lowerBound || eventTime > upperBound) continue;
+      if (event.authentication.subjectId !== operationCreatorServiceAccountId) {
+        return 'AUDIT_CREATE_EVENT_WRITER_MISMATCH';
+      }
+      if (typeof event.eventId !== 'string' || event.eventId.length === 0
+        || typeof event.eventStatus !== 'string') return 'AUDIT_LOG_METADATA_INVALID';
+      matchingEvents.push({ event, eventTime });
+    }
+    if (matchingEvents.length === 0) return 'AUDIT_CREATE_EVENT_NOT_OBSERVED';
+
+    const eventIds = new Set(matchingEvents.map(({ event }) => event.eventId));
+    if (eventIds.size > 1) return 'AUDIT_CREATE_EVENT_AMBIGUOUS';
+    matchingEvents.sort((left, right) => left.eventTime - right.eventTime);
+    const latest = matchingEvents.at(-1);
+    const sameTimeEvents = matchingEvents.filter(({ eventTime }) => eventTime === latest.eventTime);
+    if (new Set(sameTimeEvents.map(({ event }) => event.eventStatus)).size > 1) {
+      return 'AUDIT_CREATE_EVENT_AMBIGUOUS';
+    }
+    const { event } = latest;
+    if (event.eventStatus === 'ERROR') return 'AUDIT_CREATE_EVENT_FAILED';
+    if (event.eventStatus === 'CANCELLED') return 'AUDIT_CREATE_EVENT_CANCELLED';
+    if (event.eventStatus === 'STARTED' || event.eventStatus === 'RUNNING') {
+      return 'AUDIT_CREATE_EVENT_IN_PROGRESS';
+    }
+    if (event.eventStatus !== 'DONE') return 'AUDIT_LOG_METADATA_INVALID';
+
+    const details = event.details;
+    if (
+      typeof details.functionVersionId !== 'string'
+      || details.functionVersionId.length === 0
+      || details.runtime !== 'nodejs22'
+      || details.functionVersionEntrypoint !== 'index.initialBootstrapRecoveryHandler'
+      || details.serviceAccountId !== runtimeServiceAccountId
+      || !Array.isArray(details.functionVersionTags)
+      || !details.functionVersionTags.includes('r1-initial-bootstrap-recovery')
+    ) return 'AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN';
+
+    const matchingVersions = versions.filter((version) => object(version) && version.id === details.functionVersionId);
+    if (matchingVersions.length === 0) return 'AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED';
+    if (matchingVersions.length > 1) return 'AUDIT_CREATE_EVENT_AMBIGUOUS';
+    const [version] = matchingVersions;
+    const versionCreatedAt = timestamp(version.created_at);
+    if (
+      versionCreatedAt === null
+      || versionCreatedAt < lowerBound
+      || versionCreatedAt > upperBound
+      || version.runtime !== 'nodejs22'
+      || version.entrypoint !== 'index.initialBootstrapRecoveryHandler'
+      || version.service_account_id !== runtimeServiceAccountId
+      || !['CREATING', 'ACTIVE', 'OBSOLETE', 'DELETING'].includes(version.status)
+    ) return 'AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN';
+    return 'EXACT_RECOVERY_VERSION_CREATED';
+  } catch {
+    return 'AUDIT_LOG_METADATA_INVALID';
+  }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, runtimeServiceAccountId] = process.argv.slice(2);
-  if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !operationCreatorServiceAccountId || !runtimeServiceAccountId) {
+  const cliArgs = process.argv.slice(2);
+  if (cliArgs[0] === '--audit-trails') {
+    const [auditTrailPath, locatorPath, runFinishedAt] = cliArgs.slice(1);
+    if (!auditTrailPath || !locatorPath || !runFinishedAt) {
+      process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      process.exitCode = 2;
+    } else {
+      try {
+        const response = await readJson(auditTrailPath);
+        const result = inspectRecoveryAuditTrailSource(response, runFinishedAt);
+        if (result.logGroupId) await writeFile(locatorPath, result.logGroupId, 'utf8');
+        process.stdout.write(`${ENUMS.has(result.evidence) ? result.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
+      } catch {
+        process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      }
+    }
+  } else if (cliArgs[0] === '--audit-events') {
+    const [auditEventsPath, versionsPath, functionId, operationCreatorServiceAccountId,
+      runtimeServiceAccountId, runStartedAt, runFinishedAt] = cliArgs.slice(1);
+    if (!auditEventsPath || !versionsPath || !functionId || !operationCreatorServiceAccountId
+      || !runtimeServiceAccountId || !runStartedAt || !runFinishedAt) {
+      process.stdout.write('AUDIT_LOG_METADATA_INVALID\n');
+      process.exitCode = 2;
+    } else {
+      try {
+        const [entries, versions] = await Promise.all([readJson(auditEventsPath), readJson(versionsPath)]);
+        const result = classifyRecoveryAuditCreateEvents({
+          entries,
+          versions,
+          functionId,
+          operationCreatorServiceAccountId,
+          runtimeServiceAccountId,
+          runStartedAt,
+          runFinishedAt,
+        });
+        process.stdout.write(`${ENUMS.has(result) ? result : 'AUDIT_LOG_CLASSIFIER_FAILED'}\n`);
+      } catch {
+        process.stdout.write('AUDIT_LOG_METADATA_INVALID\n');
+      }
+    }
+  } else {
+    const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, runtimeServiceAccountId] = cliArgs;
+    if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !operationCreatorServiceAccountId || !runtimeServiceAccountId) {
     process.stdout.write('RECOVERY_DEPLOY_INPUT_INVALID\n');
     process.exitCode = 2;
-  } else {
+    } else {
     let inputs;
     try {
       inputs = await Promise.all([
@@ -249,6 +492,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       });
       process.stdout.write(`${ENUMS.has(result) ? result : 'DIAGNOSTIC_FAILED'}\n`);
       if (result === 'DIAGNOSTIC_FAILED') process.exitCode = 2;
+    }
     }
   }
 }
