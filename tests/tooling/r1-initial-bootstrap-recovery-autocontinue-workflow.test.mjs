@@ -364,6 +364,19 @@ test('PR-862 cloud inventory failure remains unclassified and records verified C
   assert.match(evidence, /No same-SHA replay or event query is authorized/);
 });
 
+test('PR-863 Folder-status refinement records metadata-invalid stop and Cloud-viewer revocation', () => {
+  const evidence = runbook.match(
+    /### PR #863 refined Folder statuses; Cloud inventory still stopped at metadata validation([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact Cloud inventory result and permission cleanup must be retained');
+  assert.match(evidence, /recovery `36460606358`/);
+  assert.match(evidence, /`AUDIT_TRAIL_METADATA_INVALID`/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /no per-folder TrailService\.List or event read occurred/);
+  assert.match(evidence, /temporary Cloud `audit-trails\.viewer` binding was removed/);
+  assert.match(evidence, /next new-SHA synthetic refinement splits response\/entry\/ID\/cloudId\/status failures/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
