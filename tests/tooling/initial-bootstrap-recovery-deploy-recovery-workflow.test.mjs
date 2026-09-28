@@ -5,14 +5,23 @@ import test from 'node:test';
 const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml', 'utf8');
 const autocontinue = await readFile('.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', 'utf8');
 const classifier = await readFile('scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs', 'utf8');
+const ciClassifier = await readFile('scripts/classify-github-ci-run.mjs', 'utf8');
 
 test('failed recovery Function deploy has an exact-main read-only metadata recovery path', () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /failed_run_id:/);
+  assert.match(workflow, /ci_run_id:/);
   assert.match(workflow, /group: r1-initial-bootstrap-writer[\s\S]*cancel-in-progress: false/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /\.commit\.sha == \$sha and \.protected == true/);
-  assert.match(workflow, /RECOVERY_DEPLOY_EXACT_SHA_CI_MISSING/);
+  assert.match(workflow, /actions\/runs\/\$\{CI_RUN_ID\}/);
+  assert.match(workflow, /classify-github-ci-run\.mjs/);
+  assert.match(workflow, /RECOVERY_DEPLOY_EXACT_CI_RUN_NOT_PROVEN/);
+  assert.match(ciClassifier, /run\.id !== Number\(expectedRunId\)/);
+  assert.match(ciClassifier, /run\.head_sha !== expectedSha/);
+  assert.match(ciClassifier, /run\.status !== 'completed'/);
+  assert.match(ciClassifier, /run\.conclusion !== 'success'/);
+  assert.doesNotMatch(workflow, /workflows\/ci\.yml\/runs\?branch=main&event=push&status=success/);
   assert.match(workflow, /RECOVERY_DEPLOY_FAILED_RUN_NOT_LATEST/);
   assert.match(workflow, /Deploy recovery-only Function version/);
   assert.match(workflow, /Invoke exact read-only recovery tag once/);
@@ -94,7 +103,9 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /Deploy recovery-only Function version" and \.conclusion == "failure"/);
   assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
   assert.match(autocontinue, /r1-initial-bootstrap-recovery-deploy-recovery\.yml/);
-  assert.match(autocontinue, /inputs:\{failed_run_id:\$run_id\}/);
+  assert.match(autocontinue, /ci_run_id:\$ci_run_id/);
+  assert.match(autocontinue, /SOURCE_CI_RUN_ID/);
+  assert.match(autocontinue, /inputs:\{failed_run_id:\$run_id,ci_run_id:\$ci_run_id\}/);
   assert.match(autocontinue, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_CLASSIFICATION_CHANGESET_INVALID/);
   assert.match(autocontinue, /any\(\.\[]; \.filename == \$test and \.status != "removed"\)/);

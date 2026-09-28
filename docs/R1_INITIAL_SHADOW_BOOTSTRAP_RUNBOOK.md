@@ -1700,6 +1700,12 @@ PR #864 passed exact-head CI `36462120188`, Browser Quality `36462120361`, and C
 
 The next read-only discriminator separates cloud coverage inputs, TrailService.List response shape/cardinality/JSON parsing, per-trail owner folder/cloud IDs, status, timestamps, destination, and classifier-internal failures. It also fails coverage closed for deprecated/unknown filtering policies and non-empty include/exclude rules, because those may exclude the exact CreateFunctionVersion event. Synthetic fixtures cover each branch. No same-SHA replay is allowed.
 
+### PR #866 recovery stopped at the GitHub exact-CI lookup before Yandex authentication
+
+PR #866 merged with exact-main CI run `36473073042` later completing successfully, but its automatic read-only recovery child `36473228760` failed at `RECOVERY_DEPLOY_EXACT_SHA_CI_MISSING` in `Prove exact failed deploy and read-only boundary`. Yandex CLI installation and OIDC token exchange were skipped, so there was no Yandex metadata/list query, Function action, Audit Trails request, event read, or IAM operation. Cloud viewer remained absent. This does not classify the failed Function-version deployment.
+
+The successor stops depending on an eventually-visible workflow-run list. Recovery autocontinue passes the exact successful triggering CI run ID; the recovery preflight fetches that one run and synthetic-tests ID/name/SHA/main/push/completed/success fields before any Yandex CLI or token exchange. This is a GitHub metadata-only preflight refinement. The next provider call remains the already-approved exact-run read-only classification, only after the new SHA is merged and its full gates pass. No replay or write path is armed.
+
 ### PR #865 TrailService.List response-shape refinement still stopped before event reads
 
 PR #865 passed exact-head CI `36469214200`, Browser Quality `36469213994`, and CodeQL `36469209742`; post-merge exact-main CI `36469790971`, Browser Quality `36469790899`, and CodeQL `36469790605` passed. Recovery autocontinue `36469880673` passed the exact-run/phase/changeset gates and dispatched recovery `36469918792` once. The enum-only result was `AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID`, with `AUDIT_EVENT_READ_NOT_ATTEMPTED`; the deployment remains unclassified. The Cloud viewer was removed after this run and independently verified absent. No Cloud Logging read, write-capable Function operation, Google/YDB, replay, cleanup, or authority change occurred.

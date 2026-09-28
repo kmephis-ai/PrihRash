@@ -404,6 +404,19 @@ test('PR-865 Cloud trail list response remains unclassified and records viewer r
   assert.match(evidence, /no same-SHA replay/);
 });
 
+test('PR-866 exact CI list lookup failure is recorded before any Yandex authentication', () => {
+  const evidence = runbook.match(
+    /### PR #866 recovery stopped at the GitHub exact-CI lookup before Yandex authentication([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the pre-provider exact-CI failure and no-provider boundary must be retained');
+  assert.match(evidence, /recovery child `36473228760`/);
+  assert.match(evidence, /`RECOVERY_DEPLOY_EXACT_SHA_CI_MISSING`/);
+  assert.match(evidence, /Yandex CLI installation and OIDC token exchange were skipped/);
+  assert.match(evidence, /no Yandex metadata\/list query/);
+  assert.match(evidence, /Cloud viewer remained absent/);
+  assert.match(evidence, /exact successful triggering CI run ID/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
