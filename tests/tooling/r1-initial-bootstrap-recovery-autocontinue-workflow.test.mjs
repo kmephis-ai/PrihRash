@@ -296,6 +296,18 @@ test('Owner audit-source authorization remains read-only and keeps IAM changes s
   assert.match(runbook, /Permission-denied, missing trail, unsupported destination, ambiguous source/);
 });
 
+test('PR-857 permission denial records the exact audit source blocker and refuses IAM changes', () => {
+  const evidence = runbook.match(
+    /### PR #857 audit source read stopped at existing WIF permission boundary on `3c89bf799e4765822df583af6c846dc40680074e`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact audit read permission denial and no-IAM-mutation boundary must be retained');
+  assert.match(evidence, /`AUDIT_TRAIL_LIST_PERMISSION_DENIED`/);
+  assert.match(evidence, /audit log read was not attempted/);
+  assert.match(evidence, /No IAM binding changed/);
+  assert.match(evidence, /`audit-trails\.auditor` on the Function folder/);
+  assert.match(evidence, /`logging\.reader` only on its exact Cloud Logging group/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
