@@ -350,6 +350,20 @@ test('PR-861 cloud refinement records pre-list Folder Get denial and arms only t
   assert.match(evidence, /before merge, so the one post-merge exact-main autocontinue does not race the authorization/);
 });
 
+test('PR-862 cloud inventory failure remains unclassified and records verified Cloud-role removal', () => {
+  const evidence = runbook.match(
+    /### PR #862 cloud inventory classification stopped before any trail or event read([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact cloud-inventory result and stop condition must be retained');
+  assert.match(evidence, /workflow `36457545606`/);
+  assert.match(evidence, /`AUDIT_TRAIL_METADATA_INVALID`/);
+  assert.match(evidence, /No per-folder TrailService\.List or Cloud Logging read occurred/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /temporary Cloud `audit-trails\.viewer` binding was removed/);
+  assert.match(evidence, /emits distinct enums for these conditions/);
+  assert.match(evidence, /No same-SHA replay or event query is authorized/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,

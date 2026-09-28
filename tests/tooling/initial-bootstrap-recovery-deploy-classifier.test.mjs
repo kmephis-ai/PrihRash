@@ -41,7 +41,7 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
       { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
       { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
     ],
-  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_METADATA_INVALID');
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: Array.from({ length: 101 }, (_, index) => ({
       id: index === 0 ? 'synthetic-target' : `synthetic-folder-${index}`,
@@ -49,6 +49,34 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
       status: 'ACTIVE',
     })),
   }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'different-cloud', status: 'ACTIVE' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'UNRECOGNIZED' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'PENDING_DELETION' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [
+      { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
+      { id: 'synthetic-pending', cloudId: 'synthetic-cloud', status: 'PENDING_DELETION' },
+      { id: 'synthetic-deleting', cloudId: 'synthetic-cloud', status: 'DELETING' },
+    ],
+  }, 'synthetic-cloud', 'synthetic-target'), 'FOLDER_LIST_READY');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage({ folders: [
+    { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
+    { id: 'synthetic-pending', cloudId: 'synthetic-cloud', status: 'PENDING_DELETION' },
+    { id: 'synthetic-deleting', cloudId: 'synthetic-cloud', status: 'DELETING' },
+  ] }, [{ trails: [] }, { trails: [] }, { trails: [] }],
+  'synthetic-cloud', 'synthetic-target', runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_METADATA_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', status: 'ACTIVE' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_METADATA_INVALID');
 });
 
 test('cloud-scope trail discovery reads only complete per-folder lists and proves exact target-folder management-event coverage', () => {
