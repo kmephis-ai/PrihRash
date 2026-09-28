@@ -43,6 +43,14 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_LIST_READ_FAILED',
   'AUDIT_TRAIL_AUTHENTICATION_REQUIRED',
   'AUDIT_TRAIL_LIST_PERMISSION_DENIED',
+  'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED',
+  'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED',
+  'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE',
+  'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED',
+  'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED',
+  'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND',
+  'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET',
+  'AUDIT_TRAIL_COVERAGE_UNPROVEN',
   'AUDIT_TRAIL_CLASSIFIER_FAILED',
   'AUDIT_LOG_READ_FAILED',
   'AUDIT_LOG_READ_PERMISSION_DENIED',
@@ -80,6 +88,18 @@ export function classifyAuditTrailListHttpStatus(status) {
   if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
   if (status === 403) return 'AUDIT_TRAIL_LIST_PERMISSION_DENIED';
   return 'AUDIT_TRAIL_LIST_READ_FAILED';
+}
+
+export function classifyAuditTrailFolderListHttpStatus(status) {
+  if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
+  if (status === 403) return 'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED';
+  return 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED';
+}
+
+export function classifyAuditTrailFolderMetadataHttpStatus(status) {
+  if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
+  if (status === 403) return 'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED';
+  return 'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED';
 }
 
 export function classifyRecoveryFunctionDeployOutcome({
@@ -331,6 +351,160 @@ export function classifyRecoveryAuditTrailSource(response, runFinishedAt) {
   return inspectRecoveryAuditTrailSource(response, runFinishedAt).evidence;
 }
 
+function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt) {
+  try {
+    const targetFinishedAt = timestamp(runFinishedAt);
+    if (targetFinishedAt === null || typeof cloudId !== 'string' || cloudId.length === 0
+      || typeof targetFolderId !== 'string' || targetFolderId.length === 0
+      || !Array.isArray(trailResponses)) {
+      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    }
+    const inventory = inspectAuditTrailCloudFolderInventory(folderResponse, cloudId, targetFolderId);
+    if (inventory.evidence !== 'FOLDER_LIST_READY') return { evidence: inventory.evidence };
+    const { folderIds } = inventory;
+    if (trailResponses.length !== folderIds.length) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
+    }
+
+    const coveredTrails = [];
+    let coverageUnproven = false;
+    let createdAfterTarget = 0;
+    let changedAfterTarget = 0;
+    let inactive = 0;
+    let matchingScopeCount = 0;
+    let totalTrails = 0;
+    for (let folderIndex = 0; folderIndex < folderIds.length; folderIndex += 1) {
+      const response = trailResponses[folderIndex];
+      if (!object(response) || !Array.isArray(response.trails)) {
+        return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      }
+      if (response.nextPageToken !== undefined
+        && (typeof response.nextPageToken !== 'string' || response.nextPageToken.length > 0)) {
+        return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
+      }
+      if (response.trails.length >= 1_000) return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
+      totalTrails += response.trails.length;
+      for (const trail of response.trails) {
+        if (!object(trail) || trail.folderId !== folderIds[folderIndex] || trail.cloudId !== cloudId
+          || typeof trail.status !== 'string') {
+          return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+        }
+        const managementFilter = trail.filteringPolicy?.managementEventsFilter;
+        if (managementFilter === undefined) continue;
+        if (!object(managementFilter) || !Array.isArray(managementFilter.resourceScopes)
+          || managementFilter.resourceScopes.length === 0) {
+          coverageUnproven = true;
+          continue;
+        }
+        let coversTarget = false;
+        let hasUnknownScope = false;
+        for (const scope of managementFilter.resourceScopes) {
+          if (!object(scope) || typeof scope.resourceId !== 'string' || typeof scope.resourceType !== 'string') {
+            coverageUnproven = true;
+            continue;
+          }
+          if (scope.resourceType === 'resource-manager.cloud' && scope.resourceId === cloudId) {
+            coversTarget = true;
+          } else if (scope.resourceType === 'resource-manager.folder' && scope.resourceId === targetFolderId) {
+            coversTarget = true;
+          } else if (!['resource-manager.cloud', 'resource-manager.folder'].includes(scope.resourceType)) {
+            hasUnknownScope = true;
+          }
+        }
+        if (coversTarget) {
+          matchingScopeCount += 1;
+          const trailCreatedAt = timestamp(trail.createdAt);
+          const trailUpdatedAt = timestamp(trail.updatedAt);
+          if (trailCreatedAt === null || trailUpdatedAt === null || !object(trail.destination)) {
+            return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+          }
+          if (trailCreatedAt > targetFinishedAt) {
+            createdAfterTarget += 1;
+            continue;
+          }
+          if (trailUpdatedAt > targetFinishedAt) {
+            changedAfterTarget += 1;
+            continue;
+          }
+          if (trail.status !== 'ACTIVE') {
+            inactive += 1;
+            continue;
+          }
+          coveredTrails.push(trail.destination);
+        } else if (hasUnknownScope) {
+          coverageUnproven = true;
+        }
+      }
+    }
+    if (coverageUnproven) return { evidence: 'AUDIT_TRAIL_COVERAGE_UNPROVEN' };
+    if (coveredTrails.length === 0) {
+      if (createdAfterTarget > 0 && createdAfterTarget === matchingScopeCount) {
+        return { evidence: 'AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET' };
+      }
+      if (changedAfterTarget > 0) return { evidence: 'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET' };
+      if (inactive > 0) return { evidence: 'AUDIT_TRAIL_SOURCE_NOT_ACTIVE' };
+      return { evidence: totalTrails === 0
+        ? 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED'
+        : 'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET' };
+    }
+    if (coveredTrails.length > 1) return { evidence: 'AUDIT_TRAIL_SOURCE_AMBIGUOUS' };
+    const [destination] = coveredTrails;
+    const destinationKeys = ['cloudLogging', 'objectStorage', 'dataStream', 'eventrouter', 'monium'];
+    const selectedDestinations = destinationKeys.filter((key) => destination[key] !== undefined);
+    const unknownDestinations = Object.keys(destination).some((key) => !destinationKeys.includes(key));
+    if (unknownDestinations || selectedDestinations.length !== 1) {
+      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    }
+    if (object(destination.cloudLogging) && typeof destination.cloudLogging.logGroupId === 'string'
+      && destination.cloudLogging.logGroupId.length > 0) {
+      return { evidence: 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', logGroupId: destination.cloudLogging.logGroupId };
+    }
+    if (object(destination.objectStorage) && typeof destination.objectStorage.bucketId === 'string'
+      && destination.objectStorage.bucketId.length > 0) {
+      return { evidence: 'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT' };
+    }
+    return { evidence: 'AUDIT_TRAIL_SOURCE_UNSUPPORTED' };
+  } catch {
+    return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+  }
+}
+
+function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId) {
+  if (!object(response) || !Array.isArray(response.folders)
+    || typeof cloudId !== 'string' || cloudId.length === 0
+    || typeof targetFolderId !== 'string' || targetFolderId.length === 0) {
+    return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+  }
+  const folders = response.folders;
+  if (response.nextPageToken !== undefined
+    && (typeof response.nextPageToken !== 'string' || response.nextPageToken.length > 0)) {
+    return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
+  }
+  if (folders.length >= 1_000 || folders.length > 100) {
+    return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
+  }
+  const folderIds = [];
+  for (const folder of folders) {
+    if (!object(folder) || typeof folder.id !== 'string' || folder.id.length === 0
+      || folder.cloudId !== cloudId || folder.status !== 'ACTIVE' || folderIds.includes(folder.id)) {
+      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    }
+    folderIds.push(folder.id);
+  }
+  if (folderIds.filter((id) => id === targetFolderId).length !== 1) {
+    return { evidence: 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND' };
+  }
+  return { evidence: 'FOLDER_LIST_READY', folderIds };
+}
+
+export function classifyAuditTrailCloudFolderList(response, cloudId, targetFolderId) {
+  return inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId).evidence;
+}
+
+export function classifyRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt) {
+  return inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt).evidence;
+}
+
 export function classifyRecoveryAuditCreateEvents({
   entries,
   functionId,
@@ -429,7 +603,54 @@ export function classifyRecoveryAuditCreateEvents({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cliArgs = process.argv.slice(2);
-  if (cliArgs[0] === '--audit-trail-http-status') {
+  if (cliArgs[0] === '--audit-folder-list-http-status') {
+    const [rawStatus] = cliArgs.slice(1);
+    const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
+    process.stdout.write(`${classifyAuditTrailFolderListHttpStatus(status)}\n`);
+  } else if (cliArgs[0] === '--audit-folder-metadata-http-status') {
+    const [rawStatus] = cliArgs.slice(1);
+    const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
+    process.stdout.write(`${classifyAuditTrailFolderMetadataHttpStatus(status)}\n`);
+  } else if (cliArgs[0] === '--audit-cloud-folder-ids') {
+    const [folderListPath, cloudId, targetFolderId, folderIdsPath] = cliArgs.slice(1);
+    if (!folderListPath || !cloudId || !targetFolderId || !folderIdsPath) {
+      process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      process.exitCode = 2;
+    } else {
+      try {
+        const response = await readJson(folderListPath);
+        const inventory = inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId);
+        if (inventory.evidence !== 'FOLDER_LIST_READY') {
+          process.stdout.write(`${ENUMS.has(inventory.evidence) ? inventory.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
+        } else {
+          await writeFile(folderIdsPath, `${JSON.stringify(inventory.folderIds)}\n`, 'utf8');
+          process.stdout.write('FOLDER_LIST_READY\n');
+        }
+      } catch {
+        process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      }
+    }
+  } else if (cliArgs[0] === '--audit-cloud-trails') {
+    const [folderListPath, cloudId, targetFolderId, runFinishedAt, locatorPath, ...trailPaths] = cliArgs.slice(1);
+    if (!folderListPath || !cloudId || !targetFolderId || !runFinishedAt || !locatorPath) {
+      process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      process.exitCode = 2;
+    } else {
+      try {
+        const [folderResponse, trailResponses] = await Promise.all([
+          readJson(folderListPath),
+          Promise.all(trailPaths.map((trailPath) => readJson(trailPath))),
+        ]);
+        const result = inspectRecoveryAuditTrailCloudCoverage(
+          folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt,
+        );
+        if (result.logGroupId) await writeFile(locatorPath, result.logGroupId, 'utf8');
+        process.stdout.write(`${ENUMS.has(result.evidence) ? result.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
+      } catch {
+        process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      }
+    }
+  } else if (cliArgs[0] === '--audit-trail-http-status') {
     const [rawStatus] = cliArgs.slice(1);
     const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
     process.stdout.write(`${classifyAuditTrailListHttpStatus(status)}\n`);

@@ -224,27 +224,91 @@ jobs:
           audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
           audit_event_evidence='AUDIT_EVENT_READ_NOT_ATTEMPTED'
           audit_trails_api='https://audittrails.api.cloud.yandex.net/audit-trails/v1/trails'
-          if audit_trail_http="$(curl --silent --show-error --output "$tmp/audit-trails.json" \
+          folder_api='https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders'
+          folder_metadata_http='000'
+          if folder_metadata_http="$(curl --silent --show-error --output "$tmp/function-folder.json" \
             --write-out '%{http_code}' --get \
             --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
             --header 'Accept: application/json' \
-            --data-urlencode "folderId=${YC_FOLDER_ID}" \
-            --data-urlencode 'pageSize=1000' \
-            "$audit_trails_api" 2>"$tmp/audit-trails.err")"; then
-            case "$audit_trail_http" in
+            "$folder_api/${YC_FOLDER_ID}" 2>"$tmp/function-folder.err")"; then
+            case "$folder_metadata_http" in
               2??)
-                if ! audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                  --audit-trails "$tmp/audit-trails.json" "$tmp/audit-log-group-id" "$RUN_FINISHED_AT")"; then
-                  audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
+                if jq -e --arg folder "$YC_FOLDER_ID" \
+                  '.id == $folder and .status == "ACTIVE" and (.cloudId | type == "string" and length > 0)' \
+                  "$tmp/function-folder.json" >/dev/null; then
+                  cloud_id="$(jq -er '.cloudId' "$tmp/function-folder.json")"
+                  echo "::add-mask::${cloud_id}"
+                  folder_list_http='000'
+                  if folder_list_http="$(curl --silent --show-error --output "$tmp/cloud-folders.json" \
+                    --write-out '%{http_code}' --get \
+                    --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+                    --header 'Accept: application/json' \
+                    --data-urlencode "cloudId=${cloud_id}" \
+                    --data-urlencode 'pageSize=1000' \
+                    "$folder_api" 2>"$tmp/cloud-folders.err")"; then
+                    case "$folder_list_http" in
+                      2??)
+                        folder_inventory_state="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                          --audit-cloud-folder-ids "$tmp/cloud-folders.json" "$cloud_id" "$YC_FOLDER_ID" \
+                          "$tmp/cloud-folder-ids.json")" || folder_inventory_state='AUDIT_TRAIL_METADATA_INVALID'
+                        if [ "$folder_inventory_state" != 'FOLDER_LIST_READY' ]; then
+                          audit_trail_evidence="$folder_inventory_state"
+                        else
+                          mapfile -t cloud_folder_ids < <(jq -er '.[]' "$tmp/cloud-folder-ids.json")
+                          trail_response_files=()
+                          cloud_trail_lists_ready=true
+                          for index in "${!cloud_folder_ids[@]}"; do
+                            trail_response="$tmp/cloud-audit-trails-${index}.json"
+                            trail_list_http='000'
+                            if ! trail_list_http="$(curl --silent --show-error --output "$trail_response" \
+                              --write-out '%{http_code}' --get \
+                              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+                              --header 'Accept: application/json' \
+                              --data-urlencode "folderId=${cloud_folder_ids[$index]}" \
+                              --data-urlencode 'pageSize=1000' \
+                              "$audit_trails_api" 2>"$tmp/cloud-audit-trails-${index}.err")"; then
+                              audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
+                              cloud_trail_lists_ready=false
+                              break
+                            fi
+                            case "$trail_list_http" in
+                              2??) trail_response_files+=("$trail_response") ;;
+                              *)
+                                audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                                  --audit-trail-http-status "$trail_list_http")"
+                                cloud_trail_lists_ready=false
+                                break
+                                ;;
+                            esac
+                          done
+                          if [ "$cloud_trail_lists_ready" = 'true' ]; then
+                            if ! audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                              --audit-cloud-trails "$tmp/cloud-folders.json" "$cloud_id" "$YC_FOLDER_ID" \
+                              "$RUN_FINISHED_AT" "$tmp/audit-log-group-id" "${trail_response_files[@]}")"; then
+                              audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
+                            fi
+                          fi
+                        fi
+                        ;;
+                      *) audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                        --audit-folder-list-http-status "$folder_list_http")" ;;
+                    esac
+                  else
+                    audit_trail_evidence='AUDIT_TRAIL_FOLDER_LIST_READ_FAILED'
+                  fi
+                else
+                  audit_trail_evidence='AUDIT_TRAIL_METADATA_INVALID'
                 fi
                 ;;
               *) audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                --audit-trail-http-status "$audit_trail_http")" ;;
+                --audit-folder-metadata-http-status "$folder_metadata_http")" ;;
             esac
+          else
+            audit_trail_evidence='AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED'
           fi
 
           case "$audit_trail_evidence" in
-            AUDIT_TRAIL_METADATA_INVALID|AUDIT_TRAIL_LIST_INCOMPLETE|AUDIT_TRAIL_SOURCE_NOT_CONFIGURED|AUDIT_TRAIL_SOURCE_NOT_ACTIVE|AUDIT_TRAIL_SOURCE_AMBIGUOUS|AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT|AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT|AUDIT_TRAIL_SOURCE_UNSUPPORTED|AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET|AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET|AUDIT_TRAIL_SOURCE_OPEN_FAILED|AUDIT_TRAIL_LIST_READ_FAILED|AUDIT_TRAIL_AUTHENTICATION_REQUIRED|AUDIT_TRAIL_LIST_PERMISSION_DENIED|AUDIT_TRAIL_CLASSIFIER_FAILED) ;;
+            AUDIT_TRAIL_METADATA_INVALID|AUDIT_TRAIL_LIST_INCOMPLETE|AUDIT_TRAIL_SOURCE_NOT_CONFIGURED|AUDIT_TRAIL_SOURCE_NOT_ACTIVE|AUDIT_TRAIL_SOURCE_AMBIGUOUS|AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT|AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT|AUDIT_TRAIL_SOURCE_UNSUPPORTED|AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET|AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET|AUDIT_TRAIL_SOURCE_OPEN_FAILED|AUDIT_TRAIL_LIST_READ_FAILED|AUDIT_TRAIL_AUTHENTICATION_REQUIRED|AUDIT_TRAIL_LIST_PERMISSION_DENIED|AUDIT_TRAIL_FOLDER_LIST_READ_FAILED|AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED|AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE|AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED|AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED|AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND|AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET|AUDIT_TRAIL_COVERAGE_UNPROVEN|AUDIT_TRAIL_CLASSIFIER_FAILED) ;;
             *) echo 'RECOVERY_AUDIT_TRAIL_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
           esac
 

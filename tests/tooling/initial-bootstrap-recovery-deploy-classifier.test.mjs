@@ -4,7 +4,11 @@ import test from 'node:test';
 
 import {
   classifyRecoveryAuditCreateEvents,
+  classifyAuditTrailCloudFolderList,
   classifyAuditTrailListHttpStatus,
+  classifyAuditTrailFolderMetadataHttpStatus,
+  classifyAuditTrailFolderListHttpStatus,
+  classifyRecoveryAuditTrailCloudCoverage,
   classifyRecoveryAuditTrailSource,
   classifyRecoveryFunctionDeployOutcome,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
@@ -19,6 +23,97 @@ test('Audit Trails list authentication and authorization failures remain distinc
   assert.equal(classifyAuditTrailListHttpStatus(403), 'AUDIT_TRAIL_LIST_PERMISSION_DENIED');
   assert.equal(classifyAuditTrailListHttpStatus(404), 'AUDIT_TRAIL_LIST_READ_FAILED');
   assert.equal(classifyAuditTrailListHttpStatus(null), 'AUDIT_TRAIL_LIST_READ_FAILED');
+});
+
+test('cloud folder enumeration failures stay bounded and distinguish permission from other failures', () => {
+  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
+  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(403), 'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED');
+  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(500), 'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED');
+  assert.equal(classifyAuditTrailFolderListHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
+  assert.equal(classifyAuditTrailFolderListHttpStatus(403), 'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED');
+  assert.equal(classifyAuditTrailFolderListHttpStatus(500), 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED');
+  assert.equal(classifyAuditTrailCloudFolderList({ folders: [] }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
+    nextPageToken: 'synthetic-next-page',
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [
+      { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
+      { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
+    ],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_METADATA_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: Array.from({ length: 101 }, (_, index) => ({
+      id: index === 0 ? 'synthetic-target' : `synthetic-folder-${index}`,
+      cloudId: 'synthetic-cloud',
+      status: 'ACTIVE',
+    })),
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE');
+});
+
+test('cloud-scope trail discovery reads only complete per-folder lists and proves exact target-folder management-event coverage', () => {
+  const cloudId = 'synthetic-cloud';
+  const targetFolderId = 'synthetic-target-folder';
+  const otherFolderId = 'synthetic-other-folder';
+  const folders = { folders: [
+    { id: targetFolderId, cloudId, status: 'ACTIVE' },
+    { id: otherFolderId, cloudId, status: 'ACTIVE' },
+  ] };
+  const baseTrail = {
+    folderId: otherFolderId,
+    cloudId,
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    filteringPolicy: { managementEventsFilter: { resourceScopes: [
+      { resourceId: cloudId, resourceType: 'resource-manager.cloud' },
+    ] } },
+    destination: { cloudLogging: { logGroupId: 'synthetic-group' } },
+  };
+
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [baseTrail] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [{ ...baseTrail, folderId: targetFolderId, filteringPolicy: { managementEventsFilter: {
+      resourceScopes: [{ resourceId: targetFolderId, resourceType: 'resource-manager.folder' }],
+    } } }] },
+    { trails: [] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [{ ...baseTrail, filteringPolicy: { managementEventsFilter: {
+      resourceScopes: [{ resourceId: otherFolderId, resourceType: 'resource-manager.folder' }],
+    } } }] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [{ ...baseTrail, filteringPolicy: { managementEventsFilter: {
+      resourceScopes: [{ resourceId: 'synthetic-scope', resourceType: 'unknown.scope' }],
+    } } }] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [{ ...baseTrail, filteringPolicy: { managementEventsFilter: { resourceScopes: [] } } }] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [{ ...baseTrail, updatedAt: '2026-09-28T00:00:00Z' }] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [baseTrail, { ...baseTrail, folderId: otherFolderId }] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_SOURCE_AMBIGUOUS');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [] },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] },
+    { trails: [baseTrail], nextPageToken: 'synthetic-next-page' },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_LIST_INCOMPLETE');
 });
 
 function exactEvidence(overrides = {}) {
