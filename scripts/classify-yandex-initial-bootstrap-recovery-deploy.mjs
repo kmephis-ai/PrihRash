@@ -62,6 +62,22 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND',
   'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET',
   'AUDIT_TRAIL_COVERAGE_UNPROVEN',
+  'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID',
+  'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID',
+  'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH',
+  'AUDIT_TRAIL_TRAIL_JSON_INVALID',
+  'AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID',
+  'AUDIT_TRAIL_TRAIL_ENTRY_INVALID',
+  'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING',
+  'AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH',
+  'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISSING',
+  'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH',
+  'AUDIT_TRAIL_TRAIL_STATUS_MISSING',
+  'AUDIT_TRAIL_TRAIL_STATUS_UNSUPPORTED',
+  'AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID',
+  'AUDIT_TRAIL_TRAIL_DESTINATION_INVALID',
+  'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN',
+  'AUDIT_TRAIL_CLOUD_CLASSIFIER_INTERNAL_ERROR',
   'AUDIT_TRAIL_CLASSIFIER_FAILED',
   'AUDIT_LOG_READ_FAILED',
   'AUDIT_LOG_READ_PERMISSION_DENIED',
@@ -362,13 +378,13 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
     if (targetFinishedAt === null || typeof cloudId !== 'string' || cloudId.length === 0
       || typeof targetFolderId !== 'string' || targetFolderId.length === 0
       || !Array.isArray(trailResponses)) {
-      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      return { evidence: 'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID' };
     }
     const inventory = inspectAuditTrailCloudFolderInventory(folderResponse, cloudId, targetFolderId);
     if (inventory.evidence !== 'FOLDER_LIST_READY') return { evidence: inventory.evidence };
     const { folderIds } = inventory;
     if (trailResponses.length !== folderIds.length) {
-      return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
+      return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH' };
     }
 
     const coveredTrails = [];
@@ -381,23 +397,65 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
     for (let folderIndex = 0; folderIndex < folderIds.length; folderIndex += 1) {
       const response = trailResponses[folderIndex];
       if (!object(response) || !Array.isArray(response.trails)) {
-        return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+        return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
       }
-      if (response.nextPageToken !== undefined
-        && (typeof response.nextPageToken !== 'string' || response.nextPageToken.length > 0)) {
+      if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
+        return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
+      }
+      if (typeof response.nextPageToken === 'string' && response.nextPageToken.length > 0) {
         return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
       }
       if (response.trails.length >= 1_000) return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
       totalTrails += response.trails.length;
       for (const trail of response.trails) {
-        if (!object(trail) || trail.folderId !== folderIds[folderIndex] || trail.cloudId !== cloudId
-          || typeof trail.status !== 'string') {
-          return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+        if (!object(trail)) return { evidence: 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID' };
+        if (typeof trail.folderId !== 'string' || trail.folderId.length === 0) {
+          return { evidence: 'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING' };
         }
-        const managementFilter = trail.filteringPolicy?.managementEventsFilter;
-        if (managementFilter === undefined) continue;
+        if (trail.folderId !== folderIds[folderIndex]) {
+          return { evidence: 'AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH' };
+        }
+        if (typeof trail.cloudId !== 'string' || trail.cloudId.length === 0) {
+          return { evidence: 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISSING' };
+        }
+        if (trail.cloudId !== cloudId) return { evidence: 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH' };
+        if (typeof trail.status !== 'string' || trail.status.length === 0) {
+          return { evidence: 'AUDIT_TRAIL_TRAIL_STATUS_MISSING' };
+        }
+        if (!['ACTIVE', 'ERROR', 'DELETED'].includes(trail.status)) {
+          return { evidence: 'AUDIT_TRAIL_TRAIL_STATUS_UNSUPPORTED' };
+        }
+        if (trail.filter !== undefined) {
+          coverageUnproven = true;
+          continue;
+        }
+        if (trail.filteringPolicy === undefined) {
+          coverageUnproven = true;
+          continue;
+        }
+        if (!object(trail.filteringPolicy)) {
+          coverageUnproven = true;
+          continue;
+        }
+        const filteringPolicy = trail.filteringPolicy;
+        if (object(filteringPolicy)
+          && Object.keys(filteringPolicy).some((key) => !['managementEventsFilter', 'dataEventsFilters'].includes(key))) {
+          coverageUnproven = true;
+          continue;
+        }
+        const managementFilter = filteringPolicy?.managementEventsFilter;
+        if (managementFilter === undefined) {
+          if (!Array.isArray(filteringPolicy.dataEventsFilters)) coverageUnproven = true;
+          continue;
+        }
         if (!object(managementFilter) || !Array.isArray(managementFilter.resourceScopes)
           || managementFilter.resourceScopes.length === 0) {
+          coverageUnproven = true;
+          continue;
+        }
+        if (Object.keys(managementFilter).some((key) => !['resourceScopes', 'includeRules', 'excludeRules'].includes(key))
+          || ['includeRules', 'excludeRules'].some((key) => managementFilter[key] !== undefined
+            && (!Array.isArray(managementFilter[key]) || managementFilter[key].length > 0))) {
           coverageUnproven = true;
           continue;
         }
@@ -420,9 +478,10 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
           matchingScopeCount += 1;
           const trailCreatedAt = timestamp(trail.createdAt);
           const trailUpdatedAt = timestamp(trail.updatedAt);
-          if (trailCreatedAt === null || trailUpdatedAt === null || !object(trail.destination)) {
-            return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+          if (trailCreatedAt === null || trailUpdatedAt === null) {
+            return { evidence: 'AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID' };
           }
+          if (!object(trail.destination)) return { evidence: 'AUDIT_TRAIL_TRAIL_DESTINATION_INVALID' };
           if (trailCreatedAt > targetFinishedAt) {
             createdAfterTarget += 1;
             continue;
@@ -458,19 +517,25 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
     const selectedDestinations = destinationKeys.filter((key) => destination[key] !== undefined);
     const unknownDestinations = Object.keys(destination).some((key) => !destinationKeys.includes(key));
     if (unknownDestinations || selectedDestinations.length !== 1) {
-      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+      return { evidence: 'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN' };
     }
-    if (object(destination.cloudLogging) && typeof destination.cloudLogging.logGroupId === 'string'
-      && destination.cloudLogging.logGroupId.length > 0) {
+    if (destination.cloudLogging !== undefined) {
+      if (!object(destination.cloudLogging) || typeof destination.cloudLogging.logGroupId !== 'string'
+        || destination.cloudLogging.logGroupId.length === 0) {
+        return { evidence: 'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN' };
+      }
       return { evidence: 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', logGroupId: destination.cloudLogging.logGroupId };
     }
-    if (object(destination.objectStorage) && typeof destination.objectStorage.bucketId === 'string'
-      && destination.objectStorage.bucketId.length > 0) {
+    if (destination.objectStorage !== undefined) {
+      if (!object(destination.objectStorage) || typeof destination.objectStorage.bucketId !== 'string'
+        || destination.objectStorage.bucketId.length === 0) {
+        return { evidence: 'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN' };
+      }
       return { evidence: 'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT' };
     }
     return { evidence: 'AUDIT_TRAIL_SOURCE_UNSUPPORTED' };
   } catch {
-    return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    return { evidence: 'AUDIT_TRAIL_CLOUD_CLASSIFIER_INTERNAL_ERROR' };
   }
 }
 
@@ -659,7 +724,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else if (cliArgs[0] === '--audit-cloud-trails') {
     const [folderListPath, cloudId, targetFolderId, runFinishedAt, locatorPath, ...trailPaths] = cliArgs.slice(1);
     if (!folderListPath || !cloudId || !targetFolderId || !runFinishedAt || !locatorPath) {
-      process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      process.stdout.write('AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID\n');
       process.exitCode = 2;
     } else {
       try {
@@ -673,7 +738,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         if (result.logGroupId) await writeFile(locatorPath, result.logGroupId, 'utf8');
         process.stdout.write(`${ENUMS.has(result.evidence) ? result.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
       } catch {
-        process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+        process.stdout.write('AUDIT_TRAIL_TRAIL_JSON_INVALID\n');
       }
     }
   } else if (cliArgs[0] === '--audit-trail-http-status') {

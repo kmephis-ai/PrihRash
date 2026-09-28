@@ -59,6 +59,15 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH/);
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS/);
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_STATUS_MISSING/);
+  assert.match(workflow, /AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_JSON_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_DESTINATION_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_JSON_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND/);
   assert.match(workflow, /AUDIT_TRAIL_COVERAGE_UNPROVEN/);
   assert.doesNotMatch(workflow, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders\/\$\{YC_FOLDER_ID\}/);

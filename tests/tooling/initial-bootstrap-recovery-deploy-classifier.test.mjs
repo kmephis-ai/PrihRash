@@ -162,6 +162,105 @@ test('cloud-scope trail discovery reads only complete per-folder lists and prove
   ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_LIST_INCOMPLETE');
 });
 
+test('cloud trail response validation reports field-specific safe enums', () => {
+  const cloudId = 'synthetic-cloud';
+  const targetFolderId = 'synthetic-target-folder';
+  const ownerFolderId = 'synthetic-owner-folder';
+  const folders = { folders: [
+    { id: targetFolderId, cloudId, status: 'ACTIVE' },
+    { id: ownerFolderId, cloudId, status: 'ACTIVE' },
+  ] };
+  const trail = {
+    folderId: ownerFolderId,
+    cloudId,
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    filteringPolicy: { managementEventsFilter: { resourceScopes: [
+      { resourceId: cloudId, resourceType: 'resource-manager.cloud' },
+    ] } },
+    destination: { cloudLogging: { logGroupId: 'synthetic-group' } },
+  };
+  const classify = (trailValue = trail, ownerList = { trails: [trailValue] }, targetList = { trails: [] }) => (
+    classifyRecoveryAuditTrailCloudCoverage(folders, [targetList, ownerList], cloudId, targetFolderId, runFinishedAt)
+  );
+
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, null, cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] }, { trails: [], nextPageToken: 1 },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
+    { trails: [] }, { trails: [], nextPageToken: 'synthetic-next-page' },
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_LIST_INCOMPLETE');
+  assert.equal(classify(null), 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID');
+  assert.equal(classify({ ...trail, folderId: undefined }), 'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING');
+  assert.equal(classify({ ...trail, folderId: 'synthetic-other-folder' }), 'AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH');
+  assert.equal(classify({ ...trail, cloudId: undefined }), 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISSING');
+  assert.equal(classify({ ...trail, cloudId: 'synthetic-other-cloud' }), 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH');
+  assert.equal(classify({ ...trail, status: undefined }), 'AUDIT_TRAIL_TRAIL_STATUS_MISSING');
+  assert.equal(classify({ ...trail, status: 'UNKNOWN' }), 'AUDIT_TRAIL_TRAIL_STATUS_UNSUPPORTED');
+  assert.equal(classify({ ...trail, createdAt: 'invalid-time' }), 'AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID');
+  assert.equal(classify({ ...trail, destination: null }), 'AUDIT_TRAIL_TRAIL_DESTINATION_INVALID');
+  assert.equal(classify({ ...trail, destination: { unknownDestination: {} } }), 'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN');
+});
+
+test('cloud trail metadata validation splits exact list, owner, status, timestamp, and destination failures', () => {
+  const cloudId = 'synthetic-cloud';
+  const targetFolderId = 'synthetic-target-folder';
+  const ownerFolderId = 'synthetic-owner-folder';
+  const folders = { folders: [
+    { id: targetFolderId, cloudId, status: 'ACTIVE' },
+    { id: ownerFolderId, cloudId, status: 'ACTIVE' },
+  ] };
+  const trail = {
+    folderId: ownerFolderId,
+    cloudId,
+    status: 'ACTIVE',
+    createdAt: '2026-09-27T00:00:00Z',
+    updatedAt: '2026-09-27T00:00:00Z',
+    filteringPolicy: { managementEventsFilter: { resourceScopes: [
+      { resourceId: cloudId, resourceType: 'resource-manager.cloud' },
+    ] } },
+    destination: { cloudLogging: { logGroupId: 'synthetic-group' } },
+  };
+  const classify = (trailValue = trail, ownerList = { trails: [trailValue] }, targetList = { trails: [] }) => (
+    classifyRecoveryAuditTrailCloudCoverage(folders, [targetList, ownerList], cloudId, targetFolderId, runFinishedAt)
+  );
+
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }, { trails: [], nextPageToken: 1 }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classify(null), 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID');
+  assert.equal(classify({ ...trail, folderId: undefined }), 'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING');
+  assert.equal(classify({ ...trail, folderId: 'synthetic-wrong-owner' }), 'AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH');
+  assert.equal(classify({ ...trail, cloudId: undefined }), 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISSING');
+  assert.equal(classify({ ...trail, cloudId: 'synthetic-other-cloud' }), 'AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH');
+  assert.equal(classify({ ...trail, status: undefined }), 'AUDIT_TRAIL_TRAIL_STATUS_MISSING');
+  assert.equal(classify({ ...trail, status: 'UNKNOWN_STATUS' }), 'AUDIT_TRAIL_TRAIL_STATUS_UNSUPPORTED');
+  assert.equal(classify({ ...trail, createdAt: 'not-a-timestamp' }), 'AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID');
+  assert.equal(classify({ ...trail, destination: null }), 'AUDIT_TRAIL_TRAIL_DESTINATION_INVALID');
+  assert.equal(classify({ ...trail, destination: { cloudLogging: {}, objectStorage: {} } }),
+    'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN');
+  assert.equal(classify({ ...trail, filter: {} }), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+  assert.equal(classify({ ...trail, filteringPolicy: undefined }), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+  assert.equal(classify({ ...trail, filteringPolicy: { managementEventsFilter: {
+    resourceScopes: [{ resourceId: cloudId, resourceType: 'resource-manager.cloud' }],
+    includeRules: [{ conditions: [{ field: 'synthetic', operator: 'IN', values: ['value'] }] }],
+  } } }), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+  assert.equal(classify({ ...trail, filteringPolicy: { managementEventsFilter: {
+    resourceScopes: [{ resourceId: cloudId, resourceType: 'resource-manager.cloud' }],
+    unknownRule: true,
+  } } }), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+});
+
 function exactEvidence(overrides = {}) {
   const version = {
     id: 'synthetic-version',
@@ -613,5 +712,22 @@ test('cloud folder CLI maps unreadable inventory JSON to one safe enum', () => {
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'AUDIT_TRAIL_FOLDER_LIST_JSON_INVALID\n');
+  assert.equal(result.stderr, '');
+});
+
+test('cloud trail CLI maps unreadable trail JSON to one safe enum', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
+    '--audit-cloud-trails',
+    'package.json',
+    'synthetic-cloud',
+    'synthetic-target-folder',
+    runFinishedAt,
+    'unused-locator.txt',
+    'missing-trail-list.json',
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'AUDIT_TRAIL_TRAIL_JSON_INVALID\n');
   assert.equal(result.stderr, '');
 });

@@ -350,31 +350,45 @@ test('PR-861 cloud refinement records pre-list Folder Get denial and arms only t
   assert.match(evidence, /before merge, so the one post-merge exact-main autocontinue does not race the authorization/);
 });
 
-test('PR-862 cloud inventory failure remains unclassified and records verified Cloud-role removal', () => {
+test('PR-862 Cloud metadata enum remains stage-ambiguous and records verified Cloud-role removal', () => {
   const evidence = runbook.match(
-    /### PR #862 cloud inventory classification stopped before any trail or event read([\s\S]*?)(?=\n### |\n## |$)/,
+    /### PR #862 cloud inventory\/trail classifier returned one ambiguous metadata enum; event read did not run([\s\S]*?)(?=\n### |\n## |$)/,
   )?.[1];
   assert.ok(evidence, 'the exact cloud-inventory result and stop condition must be retained');
   assert.match(evidence, /workflow `36457545606`/);
   assert.match(evidence, /`AUDIT_TRAIL_METADATA_INVALID`/);
-  assert.match(evidence, /No per-folder TrailService\.List or Cloud Logging read occurred/);
+  assert.match(evidence, /available evidence does not establish whether per-folder TrailService\.List ran/);
   assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
   assert.match(evidence, /temporary Cloud `audit-trails\.viewer` binding was removed/);
   assert.match(evidence, /emits distinct enums for these conditions/);
   assert.match(evidence, /No same-SHA replay or event query is authorized/);
 });
 
-test('PR-863 Folder-status refinement records metadata-invalid stop and Cloud-viewer revocation', () => {
+test('PR-863 Folder-status refinement records stage-ambiguous metadata and Cloud-viewer revocation', () => {
   const evidence = runbook.match(
-    /### PR #863 refined Folder statuses; Cloud inventory still stopped at metadata validation([\s\S]*?)(?=\n### |\n## |$)/,
+    /### PR #863 refined Folder statuses; Cloud source classifier still returned ambiguous metadata([\s\S]*?)(?=\n### |\n## |$)/,
   )?.[1];
   assert.ok(evidence, 'the exact Cloud inventory result and permission cleanup must be retained');
   assert.match(evidence, /recovery `36460606358`/);
   assert.match(evidence, /`AUDIT_TRAIL_METADATA_INVALID`/);
   assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
-  assert.match(evidence, /no per-folder TrailService\.List or event read occurred/);
+  assert.match(evidence, /shared enum does not establish whether per-folder TrailService\.List ran/);
   assert.match(evidence, /temporary Cloud `audit-trails\.viewer` binding was removed/);
   assert.match(evidence, /next new-SHA synthetic refinement splits response\/entry\/ID\/cloudId\/status failures/);
+});
+
+test('PR-864 cloud Trail metadata failure remains unknown and records temporary-role revocation', () => {
+  const evidence = runbook.match(
+    /### PR #864 Cloud source classifier still returned the generic enum; temporary Cloud viewer revoked([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the trail-metadata validation result and Cloud-role cleanup must be retained');
+  assert.match(evidence, /Recovery autocontinue `36462701288`/);
+  assert.match(evidence, /recovery `36462743638`/);
+  assert.match(evidence, /`AUDIT_TRAIL_METADATA_INVALID`/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /shared enum does not distinguish inventory, TrailService\.List response, or trail-entry validation/);
+  assert.match(evidence, /temporary Cloud `audit-trails\.viewer` binding was removed/);
+  assert.match(evidence, /No same-SHA replay is allowed/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
