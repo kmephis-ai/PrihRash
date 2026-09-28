@@ -335,6 +335,21 @@ test('PR-859 Audit Trails classification records the missing source and verified
   assert.match(evidence, /does not classify the Function-version deployment as `APPLIED` or `NOT_APPLIED`/);
 });
 
+test('PR-861 cloud refinement records pre-list Folder Get denial and arms only the new Cloud-ID path', () => {
+  const evidence = runbook.match(
+    /### PR #861 recovery stopped at Folder Get before Audit Trails List; Cloud viewer was not yet bound([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the consumed Folder Get failure and new diagnostic discriminator must be recorded');
+  assert.match(evidence, /recovery `36452570754`/);
+  assert.match(evidence, /`AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED`/);
+  assert.match(evidence, /Audit Trails List was not attempted/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /no WIF viewer/);
+  assert.match(evidence, /dedicated masked `YC_R1_CLOUD_ID` GitHub secret/);
+  assert.match(evidence, /removes the denied Folder Get dependency/);
+  assert.match(evidence, /before merge, so the one post-merge exact-main autocontinue does not race the authorization/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
