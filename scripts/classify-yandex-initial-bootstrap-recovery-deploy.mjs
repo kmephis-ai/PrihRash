@@ -27,6 +27,8 @@ const ENUMS = new Set([
   'RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT',
   'RECOVERY_UNTAGGED_VERSION_AMBIGUOUS',
   'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN',
+  'RECOVERY_VERSION_LIST_INCOMPLETE',
+  'RECOVERY_OPERATION_LIST_INCOMPLETE',
 ]);
 
 function object(value) {
@@ -72,6 +74,8 @@ export function classifyRecoveryFunctionDeployOutcome({
 
     const lowerBound = start - 5_000;
     const upperBound = finish + 5_000;
+    if (versions.length >= 1_000) return 'RECOVERY_VERSION_LIST_INCOMPLETE';
+    if (operations.length >= 1_000) return 'RECOVERY_OPERATION_LIST_INCOMPLETE';
     const matchingOperations = operations.filter((operation) => {
       if (!object(operation)) return false;
       const createdAt = timestamp(operation.created_at ?? operation.createdAt);
