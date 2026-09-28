@@ -47,8 +47,15 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED',
   'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE',
   'AUDIT_TRAIL_FOLDER_METADATA_INVALID',
+  'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID',
+  'AUDIT_TRAIL_FOLDER_LIST_JSON_INVALID',
+  'AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID',
+  'AUDIT_TRAIL_FOLDER_ENTRY_INVALID',
+  'AUDIT_TRAIL_FOLDER_ID_INVALID',
+  'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISSING',
   'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH',
   'AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS',
+  'AUDIT_TRAIL_FOLDER_STATUS_MISSING',
   'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED',
   'AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE',
   'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID',
@@ -468,14 +475,20 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
 }
 
 function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId) {
-  if (!object(response) || !Array.isArray(response.folders)
-    || typeof cloudId !== 'string' || cloudId.length === 0
-    || typeof targetFolderId !== 'string' || targetFolderId.length === 0) {
-    return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+  if (typeof cloudId !== 'string' || cloudId.length === 0) {
+    return { evidence: 'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID' };
+  }
+  if (typeof targetFolderId !== 'string' || targetFolderId.length === 0) {
+    return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID' };
+  }
+  if (!object(response) || !Array.isArray(response.folders)) {
+    return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
   }
   const folders = response.folders;
-  if (response.nextPageToken !== undefined
-    && (typeof response.nextPageToken !== 'string' || response.nextPageToken.length > 0)) {
+  if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
+    return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
+  }
+  if (typeof response.nextPageToken === 'string' && response.nextPageToken.length > 0) {
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
   }
   if (folders.length >= 1_000 || folders.length > 100) {
@@ -484,14 +497,21 @@ function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId
   const folderIds = [];
   const foldersById = new Map();
   for (const folder of folders) {
-    if (!object(folder) || typeof folder.id !== 'string' || folder.id.length === 0) {
-      return { evidence: 'AUDIT_TRAIL_FOLDER_METADATA_INVALID' };
+    if (!object(folder)) return { evidence: 'AUDIT_TRAIL_FOLDER_ENTRY_INVALID' };
+    if (typeof folder.id !== 'string' || folder.id.length === 0) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_ID_INVALID' };
     }
     if (typeof folder.cloudId !== 'string' || folder.cloudId.length === 0) {
-      return { evidence: 'AUDIT_TRAIL_FOLDER_METADATA_INVALID' };
+      return { evidence: 'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISSING' };
     }
     if (folder.cloudId !== cloudId) return { evidence: 'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH' };
     if (foldersById.has(folder.id)) return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS' };
+    if (folder.status === undefined) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_STATUS_MISSING' };
+    }
+    if (typeof folder.status !== 'string' || folder.status.length === 0) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED' };
+    }
     if (!['ACTIVE', 'PENDING_DELETION', 'DELETING'].includes(folder.status)) {
       return { evidence: 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED' };
     }
@@ -620,7 +640,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else if (cliArgs[0] === '--audit-cloud-folder-ids') {
     const [folderListPath, cloudId, targetFolderId, folderIdsPath] = cliArgs.slice(1);
     if (!folderListPath || !cloudId || !targetFolderId || !folderIdsPath) {
-      process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+      process.stdout.write('AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID\n');
       process.exitCode = 2;
     } else {
       try {
@@ -633,7 +653,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           process.stdout.write('FOLDER_LIST_READY\n');
         }
       } catch {
-        process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
+        process.stdout.write('AUDIT_TRAIL_FOLDER_LIST_JSON_INVALID\n');
       }
     }
   } else if (cliArgs[0] === '--audit-cloud-trails') {

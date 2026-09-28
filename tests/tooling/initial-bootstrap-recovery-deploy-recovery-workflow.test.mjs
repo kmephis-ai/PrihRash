@@ -56,6 +56,9 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED/);
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED/);
   assert.match(workflow, /AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE/);
+  assert.match(workflow, /AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH/);
+  assert.match(workflow, /AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS/);
+  assert.match(workflow, /AUDIT_TRAIL_FOLDER_STATUS_MISSING/);
   assert.match(workflow, /AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND/);
   assert.match(workflow, /AUDIT_TRAIL_COVERAGE_UNPROVEN/);
   assert.doesNotMatch(workflow, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders\/\$\{YC_FOLDER_ID\}/);

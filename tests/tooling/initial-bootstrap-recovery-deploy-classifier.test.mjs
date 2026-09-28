@@ -28,14 +28,30 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
   assert.equal(classifyAuditTrailFolderListHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
   assert.equal(classifyAuditTrailFolderListHttpStatus(403), 'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED');
   assert.equal(classifyAuditTrailFolderListHttpStatus(500), 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED');
+  assert.equal(classifyAuditTrailCloudFolderList(null, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({ folders: null }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID');
   assert.equal(classifyAuditTrailCloudFolderList({ folders: [] }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
-  }, '', 'synthetic-target'), 'AUDIT_TRAIL_METADATA_INVALID');
+  }, '', 'synthetic-target'), 'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({ folders: [] }, 'synthetic-cloud', ''), 'AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
     nextPageToken: 'synthetic-next-page',
   }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
+    nextPageToken: 1,
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [null],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_ENTRY_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: '', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_ID_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', status: 'ACTIVE' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISSING');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [
       { id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' },
@@ -56,6 +72,12 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'UNRECOGNIZED' }],
   }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED');
   assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud' }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_STATUS_MISSING');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 1 }],
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED');
+  assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'PENDING_DELETION' }],
   }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE');
   assert.equal(classifyAuditTrailCloudFolderList({
@@ -73,10 +95,7 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
   'synthetic-cloud', 'synthetic-target', runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
-  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_METADATA_INVALID');
-  assert.equal(classifyAuditTrailCloudFolderList({
-    folders: [{ id: 'synthetic-target', status: 'ACTIVE' }],
-  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_METADATA_INVALID');
+  }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_ID_INVALID');
 });
 
 test('cloud-scope trail discovery reads only complete per-folder lists and proves exact target-folder management-event coverage', () => {
@@ -579,5 +598,20 @@ test('recovery deploy CLI reports invalid metadata JSON without echoing parser d
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'RECOVERY_METADATA_JSON_INVALID\n');
+  assert.equal(result.stderr, '');
+});
+
+test('cloud folder CLI maps unreadable inventory JSON to one safe enum', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
+    '--audit-cloud-folder-ids',
+    'missing-cloud-folders.json',
+    'synthetic-cloud',
+    'synthetic-target-folder',
+    'unused-folder-ids.json',
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'AUDIT_TRAIL_FOLDER_LIST_JSON_INVALID\n');
   assert.equal(result.stderr, '');
 });
