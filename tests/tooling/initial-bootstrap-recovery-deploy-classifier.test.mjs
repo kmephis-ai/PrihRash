@@ -323,6 +323,22 @@ test('recovery deploy classifier classifies exact-window untagged versions only 
   );
 });
 
+test('recovery deploy classifier refuses absence claims from a full bounded provider list', () => {
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      versions: Array.from({ length: 1_000 }, (_, index) => ({ id: `synthetic-version-${index}` })),
+    })),
+    'RECOVERY_VERSION_LIST_INCOMPLETE',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      versions: [],
+      operations: Array.from({ length: 1_000 }, () => ({})),
+    })),
+    'RECOVERY_OPERATION_LIST_INCOMPLETE',
+  );
+});
+
 test('recovery deploy CLI reports invalid metadata JSON without echoing parser details', () => {
   const result = spawnSync(process.execPath, [
     'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
