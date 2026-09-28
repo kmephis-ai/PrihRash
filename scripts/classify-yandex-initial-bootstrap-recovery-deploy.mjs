@@ -24,6 +24,9 @@ const ENUMS = new Set([
   'RECOVERY_TAG_HISTORY_AMBIGUOUS',
   'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED',
   'RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT',
+  'RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT',
+  'RECOVERY_UNTAGGED_VERSION_AMBIGUOUS',
+  'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN',
 ]);
 
 function object(value) {
@@ -80,11 +83,15 @@ export function classifyRecoveryFunctionDeployOutcome({
     });
     if (matchingOperations.length === 0) {
       const taggedCandidates = [];
+      const untaggedVersions = [];
       for (const version of versions) {
         if (!object(version)) return 'RECOVERY_VERSION_ENTRY_INVALID';
         const tags = version.tags === undefined ? [] : version.tags;
         if (!Array.isArray(tags)) return 'RECOVERY_VERSION_TAGS_INVALID';
-        if (!tags.includes('r1-initial-bootstrap-recovery')) continue;
+        if (!tags.includes('r1-initial-bootstrap-recovery')) {
+          untaggedVersions.push(version);
+          continue;
+        }
         const createdAt = timestamp(version.created_at);
         if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
         if (createdAt >= lowerBound && createdAt <= upperBound) taggedCandidates.push(version);
@@ -119,7 +126,30 @@ export function classifyRecoveryFunctionDeployOutcome({
             && effectiveFrom <= upperBound
           ) matchingHistory.push(record);
         }
-        if (matchingHistory.length === 0) return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
+        if (matchingHistory.length === 0) {
+          const untaggedCandidates = [];
+          const versionStatuses = new Set(['CREATING', 'ACTIVE', 'OBSOLETE', 'DELETING']);
+          for (const version of untaggedVersions) {
+            const createdAt = timestamp(version.created_at);
+            if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
+            if (createdAt < lowerBound || createdAt > upperBound) continue;
+            if (
+              typeof version.runtime !== 'string'
+              || typeof version.entrypoint !== 'string'
+              || typeof version.service_account_id !== 'string'
+              || typeof version.status !== 'string'
+              || !versionStatuses.has(version.status)
+            ) return 'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN';
+            if (
+              version.runtime === 'nodejs22'
+              && version.entrypoint === 'index.initialBootstrapRecoveryHandler'
+              && version.service_account_id === runtimeServiceAccountId
+            ) untaggedCandidates.push(version);
+          }
+          if (untaggedCandidates.length > 1) return 'RECOVERY_UNTAGGED_VERSION_AMBIGUOUS';
+          if (untaggedCandidates.length === 1) return 'RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT';
+          return 'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW';
+        }
         if (matchingHistory.length > 1) return 'RECOVERY_TAG_HISTORY_AMBIGUOUS';
 
         const matchingVersionId = matchingHistory[0].functionVersionId;
