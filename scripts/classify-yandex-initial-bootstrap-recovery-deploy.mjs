@@ -46,6 +46,11 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED',
   'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED',
   'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE',
+  'AUDIT_TRAIL_FOLDER_METADATA_INVALID',
+  'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH',
+  'AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS',
+  'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED',
+  'AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE',
   'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID',
   'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND',
   'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET',
@@ -477,15 +482,27 @@ function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE' };
   }
   const folderIds = [];
+  const foldersById = new Map();
   for (const folder of folders) {
-    if (!object(folder) || typeof folder.id !== 'string' || folder.id.length === 0
-      || folder.cloudId !== cloudId || folder.status !== 'ACTIVE' || folderIds.includes(folder.id)) {
-      return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
+    if (!object(folder) || typeof folder.id !== 'string' || folder.id.length === 0) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_METADATA_INVALID' };
+    }
+    if (typeof folder.cloudId !== 'string' || folder.cloudId.length === 0) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_METADATA_INVALID' };
+    }
+    if (folder.cloudId !== cloudId) return { evidence: 'AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH' };
+    if (foldersById.has(folder.id)) return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS' };
+    if (!['ACTIVE', 'PENDING_DELETION', 'DELETING'].includes(folder.status)) {
+      return { evidence: 'AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED' };
     }
     folderIds.push(folder.id);
+    foldersById.set(folder.id, folder);
   }
-  if (folderIds.filter((id) => id === targetFolderId).length !== 1) {
+  if (!foldersById.has(targetFolderId)) {
     return { evidence: 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND' };
+  }
+  if (foldersById.get(targetFolderId).status !== 'ACTIVE') {
+    return { evidence: 'AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE' };
   }
   return { evidence: 'FOLDER_LIST_READY', folderIds };
 }
