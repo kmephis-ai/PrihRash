@@ -237,9 +237,9 @@ test('cloud trail metadata validation splits exact list, owner, status, timestam
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }], cloudId, targetFolderId, runFinishedAt),
     'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
-    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+    'AUDIT_TRAIL_TRAILS_FIELD_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }, { trails: [], nextPageToken: 1 }], cloudId, targetFolderId, runFinishedAt),
-    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+    'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID');
   assert.equal(classify(null), 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID');
   assert.equal(classify({ ...trail, folderId: undefined }), 'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING');
   assert.equal(classify({ ...trail, folderId: 'synthetic-wrong-owner' }), 'AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH');
