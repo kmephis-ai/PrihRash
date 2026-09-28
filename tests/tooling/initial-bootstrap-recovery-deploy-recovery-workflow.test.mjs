@@ -28,6 +28,8 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /serverless-functions\.api\.cloud\.yandex\.net\/functions\/v1\/functions\/\$\{function_id\}:tagHistory/);
   assert.match(workflow, /data-urlencode "tag=\$\{TARGET_TAG\}"/);
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
+  assert.match(workflow, /runtime_sa="\$\(yc iam service-account get/);
+  assert.match(workflow, /"\$YC_WIF_SERVICE_ACCOUNT_ID" "\$runtime_sa"/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
   assert.match(workflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS/);
   assert.match(workflow, /RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT\|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW/);

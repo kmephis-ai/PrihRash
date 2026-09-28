@@ -49,7 +49,8 @@ export function classifyRecoveryFunctionDeployOutcome({
   tagHistory,
   runStartedAt,
   runFinishedAt,
-  deploymentServiceAccountId,
+  operationCreatorServiceAccountId,
+  runtimeServiceAccountId,
 }) {
   try {
     const start = timestamp(runStartedAt);
@@ -58,8 +59,10 @@ export function classifyRecoveryFunctionDeployOutcome({
       start === null
       || finish === null
       || finish < start
-      || typeof deploymentServiceAccountId !== 'string'
-      || deploymentServiceAccountId.length === 0
+      || typeof operationCreatorServiceAccountId !== 'string'
+      || operationCreatorServiceAccountId.length === 0
+      || typeof runtimeServiceAccountId !== 'string'
+      || runtimeServiceAccountId.length === 0
       || !Array.isArray(versions)
       || !Array.isArray(operations)
     ) return 'RECOVERY_DEPLOY_INPUT_INVALID';
@@ -70,7 +73,7 @@ export function classifyRecoveryFunctionDeployOutcome({
       if (!object(operation)) return false;
       const createdAt = timestamp(operation.created_at ?? operation.createdAt);
       const createdBy = operation.created_by ?? operation.createdBy;
-      return createdBy === deploymentServiceAccountId
+      return createdBy === operationCreatorServiceAccountId
         && createdAt !== null
         && createdAt >= lowerBound
         && createdAt <= upperBound;
@@ -139,7 +142,7 @@ export function classifyRecoveryFunctionDeployOutcome({
         || taggedVersion.status !== 'ACTIVE'
         || taggedVersion.runtime !== 'nodejs22'
         || taggedVersion.entrypoint !== 'index.initialBootstrapRecoveryHandler'
-        || taggedVersion.serviceAccountId !== deploymentServiceAccountId
+        || taggedVersion.serviceAccountId !== runtimeServiceAccountId
       ) return 'RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN';
       return 'RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT';
     }
@@ -172,7 +175,7 @@ export function classifyRecoveryFunctionDeployOutcome({
       || taggedVersion.status !== 'ACTIVE'
       || taggedVersion.runtime !== 'nodejs22'
       || taggedVersion.entrypoint !== 'index.initialBootstrapRecoveryHandler'
-      || taggedVersion.serviceAccountId !== deploymentServiceAccountId
+      || taggedVersion.serviceAccountId !== runtimeServiceAccountId
     ) return 'CREATED_VERSION_NOT_PROVEN';
 
     return 'EXACT_RECOVERY_VERSION_CREATED';
@@ -182,8 +185,8 @@ export function classifyRecoveryFunctionDeployOutcome({
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, deploymentServiceAccountId] = process.argv.slice(2);
-  if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !deploymentServiceAccountId) {
+  const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, runtimeServiceAccountId] = process.argv.slice(2);
+  if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !operationCreatorServiceAccountId || !runtimeServiceAccountId) {
     process.stdout.write('RECOVERY_DEPLOY_INPUT_INVALID\n');
     process.exitCode = 2;
   } else {
@@ -207,7 +210,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         tagHistory,
         runStartedAt,
         runFinishedAt,
-        deploymentServiceAccountId,
+        operationCreatorServiceAccountId,
+        runtimeServiceAccountId,
       });
       process.stdout.write(`${ENUMS.has(result) ? result : 'DIAGNOSTIC_FAILED'}\n`);
       if (result === 'DIAGNOSTIC_FAILED') process.exitCode = 2;

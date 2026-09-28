@@ -7,6 +7,7 @@ import { classifyRecoveryFunctionDeployOutcome } from '../../scripts/classify-ya
 const runStartedAt = '2026-09-27T18:46:30Z';
 const runFinishedAt = '2026-09-27T18:46:38Z';
 const serviceAccount = 'synthetic-deployer';
+const runtimeServiceAccount = 'synthetic-runtime';
 
 function exactEvidence(overrides = {}) {
   const version = {
@@ -25,7 +26,7 @@ function exactEvidence(overrides = {}) {
     status: 'ACTIVE',
     runtime: 'nodejs22',
     entrypoint: 'index.initialBootstrapRecoveryHandler',
-    serviceAccountId: serviceAccount,
+    serviceAccountId: runtimeServiceAccount,
   };
   return {
     versions: [version],
@@ -34,7 +35,8 @@ function exactEvidence(overrides = {}) {
     tagHistory: { functionTagHistoryRecord: [] },
     runStartedAt,
     runFinishedAt,
-    deploymentServiceAccountId: serviceAccount,
+    operationCreatorServiceAccountId: serviceAccount,
+    runtimeServiceAccountId: runtimeServiceAccount,
     ...overrides,
   };
 }
@@ -59,6 +61,13 @@ test('recovery deploy classifier proves only a unique exact version correlated t
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       taggedVersion: { ...exactEvidence().taggedVersion, id: 'other-version' },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.notEqual(serviceAccount, runtimeServiceAccount);
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      taggedVersion: { ...exactEvidence().taggedVersion, serviceAccountId: serviceAccount },
     })),
     'CREATED_VERSION_NOT_PROVEN',
   );
@@ -149,7 +158,11 @@ test('recovery deploy classifier fails closed on malformed provider metadata and
     'RECOVERY_DEPLOY_INPUT_INVALID',
   );
   assert.equal(
-    classifyRecoveryFunctionDeployOutcome(exactEvidence({ deploymentServiceAccountId: '' })),
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operationCreatorServiceAccountId: '' })),
+    'RECOVERY_DEPLOY_INPUT_INVALID',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ runtimeServiceAccountId: '' })),
     'RECOVERY_DEPLOY_INPUT_INVALID',
   );
 });
@@ -276,6 +289,7 @@ test('recovery deploy CLI reports invalid metadata JSON without echoing parser d
     runStartedAt,
     runFinishedAt,
     serviceAccount,
+    runtimeServiceAccount,
   ], { encoding: 'utf8' });
 
   assert.equal(result.status, 0);

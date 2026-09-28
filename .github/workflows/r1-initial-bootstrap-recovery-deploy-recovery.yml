@@ -217,7 +217,7 @@ jobs:
             evidence="$tag_history_status"
           elif ! evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
             "$tmp/versions.json" "$tmp/operations.json" "$tmp/tagged-version.json" "$tmp/tag-history.json" \
-            "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$YC_WIF_SERVICE_ACCOUNT_ID")"; then
+            "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$YC_WIF_SERVICE_ACCOUNT_ID" "$runtime_sa")"; then
             evidence='DIAGNOSTIC_FAILED'
           fi
           case "$evidence" in

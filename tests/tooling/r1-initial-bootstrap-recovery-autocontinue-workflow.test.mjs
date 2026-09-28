@@ -265,6 +265,17 @@ test('PR-851 no-current-tag result stays unknown and arms only bounded tag-histo
   assert.match(evidence, /`next_page_token` is empty/);
 });
 
+test('PR-852 tag-history absence remains unclassified and records the distinct runtime/deployer identity fix', () => {
+  const evidence = runbook.match(
+    /### PR #852 schema-backed tag-history read returned no in-window recovery candidate on `efea1dc6e3f76e7136c14026b9ba8f402cb34b15`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact tag-history result and newly found classifier mismatch must be recorded');
+  assert.match(evidence, /published only `RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`/);
+  assert.match(evidence, /failed deployment remains unclassified/);
+  assert.match(evidence, /runtime service account to the WIF deployment caller ID/);
+  assert.match(evidence, /different roles/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
