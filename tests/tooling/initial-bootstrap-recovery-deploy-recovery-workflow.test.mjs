@@ -61,6 +61,9 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_STATUS_MISSING/);
   assert.match(workflow, /AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAILS_FIELD_INVALID/);
+  assert.match(workflow, /AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_JSON_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH/);
