@@ -64,6 +64,9 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_COVERAGE_UNPROVEN',
   'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID',
   'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID',
+  'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID',
+  'AUDIT_TRAIL_TRAILS_FIELD_INVALID',
+  'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID',
   'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH',
   'AUDIT_TRAIL_TRAIL_JSON_INVALID',
   'AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID',
@@ -396,11 +399,10 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
     let totalTrails = 0;
     for (let folderIndex = 0; folderIndex < folderIds.length; folderIndex += 1) {
       const response = trailResponses[folderIndex];
-      if (!object(response) || !Array.isArray(response.trails)) {
-        return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
-      }
+      if (!object(response)) return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID' };
+      if (!Array.isArray(response.trails)) return { evidence: 'AUDIT_TRAIL_TRAILS_FIELD_INVALID' };
       if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
-        return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
+        return { evidence: 'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID' };
       }
       if (typeof response.nextPageToken === 'string' && response.nextPageToken.length > 0) {
         return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };

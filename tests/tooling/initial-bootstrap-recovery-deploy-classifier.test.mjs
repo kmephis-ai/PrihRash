@@ -189,11 +189,13 @@ test('cloud trail response validation reports field-specific safe enums', () => 
     'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }], cloudId, targetFolderId, runFinishedAt),
     'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, ['malformed-response', { trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
-    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+    'AUDIT_TRAIL_TRAILS_FIELD_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
     { trails: [] }, { trails: [], nextPageToken: 1 },
-  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
     { trails: [] }, { trails: [], nextPageToken: 'synthetic-next-page' },
   ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_LIST_INCOMPLETE');

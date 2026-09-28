@@ -391,6 +391,19 @@ test('PR-864 cloud Trail metadata failure remains unknown and records temporary-
   assert.match(evidence, /No same-SHA replay is allowed/);
 });
 
+test('PR-865 Cloud trail list response remains unclassified and records viewer removal', () => {
+  const evidence = runbook.match(
+    /### PR #865 TrailService\.List response-shape refinement still stopped before event reads([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the latest list-response classification and binding cleanup must be retained');
+  assert.match(evidence, /recovery `36469918792`/);
+  assert.match(evidence, /`AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID`/);
+  assert.match(evidence, /`AUDIT_EVENT_READ_NOT_ATTEMPTED`/);
+  assert.match(evidence, /Cloud viewer was removed after this run and independently verified absent/);
+  assert.match(evidence, /splits those cases/);
+  assert.match(evidence, /no same-SHA replay/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
