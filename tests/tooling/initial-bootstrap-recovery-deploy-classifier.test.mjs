@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   classifyRecoveryAuditCreateEvents,
+  classifyAuditTrailListHttpStatus,
   classifyRecoveryAuditTrailSource,
   classifyRecoveryFunctionDeployOutcome,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
@@ -12,6 +13,13 @@ const runStartedAt = '2026-09-27T18:46:30Z';
 const runFinishedAt = '2026-09-27T18:46:38Z';
 const serviceAccount = 'synthetic-deployer';
 const runtimeServiceAccount = 'synthetic-runtime';
+
+test('Audit Trails list authentication and authorization failures remain distinct safe enums', () => {
+  assert.equal(classifyAuditTrailListHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
+  assert.equal(classifyAuditTrailListHttpStatus(403), 'AUDIT_TRAIL_LIST_PERMISSION_DENIED');
+  assert.equal(classifyAuditTrailListHttpStatus(404), 'AUDIT_TRAIL_LIST_READ_FAILED');
+  assert.equal(classifyAuditTrailListHttpStatus(null), 'AUDIT_TRAIL_LIST_READ_FAILED');
+});
 
 function exactEvidence(overrides = {}) {
   const version = {

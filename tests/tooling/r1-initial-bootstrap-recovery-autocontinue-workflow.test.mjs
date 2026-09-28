@@ -296,7 +296,7 @@ test('Owner audit-source authorization remains read-only and keeps IAM changes s
   assert.match(runbook, /Permission-denied, missing trail, unsupported destination, ambiguous source/);
 });
 
-test('PR-857 permission denial records the exact audit source blocker and refuses IAM changes', () => {
+test('PR-857 permission denial records the exact audit source blocker and preserves its no-IAM-mutation result', () => {
   const evidence = runbook.match(
     /### PR #857 audit source read stopped at existing WIF permission boundary on `3c89bf799e4765822df583af6c846dc40680074e`([\s\S]*?)(?=\n### |\n## |$)/,
   )?.[1];
@@ -306,6 +306,19 @@ test('PR-857 permission denial records the exact audit source blocker and refuse
   assert.match(evidence, /No IAM binding changed/);
   assert.match(evidence, /`audit-trails\.auditor` on the Function folder/);
   assert.match(evidence, /`logging\.reader` only on its exact Cloud Logging group/);
+});
+
+test('Owner-authorized temporary viewer binding is exact-scope, read-only, and pending one new-SHA probe', () => {
+  const evidence = runbook.match(
+    /### Owner-authorized temporary Audit Trails viewer and HTTP failure refinement([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the authorized temporary role and its classification stop boundary must be recorded');
+  assert.match(evidence, /latest failed recovery/);
+  assert.match(evidence, /`audit-trails\.viewer` binding was added only to that WIF identity at the Function folder/);
+  assert.match(evidence, /no provider source query has run since the grant/);
+  assert.match(evidence, /`AUDIT_TRAIL_AUTHENTICATION_REQUIRED` for 401/);
+  assert.match(evidence, /`AUDIT_TRAIL_LIST_PERMISSION_DENIED` for 403/);
+  assert.match(evidence, /all temporary bindings must be removed with independent after-read verification/);
 });
 
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
