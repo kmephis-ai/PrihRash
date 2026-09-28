@@ -41,6 +41,7 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET',
   'AUDIT_TRAIL_SOURCE_OPEN_FAILED',
   'AUDIT_TRAIL_LIST_READ_FAILED',
+  'AUDIT_TRAIL_AUTHENTICATION_REQUIRED',
   'AUDIT_TRAIL_LIST_PERMISSION_DENIED',
   'AUDIT_TRAIL_CLASSIFIER_FAILED',
   'AUDIT_LOG_READ_FAILED',
@@ -73,6 +74,12 @@ function timestamp(value) {
 
 function readJson(path) {
   return readFile(path, 'utf8').then((text) => JSON.parse(text));
+}
+
+export function classifyAuditTrailListHttpStatus(status) {
+  if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
+  if (status === 403) return 'AUDIT_TRAIL_LIST_PERMISSION_DENIED';
+  return 'AUDIT_TRAIL_LIST_READ_FAILED';
 }
 
 export function classifyRecoveryFunctionDeployOutcome({
@@ -422,7 +429,11 @@ export function classifyRecoveryAuditCreateEvents({
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cliArgs = process.argv.slice(2);
-  if (cliArgs[0] === '--audit-trails') {
+  if (cliArgs[0] === '--audit-trail-http-status') {
+    const [rawStatus] = cliArgs.slice(1);
+    const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
+    process.stdout.write(`${classifyAuditTrailListHttpStatus(status)}\n`);
+  } else if (cliArgs[0] === '--audit-trails') {
     const [auditTrailPath, locatorPath, runFinishedAt] = cliArgs.slice(1);
     if (!auditTrailPath || !locatorPath || !runFinishedAt) {
       process.stdout.write('AUDIT_TRAIL_METADATA_INVALID\n');
