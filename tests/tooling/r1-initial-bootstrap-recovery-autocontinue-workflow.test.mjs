@@ -276,6 +276,17 @@ test('PR-852 tag-history absence remains unclassified and records the distinct r
   assert.match(evidence, /different roles/);
 });
 
+test('PR-855 exact-run metadata completion retains the unknown deploy stop boundary', () => {
+  const evidence = runbook.match(
+    /### PR #855 bounded metadata lists completed the exact failed-run classification on `78c9f162c5c9ec172ab39b2d99f7f488002d3cc3`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the final bounded metadata classification and stop state must be documented');
+  assert.match(evidence, /published only `RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`/);
+  assert.match(evidence, /Both Function version and operation lists were below the 1000-entry incomplete boundary/);
+  assert.match(evidence, /No `APPLIED`\/`NOT_APPLIED` outcome is inferred/);
+  assert.match(evidence, /Do not redeploy\/invoke, replay or clean up/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
