@@ -220,12 +220,68 @@ jobs:
             "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$YC_WIF_SERVICE_ACCOUNT_ID" "$runtime_sa")"; then
             evidence='DIAGNOSTIC_FAILED'
           fi
+
+          audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
+          audit_event_evidence='AUDIT_EVENT_READ_NOT_ATTEMPTED'
+          audit_trails_api='https://audittrails.api.cloud.yandex.net/audit-trails/v1/trails'
+          if audit_trail_http="$(curl --silent --show-error --output "$tmp/audit-trails.json" \
+            --write-out '%{http_code}' --get \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=1000' \
+            "$audit_trails_api" 2>"$tmp/audit-trails.err")"; then
+            case "$audit_trail_http" in
+              2??)
+                if ! audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                  --audit-trails "$tmp/audit-trails.json" "$tmp/audit-log-group-id" "$RUN_FINISHED_AT")"; then
+                  audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
+                fi
+                ;;
+              401|403) audit_trail_evidence='AUDIT_TRAIL_LIST_PERMISSION_DENIED' ;;
+              *) audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED' ;;
+            esac
+          fi
+
+          case "$audit_trail_evidence" in
+            AUDIT_TRAIL_METADATA_INVALID|AUDIT_TRAIL_LIST_INCOMPLETE|AUDIT_TRAIL_SOURCE_NOT_CONFIGURED|AUDIT_TRAIL_SOURCE_NOT_ACTIVE|AUDIT_TRAIL_SOURCE_AMBIGUOUS|AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT|AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT|AUDIT_TRAIL_SOURCE_UNSUPPORTED|AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET|AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET|AUDIT_TRAIL_SOURCE_OPEN_FAILED|AUDIT_TRAIL_LIST_READ_FAILED|AUDIT_TRAIL_LIST_PERMISSION_DENIED|AUDIT_TRAIL_CLASSIFIER_FAILED) ;;
+            *) echo 'RECOVERY_AUDIT_TRAIL_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
+          esac
+
+          if [ "$audit_trail_evidence" = 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT' ]; then
+            audit_log_group_id="$(cat "$tmp/audit-log-group-id")"
+            echo "::add-mask::${audit_log_group_id}"
+            audit_filter="json_payload.eventType = \"yandex.cloud.audit.serverless.functions.CreateFunctionVersion\" AND json_payload.details.functionId = \"${function_id}\""
+            if ! yc logging read --group-id "$audit_log_group_id" \
+              --since "$RUN_STARTED_AT" --until "$RUN_FINISHED_AT" --limit 1000 \
+              --max-response-size 10485760 --filter "$audit_filter" \
+              --format json --retry 0 --no-user-output \
+              >"$tmp/audit-events.json" 2>"$tmp/audit-events.err"; then
+              if grep -Eqi 'PermissionDenied|permission denied|PERMISSION_DENIED|forbidden' "$tmp/audit-events.err"; then
+                audit_event_evidence='AUDIT_LOG_READ_PERMISSION_DENIED'
+              else
+                audit_event_evidence='AUDIT_LOG_READ_FAILED'
+              fi
+            elif ! audit_event_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+              --audit-events "$tmp/audit-events.json" "$tmp/versions.json" "$function_id" \
+              "$YC_WIF_SERVICE_ACCOUNT_ID" "$runtime_sa" "$RUN_STARTED_AT" "$RUN_FINISHED_AT")"; then
+              audit_event_evidence='AUDIT_LOG_CLASSIFIER_FAILED'
+            fi
+          fi
+
+          case "$audit_event_evidence" in
+            AUDIT_EVENT_READ_NOT_ATTEMPTED|AUDIT_LOG_READ_FAILED|AUDIT_LOG_READ_PERMISSION_DENIED|AUDIT_LOG_LIST_INCOMPLETE|AUDIT_LOG_METADATA_INVALID|AUDIT_LOG_CLASSIFIER_FAILED|AUDIT_CREATE_EVENT_NOT_OBSERVED|AUDIT_CREATE_EVENT_AMBIGUOUS|AUDIT_CREATE_EVENT_WRITER_MISMATCH|AUDIT_CREATE_EVENT_IN_PROGRESS|AUDIT_CREATE_EVENT_CANCELLED|AUDIT_CREATE_EVENT_FAILED|AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED|AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN|EXACT_RECOVERY_VERSION_CREATED) ;;
+            *) echo 'RECOVERY_AUDIT_EVENT_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
+          esac
+
           case "$evidence" in
             DEPLOYMENT_OUTCOME_UNCLASSIFIED|CREATE_OPERATION_AMBIGUOUS|CREATE_OPERATION_IN_PROGRESS|CREATE_OPERATION_FAILED|CREATED_VERSION_NOT_PROVEN|EXACT_RECOVERY_VERSION_CREATED|RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW|RECOVERY_TAGGED_VERSION_AMBIGUOUS|RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN) ;;
             DIAGNOSTIC_FAILED|RECOVERY_DEPLOY_INPUT_INVALID|RECOVERY_VERSION_ENTRY_INVALID|RECOVERY_VERSION_TAGS_INVALID|RECOVERY_VERSION_TIMESTAMP_INVALID|RECOVERY_METADATA_JSON_INVALID|RECOVERY_CLASSIFIER_INTERNAL_ERROR|RECOVERY_TAG_HISTORY_READ_FAILED|RECOVERY_TAG_HISTORY_METADATA_INVALID|RECOVERY_TAG_HISTORY_INCOMPLETE|RECOVERY_TAG_HISTORY_AMBIGUOUS|RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED|RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT|RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_UNTAGGED_VERSION_AMBIGUOUS|RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN|RECOVERY_VERSION_LIST_INCOMPLETE|RECOVERY_OPERATION_LIST_INCOMPLETE) ;;
             *) echo 'RECOVERY_DEPLOY_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
           esac
-          jq -cn --arg evidence "$evidence" '{stagingFunctionDeployEvidence:$evidence}' \
+          jq -cn --arg evidence "$evidence" --arg audit_trail "$audit_trail_evidence" \
+            --arg audit_event "$audit_event_evidence" \
+            '{stagingFunctionDeployEvidence:$evidence,auditTrailSourceEvidence:$audit_trail,auditCreateFunctionVersionEvidence:$audit_event}' \
             >"$evidence_dir/function-deploy.json"
           cat "$evidence_dir/function-deploy.json"
 

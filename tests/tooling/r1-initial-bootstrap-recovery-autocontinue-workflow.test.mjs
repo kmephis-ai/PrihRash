@@ -287,6 +287,15 @@ test('PR-855 exact-run metadata completion retains the unknown deploy stop bound
   assert.match(evidence, /Do not redeploy\/invoke, replay or clean up/);
 });
 
+test('Owner audit-source authorization remains read-only and keeps IAM changes separate', () => {
+  assert.match(runbook, /Owner-authorized read-only audit source opening for exact recovery run `36341844854`/);
+  assert.match(runbook, /TrailService\.List/);
+  assert.match(runbook, /`audit-trails\.viewer`/);
+  assert.match(runbook, /`logging\.reader`/);
+  assert.match(runbook, /This PR does not add or remove IAM bindings/);
+  assert.match(runbook, /Permission-denied, missing trail, unsupported destination, ambiguous source/);
+});
+
 test('post-invoke STAGING_RUN_PRESENT evidence permits only one full read-only recovery probe', () => {
   const evidence = runbook.match(
     /### Post-invoke recovery leaves staging unclassified on `7a5c54dc5027cb9790ee4b0973287cbdf0b4c6f0`([\s\S]*?)(?=\n### |\n## )/,
