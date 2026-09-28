@@ -6,7 +6,6 @@ import {
   classifyRecoveryAuditCreateEvents,
   classifyAuditTrailCloudFolderList,
   classifyAuditTrailListHttpStatus,
-  classifyAuditTrailFolderMetadataHttpStatus,
   classifyAuditTrailFolderListHttpStatus,
   classifyRecoveryAuditTrailCloudCoverage,
   classifyRecoveryAuditTrailSource,
@@ -26,13 +25,13 @@ test('Audit Trails list authentication and authorization failures remain distinc
 });
 
 test('cloud folder enumeration failures stay bounded and distinguish permission from other failures', () => {
-  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
-  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(403), 'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED');
-  assert.equal(classifyAuditTrailFolderMetadataHttpStatus(500), 'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED');
   assert.equal(classifyAuditTrailFolderListHttpStatus(401), 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED');
   assert.equal(classifyAuditTrailFolderListHttpStatus(403), 'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED');
   assert.equal(classifyAuditTrailFolderListHttpStatus(500), 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED');
   assert.equal(classifyAuditTrailCloudFolderList({ folders: [] }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND');
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
+  }, '', 'synthetic-target'), 'AUDIT_TRAIL_METADATA_INVALID');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
     nextPageToken: 'synthetic-next-page',

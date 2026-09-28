@@ -30,6 +30,8 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /data-urlencode "tag=\$\{TARGET_TAG\}"/);
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
   assert.match(workflow, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders/);
+  assert.match(workflow, /YC_CLOUD_ID: \$\{\{ secrets\.YC_R1_CLOUD_ID \}\}/);
+  assert.match(workflow, /if \[ -z "\$YC_CLOUD_ID" \]/);
   assert.match(workflow, /data-urlencode "cloudId=\$\{cloud_id\}"/);
   assert.match(workflow, /audittrails\.api\.cloud\.yandex\.net\/audit-trails\/v1\/trails/);
   assert.match(workflow, /data-urlencode "folderId=\$\{cloud_folder_ids\[\$index\]\}"/);
@@ -54,6 +56,7 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED/);
   assert.match(workflow, /AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND/);
   assert.match(workflow, /AUDIT_TRAIL_COVERAGE_UNPROVEN/);
+  assert.doesNotMatch(workflow, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders\/\$\{YC_FOLDER_ID\}/);
   assert.match(workflow, /AUDIT_LOG_READ_FAILED\|AUDIT_LOG_READ_PERMISSION_DENIED\|AUDIT_LOG_LIST_INCOMPLETE/);
   assert.match(workflow, /r1-initial-bootstrap-recovery-deploy-evidence-/);
   assert.match(workflow, /actions\/upload-artifact@/);

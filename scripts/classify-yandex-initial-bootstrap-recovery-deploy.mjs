@@ -46,8 +46,7 @@ const ENUMS = new Set([
   'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED',
   'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED',
   'AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE',
-  'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED',
-  'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED',
+  'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID',
   'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND',
   'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET',
   'AUDIT_TRAIL_COVERAGE_UNPROVEN',
@@ -94,12 +93,6 @@ export function classifyAuditTrailFolderListHttpStatus(status) {
   if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
   if (status === 403) return 'AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED';
   return 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED';
-}
-
-export function classifyAuditTrailFolderMetadataHttpStatus(status) {
-  if (status === 401) return 'AUDIT_TRAIL_AUTHENTICATION_REQUIRED';
-  if (status === 403) return 'AUDIT_TRAIL_FOLDER_METADATA_PERMISSION_DENIED';
-  return 'AUDIT_TRAIL_FOLDER_METADATA_READ_FAILED';
 }
 
 export function classifyRecoveryFunctionDeployOutcome({
@@ -607,10 +600,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const [rawStatus] = cliArgs.slice(1);
     const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
     process.stdout.write(`${classifyAuditTrailFolderListHttpStatus(status)}\n`);
-  } else if (cliArgs[0] === '--audit-folder-metadata-http-status') {
-    const [rawStatus] = cliArgs.slice(1);
-    const status = typeof rawStatus === 'string' && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : null;
-    process.stdout.write(`${classifyAuditTrailFolderMetadataHttpStatus(status)}\n`);
   } else if (cliArgs[0] === '--audit-cloud-folder-ids') {
     const [folderListPath, cloudId, targetFolderId, folderIdsPath] = cliArgs.slice(1);
     if (!folderListPath || !cloudId || !targetFolderId || !folderIdsPath) {
