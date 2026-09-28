@@ -191,18 +191,18 @@ test('recovery deploy classifier distinguishes malformed version entry, tags, an
   );
 });
 
-test('recovery deploy classifier treats omitted repeated tags as empty and ignores unrelated timestamps', () => {
+test('recovery deploy classifier treats omitted repeated tags as empty and keeps window proof strict', () => {
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       operations: [],
       versions: [{ id: 'synthetic-untagged-version' }],
     })),
-    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+    'RECOVERY_VERSION_TIMESTAMP_INVALID',
   );
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({
       operations: [],
-      versions: [{ id: 'synthetic-untagged-version', tags: [] }],
+      versions: [{ id: 'synthetic-untagged-version', tags: [], created_at: '2026-09-27T18:40:00Z' }],
     })),
     'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
   );
@@ -224,6 +224,10 @@ test('recovery deploy classifier uses bounded exact-window tag history without i
   const versions = [{
     id: 'synthetic-version',
     created_at: '2026-09-27T18:46:34Z',
+    runtime: 'nodejs20',
+    entrypoint: 'index.legacyHandler',
+    service_account_id: 'synthetic-old-runtime',
+    status: 'ACTIVE',
   }];
 
   assert.equal(
@@ -276,6 +280,46 @@ test('recovery deploy classifier uses bounded exact-window tag history without i
       tagHistory: { functionTagHistoryRecord: null },
     })),
     'RECOVERY_TAG_HISTORY_METADATA_INVALID',
+  );
+});
+
+test('recovery deploy classifier classifies exact-window untagged versions only with complete runtime metadata', () => {
+  const untaggedVersion = {
+    id: 'synthetic-untagged-version',
+    created_at: '2026-09-27T18:46:34Z',
+    runtime: 'nodejs22',
+    entrypoint: 'index.initialBootstrapRecoveryHandler',
+    service_account_id: runtimeServiceAccount,
+    status: 'ACTIVE',
+  };
+
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [untaggedVersion],
+    })),
+    'RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [untaggedVersion, { ...untaggedVersion, id: 'synthetic-second-version' }],
+    })),
+    'RECOVERY_UNTAGGED_VERSION_AMBIGUOUS',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ ...untaggedVersion, service_account_id: serviceAccount }],
+    })),
+    'RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [{ ...untaggedVersion, status: undefined }],
+    })),
+    'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN',
   );
 });
 
