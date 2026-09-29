@@ -404,6 +404,20 @@ test('PR-865 Cloud trail list response remains unclassified and records viewer r
   assert.match(evidence, /no same-SHA replay/);
 });
 
+test('PR-867 recovery result is the current Audit Trails source decision boundary', () => {
+  const evidence = runbook.match(
+    /### PR #867 Audit Trails source decision after omitted protobuf repeated field on `e4121479ac3d0c5360af4a7ca8037be4cd6a8a3e`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the latest exact-main source decision and provider stop condition must be recorded');
+  assert.match(evidence, /recovery `36476636505`/);
+  assert.match(evidence, /`AUDIT_TRAIL_TRAILS_FIELD_INVALID`/);
+  assert.match(evidence, /`TrailService\.List`/);
+  assert.match(evidence, /Cloud `audit-trails\.viewer` binding was absent/);
+  assert.match(evidence, /protobuf JSON omitting an empty repeated field/);
+  assert.match(evidence, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE/);
+  assert.match(evidence, /SOURCE_EVIDENCE_UNUSABLE/);
+});
+
 test('PR-866 exact CI list lookup failure is recorded before any Yandex authentication', () => {
   const evidence = runbook.match(
     /### PR #866 recovery stopped at the GitHub exact-CI lookup before Yandex authentication([\s\S]*?)(?=\n### |\n## |$)/,

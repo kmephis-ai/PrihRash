@@ -1711,3 +1711,39 @@ The successor stops depending on an eventually-visible workflow-run list. Recove
 PR #865 passed exact-head CI `36469214200`, Browser Quality `36469213994`, and CodeQL `36469209742`; post-merge exact-main CI `36469790971`, Browser Quality `36469790899`, and CodeQL `36469790605` passed. Recovery autocontinue `36469880673` passed the exact-run/phase/changeset gates and dispatched recovery `36469918792` once. The enum-only result was `AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID`, with `AUDIT_EVENT_READ_NOT_ATTEMPTED`; the deployment remains unclassified. The Cloud viewer was removed after this run and independently verified absent. No Cloud Logging read, write-capable Function operation, Google/YDB, replay, cleanup, or authority change occurred.
 
 The previous refinement still coalesced a malformed list root, a missing/non-array `trails` field, and an invalid `nextPageToken`. The next new-SHA discriminator splits those cases and keeps nonempty valid pagination tokens as `AUDIT_TRAIL_LIST_INCOMPLETE`. Synthetic fixtures cover each status; no same-SHA replay or audit-event read without a uniquely proven source is authorized.
+
+### PR #867 Audit Trails source decision after omitted protobuf repeated field on `e4121479ac3d0c5360af4a7ca8037be4cd6a8a3e`
+
+Post-merge read-only recovery `36476636505` reached `TrailService.List` and returned
+`AUDIT_TRAIL_TRAILS_FIELD_INVALID`; event read remained `AUDIT_EVENT_READ_NOT_ATTEMPTED`. The exact
+main stayed `e4121479ac3d0c5360af4a7ca8037be4cd6a8a3e`, no write-capable Function operation ran, and
+the temporary Cloud `audit-trails.viewer` binding was absent after the earlier one-shot cycle. This
+failure signature is consistent with protobuf JSON omitting an empty repeated field; it does not
+establish an empty list or prove source absence by itself.
+
+The causal successor treats only an omitted protobuf repeated `trails`/`folders` member as its
+canonical empty-list value; explicit `null`, wrong types, malformed roots/entries, invalid or
+non-empty page tokens, provider errors, incomplete enumeration, unknown schema/vocabulary, ambiguous
+coverage/destination, and event-read failures remain fail-closed. Existing response validation,
+temporal bounds, exact Cloud/Function coverage, destination validation and event identity checks stay
+in place. Synthetic fixtures cover omitted/empty/malformed response cases and all existing response,
+pagination, coverage, metadata and event branches.
+
+Each exact failed-run classification now emits one terminal `auditSourceDecision` together with the
+source and event enums:
+
+- `EXISTING_APPLICABLE_AUDIT_SOURCE`: one pre-existing, active, covering Cloud Logging source was
+  proven and its event query/classification was performed. Use the exact event result; only the
+  existing exact-version event classifier can establish `EXACT_RECOVERY_VERSION_CREATED`.
+- `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`: complete discovery proves no configured, active,
+  pre-existing source covers the target. Stop this Audit Trails branch and move to a different
+  provider metadata/root-cause model; do not add another list discriminator.
+- `SOURCE_EVIDENCE_UNUSABLE` / `SOURCE_EVIDENCE_AMBIGUOUS`: malformed/incomplete/unreadable source,
+  unsupported destination, absent matching event, or ambiguous source/event prevents a conclusion.
+  Stop this Audit Trails branch and use an independent already-bounded provider metadata path, or
+  preserve `DEPLOYMENT_OUTCOME_UNCLASSIFIED`; no further Audit Trails-only PR/probe cycle.
+
+This Incident-M does not authorize Function deploy/invoke, Google/YDB access, replay, cleanup, timer,
+cutover, or authority change. Any one future read-only recovery remains exact-main and exact-failed-run
+bound. Owner anti-S-unit rules are synchronized here, `AGENTS.md`, and `docs/R1_COMPLETION_SPRINT.md`
+in the same causal PR.

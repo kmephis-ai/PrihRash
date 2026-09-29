@@ -2,6 +2,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
 const ENUMS = new Set([
+  'EXISTING_APPLICABLE_AUDIT_SOURCE',
+  'NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE',
+  'SOURCE_EVIDENCE_UNUSABLE',
+  'SOURCE_EVIDENCE_AMBIGUOUS',
   'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
   'CREATE_OPERATION_AMBIGUOUS',
   'CREATE_OPERATION_IN_PROGRESS',
@@ -400,16 +404,19 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
     for (let folderIndex = 0; folderIndex < folderIds.length; folderIndex += 1) {
       const response = trailResponses[folderIndex];
       if (!object(response)) return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID' };
-      if (!Array.isArray(response.trails)) return { evidence: 'AUDIT_TRAIL_TRAILS_FIELD_INVALID' };
+      // Protobuf JSON omits empty repeated fields; omission is the canonical empty-list value.
+      // Explicit null or another type remains malformed and fail-closed.
+      const trails = response.trails === undefined ? [] : response.trails;
+      if (!Array.isArray(trails)) return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
       if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
         return { evidence: 'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID' };
       }
       if (typeof response.nextPageToken === 'string' && response.nextPageToken.length > 0) {
         return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
       }
-      if (response.trails.length >= 1_000) return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
-      totalTrails += response.trails.length;
-      for (const trail of response.trails) {
+      if (trails.length >= 1_000) return { evidence: 'AUDIT_TRAIL_LIST_INCOMPLETE' };
+      totalTrails += trails.length;
+      for (const trail of trails) {
         if (!object(trail)) return { evidence: 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID' };
         if (typeof trail.folderId !== 'string' || trail.folderId.length === 0) {
           return { evidence: 'AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING' };
@@ -548,10 +555,13 @@ function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId
   if (typeof targetFolderId !== 'string' || targetFolderId.length === 0) {
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID' };
   }
-  if (!object(response) || !Array.isArray(response.folders)) {
+  if (!object(response)) {
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
   }
-  const folders = response.folders;
+  // Protobuf JSON omits empty repeated fields; omission is the canonical empty-list value.
+  // Explicit null or another type remains malformed and fail-closed.
+  const folders = response.folders === undefined ? [] : response.folders;
+  if (!Array.isArray(folders)) return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
   if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
   }
@@ -600,6 +610,32 @@ export function classifyAuditTrailCloudFolderList(response, cloudId, targetFolde
 
 export function classifyRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt) {
   return inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt).evidence;
+}
+
+export function classifyAuditTrailSourceDecision(sourceEvidence, eventEvidence) {
+  if (sourceEvidence === 'AUDIT_TRAIL_SOURCE_AMBIGUOUS'
+    || eventEvidence === 'AUDIT_CREATE_EVENT_AMBIGUOUS'
+    || eventEvidence === 'AUDIT_CREATE_EVENT_WRITER_MISMATCH') {
+    return 'SOURCE_EVIDENCE_AMBIGUOUS';
+  }
+  if ([
+    'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED',
+    'AUDIT_TRAIL_SOURCE_NOT_ACTIVE',
+    'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET',
+    'AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET',
+  ].includes(sourceEvidence)) {
+    return 'NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE';
+  }
+  if (sourceEvidence === 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT'
+    && [
+      'EXACT_RECOVERY_VERSION_CREATED',
+      'AUDIT_CREATE_EVENT_FAILED',
+      'AUDIT_CREATE_EVENT_CANCELLED',
+      'AUDIT_CREATE_EVENT_IN_PROGRESS',
+    ].includes(eventEvidence)) {
+    return 'EXISTING_APPLICABLE_AUDIT_SOURCE';
+  }
+  return 'SOURCE_EVIDENCE_UNUSABLE';
 }
 
 export function classifyRecoveryAuditCreateEvents({
@@ -785,6 +821,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       } catch {
         process.stdout.write('AUDIT_LOG_METADATA_INVALID\n');
       }
+    }
+  } else if (cliArgs[0] === '--audit-source-decision') {
+    const [sourceEvidence, eventEvidence] = cliArgs.slice(1);
+    if (!sourceEvidence || !eventEvidence) {
+      process.stdout.write('SOURCE_EVIDENCE_UNUSABLE\n');
+      process.exitCode = 2;
+    } else {
+      process.stdout.write(`${classifyAuditTrailSourceDecision(sourceEvidence, eventEvidence)}\n`);
     }
   } else {
     const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, runtimeServiceAccountId] = cliArgs;

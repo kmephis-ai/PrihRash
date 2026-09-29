@@ -328,6 +328,12 @@ jobs:
             AUDIT_EVENT_READ_NOT_ATTEMPTED|AUDIT_LOG_READ_FAILED|AUDIT_LOG_READ_PERMISSION_DENIED|AUDIT_LOG_LIST_INCOMPLETE|AUDIT_LOG_METADATA_INVALID|AUDIT_LOG_CLASSIFIER_FAILED|AUDIT_CREATE_EVENT_NOT_OBSERVED|AUDIT_CREATE_EVENT_AMBIGUOUS|AUDIT_CREATE_EVENT_WRITER_MISMATCH|AUDIT_CREATE_EVENT_IN_PROGRESS|AUDIT_CREATE_EVENT_CANCELLED|AUDIT_CREATE_EVENT_FAILED|AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED|AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN|EXACT_RECOVERY_VERSION_CREATED) ;;
             *) echo 'RECOVERY_AUDIT_EVENT_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
           esac
+          audit_source_decision="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+            --audit-source-decision "$audit_trail_evidence" "$audit_event_evidence")"
+          case "$audit_source_decision" in
+            EXISTING_APPLICABLE_AUDIT_SOURCE|NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE|SOURCE_EVIDENCE_UNUSABLE|SOURCE_EVIDENCE_AMBIGUOUS) ;;
+            *) echo 'RECOVERY_AUDIT_SOURCE_DECISION_INVALID'; exit 1 ;;
+          esac
 
           case "$evidence" in
             DEPLOYMENT_OUTCOME_UNCLASSIFIED|CREATE_OPERATION_AMBIGUOUS|CREATE_OPERATION_IN_PROGRESS|CREATE_OPERATION_FAILED|CREATED_VERSION_NOT_PROVEN|EXACT_RECOVERY_VERSION_CREATED|RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW|RECOVERY_TAGGED_VERSION_AMBIGUOUS|RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN) ;;
@@ -335,8 +341,9 @@ jobs:
             *) echo 'RECOVERY_DEPLOY_CLASSIFIER_OUTPUT_INVALID'; exit 1 ;;
           esac
           jq -cn --arg evidence "$evidence" --arg audit_trail "$audit_trail_evidence" \
+            --arg audit_source_decision "$audit_source_decision" \
             --arg audit_event "$audit_event_evidence" \
-            '{stagingFunctionDeployEvidence:$evidence,auditTrailSourceEvidence:$audit_trail,auditCreateFunctionVersionEvidence:$audit_event}' \
+            '{stagingFunctionDeployEvidence:$evidence,auditTrailSourceEvidence:$audit_trail,auditSourceDecision:$audit_source_decision,auditCreateFunctionVersionEvidence:$audit_event}' \
             >"$evidence_dir/function-deploy.json"
           cat "$evidence_dir/function-deploy.json"
 

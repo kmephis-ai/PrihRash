@@ -51,7 +51,8 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
   assert.match(classifier, /folders\.length > 100/);
   assert.match(workflow, /--audit-events "\$tmp\/audit-events\.json"/);
-  assert.match(workflow, /auditTrailSourceEvidence:\$audit_trail,auditCreateFunctionVersionEvidence:\$audit_event/);
+  assert.match(workflow, /auditTrailSourceEvidence:\$audit_trail,auditSourceDecision:\$audit_source_decision,auditCreateFunctionVersionEvidence:\$audit_event/);
+  assert.match(workflow, /EXISTING_APPLICABLE_AUDIT_SOURCE\|NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE\|SOURCE_EVIDENCE_UNUSABLE\|SOURCE_EVIDENCE_AMBIGUOUS/);
   assert.match(workflow, /runtime_sa="\$\(yc iam service-account get/);
   assert.match(workflow, /"\$YC_WIF_SERVICE_ACCOUNT_ID" "\$runtime_sa"/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
@@ -71,7 +72,8 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID/);
-  assert.match(workflow, /AUDIT_TRAIL_TRAILS_FIELD_INVALID/);
+  assert.match(classifier, /const trails = response\.trails === undefined \? \[\] : response\.trails/);
+  assert.match(classifier, /Protobuf JSON omits empty repeated fields/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_JSON_INVALID/);
