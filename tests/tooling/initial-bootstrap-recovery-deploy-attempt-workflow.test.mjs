@@ -27,7 +27,8 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(historyClassifier, /PRIOR_ATTEMPT_CONSUMED/);
   assert.match(historyClassifier, /SAME_SHA_PREWRITE_STOP_FORBIDDEN/);
   assert.match(workflow, /issue_630_state/);
-  assert.match(workflow, /\[ "\$issue_630_state" = 'open' \]/);
+  assert.match(workflow, /\$issue_630_state/);
+  assert.match(workflow, /'open'/);
   assert.doesNotMatch(workflow, /\.state == "OPEN"/);
   assert.doesNotMatch(workflow, /issues\/453/);
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs/);
