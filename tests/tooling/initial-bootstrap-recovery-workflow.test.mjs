@@ -93,6 +93,10 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(recoveryAutocontinueWorkflow, /Recovery-Version-Run-ID/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_MODE_CONFLICT/);
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs reuse-source/);
+  assert.match(workflow, /reuse_source_workflow_id=/);
+  assert.match(workflow, /--argjson workflow_id "\$reuse_source_workflow_id"/);
+  assert.match(recoveryDeployHistory, /sourceWorkflowId: args\[6\]/);
+  assert.doesNotMatch(workflow, /\.name=="R1 initial bootstrap recovery deploy-only attempt"/);
   assert.match(recoveryDeployHistory, /RECOVERY_VERSION_REUSE_SOURCE_PROVEN/);
   assert.match(recoveryDeployHistory, /Preserve failed create as the consumed terminal outcome/);
   assert.match(recoveryAutocontinueWorkflow, /Provider-Attempt: NOT_AUTHORIZED/);
@@ -137,7 +141,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     'Recovery-State: STAGING_PRESENT_UNCLASSIFIED',
     'Recovery-Run-ID: 36341844854',
     'Recovery-Version-Run-ID: 36611387299',
-    'Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   ].join('\n');
   const parse = (marker) => {
     const result = spawnSync('jq', [

@@ -129,6 +129,9 @@ write-free recovery handler один раз. Все ожидаемые version m
 reuse outcomes закрываются вместе synthetic fixtures в одном Incident-M: exact version → durable
 classification; unproven version → STOP without invoke/redeploy; classified durable state → отдельный
 state-specific engineering next step. Не дробить этот boundary на enum-only refinements.
+GitHub Actions run JSON may set `.name` to dynamic `run-name`/`display_title`, not the static workflow
+name. Source identity must be bound by exact `/actions/workflows/<file>.yml/runs` provenance and
+`workflow_id`; source/attempt history must not filter exact endpoint records against static `.name`.
 
 ## Постоянная делегация Owner до завершения R1
 

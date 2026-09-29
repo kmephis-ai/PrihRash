@@ -86,15 +86,21 @@ jobs:
             "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
           printf '%s\n' "$prior_attempts" > "$tmp/prior-attempts.json"
           printf '{"jobsByRun":[]}\n' > "$tmp/prior-attempt-jobs.json"
+          deploy_workflow_id="$(jq -er --argjson self_id "$GITHUB_RUN_ID" '
+            [.workflow_runs[] | select(.id == $self_id) | .workflow_id] | unique
+            | if length == 1 and (.[0] | type == "number") then .[0] else empty end
+          ' <<<"$prior_attempts")" || { echo 'RECOVERY_DEPLOY_ATTEMPT_WORKFLOW_ID_UNPROVEN'; exit 1; }
           prior_count="$(jq --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
-            --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
-              and .name == "R1 initial bootstrap recovery deploy-only attempt"
-              and .display_title == $expected)] | length' <<<"$prior_attempts")"
+            --argjson self_id "$GITHUB_RUN_ID" --argjson workflow_id "$deploy_workflow_id" '
+              [.workflow_runs[] | select(.id != $self_id and .workflow_id == $workflow_id
+                and .display_title == $expected)] | length
+            ' <<<"$prior_attempts")"
           if [ "$prior_count" -gt 0 ]; then
             prior_run_ids="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
-              --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
-                and .name == "R1 initial bootstrap recovery deploy-only attempt"
-                and .display_title == $expected)] | sort_by(.created_at,.id) | .[].id' <<<"$prior_attempts")"
+              --argjson self_id "$GITHUB_RUN_ID" --argjson workflow_id "$deploy_workflow_id" '
+                [.workflow_runs[] | select(.id != $self_id and .workflow_id == $workflow_id
+                  and .display_title == $expected)] | sort_by(.created_at,.id) | .[].id
+              ' <<<"$prior_attempts")"
             while IFS= read -r prior_run_id; do
               [ -n "$prior_run_id" ] || continue
               prior_jobs_path="$tmp/prior-attempt-${prior_run_id}-jobs.json"
@@ -190,10 +196,10 @@ jobs:
           fi
           active_runs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
             "$api/actions/runs?per_page=100")"
-          if jq -e --arg self "$GITHUB_RUN_ID" '
+          if jq -e --arg self "$GITHUB_RUN_ID" --argjson deploy_workflow_id "$deploy_workflow_id" '
             .workflow_runs | any(.id != ($self | tonumber) and (.status == "queued" or .status == "in_progress")
               and (.name == "R1 initial bootstrap orchestrator" or .name == "R1 initial shadow bootstrap"
-                or .name == "R1 initial bootstrap recovery" or .name == "R1 initial bootstrap recovery deploy-only attempt"))
+                or .name == "R1 initial bootstrap recovery" or .workflow_id == $deploy_workflow_id))
           ' <<<"$active_runs" >/dev/null; then
             echo 'RECOVERY_DEPLOY_ATTEMPT_WRITER_CONFLICT'; exit 1
           fi

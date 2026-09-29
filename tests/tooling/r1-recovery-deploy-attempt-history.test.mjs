@@ -13,11 +13,13 @@ import {
 const failedRecoveryRunId = '36341844854';
 const attemptTitle = `R1 recovery-only deploy attempt for failed run ${failedRecoveryRunId}`;
 const currentSha = 'b'.repeat(40);
+const deployWorkflowId = 370292276;
 
 function run(overrides = {}) {
   return {
     id: 99,
-    name: 'R1 initial bootstrap recovery deploy-only attempt',
+    name: attemptTitle,
+    workflow_id: deployWorkflowId,
     head_branch: 'main',
     event: 'workflow_dispatch',
     display_title: attemptTitle,
@@ -137,13 +139,25 @@ test('reuse selects the unique successful exact recovery create only after all o
 
   assert.equal(classifyRecoveryVersionReuseSourceHistory({
     runs, jobsByRun, currentSha, sourceRunId: String(sourceRunId), failedRecoveryRunId,
+    sourceWorkflowId: String(deployWorkflowId),
   }), 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN');
+
+  const workflowIdMismatch = {
+    workflow_runs: runs.workflow_runs.map((entry) => entry.id === 102
+      ? { ...entry, workflow_id: deployWorkflowId + 1 }
+      : entry),
+  };
+  assert.equal(classifyRecoveryVersionReuseSourceHistory({
+    runs: workflowIdMismatch, jobsByRun, currentSha, sourceRunId: String(sourceRunId), failedRecoveryRunId,
+    sourceWorkflowId: String(deployWorkflowId),
+  }), 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN');
 
   const createReachedBeforeSource = jobsByRun.map((entry) => entry.runId === 102
     ? { ...entry, jobs: reuseJobs('failure', 'failure') }
     : entry);
   assert.equal(classifyRecoveryVersionReuseSourceHistory({
     runs, jobsByRun: createReachedBeforeSource, currentSha, sourceRunId: String(sourceRunId), failedRecoveryRunId,
+    sourceWorkflowId: String(deployWorkflowId),
   }), 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN');
 
   const duplicateSuccess = { workflow_runs: [...runs.workflow_runs, reuseRun(105, 'f'.repeat(40), 'success')] };
@@ -153,10 +167,12 @@ test('reuse selects the unique successful exact recovery create only after all o
     currentSha,
     sourceRunId: String(sourceRunId),
     failedRecoveryRunId,
+    sourceWorkflowId: String(deployWorkflowId),
   }), 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN');
 
   assert.equal(classifyRecoveryVersionReuseSourceHistory({
     runs, jobsByRun, currentSha, sourceRunId: String(sourceRunId), failedRecoveryRunId,
+    sourceWorkflowId: String(deployWorkflowId),
   }), 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN');
 });
 
@@ -191,6 +207,7 @@ test('reuse-source CLI consumes an exact run/job map and emits only its allowlis
       currentSha,
       String(sourceRunId),
       failedRecoveryRunId,
+      String(deployWorkflowId),
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN\n');

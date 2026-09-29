@@ -26,6 +26,12 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(workflow, /--argjson self_id "\$GITHUB_RUN_ID" '[\s\S]*?\.id != \$self_id and \.head_sha == \$sha/);
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs/);
   assert.match(workflow, /PRIOR_PREWRITE_STOP_ONLY/);
+  assert.match(workflow, /deploy_workflow_id=/);
+  assert.match(workflow, /\.workflow_id == \$workflow_id/);
+  assert.match(workflow, /--argjson deploy_workflow_id/);
+  assert.doesNotMatch(workflow, /\.name == "R1 initial bootstrap recovery deploy-only attempt"/);
+  assert.match(historyClassifier, /run\.display_title === expectedTitle/);
+  assert.doesNotMatch(historyClassifier, /run\.name === 'R1 initial bootstrap recovery deploy-only attempt'/);
   assert.match(historyClassifier, /PREWRITE_STOP_ONLY/);
   assert.match(historyClassifier, /PRIOR_ATTEMPT_CONSUMED/);
   assert.match(historyClassifier, /SAME_SHA_PREWRITE_STOP_FORBIDDEN/);

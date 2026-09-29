@@ -1903,6 +1903,29 @@ one-shot authorization PR (#874), complete history for all prior attempts (exact
 successful create, every earlier create skipped on a distinct SHA), and
 the current recovery PR marker. Missing, duplicate, same-SHA, incomplete or conflicting history stops.
 
+#### PR #875 read-only reuse preflight stop: dynamic Actions run name
+
+PR #875 merged as exact main `399e762e697736e8cca30faf6ebc69b940e4bd99`; canonical CI `36641067886`,
+Browser Quality `36641067884` and CodeQL `36641068161` all passed. Recovery autocontinue run
+`36641163282` stopped before dispatch with `R1_RECOVERY_AUTOCONTINUE_REUSE_SOURCE_RUN_NOT_EXACT`.
+No canonical recovery run was dispatched; Yandex version metadata, Function invoke and YDB were not
+reached. The accepted version from `36611387299` remains uninvoked; durable state is still unknown.
+
+Read-only GitHub Actions metadata confirmed the causal mismatch: for this workflow, API `name` is the
+dynamic `run-name` (`R1 recovery-only deploy attempt for failed run 36341844854`), while workflow identity
+is the numeric `workflow_id` from the workflow-file endpoint. Earlier history/source code compared the
+dynamic value to the static workflow filename name, preventing source-run classification and potentially
+omitting prior runs. Gate C run `36641163254` independently stopped at
+`Verify one-shot Gate C repository authority`; readiness, provider, deployment and invoke steps were all
+`skipped`.
+
+The next single causal fix updates every recovery deploy attempt-history/source check to bind the exact
+workflow-file endpoint and `workflow_id`, carries dynamic run-name/duplicate/missing/wrong-workflow cases
+through synthetic fixtures, and preserves fail-closed history classification. It remains repository-only
+until new-SHA exact-main CI and the complete reuse guards pass; no provider invoke or create is authorized
+by this stop. The existing Owner anti-S-unit directive remains synchronized in `AGENTS.md` and
+`docs/R1_COMPLETION_SPRINT.md` in the same causal PR.
+
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
 preflight, it reads the Function version list, operation list and exact recovery tag. Existing
 `classifyRecoveryFunctionDeployOutcome` must prove `EXACT_RECOVERY_VERSION_CREATED` for the successful
@@ -1936,7 +1959,7 @@ Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
 Recovery-State: STAGING_PRESENT_UNCLASSIFIED
 Recovery-Run-ID: 36341844854
 Recovery-Version-Run-ID: 36611387299
-Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
 ```
 
 The reuse marker is a read-only `STAGING_PRESENT_UNCLASSIFIED` probe, not a create re-arm. Recovery
@@ -1966,5 +1989,5 @@ Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
 Recovery-State: STAGING_PRESENT_UNCLASSIFIED
 Recovery-Run-ID: 36341844854
 Recovery-Version-Run-ID: 36611387299
-Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
 ```

@@ -320,7 +320,7 @@ jobs:
                 and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
                 and ($observed | length) == 0
                 and ($rearm | length) == 0
-                and $test == ["Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs"])
+                and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
             ')"
             [ "$source_pr_marker" = 'true' ] || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID'; exit 1;
@@ -336,9 +336,15 @@ jobs:
             fi
             printf '%s\n' "$reuse_attempts" > "$tmp/reuse-attempts.json"
             printf '{"jobsByRun":[]}\n' > "$tmp/reuse-attempt-jobs.json"
+            reuse_source_workflow_id="$(jq -er --argjson id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" '
+              [.workflow_runs[] | select(.id == $id) | .workflow_id] | unique
+              | if length == 1 and (.[0] | type == "number") then .[0] else empty end
+            ' <<<"$reuse_attempts")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_WORKFLOW_ID_UNPROVEN'; exit 1;
+            }
             reuse_attempt_ids="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${REUSE_FAILED_RECOVERY_RUN_ID}" '
-              [.workflow_runs[] | select(.name == "R1 initial bootstrap recovery deploy-only attempt"
-                and .head_branch == "main" and .event == "workflow_dispatch" and .display_title == $expected)]
+              [.workflow_runs[] | select(.head_branch == "main" and .event == "workflow_dispatch"
+                and .display_title == $expected)]
               | sort_by(.created_at,.id) | .[].id
             ' <<<"$reuse_attempts")" || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_INVALID'; exit 1;
@@ -359,7 +365,7 @@ jobs:
             done <<<"$reuse_attempt_ids"
             reuse_source_state="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs reuse-source \
               "$tmp/reuse-attempts.json" "$tmp/reuse-attempt-jobs.json" "$GITHUB_SHA" \
-              "$REUSE_DEPLOY_ATTEMPT_RUN_ID" "$REUSE_FAILED_RECOVERY_RUN_ID")" || {
+              "$REUSE_DEPLOY_ATTEMPT_RUN_ID" "$REUSE_FAILED_RECOVERY_RUN_ID" "$reuse_source_workflow_id")" || {
                 echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_CLASSIFIER_FAILED'; exit 1;
               }
             [ "$reuse_source_state" = 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN' ] || {
@@ -371,9 +377,9 @@ jobs:
                 echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_RUN_READ_FAILED'; exit 1;
               }
             reuse_source_sha="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' <<<"$reuse_source_run")"
-            jq -e --argjson id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" \
+            jq -e --argjson id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" --argjson workflow_id "$reuse_source_workflow_id" \
               --arg expected "R1 recovery-only deploy attempt for failed run ${REUSE_FAILED_RECOVERY_RUN_ID}" '
-              .id==$id and .name=="R1 initial bootstrap recovery deploy-only attempt"
+              .id==$id and .workflow_id==$workflow_id
               and .head_branch=="main" and .event=="workflow_dispatch"
               and .status=="completed" and .conclusion=="success" and .display_title==$expected
               and (.run_started_at | type=="string") and (.updated_at | type=="string")
