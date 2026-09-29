@@ -84,6 +84,27 @@ Same-SHA replay запрещён.
 Provider attempts не являются способом собирать telemetry. Telemetry должна быть собрана
 настолько полно, насколько разумно, в рамках causal PR и его единственного attempt.
 
+### Owner-authorized one-shot recovery Function deploy-only exception
+
+После exact-run read-only classification `36554205552` Owner 2026-09-29 разрешил для failed
+recovery run `36341844854` ровно одну новую recovery-only Function version create попытку. Она
+вооружается только новым exact-main PR machine marker `OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY`,
+canonical CI, exact latest failed-run/deploy-failed/invoke-skipped guards и single-writer lock.
+Attempt создаёт только read-only recovery Function version; Function не вызывается, YDB и Google не
+читаются/не меняются, IAM не меняется. Внешний error text остаётся в runner-temp; артефакт содержит
+только allowlisted failure class/resource boundary enums.
+
+Терминальные результаты `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`, конкретный safe error
+class или `PROVIDER_ERROR_DETAIL_UNAVAILABLE/OTHER` потребляют эту единственную authority. Workflow
+проверяет cross-SHA history по exact failed run и никогда не повторяется для него; успешное создание
+не доказывает durable YDB state, `APPLIED`/`NOT_APPLIED` или `COMMITTED` и не авторизует invoke.
+Следующее engineering решение принимается по конкретному enum: исправление кода для доказанного
+invalid request; отдельная exact least-privilege authority boundary при доказанном missing permission;
+stop/новая causal гипотеза для resource/policy/unclassified результата. Никакой retry, IAM widening,
+YDB invoke, Google/YDB write, cleanup, timer или cutover не вооружаются автоматически. Этот узкий
+explicit Owner exception не отменяет правило, что обычный diagnostic-only PR не вооружает provider
+attempt.
+
 ## Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,

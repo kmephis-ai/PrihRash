@@ -187,6 +187,37 @@ replay запрещены. Любое количество таких read-only 
 circuit и не разрешает deploy/invoke/replay/cleanup/authority changes. Если enum всё ещё missing или
 ambiguous, меняй причинную гипотезу и продолжавай только с read-only/repository-only actions.
 
+#### One-shot recovery-only Function deploy decision (Owner 2026-09-29)
+
+Для exact failed recovery run `36341844854` Owner отдельно разрешил **ровно одну** новую
+`recovery-only Function version create` попытку после завершённого read-only deploy classification.
+Scope не включает Function invoke, Google/YDB read/write, IAM mutation, replay bootstrap, cleanup,
+timer/cutover или authority switch. Это не переопределяет неизвестный create outcome как `NOT_APPLIED`;
+повтор допустим только как отдельный Owner-authorized deploy-only transition на новом exact main SHA,
+после canonical CI, exact failed-run/deploy-failed/invoke-skipped, PR marker и single-writer gates.
+
+PR marker:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED
+Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY
+Recovery-Run-ID: 36341844854
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs
+```
+
+Workflow `.github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml` создает только одну
+immutable recovery Function version, не вызывает её, не трогает YDB/Google, захватывает provider stderr
+лишь в runner-temporary file и публикует allowlisted error class/resource boundary enums. Raw stderr,
+IDs и secret values не публикуются. Возможный `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`,
+known error class или unresolved error — терминальный outcome этого authorization: workflow проверяет
+cross-SHA history для exact failed run и никогда не dispatch-ится повторно для него. Следующий
+Function invoke/IAM change требует собственной applicable authority; ни один deploy result сам по себе
+не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет правило, что
+обычный diagnostic-only PR не вооружает provider attempt.
+
 ### 8.2. R1 completion sprint и multi-agent handoff
 
 Пока R1 не имеет доказанного первого `COMMITTED` baseline, operational process определяется

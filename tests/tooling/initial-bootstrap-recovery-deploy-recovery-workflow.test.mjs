@@ -96,7 +96,7 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.doesNotMatch(classifier, /process\.stderr|console\.(?:log|error)/);
 });
 
-test('recovery autocontinue routes only the deployment-classification marker to this workflow', () => {
+test('recovery autocontinue routes only its allowlisted exact-run recovery markers', () => {
   assert.match(autocontinue, /READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION/);
   assert.match(autocontinue, /DEPLOYMENT_OUTCOME_UNCLASSIFIED/);
   assert.match(autocontinue, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
@@ -117,10 +117,45 @@ test('recovery autocontinue routes only the deployment-classification marker to 
   assert.match(autocontinue, /or\s+\([\s\S]*any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml"/);
   assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml/);
   assert.match(autocontinue, /scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
-  assert.doesNotMatch(autocontinue, /\.filename == "AGENTS\.md"/);
   assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_RUN_NOT_LATEST_FAILED/);
   assert.match(autocontinue, /RECOVERY_AUTOCONTINUE_DEPLOY_RUN_PHASE_NOT_PROVEN/);
   assert.match(autocontinue, /actions\/workflows\/r1-initial-bootstrap-recovery\.yml\/runs\?branch=main&event=workflow_dispatch&status=failure/);
   assert.match(autocontinue, /Deploy recovery-only Function version" and \.conclusion == "failure"/);
   assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
+  assert.match(autocontinue, /OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY/);
+  assert.match(autocontinue, /RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED/);
+  assert.match(autocontinue, /r1-initial-bootstrap-recovery-deploy-attempt\.yml/);
+  assert.match(autocontinue, /RECOVERY_DEPLOY_ATTEMPT_CHANGESET_INVALID/);
+  assert.match(autocontinue, /R1_RECOVERY_DEPLOY_ATTEMPT_HISTORY_INCOMPLETE/);
+  assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml/);
+  assert.match(autocontinue, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
+  assert.match(autocontinue, /\.filename == "AGENTS\.md"/);
+  assert.match(autocontinue, /\.filename == "docs\/R1_COMPLETION_SPRINT\.md"/);
+});
+
+test('deploy-only retry is exact-run bounded, emits safe failure enums and never invokes the Function', async () => {
+  const attemptWorkflow = (await readFile(
+    '.github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml', 'utf8',
+  )).replace(/\r\n/g, '\n');
+  const attemptClassifier = (await readFile(
+    'scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs', 'utf8',
+  )).replace(/\r\n/g, '\n');
+  assert.match(attemptWorkflow, /workflow_dispatch:[\s\S]*failed_run_id:[\s\S]*ci_run_id:[\s\S]*source_pr_number:/);
+  assert.match(attemptWorkflow, /group: r1-initial-bootstrap-writer[\s\S]*cancel-in-progress: false/);
+  assert.match(attemptWorkflow, /INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED/);
+  assert.match(attemptWorkflow, /Invoke exact read-only recovery tag once/);
+  assert.match(attemptWorkflow, /and \.conclusion == "skipped"/);
+  assert.match(attemptWorkflow, /latest_failed_id/);
+  assert.match(attemptWorkflow, /GITHUB_RUN_ATTEMPT/);
+  assert.match(attemptWorkflow, /RECOVERY_DEPLOY_ATTEMPT_ALREADY_USED_FOR_SHA/);
+  assert.match(attemptWorkflow, /Create exactly one read-only recovery Function version without invoking it/);
+  assert.match(attemptWorkflow, /classify-yandex-initial-bootstrap-recovery-deploy-attempt\.mjs/);
+  assert.match(attemptWorkflow, /actions\/upload-artifact@/);
+  assert.doesNotMatch(attemptWorkflow, /yc serverless function invoke/);
+  assert.doesNotMatch(attemptWorkflow, /migration_runs|source_records|source_snapshots/);
+  assert.doesNotMatch(attemptWorkflow, /secret get-payload/);
+  assert.match(attemptClassifier, /PERMISSION_DENIED/);
+  assert.match(attemptClassifier, /permissionBoundary/);
+  assert.match(attemptClassifier, /RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE/);
+  assert.doesNotMatch(attemptClassifier, /process\.stderr|console\.(?:log|error)/);
 });
