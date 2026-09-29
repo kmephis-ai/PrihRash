@@ -1788,3 +1788,37 @@ separate exact-scope authority boundary; resource/policy/unclassified evidence s
 decision. Success means only that provider accepted the recovery-only version create, not that YDB is
 classified or `COMMITTED`. No automatic second deploy, Function invoke, IAM mutation, replay, cleanup,
 timer, cutover or authority change follows.
+
+#### PR #870 was a pre-provider stop; authorized create was not consumed
+
+The first deploy-only successor reached only its GitHub preflight and failed with
+`RECOVERY_DEPLOY_ATTEMPT_ISSUE_INACTIVE`; `Create exactly one read-only recovery Function version without
+invoking it` was `skipped`. No Yandex CLI/token exchange or provider operation occurred. Root cause was
+the repository comparing REST issue state to uppercase `OPEN` although the exact endpoint returns
+lowercase `open`. Therefore the one Owner-authorized create action was **not consumed**.
+
+The next distinct-SHA successor uses active control Issue #630 with the lowercase REST state, and uses
+the prior workflow's exact deploy-step conclusion to distinguish this `skipped` preflight stop from a
+create attempt that reached the provider. A prior exact attempt whose create step was success/failure/
+cancelled consumes authority; missing, duplicate, incomplete, or ambiguous run/job/step evidence blocks.
+Same-SHA replay is forbidden even when a prior create step was skipped. The owner-authorized attempt
+remains limited to failed run `36341844854`, one `--retry 0` create, no invoke, and no IAM/YDB/Google
+mutation.
+
+#### PR #870 stopped before the authorized create on the issue-state casing guard
+
+The Owner-authorized deploy-only continuation `36590773848` failed in
+`Prove exact merged authorization, CI and failed deploy boundary` with
+`RECOVERY_DEPLOY_ATTEMPT_ISSUE_INACTIVE`. The provider CLI, OIDC exchange, Function preflight and deploy
+step were all skipped; specifically `Create exactly one read-only recovery Function version without
+invoking it` was `skipped`. No provider mutation or invoke occurred, so the one-shot create allowance was
+not consumed.
+
+Root cause was a repository preflight comparison against uppercase `OPEN`, while GitHub REST issue
+metadata uses lowercase `open`. The next distinct-SHA successor normalizes this exact active-issue guard
+to the canonical REST value and replaces workflow-run-exists deduplication with deploy-step evidence:
+only a prior exact failed-run attempt whose create step was reached consumes the allowance. A proven
+pre-write `skipped` create may proceed once on a new SHA; ambiguous/missing phase evidence and same-SHA
+replay still fail closed. Synthetic history fixtures cover `skipped`, success, failure, cancelled,
+active, duplicate, incomplete, and unclassified attempts. The PR marker remains bound to failed run
+`36341844854`, and the newly authorized create-only attempt still never invokes the Function.

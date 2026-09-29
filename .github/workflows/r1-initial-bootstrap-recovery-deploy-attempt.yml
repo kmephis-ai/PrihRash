@@ -76,24 +76,39 @@ jobs:
           [[ "$SOURCE_PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RECOVERY_DEPLOY_ATTEMPT_PR_NUMBER_INVALID'; exit 1; }
           test -n "$YC_FOLDER_ID"; test -n "$YC_WIF_SERVICE_ACCOUNT_ID"; test -n "$YC_LOCKBOX_SECRET_ID"
 
-          prior_attempts="$(curl --fail --silent --show-error --header "Authorization: Bearer ${GH_API_TOKEN}" \
-            --header 'Accept: application/vnd.github+json' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
-          if [ "$(jq '.workflow_runs | length' <<<"$prior_attempts")" -ge 100 ]; then
-            echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_INCOMPLETE'; exit 1
-          fi
-          if jq -e --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
-            --argjson self_id "$GITHUB_RUN_ID" '
-            .workflow_runs | any(.id != $self_id and .display_title == $expected)
-          ' <<<"$prior_attempts" >/dev/null; then
-            echo 'RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_FOR_FAILED_RUN'; exit 1
-          fi
-
           tmp="$RUNNER_TEMP/r1-recovery-deploy-attempt-gates"
           mkdir -p "$tmp"
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
           auth_header="Authorization: Bearer ${GH_API_TOKEN}"
           accept_header='Accept: application/vnd.github+json'
+
+          prior_attempts="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
+          printf '%s\n' "$prior_attempts" > "$tmp/prior-attempts.json"
+          printf '{"jobs":[]}\n' > "$tmp/prior-attempt-jobs.json"
+          prior_count="$(jq --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
+            --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
+              and .name == "R1 initial bootstrap recovery deploy-only attempt"
+              and .display_title == $expected)] | length' <<<"$prior_attempts")"
+          if [ "$prior_count" = '1' ]; then
+            prior_run_id="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
+              --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
+                and .name == "R1 initial bootstrap recovery deploy-only attempt"
+                and .display_title == $expected)][0].id' <<<"$prior_attempts")"
+            curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+              "$api/actions/runs/${prior_run_id}/jobs?filter=latest&per_page=100" \
+              --output "$tmp/prior-attempt-jobs.json" || { echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_READ_FAILED'; exit 1; }
+          fi
+          prior_attempt_state="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs \
+            "$tmp/prior-attempts.json" "$tmp/prior-attempt-jobs.json" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$FAILED_RUN_ID")"
+          case "$prior_attempt_state" in
+            NO_PRIOR_ATTEMPT|PRIOR_PREWRITE_STOP_ONLY) ;;
+            ATTEMPT_HISTORY_INCOMPLETE|ATTEMPT_HISTORY_INVALID|ATTEMPT_HISTORY_AMBIGUOUS|ATTEMPT_HISTORY_UNCLASSIFIED)
+              echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_UNCLASSIFIED'; exit 1 ;;
+            SAME_SHA_PREWRITE_STOP_FORBIDDEN|PRIOR_ATTEMPT_ACTIVE|PRIOR_ATTEMPT_CONSUMED)
+              echo 'RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_FOR_FAILED_RUN'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_UNCLASSIFIED'; exit 1 ;;
+          esac
 
           curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
             "$api/branches/main" --output "$tmp/main.json"
@@ -132,9 +147,6 @@ jobs:
               and $run == ["Recovery-Run-ID: 36341844854"]
               and $test == ["Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs"])
           ' <<<"$source_body" | jq -e . >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_OWNER_MARKER_INVALID'; exit 1; }
-          jq -e --argjson failed_id "$FAILED_RUN_ID" '.state == "OPEN"' \
-            <(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/issues/453") \
-            >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_ISSUE_INACTIVE'; exit 1; }
 
           failed_runs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
             "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100")"

@@ -96,14 +96,20 @@ Attempt создаёт только read-only recovery Function version; Functio
 
 Терминальные результаты `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`, конкретный safe error
 class или `PROVIDER_ERROR_DETAIL_UNAVAILABLE/OTHER` потребляют эту единственную authority. Workflow
-проверяет cross-SHA history по exact failed run и никогда не повторяется для него; успешное создание
-не доказывает durable YDB state, `APPLIED`/`NOT_APPLIED` или `COMMITTED` и не авторизует invoke.
+проверяет cross-SHA history по exact failed run и не повторяется после достижения create step; успешное
+создание не доказывает durable YDB state, `APPLIED`/`NOT_APPLIED` или `COMMITTED` и не авторизует invoke.
 Следующее engineering решение принимается по конкретному enum: исправление кода для доказанного
 invalid request; отдельная exact least-privilege authority boundary при доказанном missing permission;
 stop/новая causal гипотеза для resource/policy/unclassified результата. Никакой retry, IAM widening,
 YDB invoke, Google/YDB write, cleanup, timer или cutover не вооружаются автоматически. Этот узкий
 explicit Owner exception не отменяет правило, что обычный diagnostic-only PR не вооружает provider
-attempt.
+attempt. Если workflow остановился до deploy step на воспроизводимо доказанном preflight defect, это не
+consumed provider attempt; поправка должна быть на distinct SHA, а guard допускает продолжение только
+после доказательства `Deploy recovery-only Function version` = `skipped` для предыдущего run. Первый
+preflight stop PR #870 вызван сравнением REST issue `state` с uppercase `OPEN`; exact recovery deploy
+attempt не начинался. Successor на новом SHA принимает только точный failed run и единственную skipped
+create step; success/failure/cancelled или missing/ambiguous job evidence потребляют/блокируют allowance.
+Same-SHA replay и любая повторная попытка после входа в deploy step запрещены.
 
 ## Постоянная делегация Owner до завершения R1
 
