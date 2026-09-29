@@ -85,19 +85,27 @@ jobs:
           prior_attempts="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
             "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")"
           printf '%s\n' "$prior_attempts" > "$tmp/prior-attempts.json"
-          printf '{"jobs":[]}\n' > "$tmp/prior-attempt-jobs.json"
+          printf '{"jobsByRun":[]}\n' > "$tmp/prior-attempt-jobs.json"
           prior_count="$(jq --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
             --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
               and .name == "R1 initial bootstrap recovery deploy-only attempt"
               and .display_title == $expected)] | length' <<<"$prior_attempts")"
-          if [ "$prior_count" = '1' ]; then
-            prior_run_id="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
+          if [ "$prior_count" -gt 0 ]; then
+            prior_run_ids="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${FAILED_RUN_ID}" \
               --argjson self_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(.id != $self_id
                 and .name == "R1 initial bootstrap recovery deploy-only attempt"
-                and .display_title == $expected)][0].id' <<<"$prior_attempts")"
-            curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
-              "$api/actions/runs/${prior_run_id}/jobs?filter=latest&per_page=100" \
-              --output "$tmp/prior-attempt-jobs.json" || { echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_READ_FAILED'; exit 1; }
+                and .display_title == $expected)] | sort_by(.created_at,.id) | .[].id' <<<"$prior_attempts")"
+            while IFS= read -r prior_run_id; do
+              [ -n "$prior_run_id" ] || continue
+              prior_jobs_path="$tmp/prior-attempt-${prior_run_id}-jobs.json"
+              curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/${prior_run_id}/jobs?filter=latest&per_page=100" \
+                --output "$prior_jobs_path" || { echo 'RECOVERY_DEPLOY_ATTEMPT_HISTORY_READ_FAILED'; exit 1; }
+              jq --argjson run_id "$prior_run_id" --slurpfile run_jobs "$prior_jobs_path" \
+                '.jobsByRun += [{runId:$run_id,jobs:$run_jobs[0]}]' \
+                "$tmp/prior-attempt-jobs.json" > "$tmp/prior-attempt-jobs-next.json"
+              mv "$tmp/prior-attempt-jobs-next.json" "$tmp/prior-attempt-jobs.json"
+            done <<<"$prior_run_ids"
           fi
           prior_attempt_state="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs \
             "$tmp/prior-attempts.json" "$tmp/prior-attempt-jobs.json" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$FAILED_RUN_ID")"

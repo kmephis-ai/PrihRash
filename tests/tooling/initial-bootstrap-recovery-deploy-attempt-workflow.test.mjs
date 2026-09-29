@@ -9,6 +9,8 @@ const runbook = (await readFile('docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md', '
 const historyClassifier = (await readFile(
   'scripts/classify-r1-recovery-deploy-attempt-history.mjs', 'utf8',
 )).replace(/\r\n/g, '\n');
+const ciClassifier = (await readFile('scripts/classify-github-ci-run.mjs', 'utf8')).replace(/\r\n/g, '\n');
+const exactSourceRestore = (await readFile('.github/actions/restore-exact-source/action.yml', 'utf8')).replace(/\r\n/g, '\n');
 
 test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run, and one-shot', () => {
   assert.match(workflow, /workflow_dispatch:[\s\S]*failed_run_id:[\s\S]*ci_run_id:[\s\S]*source_pr_number:/);
@@ -26,6 +28,8 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(historyClassifier, /PREWRITE_STOP_ONLY/);
   assert.match(historyClassifier, /PRIOR_ATTEMPT_CONSUMED/);
   assert.match(historyClassifier, /SAME_SHA_PREWRITE_STOP_FORBIDDEN/);
+  assert.match(workflow, /jobsByRun/);
+  assert.match(workflow, /while IFS= read -r prior_run_id/);
   assert.match(workflow, /issue_630_state/);
   assert.match(workflow, /\$issue_630_state/);
   assert.match(workflow, /'open'/);
@@ -34,6 +38,14 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs/);
   assert.match(workflow, /PRIOR_PREWRITE_STOP_ONLY/);
   assert.match(workflow, /cancel-in-progress: false/);
+});
+
+test('the one-shot PR regression marker binds to this guard test and canonical exact-main CI fallback', () => {
+  assert.match(workflow, /Regression-Test: tests\/tooling\/initial-bootstrap-recovery-deploy-attempt-workflow\.test\.mjs/);
+  assert.match(ciClassifier, /\['push', 'workflow_dispatch'\]/);
+  assert.match(exactSourceRestore, /\.event == "push" or \.event == "workflow_dispatch"/);
+  assert.match(exactSourceRestore, /\.head_sha == \$sha/);
+  assert.match(exactSourceRestore, /\.head_branch == "main"/);
 });
 
 test('attempt creates only the recovery Function version, classifies stderr privately, and never invokes', () => {

@@ -1846,3 +1846,27 @@ pre-write `skipped` create may proceed once on a new SHA; ambiguous/missing phas
 replay still fail closed. Synthetic history fixtures cover `skipped`, success, failure, cancelled,
 active, duplicate, incomplete, and unclassified attempts. The PR marker remains bound to failed run
 `36341844854`, and the newly authorized create-only attempt still never invokes the Function.
+
+#### Exact one-shot marker and multiple prewrite stops after PR #872
+
+Canonical push-CI `36604027511` passed on exact main `2263cd99861feca710d2406cb85a063308d9829b` and
+published its exact-source artifact. CI-triggered bootstrap autocontinue did not dispatch an orchestrator:
+the `OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY` marker is not an ordinary root-cause bootstrap marker.
+Recovery autocontinue also did not dispatch a provider workflow; it returned
+`R1_RECOVERY_DEPLOY_ATTEMPT_CHANGESET_INVALID`. Gate C stopped at authority preflight; readiness, OIDC,
+Yandex CLI and provider deployment were skipped.
+
+The single manual deploy-only run `36604866875` stopped at
+`RECOVERY_DEPLOY_ATTEMPT_OWNER_MARKER_INVALID`. PR #872 used
+`Regression-Test: tests/tooling/exact-source-artifact.test.mjs`, while the workflow requires the exact
+canonical test `tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs`. The create
+step remained `skipped`; CLI, OIDC, Function metadata and provider operations did not run. This distinct-
+SHA prewrite stop did not consume the Owner's one-shot create.
+
+History for failed recovery run `36341844854` now contains two deploy-only workflow runs,
+`36590773848` and `36604866875`. The next exact-SHA deploy classifies **each** prior run independently:
+exactly one deploy job and one create step with `conclusion=skipped` are required for every prior run.
+Only when all prior stops on distinct SHAs are proven prewrite-only does the one-shot remain available.
+Any create with `success`/`failure`/`cancelled`, same SHA, active run, or missing/duplicate/ambiguous
+evidence blocks continuation. The next marker must use the canonical regression-test path above. No
+same-SHA retry, Function invoke, IAM change, cleanup or YDB/Google action is authorized.

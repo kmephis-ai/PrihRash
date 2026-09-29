@@ -218,7 +218,11 @@ cross-SHA history по exact failed run и не dispatch-ится повторн
 allowance; continuation допускается только на новом exact SHA после исправления самого preflight gate.
 PR #870 был exact таким случаем: issue-state casing блокировал deploy до provider; issue #453 проверка
 должна использовать REST `state == open`. Следующий attempt-history classifier требует предыдущий exact
-run/job/step и не выводит `skipped` по одному run conclusion.
+run/job/step и не выводит `skipped` по одному run conclusion. Если было несколько distinct-SHA preflight
+stops, continuation допускается только когда exact run/job/deploy-step evidence доказывает `skipped`
+для **каждого** предыдущего attempt; reached create, same SHA, missing/duplicate/ambiguous evidence
+всегда блокируют continuation. Все такие preflight stops остаются нерасходующими create allowance, но
+не позволяют replay одного SHA.
 Следующий Function invoke/IAM change требует собственной applicable authority; ни один deploy result
 сам по себе не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет
 правило, что обычный diagnostic-only PR не вооружает provider attempt.
