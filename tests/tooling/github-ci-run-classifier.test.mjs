@@ -23,12 +23,18 @@ test('exact triggering main CI run passes with its run ID, SHA, branch, event, a
   assert.equal(classifyExactMainCiRun(exactRun(), runId, sha), 'CI_RUN_EXACT_SUCCESS');
 });
 
+test('exact manually dispatched main CI run passes with the same exact identity and successful conclusion', () => {
+  assert.equal(classifyExactMainCiRun(exactRun({ event: 'workflow_dispatch' }), runId, sha), 'CI_RUN_EXACT_SUCCESS');
+});
+
 test('CI run lookup fails closed for mismatched or incomplete identity and state', () => {
   assert.equal(classifyExactMainCiRun(exactRun({ id: Number(runId) + 1 }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ name: 'Browser Quality' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ head_sha: 'a'.repeat(40) }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ head_branch: 'feature' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ event: 'pull_request' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
+  assert.equal(classifyExactMainCiRun(exactRun({ event: 'repository_dispatch' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
+  assert.equal(classifyExactMainCiRun(exactRun({ event: 'workflow_dispatch', head_branch: 'feature' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ status: 'in_progress', conclusion: null }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun({ conclusion: 'failure' }), runId, sha), 'CI_RUN_NOT_EXACT_SUCCESS');
   assert.equal(classifyExactMainCiRun(exactRun(), '0', sha), 'CI_RUN_INPUT_INVALID');

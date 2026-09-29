@@ -75,15 +75,19 @@ const providerWorkflowPaths = [
   'r1-initial-bootstrap-gate-c.yml',
 ];
 
-test('canonical CI publishes one exact-SHA provider artifact after the full check', async () => {
+test('canonical push or manually dispatched main CI publishes one exact-SHA provider artifact after the full check', async () => {
   const ci = await readFile(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const checkIndex = ci.indexOf('- run: npm run check');
   const manifestIndex = ci.indexOf('scripts/exact-source-artifact.mjs create');
   const uploadIndex = ci.indexOf('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
 
   assert.ok(checkIndex >= 0 && manifestIndex > checkIndex && uploadIndex > manifestIndex);
+  assert.match(ci, /workflow_dispatch:/);
+  assert.match(ci, /Prove manually dispatched CI targets the protected current main/);
+  assert.match(ci, /test "\$GITHUB_REF" = 'refs\/heads\/main'/);
+  assert.match(ci, /\.commit\.sha == \$sha and \.protected == true/);
   assert.match(ci, /name: r1-exact-source-\$\{\{ github\.sha \}\}/);
-  assert.match(ci, /if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
+  assert.equal((ci.match(/if: \(github\.event_name == 'push' \|\| github\.event_name == 'workflow_dispatch'\) && github\.ref == 'refs\/heads\/main'/g) ?? []).length, 2);
   assert.match(ci, /include-hidden-files: true/);
   assert.doesNotMatch(ci, /path: \.artifacts\/\s*$/m);
   assert.match(ci, /\.artifacts\/exact-source-manifest\.json/);
@@ -129,11 +133,12 @@ test('provider package inventory keeps the only full check in canonical CI and r
   assert.match(runbook, /one canonical `npm run check` per commit/);
 });
 
-test('restore action requires one successful canonical CI push for the exact current main SHA', async () => {
+test('restore action requires one successful canonical exact-main CI run for the exact current main SHA', async () => {
   const action = await readFile(new URL('../../.github/actions/restore-exact-source/action.yml', import.meta.url), 'utf8');
   assert.match(action, /test "\$GITHUB_SHA" = "\$SOURCE_SHA"/);
   assert.match(action, /test "\$GITHUB_REF" = 'refs\/heads\/main'/);
-  assert.match(action, /actions\/workflows\/ci\.yml\/runs\?branch=main&event=push&status=success/);
+  assert.match(action, /actions\/workflows\/ci\.yml\/runs\?branch=main&per_page=100/);
+  assert.match(action, /\.event == "push" or \.event == "workflow_dispatch"/);
   assert.match(action, /if length == 1 then \.\[0\]\.id else error\("exact CI run count mismatch"\) end/);
   assert.match(action, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/);
   assert.match(action, /scripts\/exact-source-artifact\.mjs verify/);
