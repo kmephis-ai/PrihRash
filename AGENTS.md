@@ -222,7 +222,8 @@ run/job/step и не выводит `skipped` по одному run conclusion. 
 stops, continuation допускается только когда exact run/job/deploy-step evidence доказывает `skipped`
 для **каждого** предыдущего attempt; reached create, same SHA, missing/duplicate/ambiguous evidence
 всегда блокируют continuation. Все такие preflight stops остаются нерасходующими create allowance, но
-не позволяют replay одного SHA.
+не позволяют replay одного SHA. Self-SHA guard обязан исключать только текущий workflow run по
+`GITHUB_RUN_ID`, продолжая проверять все прочие run на этот SHA.
 Следующий Function invoke/IAM change требует собственной applicable authority; ни один deploy result
 сам по себе не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет
 правило, что обычный diagnostic-only PR не вооружает provider attempt.

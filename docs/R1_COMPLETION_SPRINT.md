@@ -112,7 +112,8 @@ create step; success/failure/cancelled или missing/ambiguous job evidence п�
 Same-SHA replay и любая повторная попытка после входа в deploy step запрещены. Если до create было
 несколько distinct-SHA preflight stops, continuation допускается лишь после точной классификации
 каждого run/job/deploy step как `skipped`; один reached create или incomplete/ambiguous история
-блокирует путь. Same-SHA replay запрещён независимо от заключения preflight.
+блокирует путь. Same-SHA replay запрещён независимо от заключения preflight. Same-SHA lookup исключает
+собственный текущий workflow run по run ID, но ни один другой run на этом SHA.
 
 ## Постоянная делегация Owner до завершения R1
 
