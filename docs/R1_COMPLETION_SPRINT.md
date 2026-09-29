@@ -49,6 +49,25 @@ Diagnostic-only изменение само по себе не вооружае�
 следующий цикл обязан сменить причинную гипотезу/решение либо остановиться
 `BLOCKED_NEEDS_ROOT_CAUSE`. Дополнительный blind diagnostic replay запрещён.
 
+### Owner anti-S-unit override
+
+Operational unit активного R1 — законченный `Incident-M` causal boundary, не default S-sized item.
+Новый enum, response-shape discriminator, pagination detail, telemetry field или preflight/CI race
+в том же provider/read path не является новой causal hypothesis и не оправдывает отдельный PR.
+Перед PR определить конечные outcomes и различный инженерный next step для каждого; если все исходы
+ведут только к дополнительной диагностике — PR не создавать. После первого diagnostic refinement
+successor объединяет все разумно предвидимые cases, synthetic fixtures и доводит boundary до одного
+decision point. После двух distinct-SHA read-only refinements без decision point третий
+discriminator-only PR запрещён: сменить root-cause model/solution, найти безопасный architectural/
+process bypass либо остановиться `BLOCKED_NEEDS_ROOT_CAUSE`.
+
+Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`
+достигнут) запрещён отдельный PR только ради `omitted trails => []`. Один causal PR должен довести
+источник до `EXISTING_APPLICABLE_AUDIT_SOURCE`, `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` либо
+`SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS`, затем использовать доказанный источник или прекратить эту
+ветку и сменить causal model. Правило синхронизируется в `AGENTS.md` в том же causal PR; отдельный
+process/docs PR запрещён.
+
 ## Provider loop
 
 После merge root-cause PR выполняется только этот bounded цикл:

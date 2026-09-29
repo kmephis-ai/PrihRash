@@ -203,6 +203,23 @@ commit+push либо явно сохранена/отброшена с checkpoin
 micro-PR ради отдельных enum/telemetry строк. Один merged root-cause change разрешает максимум
 один separately gated provider attempt; после него обязателен recovery/read-back и новый handover.
 
+Owner anti-S-unit override: operational unit — законченный Incident-M causal boundary, а не
+default S-sized item. Новый enum, response-shape discriminator, pagination detail, telemetry field
+или preflight/CI race внутри того же provider/read path не является новой causal hypothesis и не
+оправдывает отдельный PR. Перед PR определить конечные outcomes и различный инженерный next step
+для каждого; если все outcomes требуют только новой диагностики — PR не создавать. После первого
+diagnostic refinement successor обязан объединить предвидимые cases, synthetic fixtures и привести
+boundary к одному decision point. После двух distinct-SHA read-only refinements без decision point
+третий discriminator-only PR запрещён: сменить root-cause model/solution, найти безопасный bypass или
+остановиться `BLOCKED_NEEDS_ROOT_CAUSE`.
+
+Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`
+достигнут) запрещён отдельный PR только для `omitted trails => []`. Один causal PR обязан завершить
+ветку исходом `EXISTING_APPLICABLE_AUDIT_SOURCE`, `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` либо
+`SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS`, затем использовать доказанный источник или прекратить ветку
+и сменить causal model. Синхронизировать это правило с `docs/R1_COMPLETION_SPRINT.md` в том же PR;
+отдельный process/docs PR запрещён.
+
 При смене ChatGPT ↔ OpenCode новый агент делает minimal fresh reconciliation, читает exact
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.

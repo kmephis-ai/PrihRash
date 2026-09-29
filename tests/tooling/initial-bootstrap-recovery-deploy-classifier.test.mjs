@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   classifyRecoveryAuditCreateEvents,
+  classifyAuditTrailSourceDecision,
   classifyAuditTrailCloudFolderList,
   classifyAuditTrailListHttpStatus,
   classifyAuditTrailFolderListHttpStatus,
@@ -30,6 +31,7 @@ test('cloud folder enumeration failures stay bounded and distinguish permission 
   assert.equal(classifyAuditTrailFolderListHttpStatus(500), 'AUDIT_TRAIL_FOLDER_LIST_READ_FAILED');
   assert.equal(classifyAuditTrailCloudFolderList(null, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID');
   assert.equal(classifyAuditTrailCloudFolderList({ folders: null }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID');
+  assert.equal(classifyAuditTrailCloudFolderList({}, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND');
   assert.equal(classifyAuditTrailCloudFolderList({ folders: [] }, 'synthetic-cloud', 'synthetic-target'), 'AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND');
   assert.equal(classifyAuditTrailCloudFolderList({
     folders: [{ id: 'synthetic-target', cloudId: 'synthetic-cloud', status: 'ACTIVE' }],
@@ -192,7 +194,9 @@ test('cloud trail response validation reports field-specific safe enums', () => 
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, ['malformed-response', { trails: [] }], cloudId, targetFolderId, runFinishedAt),
     'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
-    'AUDIT_TRAIL_TRAILS_FIELD_INVALID');
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{}, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [
     { trails: [] }, { trails: [], nextPageToken: 1 },
   ], cloudId, targetFolderId, runFinishedAt), 'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID');
@@ -237,7 +241,9 @@ test('cloud trail metadata validation splits exact list, owner, status, timestam
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }], cloudId, targetFolderId, runFinishedAt),
     'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: null }, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
-    'AUDIT_TRAIL_TRAILS_FIELD_INVALID');
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{}, { trails: [] }], cloudId, targetFolderId, runFinishedAt),
+    'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(folders, [{ trails: [] }, { trails: [], nextPageToken: 1 }], cloudId, targetFolderId, runFinishedAt),
     'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID');
   assert.equal(classify(null), 'AUDIT_TRAIL_TRAIL_ENTRY_INVALID');
@@ -261,6 +267,30 @@ test('cloud trail metadata validation splits exact list, owner, status, timestam
     resourceScopes: [{ resourceId: cloudId, resourceType: 'resource-manager.cloud' }],
     unknownRule: true,
   } } }), 'AUDIT_TRAIL_COVERAGE_UNPROVEN');
+});
+
+test('Audit Trails source branch reaches a terminal decision instead of another discriminator cycle', () => {
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', 'EXACT_RECOVERY_VERSION_CREATED',
+  ), 'EXISTING_APPLICABLE_AUDIT_SOURCE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', 'AUDIT_CREATE_EVENT_FAILED',
+  ), 'EXISTING_APPLICABLE_AUDIT_SOURCE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_SOURCE_AMBIGUOUS', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'SOURCE_EVIDENCE_AMBIGUOUS');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'SOURCE_EVIDENCE_UNUSABLE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', 'AUDIT_CREATE_EVENT_NOT_OBSERVED',
+  ), 'SOURCE_EVIDENCE_UNUSABLE');
 });
 
 function exactEvidence(overrides = {}) {
