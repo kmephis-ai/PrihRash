@@ -646,6 +646,7 @@ export function classifyRecoveryAuditCreateEvents({
   versions,
   runStartedAt,
   runFinishedAt,
+  expectedVersionId,
 }) {
   try {
     const start = timestamp(runStartedAt);
@@ -659,6 +660,7 @@ export function classifyRecoveryAuditCreateEvents({
       || operationCreatorServiceAccountId.length === 0
       || typeof runtimeServiceAccountId !== 'string'
       || runtimeServiceAccountId.length === 0
+      || (expectedVersionId !== undefined && (typeof expectedVersionId !== 'string' || expectedVersionId.length === 0))
       || start === null
       || finish === null
       || finish < start
@@ -707,6 +709,7 @@ export function classifyRecoveryAuditCreateEvents({
     if (
       typeof details.functionVersionId !== 'string'
       || details.functionVersionId.length === 0
+      || (expectedVersionId !== undefined && details.functionVersionId !== expectedVersionId)
       || details.runtime !== 'nodejs22'
       || details.functionVersionEntrypoint !== 'index.initialBootstrapRecoveryHandler'
       || details.serviceAccountId !== runtimeServiceAccountId
@@ -800,7 +803,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   } else if (cliArgs[0] === '--audit-events') {
     const [auditEventsPath, versionsPath, functionId, operationCreatorServiceAccountId,
-      runtimeServiceAccountId, runStartedAt, runFinishedAt] = cliArgs.slice(1);
+      runtimeServiceAccountId, runStartedAt, runFinishedAt, expectedVersionId] = cliArgs.slice(1);
     if (!auditEventsPath || !versionsPath || !functionId || !operationCreatorServiceAccountId
       || !runtimeServiceAccountId || !runStartedAt || !runFinishedAt) {
       process.stdout.write('AUDIT_LOG_METADATA_INVALID\n');
@@ -816,6 +819,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           runtimeServiceAccountId,
           runStartedAt,
           runFinishedAt,
+          ...(expectedVersionId === undefined ? {} : { expectedVersionId }),
         });
         process.stdout.write(`${ENUMS.has(result) ? result : 'AUDIT_LOG_CLASSIFIER_FAILED'}\n`);
       } catch {

@@ -1926,13 +1926,34 @@ until new-SHA exact-main CI and the complete reuse guards pass; no provider invo
 by this stop. The existing Owner anti-S-unit directive remains synchronized in `AGENTS.md` and
 `docs/R1_COMPLETION_SPRINT.md` in the same causal PR.
 
+After PR #876, exact-main run `36643931461` passed source-history, authorization, WIF and private-boundary
+checks and performed only read-only Yandex Function version/operation/tag metadata reads. It stopped with
+`INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT`; deployment and Function invoke were skipped, so
+Google and YDB were not read. The then-current workflow supplied a synthetic empty tag-history document
+and did not preserve the classifier sub-enum on failure. The next integrated Incident-M therefore adds
+the existing exact recovery-tag-history request, a read-only Audit Trails/Cloud Logging provenance fallback
+for operation-metadata candidate cases, and an enum-only artifact for every pre-invoke terminal outcome.
+Only exact operation proof or exact actor/function/time/version audit proof bound to the active tag can
+admit the one read-only invoke. All other classifier/source outcomes stop with no redeploy or invoke.
+
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
-preflight, it reads the Function version list, operation list and exact recovery tag. Existing
-`classifyRecoveryFunctionDeployOutcome` must prove `EXACT_RECOVERY_VERSION_CREATED` for the successful
-deploy run's time window, with exact operation/version/tag/runtime/entrypoint/runtime-SA correlation.
-Only that enum admits one invocation of the existing write-free recovery handler. Missing, ambiguous,
-inactive, mismatched, untagged, or temporally uncorrelated metadata stops before invocation and does not
-re-arm deployment. Exact main is checked again immediately before invocation.
+preflight, it reads the Function version list, operation list, exact recovery tag and bounded tag history;
+it never substitutes a synthetic empty tag history for a provider read failure. Existing
+`classifyRecoveryFunctionDeployOutcome` first checks exact operation/version/tag/runtime/entrypoint/runtime-SA
+correlation within the successful deploy run's time window. If that metadata yields only a version candidate,
+one already-contracted read-only Audit Trails → Cloud Logging path classifies the exact
+`CreateFunctionVersion` event by actor, function, time and version. The event's version ID must match the
+unique currently active recovery tag and the accepted runtime/entrypoint/runtime-SA. The source decision
+must be `EXISTING_APPLICABLE_AUDIT_SOURCE`; absent, unsupported, changed-after-target, unusable or ambiguous
+source/event evidence stops before invocation. No additional source aliases are invented.
+
+The recovery workflow retains an enum-only proof artifact even when pre-invoke metadata classification
+fails. It contains the version-classifier enum, bounded Audit Trails source-decision enum and audit-event
+enum only; raw version, operation, trail, audit, provider or financial payload stays in runner-temp.
+Only exact proof from either the operation-correlated path or corroborated audit-event path admits one
+invocation of the existing write-free recovery handler. Missing, ambiguous, inactive, mismatched, untagged,
+or temporally uncorrelated metadata stops before invocation and does not re-arm deployment. Exact main is
+checked again immediately before invocation.
 
 The bounded outcomes have different next steps:
 
@@ -1944,8 +1965,9 @@ The bounded outcomes have different next steps:
 - Recovery returns `APPLIED` or `NOT_APPLIED`: treat these as recovery-specific verdicts, then use the
   exact applicable stage contract. Neither verdict alone proves R1 `COMMITTED`; run independent
   reconciliation and catch-up review before claiming a baseline.
-- Version source cannot be proven: no invoke and no redeploy under the consumed one-shot; stop at the
-  provider metadata boundary and choose a new root-cause model.
+- Version source cannot be proven: no invoke and no redeploy under the consumed one-shot; the enum-only
+  artifact identifies whether operation metadata, tag history or the existing audit-source branch is
+  missing/ambiguous, then select the corresponding next root-cause model without a discriminator-only PR.
 - Read-only invoke/classification fails: no replay or cleanup; fix the specific repository/read-path
   cause before another read-only cycle.
 

@@ -125,7 +125,13 @@ provenance или конфигурация не доказаны, он заве�
 Reuse marker связывает точные failed `Recovery-Run-ID` и successful `Recovery-Version-Run-ID`;
 autocontinue передаёт их только canonical recovery workflow, который повторно доказывает run history,
 PR markers и exact provider version metadata. Reuse не создаёт Function version и вызывает только
-write-free recovery handler один раз. Все ожидаемые version metadata shapes и failed/missing/ambiguous
+write-free recovery handler один раз. Если operation metadata не связывает accepted create с unique
+version, тот же causal boundary может использовать существующий read-only Cloud Logging
+`CreateFunctionVersion` audit source; только exact actor/function/time/version, совпадающий с active tag и
+runtime contract, закрывает provenance. Audit-source decision и все provider cases объединяются в одном
+Incident-M; отсутствующий/неприменимый/непригодный/ambiguous источник завершает reuse до invoke.
+Enum-only proof artifact сохраняется и на failed preinvoke, raw provider/financial payload не публикуется.
+Все ожидаемые version metadata shapes и failed/missing/ambiguous
 reuse outcomes закрываются вместе synthetic fixtures в одном Incident-M: exact version → durable
 classification; unproven version → STOP without invoke/redeploy; classified durable state → отдельный
 state-specific engineering next step. Не дробить этот boundary на enum-only refinements.

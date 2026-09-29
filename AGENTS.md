@@ -231,7 +231,10 @@ stops, continuation допускается только когда exact run/job
 После `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE` one-shot create закрыт. Отдельная
 stage-appropriate read-only durable recovery может reuse-ить только уже созданную версию, если новый
 exact-main read-only marker, успешный exact deploy-run, все prior deploy-step evidence и свежая Yandex
-tag/version metadata доказывают unique active private recovery version. Reuse path обязан пропустить
+tag/version metadata доказывают unique active private recovery version. Если operation metadata даёт только
+tagged-version candidate, corroboration допускается только через уже-контрактный Audit Trails → Cloud
+Logging `CreateFunctionVersion` source: exact actor/function/time/version обязан совпасть с единственной
+active recovery tag/version и runtime contract. Reuse path обязан пропустить
 Function-version create и вызвать только write-free recovery handler ровно один раз; если provenance,
 tag, metadata или exact-main gate не доказаны — STOP без invoke/redeploy. Результат recovery ведёт к
 state-specific решению; неизвестный outcome не разрешает replay, а `COMMITTED` требует независимой
@@ -239,7 +242,8 @@ canonical reconciliation.
 Read-only reuse marker обязан однозначно связать failed recovery run и successful version-create
 run ID; autocontinue передаёт оба точных ID только в canonical recovery workflow. Workflow повторно
 проверяет обе истории, source PR/marker и active tag metadata до invocation. Этот marker не вооружает
-новый create или write-capable bootstrap invoke.
+новый create или write-capable bootstrap invoke. Failed/missing/ambiguous preinvoke metadata публикуется
+только как allowlisted enum artifact; raw audit/version payload остаётся runner-local.
 Для GitHub Actions runs endpoint `.name` может быть custom `run-name`/`display_title`, а не static
 workflow filename name. Identity recovery deploy-only workflow берётся из exact
 `/actions/workflows/<file>.yml/runs` endpoint и `workflow_id`; не фильтруй его по static `.name`.
