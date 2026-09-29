@@ -240,6 +240,9 @@ Read-only reuse marker обязан однозначно связать failed r
 run ID; autocontinue передаёт оба точных ID только в canonical recovery workflow. Workflow повторно
 проверяет обе истории, source PR/marker и active tag metadata до invocation. Этот marker не вооружает
 новый create или write-capable bootstrap invoke.
+Для GitHub Actions runs endpoint `.name` может быть custom `run-name`/`display_title`, а не static
+workflow filename name. Identity recovery deploy-only workflow берётся из exact
+`/actions/workflows/<file>.yml/runs` endpoint и `workflow_id`; не фильтруй его по static `.name`.
 Единственный reuse marker дополнительно использует `Recovery-Version-Run-ID`; его allowed shape и
 synthetic terminal cases проверяются в одном Incident-M вместе с caller/recovery workflows. Exact
 version proof → одна read-only durable classification; missing/ambiguous metadata → STOP без invoke;

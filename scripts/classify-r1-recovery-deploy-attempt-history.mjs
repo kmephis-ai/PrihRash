@@ -20,7 +20,6 @@ export function classifyRecoveryDeployAttemptHistory({
 
   const expectedTitle = `R1 recovery-only deploy attempt for failed run ${failedRecoveryRunId}`;
   const prior = runs.workflow_runs.filter((run) => run && run.id !== Number(currentRunId)
-    && run.name === 'R1 initial bootstrap recovery deploy-only attempt'
     && run.head_branch === 'main'
     && run.event === 'workflow_dispatch'
     && run.display_title === expectedTitle);
@@ -75,20 +74,27 @@ export function classifyRecoveryVersionReuseSourceHistory({
   currentSha,
   sourceRunId,
   failedRecoveryRunId,
+  sourceWorkflowId,
 }) {
   if (!runs || !Array.isArray(runs.workflow_runs) || runs.workflow_runs.length >= 100
     || !Array.isArray(jobsByRun)
     || !/^[0-9a-f]{40}$/.test(String(currentSha))
     || !/^[1-9][0-9]*$/.test(String(sourceRunId))
-    || !/^[1-9][0-9]*$/.test(String(failedRecoveryRunId))) {
+    || !/^[1-9][0-9]*$/.test(String(failedRecoveryRunId))
+    || !/^[1-9][0-9]*$/.test(String(sourceWorkflowId))) {
     return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
   }
   const expectedTitle = `R1 recovery-only deploy attempt for failed run ${failedRecoveryRunId}`;
-  const attempts = runs.workflow_runs.filter((run) => run && run.name === 'R1 initial bootstrap recovery deploy-only attempt'
+  const attempts = runs.workflow_runs.filter((run) => run
     && run.head_branch === 'main'
     && run.event === 'workflow_dispatch'
     && run.display_title === expectedTitle);
   if (attempts.length === 0 || attempts.length >= 100) return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+
+  const sourceRecords = attempts.filter((attempt) => attempt.id === Number(sourceRunId));
+  if (sourceRecords.length !== 1 || sourceRecords[0].workflow_id !== Number(sourceWorkflowId)) {
+    return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+  }
 
   const ids = new Set();
   const shas = new Set();
@@ -96,7 +102,8 @@ export function classifyRecoveryVersionReuseSourceHistory({
   for (const attempt of attempts) {
     if (!Number.isSafeInteger(attempt.id) || attempt.id < 1 || ids.has(attempt.id)
       || !/^[0-9a-f]{40}$/.test(String(attempt.head_sha)) || shas.has(attempt.head_sha)
-      || attempt.head_sha === currentSha || attempt.status !== 'completed') {
+      || attempt.head_sha === currentSha || attempt.status !== 'completed'
+      || attempt.workflow_id !== Number(sourceWorkflowId)) {
       return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
     }
     ids.add(attempt.id);
@@ -141,7 +148,7 @@ export function classifyRecoveryVersionReuseSourceHistory({
 }
 
 async function main(args) {
-  if (args[0] === 'reuse-source' && args.length === 6) {
+  if (args[0] === 'reuse-source' && args.length === 7) {
     try {
       const [runs, jobMap] = await Promise.all([
         readFile(args[1], 'utf8').then(JSON.parse),
@@ -153,6 +160,7 @@ async function main(args) {
         currentSha: args[3],
         sourceRunId: args[4],
         failedRecoveryRunId: args[5],
+        sourceWorkflowId: args[6],
       });
     } catch {
       return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';

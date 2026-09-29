@@ -35,6 +35,10 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /reuse_failed_recovery_run_id/);
   assert.match(workflow, /reuse_source_pr_number/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_SOURCE_RUN_NOT_EXACT/);
+  assert.match(workflow, /actions\/workflows\/r1-initial-bootstrap-recovery-deploy-attempt\.yml\/runs/);
+  assert.match(workflow, /\.workflow_id\|type=="number"/);
+  assert.doesNotMatch(workflow, /\.name=="R1 initial bootstrap recovery deploy-only attempt"/);
+  assert.doesNotMatch(workflow, /\.name == "R1 initial bootstrap recovery deploy-only attempt"/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
   assert.match(workflow, /Recovery-Version-Run-ID/);
   assert.match(workflow, /"surface_only":"true"/);
@@ -46,6 +50,40 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
   assert.match(workflow, /cancel-in-progress:\s*false/);
+});
+
+test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
+  const filter = workflow.match(/--argjson id "\$source_reuse_run_id" --arg expected[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$reuse_attempts"/)?.[1];
+  assert.ok(filter, 'extract the live source-run selection filter');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const expected = 'R1 recovery-only deploy attempt for failed run 36341844854';
+  const validRun = {
+    id: 36611387299,
+    name: expected,
+    display_title: expected,
+    workflow_id: 370292276,
+    head_branch: 'main',
+    event: 'workflow_dispatch',
+    status: 'completed',
+    conclusion: 'success',
+  };
+  const select = (workflowRuns) => {
+    const result = spawnSync('jq', [
+      '-e', '--argjson', 'id', '36611387299', '--arg', 'expected', expected,
+      filter,
+    ], { input: JSON.stringify({ workflow_runs: workflowRuns }), encoding: 'utf8' });
+    if (result.status !== 0) return false;
+    return result.stdout.trim() === 'true';
+  };
+  assert.equal(select([validRun]), true);
+  assert.equal(select([{ ...validRun, name: 'R1 initial bootstrap recovery deploy-only attempt' }]), true);
+  assert.equal(select([{ ...validRun, workflow_id: undefined }]), false);
+  assert.equal(select([validRun, { ...validRun }]), false);
+  assert.equal(select([{ ...validRun, conclusion: 'failure' }]), false);
 });
 
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {
