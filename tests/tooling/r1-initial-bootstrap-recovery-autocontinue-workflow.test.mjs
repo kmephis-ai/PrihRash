@@ -7,6 +7,10 @@ const workflow = (await readFile(
   new URL('../../.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', import.meta.url),
   'utf8',
 )).replace(/\r\n/g, '\n');
+const recoveryWorkflow = (await readFile(
+  new URL('../../.github/workflows/r1-initial-bootstrap-recovery.yml', import.meta.url),
+  'utf8',
+)).replace(/\r\n/g, '\n');
 const runbook = (await readFile(
   new URL('../../docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md', import.meta.url),
   'utf8',
@@ -31,6 +35,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
   assert.match(workflow, /all\(\.\[\]; \.filename \| IN\(/);
   assert.match(workflow, /tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs/);
+  assert.match(workflow, /scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
+  assert.match(workflow, /tests\/tooling\/initial-bootstrap-recovery-deploy-classifier\.test\.mjs/);
   assert.match(workflow, /reuse_deploy_attempt_run_id/);
   assert.match(workflow, /reuse_failed_recovery_run_id/);
   assert.match(workflow, /reuse_source_pr_number/);
@@ -45,6 +51,9 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-recovery\.yml/);
+  assert.match(recoveryWorkflow, /functions\/\$\{PRIHRASH_YC_FUNCTION_ID\}:tagHistory/);
+  assert.match(recoveryWorkflow, /--audit-source-decision/);
+  assert.match(recoveryWorkflow, /Publish enum-only accepted-version proof outcome/);
   assert.match(workflow, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);

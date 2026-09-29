@@ -699,6 +699,14 @@ test('audit log classifier identifies only an exact actor/function/time CreateFu
     runFinishedAt,
   };
   assert.equal(classifyRecoveryAuditCreateEvents(context), 'EXACT_RECOVERY_VERSION_CREATED');
+  assert.equal(classifyRecoveryAuditCreateEvents({
+    ...context,
+    expectedVersionId: version.id,
+  }), 'EXACT_RECOVERY_VERSION_CREATED');
+  assert.equal(classifyRecoveryAuditCreateEvents({
+    ...context,
+    expectedVersionId: 'different-synthetic-version',
+  }), 'AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN');
   assert.equal(classifyRecoveryAuditCreateEvents({ ...context, entries: [] }), 'AUDIT_CREATE_EVENT_NOT_OBSERVED');
   assert.equal(classifyRecoveryAuditCreateEvents({
     ...context,
