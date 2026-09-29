@@ -1805,6 +1805,30 @@ Same-SHA replay is forbidden even when a prior create step was skipped. The owne
 remains limited to failed run `36341844854`, one `--retry 0` create, no invoke, and no IAM/YDB/Google
 mutation.
 
+#### Missing `main` push-CI after PR #871 merge
+
+PR #871 merged as exact `main` SHA `a2e9f0d27dc127a93c6a97b84735e4b2819098a2`. GitHub records the
+`PullRequestEvent` as merged and advances protected `main`, but repository events expose no matching
+`PushEvent`; the SHA has no Actions run, check suite or commit status. Repository Actions are enabled,
+and canonical CI is active with `push: branches: [main]`. Attempting to dispatch it through the API
+returned `Workflow does not have 'workflow_dispatch' trigger`. Available provider evidence does not
+identify why GitHub omitted the push-triggered workflow; this is not a CI test failure.
+
+The bounded recovery adds manual dispatch to the same canonical CI workflow. The dispatch-only guard
+requires the canonical repository, `refs/heads/main`, checkout `HEAD == GITHUB_SHA`, and a fresh
+protected-main API read equal to that SHA. It runs the unchanged full `npm run check`, builds and uploads
+the same exact-SHA artifact only on main, and does not arm workflow-run autocontinue (those R1
+consumers remain restricted to successful `push` CI). Exact-source restore and CI-run classification
+accept only one successful completed `CI` run on `main` with the exact SHA and event `push` or
+`workflow_dispatch`; pull-request, other-event, mismatched, duplicate or incomplete runs remain
+fail-closed. This gives a recovery path when a merge push event is missing without fabricating a check,
+reusing an artifact from another SHA, or dispatching a provider workflow automatically.
+
+Once this fix is merged, manually dispatch canonical CI on the exact protected current `main`, verify
+its successful run and exact-source artifact, then re-evaluate the one-shot deploy-only gates. The
+one-shot create for failed recovery run `36341844854` remains unused; Function invoke remains out of
+scope.
+
 #### PR #870 stopped before the authorized create on the issue-state casing guard
 
 The Owner-authorized deploy-only continuation `36590773848` failed in

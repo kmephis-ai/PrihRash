@@ -32,7 +32,7 @@ runs:
         curl --fail --silent --show-error \
           --header "$auth_header" \
           --header 'Accept: application/vnd.github+json' \
-          "$api/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+          "$api/actions/workflows/ci.yml/runs?branch=main&per_page=100" \
           --output "$tmp/ci-runs.json" || {
             echo 'R1_EXACT_SOURCE_CI_READ_FAILED'
             exit 1
@@ -44,7 +44,7 @@ runs:
                 .name == "CI"
                 and .head_sha == $sha
                 and .head_branch == "main"
-                and .event == "push"
+                and (.event == "push" or .event == "workflow_dispatch")
                 and .conclusion == "success"
               )]
           | if length == 1 then .[0].id else error("exact CI run count mismatch") end

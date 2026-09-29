@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,6 +19,23 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Prove manually dispatched CI targets the protected current main
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" \
+            --output "$RUNNER_TEMP/current-main.json"
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha == $sha and .protected == true' \
+            "$RUNNER_TEMP/current-main.json" >/dev/null
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -26,10 +44,10 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Bind provider packages to exact main SHA
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: node scripts/exact-source-artifact.mjs create "$GITHUB_SHA"
       - name: Publish exact-source provider artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: r1-exact-source-${{ github.sha }}

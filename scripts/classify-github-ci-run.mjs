@@ -11,7 +11,7 @@ export function classifyExactMainCiRun(run, expectedRunId, expectedSha) {
     || run.name !== 'CI'
     || run.head_sha !== expectedSha
     || run.head_branch !== 'main'
-    || run.event !== 'push'
+    || !['push', 'workflow_dispatch'].includes(run.event)
     || run.status !== 'completed'
     || run.conclusion !== 'success') {
     return 'CI_RUN_NOT_EXACT_SUCCESS';
