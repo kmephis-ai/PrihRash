@@ -1886,3 +1886,85 @@ repository-side self-match, а не уже использованный create.
 (`099275d`, `2263cd9`, `7013075`) имеют exact create step `skipped`; следующий run допустим только на
 новом SHA, с успешным canonical CI и marker на canonical regression test. Любой ранее достигнутый
 create либо same-SHA replay блокирует попытку.
+
+#### One read-only durable recovery using the accepted version after PR #874
+
+The owner-authorized create-only run `36611387299` ended with
+`RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`. This proves the provider accepted one immutable
+recovery version; it does **not** classify YDB durable state or prove `COMMITTED`. The version was not
+invoked as part of that one-shot authority, which is now consumed.
+
+The next Incident-M adds a `reuse_deploy_attempt_run_id` mode to the canonical read-only recovery
+workflow. It is available only from an exact merged R1 PR whose title identifies its still-open tracking
+issue and whose body carries the marker below, on exact protected main with successful canonical CI.
+Before Yandex access, the workflow proves the exact latest failed recovery run
+(`36341844854`, deploy failed/invoke skipped), the exact successful source deploy-only run, its merged
+one-shot authorization PR (#874), complete history for all prior attempts (exactly one reached
+successful create, every earlier create skipped on a distinct SHA), and
+the current recovery PR marker. Missing, duplicate, same-SHA, incomplete or conflicting history stops.
+
+The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
+preflight, it reads the Function version list, operation list and exact recovery tag. Existing
+`classifyRecoveryFunctionDeployOutcome` must prove `EXACT_RECOVERY_VERSION_CREATED` for the successful
+deploy run's time window, with exact operation/version/tag/runtime/entrypoint/runtime-SA correlation.
+Only that enum admits one invocation of the existing write-free recovery handler. Missing, ambiguous,
+inactive, mismatched, untagged, or temporally uncorrelated metadata stops before invocation and does not
+re-arm deployment. Exact main is checked again immediately before invocation.
+
+The bounded outcomes have different next steps:
+
+- Exact version proven and read-only recovery returns `NOT_APPLIED / EMPTY_DURABLE_STATE`: continue only
+  through the applicable fresh recovery/readiness/bootstrap root-cause gates.
+- Read-only recovery returns `RECOVERY_REQUIRED` plus exact STAGING/VALIDATED evidence: choose the
+  already applicable resume, source-drift retirement or stale-VALIDATED Gate C path; no inference or
+  generic replay.
+- Recovery returns `APPLIED` or `NOT_APPLIED`: treat these as recovery-specific verdicts, then use the
+  exact applicable stage contract. Neither verdict alone proves R1 `COMMITTED`; run independent
+  reconciliation and catch-up review before claiming a baseline.
+- Version source cannot be proven: no invoke and no redeploy under the consumed one-shot; stop at the
+  provider metadata boundary and choose a new root-cause model.
+- Read-only invoke/classification fails: no replay or cleanup; fix the specific repository/read-path
+  cause before another read-only cycle.
+
+This reuse flow performs no YDB application writes, schema changes, IAM mutation, timer/cutover or
+authority switch. Raw provider/financial payload remains private. The marker is:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+```
+
+The reuse marker is a read-only `STAGING_PRESENT_UNCLASSIFIED` probe, not a create re-arm. Recovery
+autocontinue additionally proves that the named accepted-version source run is the successful, exact,
+one-shot deploy-only attempt for the same failed recovery run, and passes that run ID and the exact merged
+read-only PR number to the canonical recovery workflow. The workflow repeats all gates and the source PR
+marker checks; direct unmarked dispatch cannot select reuse mode. It also requires canonical current-main
+CI/artifact and latest failed bootstrap/recovery phase evidence.
+
+The successful source run's version metadata is checked in its exact bounded run window: Function version
+list, create operations and `get-by-tag` must identify one active
+`index.initialBootstrapRecoveryHandler` on the dedicated runtime service account and exact recovery tag.
+Only the unique `EXACT_RECOVERY_VERSION_CREATED` classification allows the tag invoke. The deploy step is
+explicitly `skipped` in reuse mode; all other classifier results end before invocation and cannot re-arm
+the consumed create. The handler package is the previously accepted read-only package; no schema or
+application writer path is included.
+
+For this path the marker carries two distinct run identities: `Recovery-Run-ID` binds the previously
+failed recovery attempt; `Recovery-Version-Run-ID` binds the later successful create-only run. They are
+not interchangeable. The recovery PR must also include the caller workflow, reuse-mode recovery workflow,
+the source-history test and this runbook. The exact marker is:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+```

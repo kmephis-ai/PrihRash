@@ -23,6 +23,21 @@ on:
         required: false
         type: string
         default: ''
+      reuse_deploy_attempt_run_id:
+        description: Exact successful create-only recovery deployment to reuse without creating another Function version
+        required: false
+        type: string
+        default: ''
+      reuse_failed_recovery_run_id:
+        description: Exact latest failed recovery run that authorized the reused create-only version
+        required: false
+        type: string
+        default: ''
+      reuse_source_pr_number:
+        description: Exact merged R1 PR authorizing the read-only reuse probe
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -44,6 +59,9 @@ jobs:
       RECOVERY_CONTROLLED_PREPARATION_ONLY: ${{ inputs.controlled_preparation_only && '1' || '0' }}
       RECOVERY_REVISION_CARDINALITY_ONLY: ${{ inputs.staging_revision_cardinality_only && '1' || '0' }}
       CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
+      REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
+      REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
+      REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -70,6 +88,21 @@ jobs:
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           test -n "$YC_LOCKBOX_SECRET_ID"
           recovery_mode_count=$((RECOVERY_SURFACE_ONLY + RECOVERY_CONTROLLED_PREPARATION_ONLY + RECOVERY_REVISION_CARDINALITY_ONLY))
+          reuse_field_count=0
+          [ -n "$REUSE_DEPLOY_ATTEMPT_RUN_ID" ] && reuse_field_count=$((reuse_field_count + 1))
+          [ -n "$REUSE_FAILED_RECOVERY_RUN_ID" ] && reuse_field_count=$((reuse_field_count + 1))
+          [ -n "$REUSE_SOURCE_PR_NUMBER" ] && reuse_field_count=$((reuse_field_count + 1))
+          if [ "$reuse_field_count" -ne 0 ] && [ "$reuse_field_count" -ne 3 ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_INPUT_INCOMPLETE'; exit 1
+          fi
+          if [ "$reuse_field_count" -eq 3 ] && { [ "$recovery_mode_count" -ne 0 ] || [ -n "$CAUSAL_BOOTSTRAP_RUN_ID" ]; }; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_MODE_CONFLICT'; exit 1
+          fi
+          if [ -n "$REUSE_DEPLOY_ATTEMPT_RUN_ID" ]; then
+            [[ "$REUSE_DEPLOY_ATTEMPT_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_RUN_ID_INVALID'; exit 1; }
+            [[ "$REUSE_FAILED_RECOVERY_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_RUN_ID_INVALID'; exit 1; }
+            [[ "$REUSE_SOURCE_PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NUMBER_INVALID'; exit 1; }
+          fi
           if [ "$recovery_mode_count" -gt 1 ]; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT'
             exit 1
@@ -109,6 +142,9 @@ jobs:
         env:
           GH_API_TOKEN: ${{ github.token }}
           CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
+          REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
+          REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
+          REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-gates"
@@ -206,6 +242,174 @@ jobs:
           ' "$tmp/bootstrap-jobs.json" >/dev/null 2>&1; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN'
             exit 1
+          fi
+
+          if [ -n "$REUSE_DEPLOY_ATTEMPT_RUN_ID" ]; then
+            [[ "$REUSE_DEPLOY_ATTEMPT_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_RUN_ID_INVALID'; exit 1;
+            }
+            [[ "$REUSE_FAILED_RECOVERY_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_RUN_ID_INVALID'; exit 1;
+            }
+            [[ "$REUSE_SOURCE_PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NUMBER_INVALID'; exit 1;
+            }
+
+            failed_recovery_runs="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100")"
+            latest_failed_recovery_id="$(jq -er '[.workflow_runs[] | select(
+              .name == "R1 initial bootstrap recovery" and .head_branch == "main"
+              and .event == "workflow_dispatch" and .conclusion == "failure"
+            )] | sort_by(.created_at,.id) | reverse | .[0].id // empty' <<<"$failed_recovery_runs")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_HISTORY_INVALID'; exit 1;
+            }
+            [ "$REUSE_FAILED_RECOVERY_RUN_ID" = "$latest_failed_recovery_id" ] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_RUN_NOT_LATEST'; exit 1;
+            }
+            failed_recovery_jobs="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/actions/runs/${REUSE_FAILED_RECOVERY_RUN_ID}/jobs?filter=latest&per_page=100")"
+            if ! jq -e '
+              [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
+              | ($jobs | length) == 1
+              and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
+              and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
+            ' <<<"$failed_recovery_jobs" >/dev/null; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 1;
+            fi
+
+            current_source_pr="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/pulls/${REUSE_SOURCE_PR_NUMBER}")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_READ_FAILED'; exit 1;
+              }
+            if ! jq -e --argjson number "$REUSE_SOURCE_PR_NUMBER" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .number == $number and .merged_at != null and .merge_commit_sha == $sha
+              and .base.ref == "main" and .head.repo.full_name == $repo
+              and (.title | test("^R1 #[1-9][0-9]*:"))
+            ' <<<"$current_source_pr" >/dev/null; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NOT_EXACT'; exit 1;
+            fi
+            authorization_issue_number="$(jq -er '.title | capture("^R1 #(?<number>[1-9][0-9]*):").number' <<<"$current_source_pr")"
+            authorization_issue_state="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/issues/${authorization_issue_number}" | jq -er '.state')" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_READ_FAILED'; exit 1;
+              }
+            [ "$authorization_issue_state" = 'open' ] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_INACTIVE'; exit 1;
+            }
+            source_pr_body="$(jq -r '.body // ""' <<<"$current_source_pr")"
+            source_pr_marker="$(jq -Rn --arg body "$source_pr_body" --arg failed_id "$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" '
+              def exact_line($prefix): ($body | split("\n") | map(select(startswith($prefix))));
+              (exact_line("Provider-Attempt: ")) as $attempt
+              | (exact_line("Recovery-Probe: ")) as $probe
+              | (exact_line("Expected-Transition: ")) as $expected
+              | (exact_line("Recovery-State: ")) as $state
+              | (exact_line("Recovery-Run-ID: ")) as $failed_run
+              | (exact_line("Recovery-Version-Run-ID: ")) as $version_run
+              | (exact_line("Observed-Signature: ")) as $observed
+              | (exact_line("Circuit-Rearm: ")) as $rearm
+              | (exact_line("Regression-Test: ")) as $test
+              | ($attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
+                and $probe == ["Recovery-Probe: READY"]
+                and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
+                and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
+                and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
+                and ($observed | length) == 0
+                and ($rearm | length) == 0
+                and $test == ["Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs"])
+            ')"
+            [ "$source_pr_marker" = 'true' ] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID'; exit 1;
+            }
+
+            reuse_attempts="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_READ_FAILED'; exit 1;
+              }
+            if [ "$(jq '.workflow_runs | length' <<<"$reuse_attempts")" -ge 100 ]; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_INCOMPLETE'; exit 1;
+            fi
+            printf '%s\n' "$reuse_attempts" > "$tmp/reuse-attempts.json"
+            printf '{"jobsByRun":[]}\n' > "$tmp/reuse-attempt-jobs.json"
+            reuse_attempt_ids="$(jq -er --arg expected "R1 recovery-only deploy attempt for failed run ${REUSE_FAILED_RECOVERY_RUN_ID}" '
+              [.workflow_runs[] | select(.name == "R1 initial bootstrap recovery deploy-only attempt"
+                and .head_branch == "main" and .event == "workflow_dispatch" and .display_title == $expected)]
+              | sort_by(.created_at,.id) | .[].id
+            ' <<<"$reuse_attempts")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_INVALID'; exit 1;
+            }
+            while IFS= read -r attempt_id; do
+              [ -n "$attempt_id" ] || continue
+              attempt_jobs_path="$tmp/reuse-attempt-${attempt_id}-jobs.json"
+              curl --fail --silent --show-error --header "$auth_header" \
+                --header 'Accept: application/vnd.github+json' \
+                "$api/actions/runs/${attempt_id}/jobs?filter=latest&per_page=100" \
+                --output "$attempt_jobs_path" || {
+                  echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_READ_FAILED'; exit 1;
+                }
+              jq --argjson run_id "$attempt_id" --slurpfile run_jobs "$attempt_jobs_path" \
+                '.jobsByRun += [{runId:$run_id,jobs:$run_jobs[0]}]' \
+                "$tmp/reuse-attempt-jobs.json" > "$tmp/reuse-attempt-jobs-next.json"
+              mv "$tmp/reuse-attempt-jobs-next.json" "$tmp/reuse-attempt-jobs.json"
+            done <<<"$reuse_attempt_ids"
+            reuse_source_state="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs reuse-source \
+              "$tmp/reuse-attempts.json" "$tmp/reuse-attempt-jobs.json" "$GITHUB_SHA" \
+              "$REUSE_DEPLOY_ATTEMPT_RUN_ID" "$REUSE_FAILED_RECOVERY_RUN_ID")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_HISTORY_CLASSIFIER_FAILED'; exit 1;
+              }
+            [ "$reuse_source_state" = 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN' ] || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_NOT_PROVEN'; exit 1;
+            }
+            reuse_source_run="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/actions/runs/${REUSE_DEPLOY_ATTEMPT_RUN_ID}")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_RUN_READ_FAILED'; exit 1;
+              }
+            reuse_source_sha="$(jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' <<<"$reuse_source_run")"
+            jq -e --argjson id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" \
+              --arg expected "R1 recovery-only deploy attempt for failed run ${REUSE_FAILED_RECOVERY_RUN_ID}" '
+              .id==$id and .name=="R1 initial bootstrap recovery deploy-only attempt"
+              and .head_branch=="main" and .event=="workflow_dispatch"
+              and .status=="completed" and .conclusion=="success" and .display_title==$expected
+              and (.run_started_at | type=="string") and (.updated_at | type=="string")
+            ' <<<"$reuse_source_run" >/dev/null || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_RUN_NOT_EXACT'; exit 1;
+            }
+            reuse_source_prs="$(curl --fail --silent --show-error --header "$auth_header" \
+              --header 'Accept: application/vnd.github+json' \
+              "$api/commits/${reuse_source_sha}/pulls")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_READ_FAILED'; exit 1;
+              }
+            reuse_source_pr="$(jq -cer --arg sha "$reuse_source_sha" --arg repo "$GITHUB_REPOSITORY" '
+              [.[] | select(.merged_at!=null and .merge_commit_sha==$sha and .base.ref=="main"
+                and .head.repo.full_name==$repo and (.title|startswith("R1 #453:")))]
+              | if length==1 then .[0] else empty end
+            ' <<<"$reuse_source_prs")" || {
+                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_NOT_EXACT'; exit 1;
+              }
+            jq -e --argjson number "$(jq -er '.number' <<<"$reuse_source_pr")" \
+              --arg sha "$reuse_source_sha" --argjson expected_run "$REUSE_FAILED_RECOVERY_RUN_ID" '
+              (.body // "" | split("\n")) as $lines
+              | (.number==$number and .merge_commit_sha==$sha
+                and ([$lines[] | select(.=="Provider-Attempt: READY")]|length)==1
+                and ([$lines[] | select(.=="Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED")]|length)==1
+                and ([$lines[] | select(.=="Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED")]|length)==1
+                and ([$lines[] | select(.=="Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED")]|length)==1
+                and ([$lines[] | select(.=="Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY")]|length)==1
+                and ([$lines[] | select(.==("Recovery-Run-ID: "+($expected_run|tostring))) ]|length)==1
+                and ([$lines[] | select(.=="Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs")]|length)==1)
+            ' <<<"$reuse_source_pr" >/dev/null || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_MARKER_INVALID'; exit 1;
+            }
+            reuse_started_at="$(jq -er '.run_started_at' <<<"$reuse_source_run")"
+            reuse_finished_at="$(jq -er '.updated_at' <<<"$reuse_source_run")"
+            printf 'reuse_source_started_at=%s\nreuse_source_finished_at=%s\nreuse_source_sha=%s\n' \
+              "$reuse_started_at" "$reuse_finished_at" "$reuse_source_sha" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install Yandex Cloud CLI
@@ -384,6 +588,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Re-verify exact current main before recovery deployment
+        if: inputs.reuse_deploy_attempt_run_id == ''
         shell: bash
         env:
           GH_API_TOKEN: ${{ github.token }}
@@ -398,7 +603,47 @@ jobs:
             exit 1
           fi
 
+      - name: Verify exact accepted recovery Function version for reuse
+        id: reuse-version
+        if: inputs.reuse_deploy_attempt_run_id != ''
+        shell: bash
+        env:
+          RUN_STARTED_AT: ${{ steps.recovery_prerequisites.outputs.reuse_source_started_at }}
+          RUN_FINISHED_AT: ${{ steps.recovery_prerequisites.outputs.reuse_source_finished_at }}
+          OPERATION_CREATOR_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+          RUNTIME_SERVICE_ACCOUNT_ID: ${{ env.PRIHRASH_YC_FUNCTION_SA_ID }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-reuse-version"
+          mkdir -p "$tmp"
+          yc serverless function version list --function-id "$PRIHRASH_YC_FUNCTION_ID" --limit 1000 \
+            --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_LIST_FAILED'; exit 1;
+            }
+          yc serverless function list-operations --id "$PRIHRASH_YC_FUNCTION_ID" --limit 1000 \
+            --format json --retry 0 --no-user-output >"$tmp/operations.json" 2>"$tmp/operations.err" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_OPERATION_LIST_FAILED'; exit 1;
+            }
+          if ! yc serverless function version get-by-tag --function-id "$PRIHRASH_YC_FUNCTION_ID" \
+            --tag r1-initial-bootstrap-recovery --format json-rest --retry 0 --no-user-output \
+            >"$tmp/tagged-version.json" 2>"$tmp/tagged-version.err"; then
+            printf '{}\n' >"$tmp/tagged-version.json"
+          fi
+          printf '{"functionTagHistoryRecord":[]}\n' >"$tmp/tag-history.json"
+          reuse_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+            "$tmp/versions.json" "$tmp/operations.json" "$tmp/tagged-version.json" "$tmp/tag-history.json" \
+            "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$OPERATION_CREATOR_SERVICE_ACCOUNT_ID" "$RUNTIME_SERVICE_ACCOUNT_ID")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_CLASSIFICATION_FAILED'; exit 1;
+            }
+          if [ "$reuse_evidence" != 'EXACT_RECOVERY_VERSION_CREATED' ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'
+            exit 1
+          fi
+          printf 'reuse_status=%s\n' "$reuse_evidence" >> "$GITHUB_OUTPUT"
+          printf '{"recoveryVersionReuse":"%s"}\n' "$reuse_evidence"
+
       - name: Deploy recovery-only Function version
+        if: inputs.reuse_deploy_attempt_run_id == ''
         shell: bash
         env:
           CAUSAL_BOOTSTRAP_STARTED_AT: ${{ steps.recovery_prerequisites.outputs.causal_bootstrap_started_at }}
@@ -488,6 +733,7 @@ jobs:
           fi
 
       - name: Invoke exact read-only recovery tag once
+        if: inputs.reuse_deploy_attempt_run_id == '' || steps.reuse-version.outputs.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'
         shell: bash
         run: |
           set -euo pipefail

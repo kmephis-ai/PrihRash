@@ -69,7 +69,95 @@ export function classifyRecoveryDeployAttemptHistory({
   return 'PRIOR_PREWRITE_STOP_ONLY';
 }
 
+export function classifyRecoveryVersionReuseSourceHistory({
+  runs,
+  jobsByRun,
+  currentSha,
+  sourceRunId,
+  failedRecoveryRunId,
+}) {
+  if (!runs || !Array.isArray(runs.workflow_runs) || runs.workflow_runs.length >= 100
+    || !Array.isArray(jobsByRun)
+    || !/^[0-9a-f]{40}$/.test(String(currentSha))
+    || !/^[1-9][0-9]*$/.test(String(sourceRunId))
+    || !/^[1-9][0-9]*$/.test(String(failedRecoveryRunId))) {
+    return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+  }
+  const expectedTitle = `R1 recovery-only deploy attempt for failed run ${failedRecoveryRunId}`;
+  const attempts = runs.workflow_runs.filter((run) => run && run.name === 'R1 initial bootstrap recovery deploy-only attempt'
+    && run.head_branch === 'main'
+    && run.event === 'workflow_dispatch'
+    && run.display_title === expectedTitle);
+  if (attempts.length === 0 || attempts.length >= 100) return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+
+  const ids = new Set();
+  const shas = new Set();
+  let sourceMatches = 0;
+  for (const attempt of attempts) {
+    if (!Number.isSafeInteger(attempt.id) || attempt.id < 1 || ids.has(attempt.id)
+      || !/^[0-9a-f]{40}$/.test(String(attempt.head_sha)) || shas.has(attempt.head_sha)
+      || attempt.head_sha === currentSha || attempt.status !== 'completed') {
+      return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+    }
+    ids.add(attempt.id);
+    shas.add(attempt.head_sha);
+
+    const records = jobsByRun.filter((record) => record && record.runId === attempt.id);
+    if (records.length !== 1 || !Array.isArray(records[0].jobs?.jobs)) {
+      return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+    }
+    const deployJobs = records[0].jobs.jobs.filter((job) => job && job.name === 'deploy-only-attempt');
+    if (deployJobs.length !== 1 || !Array.isArray(deployJobs[0].steps)
+      || deployJobs[0].conclusion !== attempt.conclusion) {
+      return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+    }
+    const stepConclusion = (name) => {
+      const matches = deployJobs[0].steps.filter((step) => step && step.name === name);
+      return matches.length === 1 ? matches[0].conclusion : null;
+    };
+    const createConclusion = stepConclusion(DEPLOY_STEP_NAME);
+    if (attempt.id === Number(sourceRunId)) {
+      sourceMatches += 1;
+      if (attempt.conclusion !== 'success' || createConclusion !== 'success') {
+        return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+      }
+      for (const stepName of [
+        'Prove exact merged authorization, CI and failed deploy boundary',
+        'Restore exact-main provider artifact',
+        'Re-assert exact main before the one-shot recovery-only version create',
+        'Re-assert exact main after the one-shot deploy-only result',
+        'Publish enum-only recovery deploy attempt result',
+      ]) {
+        if (stepConclusion(stepName) !== 'success') return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+      }
+      if (stepConclusion('Preserve failed create as the consumed terminal outcome') !== 'skipped') {
+        return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+      }
+    } else if (attempt.conclusion !== 'failure' || createConclusion !== 'skipped') {
+      return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+    }
+  }
+  return sourceMatches === 1 ? 'RECOVERY_VERSION_REUSE_SOURCE_PROVEN' : 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+}
+
 async function main(args) {
+  if (args[0] === 'reuse-source' && args.length === 6) {
+    try {
+      const [runs, jobMap] = await Promise.all([
+        readFile(args[1], 'utf8').then(JSON.parse),
+        readFile(args[2], 'utf8').then(JSON.parse),
+      ]);
+      return classifyRecoveryVersionReuseSourceHistory({
+        runs,
+        jobsByRun: jobMap.jobsByRun,
+        currentSha: args[3],
+        sourceRunId: args[4],
+        failedRecoveryRunId: args[5],
+      });
+    } catch {
+      return 'RECOVERY_VERSION_REUSE_SOURCE_UNPROVEN';
+    }
+  }
   const [runsPath, jobsPath, currentRunId, currentSha, failedRecoveryRunId] = args;
   if (!runsPath || !jobsPath || !currentRunId || !currentSha || !failedRecoveryRunId || args.length !== 5) {
     return 'ATTEMPT_HISTORY_INVALID';
