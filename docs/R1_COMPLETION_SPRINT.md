@@ -109,7 +109,10 @@ consumed provider attempt; поправка должна быть на distinct 
 preflight stop PR #870 вызван сравнением REST issue `state` с uppercase `OPEN`; exact recovery deploy
 attempt не начинался. Successor на новом SHA принимает только точный failed run и единственную skipped
 create step; success/failure/cancelled или missing/ambiguous job evidence потребляют/блокируют allowance.
-Same-SHA replay и любая повторная попытка после входа в deploy step запрещены.
+Same-SHA replay и любая повторная попытка после входа в deploy step запрещены. Если до create было
+несколько distinct-SHA preflight stops, continuation допускается лишь после точной классификации
+каждого run/job/deploy step как `skipped`; один reached create или incomplete/ambiguous история
+блокирует путь. Same-SHA replay запрещён независимо от заключения preflight.
 
 ## Постоянная делегация Owner до завершения R1
 

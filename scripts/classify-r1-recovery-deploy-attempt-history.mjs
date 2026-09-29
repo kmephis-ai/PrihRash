@@ -24,24 +24,49 @@ export function classifyRecoveryDeployAttemptHistory({
     && run.head_branch === 'main'
     && run.event === 'workflow_dispatch'
     && run.display_title === expectedTitle);
-  if (prior.length > 1) return 'ATTEMPT_HISTORY_AMBIGUOUS';
   if (prior.length === 0) return 'NO_PRIOR_ATTEMPT';
-  const [previous] = prior;
-  if (previous.head_sha === currentSha) return 'SAME_SHA_PREWRITE_STOP_FORBIDDEN';
-  if (previous.status === 'queued' || previous.status === 'in_progress') return 'PRIOR_ATTEMPT_ACTIVE';
-  if (previous.status !== 'completed' || !jobs || !Array.isArray(jobs.jobs)) {
+
+  const priorIds = new Set();
+  const priorShas = new Set();
+  for (const previous of prior) {
+    if (!previous || !Number.isSafeInteger(previous.id) || previous.id < 1 || priorIds.has(previous.id)) {
+      return 'ATTEMPT_HISTORY_AMBIGUOUS';
+    }
+    priorIds.add(previous.id);
+    if (!/^[0-9a-f]{40}$/.test(String(previous.head_sha))) return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+    if (priorShas.has(previous.head_sha)) return 'ATTEMPT_HISTORY_AMBIGUOUS';
+    priorShas.add(previous.head_sha);
+    if (previous.head_sha === currentSha) return 'SAME_SHA_PREWRITE_STOP_FORBIDDEN';
+    if (previous.status === 'queued' || previous.status === 'in_progress') return 'PRIOR_ATTEMPT_ACTIVE';
+    if (previous.status !== 'completed') return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+  }
+
+  let jobsByRun;
+  if (Array.isArray(jobs?.jobsByRun)) {
+    jobsByRun = jobs.jobsByRun;
+  } else if (prior.length === 1 && Array.isArray(jobs?.jobs)) {
+    jobsByRun = [{ runId: prior[0].id, jobs }];
+  } else {
     return 'ATTEMPT_HISTORY_UNCLASSIFIED';
   }
 
-  const deployJobs = jobs.jobs.filter((job) => job && job.name === 'deploy-only-attempt');
-  if (deployJobs.length !== 1 || !Array.isArray(deployJobs[0].steps)) return 'ATTEMPT_HISTORY_UNCLASSIFIED';
-  const deploySteps = deployJobs[0].steps.filter((step) => step && step.name === DEPLOY_STEP_NAME);
-  if (deploySteps.length !== 1) return 'ATTEMPT_HISTORY_UNCLASSIFIED';
-  if (deploySteps[0].conclusion === 'skipped') return 'PRIOR_PREWRITE_STOP_ONLY';
-  if (['success', 'failure', 'cancelled'].includes(deploySteps[0].conclusion)) {
-    return 'PRIOR_ATTEMPT_CONSUMED';
+  for (const previous of prior) {
+    const runJobs = jobsByRun.filter((entry) => entry && entry.runId === previous.id);
+    if (runJobs.length !== 1 || !Array.isArray(runJobs[0].jobs?.jobs)) {
+      return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+    }
+    const deployJobs = runJobs[0].jobs.jobs.filter((job) => job && job.name === 'deploy-only-attempt');
+    if (deployJobs.length !== 1 || !Array.isArray(deployJobs[0].steps)) return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+    const deploySteps = deployJobs[0].steps.filter((step) => step && step.name === DEPLOY_STEP_NAME);
+    if (deploySteps.length !== 1) return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+    if (deploySteps[0].conclusion === 'skipped') continue;
+    if (['success', 'failure', 'cancelled'].includes(deploySteps[0].conclusion)) {
+      return 'PRIOR_ATTEMPT_CONSUMED';
+    }
+    return 'ATTEMPT_HISTORY_UNCLASSIFIED';
   }
-  return 'ATTEMPT_HISTORY_UNCLASSIFIED';
+
+  return 'PRIOR_PREWRITE_STOP_ONLY';
 }
 
 async function main(args) {
