@@ -182,7 +182,9 @@ jobs:
           curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
             "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100" \
             --output "$tmp/prior-attempts.json"
-          if jq -e --arg sha "$GITHUB_SHA" '.workflow_runs | any(.head_sha == $sha)' \
+          if jq -e --arg sha "$GITHUB_SHA" --argjson self_id "$GITHUB_RUN_ID" '
+            .workflow_runs | any(.id != $self_id and .head_sha == $sha)
+          ' \
             "$tmp/prior-attempts.json" >/dev/null; then
             echo 'RECOVERY_DEPLOY_ATTEMPT_ALREADY_USED_FOR_SHA'; exit 1
           fi

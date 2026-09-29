@@ -23,6 +23,7 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(workflow, /GITHUB_RUN_ATTEMPT/);
   assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_FOR_FAILED_RUN/);
   assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_ALREADY_USED_FOR_SHA/);
+  assert.match(workflow, /--argjson self_id "\$GITHUB_RUN_ID" '[\s\S]*?\.id != \$self_id and \.head_sha == \$sha/);
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs/);
   assert.match(workflow, /PRIOR_PREWRITE_STOP_ONLY/);
   assert.match(historyClassifier, /PREWRITE_STOP_ONLY/);

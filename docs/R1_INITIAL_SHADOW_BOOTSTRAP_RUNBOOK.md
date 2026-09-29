@@ -1870,3 +1870,19 @@ Only when all prior stops on distinct SHAs are proven prewrite-only does the one
 Any create with `success`/`failure`/`cancelled`, same SHA, active run, or missing/duplicate/ambiguous
 evidence blocks continuation. The next marker must use the canonical regression-test path above. No
 same-SHA retry, Function invoke, IAM change, cleanup or YDB/Google action is authorized.
+
+#### Self-run collision in exact-SHA preflight after PR #873
+
+Deploy-only run `36609062283` на exact main `7013075d385667988ce49328fd0797b259bd91b3` прошёл prior-run
+history classification, затем остановился с `RECOVERY_DEPLOY_ATTEMPT_ALREADY_USED_FOR_SHA`. Его
+same-SHA API query включала только что dispatch-нутый текущий workflow run и сравнивала только
+`head_sha`; поэтому сама эта попытка совпала с guard. Job evidence confirms create step `skipped`;
+OIDC exchange, Yandex CLI, Function preflight и provider operation были skipped. Это доказанный
+repository-side self-match, а не уже использованный create.
+
+Следующий exact-SHA successor исключает из same-SHA query только `GITHUB_RUN_ID` текущего workflow.
+Все остальные runs с тем же SHA остаются блокирующими; cross-SHA history по failed run по-прежнему
+проверяет каждый exact attempt, job и create step. Для recovery `36341844854` три предыдущих SHA
+(`099275d`, `2263cd9`, `7013075`) имеют exact create step `skipped`; следующий run допустим только на
+новом SHA, с успешным canonical CI и marker на canonical regression test. Любой ранее достигнутый
+create либо same-SHA replay блокирует попытку.
