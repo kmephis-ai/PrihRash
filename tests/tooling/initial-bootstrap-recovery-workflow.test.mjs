@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
@@ -10,8 +11,11 @@ const bootstrapWorkflow = await readFile('.github/workflows/r1-initial-shadow-bo
 const controlledWorkflow = await readFile('.github/workflows/r1-initial-controlled-rebuild.yml', 'utf8');
 const swapRecoveryWorkflow = await readFile('.github/workflows/r1-initial-controlled-rebuild-swap-recovery.yml', 'utf8');
 const orchestratorWorkflow = await readFile('.github/workflows/r1-initial-bootstrap-orchestrator.yml', 'utf8');
+const recoveryAutocontinueWorkflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', 'utf8');
 const bootstrapApplication = await readFile('src/migration/initialBootstrapApplication.ts', 'utf8');
 const gateCGuard = await readFile('src/migration/initialBootstrapGateCGuard.ts', 'utf8');
+const recoveryDeployHistory = await readFile('scripts/classify-r1-recovery-deploy-attempt-history.mjs', 'utf8');
+const recoveryDeployClassifier = await readFile('scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs', 'utf8');
 
 test('initial bootstrap recovery workflow stays manual-only and exact-main guarded', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -80,6 +84,74 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
   assert.match(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
+});
+
+test('read-only reuse requires exact accepted deploy history and version metadata, then skips every create', () => {
+  assert.match(workflow, /reuse_deploy_attempt_run_id:/);
+  assert.match(workflow, /reuse_failed_recovery_run_id:/);
+  assert.match(workflow, /reuse_source_pr_number:/);
+  assert.match(recoveryAutocontinueWorkflow, /Recovery-Version-Run-ID/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_MODE_CONFLICT/);
+  assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs reuse-source/);
+  assert.match(recoveryDeployHistory, /RECOVERY_VERSION_REUSE_SOURCE_PROVEN/);
+  assert.match(recoveryDeployHistory, /Preserve failed create as the consumed terminal outcome/);
+  assert.match(recoveryAutocontinueWorkflow, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(recoveryAutocontinueWorkflow, /Recovery-Version-Run-ID/);
+  assert.match(workflow, /Verify exact accepted recovery Function version for reuse/);
+  assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
+  assert.match(workflow, /\[ "\$reuse_evidence" != 'EXACT_RECOVERY_VERSION_CREATED' \]/);
+  assert.match(recoveryDeployClassifier, /EXACT_RECOVERY_VERSION_CREATED/);
+  assert.match(workflow, /name: Deploy recovery-only Function version\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
+  assert.match(workflow, /name: Re-verify exact current main before recovery deployment\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
+  assert.match(workflow, /name: Invoke exact read-only recovery tag once\s+if: inputs\.reuse_deploy_attempt_run_id == '' \|\| steps\.reuse-version\.outputs\.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'/);
+  assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID/);
+  assert.match(workflow, /\.number == \$number and \.merged_at != null and \.merge_commit_sha == \$sha/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NOT_EXACT/);
+  assert.match(workflow, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
+  assert.match(workflow, /Recovery-Probe: READY/);
+  assert.match(workflow, /READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(workflow, /Recovery-Version-Run-ID/);
+  assert.match(workflow, /\$failed_run == \[\("Recovery-Run-ID: " \+ \$failed_id\)\]/);
+  assert.match(workflow, /\$version_run == \[\("Recovery-Version-Run-ID: " \+ \$version_id\)\]/);
+  assert.doesNotMatch(workflow, /issues\/(?:630|453)\b/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_MARKER_INVALID/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_CLASSIFICATION_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_INACTIVE/);
+});
+
+test('read-only reuse authorization PR is distinct from the historical deploy-authority PR', (t) => {
+  const filter = workflow.match(/source_pr_marker="\$\(jq -Rn --arg body "\$source_pr_body" --arg failed_id "\$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "\$REUSE_DEPLOY_ATTEMPT_RUN_ID" '\r?\n([\s\S]*?)\r?\n            '\)"/)?.[1];
+  assert.ok(filter, 'extract the canonical reuse-authorization PR marker filter');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const body = [
+    'Provider-Attempt: NOT_AUTHORIZED',
+    'Recovery-Probe: READY',
+    'Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION',
+    'Recovery-State: STAGING_PRESENT_UNCLASSIFIED',
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Regression-Test: tests/tooling/initial-bootstrap-recovery-workflow.test.mjs',
+  ].join('\n');
+  const parse = (marker) => {
+    const result = spawnSync('jq', [
+      '-Rn', '--arg', 'body', marker,
+      '--arg', 'failed_id', '36341844854',
+      '--arg', 'version_id', '36611387299', filter,
+    ], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  assert.equal(parse(body), true);
+  assert.equal(parse(body.replace('Recovery-Version-Run-ID: 36611387299', 'Recovery-Version-Run-ID: 36611387298')), false);
+  assert.equal(parse(`${body}\nObserved-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`), false);
+  assert.equal(parse(body.replace('Provider-Attempt: NOT_AUTHORIZED', 'Provider-Attempt: READY')), false);
 });
 
 test('initial bootstrap recovery persists only enum-only classification evidence', () => {

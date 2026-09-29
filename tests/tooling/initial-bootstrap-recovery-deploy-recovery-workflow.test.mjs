@@ -124,8 +124,8 @@ test('recovery autocontinue routes only its allowlisted exact-run recovery marke
   assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
   assert.match(autocontinue, /OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY/);
   assert.match(autocontinue, /RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED/);
-  assert.match(autocontinue, /tracking_issue_number='453'/);
-  assert.match(autocontinue, /tracking_issue_number='630'/);
+  assert.match(autocontinue, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
+  assert.doesNotMatch(autocontinue, /tracking_issue_number='(?:453|630)'/);
   assert.match(autocontinue, /\$api\/issues\/\$\{tracking_issue_number\}/);
   assert.match(autocontinue, /r1-initial-bootstrap-recovery-deploy-attempt\.yml/);
   assert.match(autocontinue, /RECOVERY_DEPLOY_ATTEMPT_CHANGESET_INVALID/);

@@ -115,6 +115,21 @@ Same-SHA replay и любая повторная попытка после вх�
 блокирует путь. Same-SHA replay запрещён независимо от заключения preflight. Same-SHA lookup исключает
 собственный текущий workflow run по run ID, но ни один другой run на этом SHA.
 
+После успешного owner-authorized `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE` create allowance
+считается consumed, а durable YDB state остаётся не классифицированным. Следующая bounded read-only
+recovery может использовать только эту accepted version: новый exact-main PR/marker связывает её с
+успешным deploy-attempt run ID, история доказывает единственный reached create и `skipped` у всех
+остальных попыток, а свежие tag/version/operation metadata должны доказать ту же активную private
+recovery version. Reuse mode пропускает deployment и делает ровно один read-only invoke. Если version
+provenance или конфигурация не доказаны, он завершает STOP до invoke и не повторяет deployment.
+Reuse marker связывает точные failed `Recovery-Run-ID` и successful `Recovery-Version-Run-ID`;
+autocontinue передаёт их только canonical recovery workflow, который повторно доказывает run history,
+PR markers и exact provider version metadata. Reuse не создаёт Function version и вызывает только
+write-free recovery handler один раз. Все ожидаемые version metadata shapes и failed/missing/ambiguous
+reuse outcomes закрываются вместе synthetic fixtures в одном Incident-M: exact version → durable
+classification; unproven version → STOP without invoke/redeploy; classified durable state → отдельный
+state-specific engineering next step. Не дробить этот boundary на enum-only refinements.
+
 ## Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,

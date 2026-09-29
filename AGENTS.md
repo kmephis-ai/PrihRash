@@ -228,6 +228,24 @@ stops, continuation допускается только когда exact run/job
 сам по себе не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет
 правило, что обычный diagnostic-only PR не вооружает provider attempt.
 
+После `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE` one-shot create закрыт. Отдельная
+stage-appropriate read-only durable recovery может reuse-ить только уже созданную версию, если новый
+exact-main read-only marker, успешный exact deploy-run, все prior deploy-step evidence и свежая Yandex
+tag/version metadata доказывают unique active private recovery version. Reuse path обязан пропустить
+Function-version create и вызвать только write-free recovery handler ровно один раз; если provenance,
+tag, metadata или exact-main gate не доказаны — STOP без invoke/redeploy. Результат recovery ведёт к
+state-specific решению; неизвестный outcome не разрешает replay, а `COMMITTED` требует независимой
+canonical reconciliation.
+Read-only reuse marker обязан однозначно связать failed recovery run и successful version-create
+run ID; autocontinue передаёт оба точных ID только в canonical recovery workflow. Workflow повторно
+проверяет обе истории, source PR/marker и active tag metadata до invocation. Этот marker не вооружает
+новый create или write-capable bootstrap invoke.
+Единственный reuse marker дополнительно использует `Recovery-Version-Run-ID`; его allowed shape и
+synthetic terminal cases проверяются в одном Incident-M вместе с caller/recovery workflows. Exact
+version proof → одна read-only durable classification; missing/ambiguous metadata → STOP без invoke;
+read-only recovery verdict → разные state-specific bootstrap, reconciliation/catch-up или root-cause
+решения. Diagnostic enum не создаёт отдельную PR-цепочку.
+
 ### 8.2. R1 completion sprint и multi-agent handoff
 
 Пока R1 не имеет доказанного первого `COMMITTED` baseline, operational process определяется
