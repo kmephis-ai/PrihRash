@@ -65,6 +65,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     valid: true,
     surfaceOnly: true,
     functionDeployRecovery: false,
+    recoveryFunctionDeployAttempt: false,
     recoveryRunId: null,
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   });
@@ -79,6 +80,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     valid: true,
     surfaceOnly: false,
     functionDeployRecovery: false,
+    recoveryFunctionDeployAttempt: false,
     recoveryRunId: null,
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   });
@@ -89,6 +91,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     valid: true,
     surfaceOnly: false,
     functionDeployRecovery: false,
+    recoveryFunctionDeployAttempt: false,
     recoveryRunId: null,
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   });
@@ -123,6 +126,7 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
     valid: true,
     surfaceOnly: false,
     functionDeployRecovery: true,
+    recoveryFunctionDeployAttempt: false,
     recoveryRunId: '36341844854',
     regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs',
   });
@@ -130,6 +134,47 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
   assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
   assert.equal(parse({ 'Expected-Transition': 'READ_ONLY_EXACT_REVISION_CLASSIFICATION' }).valid, false);
   assert.equal(parse({ 'Provider-Attempt': 'READY' }).valid, false);
+});
+
+test('Owner-authorized recovery Function create marker arms exactly one deploy-only run for the proven failed run', (t) => {
+  const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
+  assert.ok(filter, 'extract the live jq marker filter from the workflow');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+
+  const parse = (overrides = {}) => {
+    const lines = {
+      'Provider-Attempt': 'READY',
+      'Observed-Signature': 'INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED',
+      'Expected-Transition': 'RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED',
+      'Recovery-State': 'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
+      'Circuit-Rearm': 'OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY',
+      'Recovery-Run-ID': '36341844854',
+      'Regression-Test': 'tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
+      ...overrides,
+    };
+    const body = Object.entries(lines).map(([key, value]) => `${key}: ${value}`).join('\n');
+    const result = spawnSync('jq', ['-Rn', '--arg', 'body', body, filter], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+
+  assert.deepEqual(parse(), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: false,
+    recoveryFunctionDeployAttempt: true,
+    recoveryRunId: '36341844854',
+    regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
+  });
+  assert.equal(parse({ 'Provider-Attempt': 'NOT_AUTHORIZED' }).valid, false);
+  assert.equal(parse({ 'Recovery-Run-ID': '36341844855' }).valid, false);
+  assert.equal(parse({ 'Circuit-Rearm': 'ROOT_CAUSE_FIX' }).valid, false);
+  assert.equal(parse({ 'Recovery-Probe': 'READY' }).valid, false);
+  assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
 });
 
 test('post-PR-840 deployment failure remains unclassified and disarms deployment/invocation', () => {

@@ -1747,3 +1747,44 @@ This Incident-M does not authorize Function deploy/invoke, Google/YDB access, re
 cutover, or authority change. Any one future read-only recovery remains exact-main and exact-failed-run
 bound. Owner anti-S-unit rules are synchronized here, `AGENTS.md`, and `docs/R1_COMPLETION_SPRINT.md`
 in the same causal PR.
+
+### Owner-authorized one-shot recovery-only Function deploy after PR #869
+
+Exact-main deploy classification `36554205552` reached its provider reads and returned
+`RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW`; the Audit Trails source decision was
+`SOURCE_EVIDENCE_UNUSABLE` because the complete configured-Cloud folder inventory did not contain the
+exact Function folder. Event read was `AUDIT_EVENT_READ_NOT_ATTEMPTED`. This closes the Audit Trails
+branch; no additional Audit Trails query/discriminator is allowed. The provider classification does not
+prove `APPLIED` or `NOT_APPLIED`, and does not authorize a bootstrap/recovery Function invoke.
+
+After this exact-run deploy classification, Owner authorized in chat exactly one new recovery-only
+Function-version create for failed recovery run `36341844854`, with **Function invoke explicitly out of
+scope**. The authorization was recorded on active Issue #630. It does not authorize another attempt,
+YDB/Google access, IAM changes, cleanup, or any financial write. The next causal PR uses a dedicated
+deploy-only workflow and one machine-readable block:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED
+Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY
+Recovery-Run-ID: 36341844854
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs
+```
+
+The workflow re-proves exact current main/CI, exact source PR and this latest failed run's deploy-failed
+/ invoke-skipped phase, shared writer exclusion, private trigger-free Function boundary, exact runtime
+SA and Lockbox secret metadata. It executes one `yc serverless function version create --retry 0`, captures
+stderr only in runner-temporary storage, and publishes a synthetic-tested allowlisted result:
+`PERMISSION_DENIED` with a bounded resource boundary, another documented provider status class, or
+`OTHER/PROVIDER_ERROR_DETAIL_UNAVAILABLE`; successful CLI completion emits
+`RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`. The raw provider response, IDs and secret values
+are never published. It does **not** call the Function or access YDB/Google.
+
+Every possible result consumes the one-shot authority for this exact failed run. A concrete
+`INVALID_ARGUMENT`-class result permits a repository request fix; a proven missing permission is a
+separate exact-scope authority boundary; resource/policy/unclassified evidence stops for a new causal
+decision. Success means only that provider accepted the recovery-only version create, not that YDB is
+classified or `COMMITTED`. No automatic second deploy, Function invoke, IAM mutation, replay, cleanup,
+timer, cutover or authority change follows.
