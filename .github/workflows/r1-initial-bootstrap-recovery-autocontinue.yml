@@ -195,16 +195,6 @@ jobs:
           fi
 
           if [ "$(jq -r '.recoveryFunctionDeployAttempt' <<<"$marker")" = 'true' ]; then
-            issue_630_state="$(curl --fail --silent --show-error \
-              --header "$auth_header" --header "$accept_header" \
-              "$api/issues/630" | jq -er '.state')"
-            if [ "$issue_630_state" != 'open' ]; then
-              echo 'R1_RECOVERY_DEPLOY_ATTEMPT_TRACKING_ISSUE_INACTIVE'
-              exit 0
-            fi
-          fi
-
-          if [ "$(jq -r '.recoveryFunctionDeployAttempt' <<<"$marker")" = 'true' ]; then
             failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
             attempts_for_failed_run="$(curl --fail --silent --show-error \
               --header "$auth_header" --header "$accept_header" \
@@ -214,10 +204,39 @@ jobs:
             if [ "$(jq '.workflow_runs | length' <<<"$attempts_for_failed_run")" -ge 100 ]; then
               echo 'R1_RECOVERY_DEPLOY_ATTEMPT_HISTORY_INCOMPLETE'; exit 0
             fi
-            if jq -e --arg expected "R1 recovery-only deploy attempt for failed run ${failed_run_id}" '
-              .workflow_runs | any(.display_title == $expected)
-            ' <<<"$attempts_for_failed_run" >/dev/null; then
-              echo 'R1_RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_FOR_FAILED_RUN'; exit 0
+            prior_attempts="$(jq -c --arg expected "R1 recovery-only deploy attempt for failed run ${failed_run_id}" '
+              [.workflow_runs[] | select(.name == "R1 initial bootstrap recovery deploy-only attempt"
+                and .head_branch == "main" and .event == "workflow_dispatch" and .display_title == $expected)]
+            ' <<<"$attempts_for_failed_run")"
+            prior_attempt_count="$(jq 'length' <<<"$prior_attempts")"
+            if [ "$prior_attempt_count" -gt 1 ]; then
+              echo 'R1_RECOVERY_DEPLOY_ATTEMPT_HISTORY_AMBIGUOUS'; exit 0
+            fi
+            if [ "$prior_attempt_count" = '1' ]; then
+              prior_attempt_id="$(jq -er '.[0].id | select(type == "number")' <<<"$prior_attempts")"
+              prior_attempt_sha="$(jq -er '.[0].head_sha | select(type == "string")' <<<"$prior_attempts")"
+              prior_attempt_status="$(jq -er '.[0].status | select(type == "string")' <<<"$prior_attempts")"
+              if [ "$prior_attempt_sha" = "$SOURCE_SHA" ]; then
+                echo 'R1_RECOVERY_DEPLOY_ATTEMPT_SAME_SHA_REPLAY_FORBIDDEN'; exit 0
+              fi
+              if [ "$prior_attempt_status" != 'completed' ]; then
+                echo 'R1_RECOVERY_DEPLOY_ATTEMPT_ALREADY_ACTIVE_OR_UNCLASSIFIED'; exit 0
+              fi
+              prior_attempt_jobs="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/${prior_attempt_id}/jobs?filter=latest&per_page=100")" || {
+                  echo 'R1_RECOVERY_DEPLOY_ATTEMPT_PRIOR_PHASE_READ_FAILED'; exit 0;
+                }
+              if ! jq -e '
+                [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
+                | ($jobs | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Create exactly one read-only recovery Function version without invoking it"
+                  and .conclusion == "skipped"
+                )] | length) == 1
+              ' <<<"$prior_attempt_jobs" >/dev/null; then
+                echo 'R1_RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_OR_UNCLASSIFIED'; exit 0
+              fi
             fi
             source_pr_number="$(jq -er '.number | select(type == "number")' <<<"$source_pr")"
             source_files="$(curl --fail --silent --show-error \
@@ -229,8 +248,10 @@ jobs:
               any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml" and .status != "removed")
               and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
               and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs" and .status != "removed")
+              and any(.[]; .filename == "scripts/classify-r1-recovery-deploy-attempt-history.mjs" and .status != "removed")
               and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs" and .status != "removed")
               and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-attempt-classifier.test.mjs" and .status != "removed")
+              and any(.[]; .filename == "tests/tooling/r1-recovery-deploy-attempt-history.test.mjs" and .status != "removed")
               and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
               and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
               and any(.[]; .filename == "AGENTS.md" and .status != "removed")
@@ -268,7 +289,13 @@ jobs:
             fi
           fi
 
-          issue_state="$(curl --fail --silent --show-error             --header "$auth_header"             --header "$accept_header"             "$api/issues/453" | jq -er '.state')"
+          tracking_issue_number='453'
+          if [ "$(jq -r '.recoveryFunctionDeployAttempt' <<<"$marker")" = 'true' ]; then
+            tracking_issue_number='630'
+          fi
+          issue_state="$(curl --fail --silent --show-error \
+            --header "$auth_header" --header "$accept_header" \
+            "$api/issues/${tracking_issue_number}" | jq -er '.state')"
           if [ "$issue_state" != 'open' ]; then
             echo 'R1_RECOVERY_AUTOCONTINUE_ISSUE_INACTIVE'
             exit 0

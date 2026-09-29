@@ -213,10 +213,15 @@ immutable recovery Function version, не вызывает её, не трога
 лишь в runner-temporary file и публикует allowlisted error class/resource boundary enums. Raw stderr,
 IDs и secret values не публикуются. Возможный `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`,
 known error class или unresolved error — терминальный outcome этого authorization: workflow проверяет
-cross-SHA history для exact failed run и никогда не dispatch-ится повторно для него. Следующий
-Function invoke/IAM change требует собственной applicable authority; ни один deploy result сам по себе
-не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет правило, что
-обычный diagnostic-only PR не вооружает provider attempt.
+cross-SHA history по exact failed run и не dispatch-ится повторно, если create step уже был достигнут.
+Синтетически доказанный pre-provider stop, где create step `skipped`, не расходует одноразовый create
+allowance; continuation допускается только на новом exact SHA после исправления самого preflight gate.
+PR #870 был exact таким случаем: issue-state casing блокировал deploy до provider; issue #453 проверка
+должна использовать REST `state == open`. Следующий attempt-history classifier требует предыдущий exact
+run/job/step и не выводит `skipped` по одному run conclusion.
+Следующий Function invoke/IAM change требует собственной applicable authority; ни один deploy result
+сам по себе не доказывает YDB durable state или `COMMITTED`. Этот bounded Owner exception не отменяет
+правило, что обычный diagnostic-only PR не вооружает provider attempt.
 
 ### 8.2. R1 completion sprint и multi-agent handoff
 

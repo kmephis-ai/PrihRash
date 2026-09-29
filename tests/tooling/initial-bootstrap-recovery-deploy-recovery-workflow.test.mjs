@@ -124,9 +124,17 @@ test('recovery autocontinue routes only its allowlisted exact-run recovery marke
   assert.match(autocontinue, /Invoke exact read-only recovery tag once" and \.conclusion == "skipped"/);
   assert.match(autocontinue, /OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY/);
   assert.match(autocontinue, /RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED/);
+  assert.match(autocontinue, /tracking_issue_number='453'/);
+  assert.match(autocontinue, /tracking_issue_number='630'/);
+  assert.match(autocontinue, /\$api\/issues\/\$\{tracking_issue_number\}/);
   assert.match(autocontinue, /r1-initial-bootstrap-recovery-deploy-attempt\.yml/);
   assert.match(autocontinue, /RECOVERY_DEPLOY_ATTEMPT_CHANGESET_INVALID/);
-  assert.match(autocontinue, /R1_RECOVERY_DEPLOY_ATTEMPT_HISTORY_INCOMPLETE/);
+  assert.match(autocontinue, /workflow_runs \| length/);
+  assert.match(autocontinue, /R1_RECOVERY_DEPLOY_ATTEMPT_SAME_SHA_REPLAY_FORBIDDEN/);
+  assert.match(autocontinue, /prior_attempt_status" != 'completed'/);
+  assert.match(autocontinue, /R1_RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_OR_UNCLASSIFIED/);
+  assert.match(autocontinue, /\.name == "Create exactly one read-only recovery Function version without invoking it"/);
+  assert.match(autocontinue, /Create exactly one read-only recovery Function version without invoking it"\s+and \.conclusion == "skipped"/);
   assert.match(autocontinue, /\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml/);
   assert.match(autocontinue, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
   assert.match(autocontinue, /\.filename == "AGENTS\.md"/);
