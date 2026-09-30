@@ -460,6 +460,38 @@ mutation/authority switch, `MEMBER` activation, cap/IAM widening или отме
 workflow/autocontinue surfaces и delegated authority retires после доказанного initial
 `COMMITTED` + required catch-up/reconciliation completion.
 
+### 8.4. Owner-approved async invocation contract для R1
+
+После двух consumed root-cause attempts с одинаковой внешней подписью
+`FAIL/INITIAL_BOOTSTRAP_INVOKE_FAILED` synchronous circuit остаётся
+`BLOCKED_NEEDS_ROOT_CAUSE`; третий sync bootstrap/replay запрещён.
+
+Owner 2026-10-01 отдельно разрешил bounded R1 item для Yandex Cloud Functions asynchronous
+invocation contract. Это новая provider-delivery model, а не rearm старого circuit. До отдельного
+exact-main provider marker contract work остаётся repository/test-only.
+
+Обязательные границы async path:
+
+- Yandex async feature считать Preview и использовать только внутри временной R1 bootstrap surface;
+- `async-max-retries=0`; provider retries запрещены;
+- success/failure YMQ targets не создавать и не настраивать;
+- новые paid resources запрещены;
+- не добавлять IAM binding ради async path: использовать только уже существующий exact-Function
+  `functions.functionInvoker` service account после read-back; иначе STOP;
+- async version должна иметь отдельный tag `r1-initial-bootstrap-async`;
+- HTTPS `integration=async` должен принимать только `HTTP 202`; это означает только
+  `INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`, не `COMMITTED`;
+- тело async HTTP response игнорировать и не публиковать;
+- после `202` не делать повторный invoke;
+- durable outcome классифицировать только существующим read-only recovery после полного
+  Function execution window; до recovery никакого inferred success/failure;
+- `COMMITTED` по-прежнему требует independent reconciliation/catch-up;
+- Google остаётся authoritative.
+
+Любая будущая provider-capable интеграция async path требует отдельного exact-main PR marker,
+canonical CI, fresh recovery/stale-retirement gates, fresh readiness, single-writer и one-shot
+async admission. Старый sync root-cause attempt counter не сбрасывать и не обходить.
+
 ## 9. CI
 
 На старте GitHub Actions должны проверять минимум:
