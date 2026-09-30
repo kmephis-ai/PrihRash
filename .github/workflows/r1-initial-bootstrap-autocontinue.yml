@@ -104,6 +104,9 @@ jobs:
           source_is_r1="$(jq -r --arg prefix "$r1_title_prefix" '.title | startswith($prefix)' <<<"$source_pr")"
           allow_staging_resume='false'
           allow_stale_staging_retirement='false'
+          async_invocation='false'
+          async_provider_attempt='false'
+          async_recovery_run_id=''
           orchestrator_preflight='false'
           preflight_recovery_run_id=''
 
@@ -156,7 +159,57 @@ jobs:
               marker="$preflight_marker"
               preflight_recovery_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
             else
-              marker="$(jq -Rn --arg body "$source_pr_body" '
+              async_marker="$(jq -Rn --arg body "$source_pr_body" '
+                def exact_line($prefix):
+                  ($body | split("\n") | map(select(startswith($prefix))));
+                (exact_line("Async-Provider-Attempt: ")) as $attempt
+                | (exact_line("Owner-Decision: ")) as $owner
+                | (exact_line("Observed-Recovery: ")) as $observed_recovery
+                | (exact_line("Expected-Transition: ")) as $expected
+                | (exact_line("Recovery-State: ")) as $recovery
+                | (exact_line("Recovery-Run-ID: ")) as $recovery_run
+                | (exact_line("Regression-Test: ")) as $test
+                | (exact_line("Provider-Attempt: ")) as $sync_attempt
+                | (exact_line("Observed-Signature: ")) as $observed_signature
+                | (exact_line("Circuit-Rearm: ")) as $rearm
+                | (exact_line("Orchestrator-Preflight: ")) as $preflight
+                | {
+                    valid: (
+                      $attempt == ["Async-Provider-Attempt: READY"]
+                      and $owner == ["Owner-Decision: R1_ASYNC_INVOCATION_CONTRACT_APPROVED"]
+                      and $observed_recovery == ["Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
+                      and $expected == ["Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED"]
+                      and $recovery == ["Recovery-State: STAGING_STALE_RETIREABLE"]
+                      and ($recovery_run | length) == 1
+                      and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
+                      and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"]
+                      and ($sync_attempt | length) == 0
+                      and ($observed_signature | length) == 0
+                      and ($rearm | length) == 0
+                      and ($preflight | length) == 0
+                    ),
+                    recoveryRunId: (
+                      if ($recovery_run | length) == 1
+                      then ($recovery_run[0] | sub("^Recovery-Run-ID: "; ""))
+                      else null
+                      end
+                    ),
+                    recovery: "STAGING_STALE_RETIREABLE",
+                    regressionTest: (
+                      if ($test | length) == 1
+                      then ($test[0] | sub("^Regression-Test: "; ""))
+                      else null
+                      end
+                    )
+                  }
+              ')"
+              if [ "$(jq -r '.valid' <<<"$async_marker")" = 'true' ]; then
+                async_provider_attempt='true'
+                async_invocation='true'
+                marker="$async_marker"
+                async_recovery_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
+              else
+                marker="$(jq -Rn --arg body "$source_pr_body" '
                 def exact_line($prefix):
                   ($body | split("\n") | map(select(startswith($prefix))));
                 (exact_line("Provider-Attempt: ")) as $attempt
@@ -198,9 +251,10 @@ jobs:
                     regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
                   }
               ')"
-              if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
-                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_MARKER_INVALID'
-                exit 0
+                if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_MARKER_INVALID'
+                  exit 0
+                fi
               fi
             fi
 
@@ -214,7 +268,112 @@ jobs:
             fi
             regression_test="$(jq -r '.regressionTest' <<<"$marker")"
 
-            if [ "$orchestrator_preflight" = 'true' ]; then
+            if [ "$async_provider_attempt" = 'true' ]; then
+              if ! jq -e --arg test "$regression_test" '
+                $test == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"
+                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-autocontinue.yml" and .status != "removed")
+                and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs" and .status != "removed")
+                and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+                and all(.[]; .filename | IN(
+                  ".github/workflows/r1-initial-bootstrap-autocontinue.yml",
+                  "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs",
+                  "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                ))
+              ' <<<"$source_files" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_CHANGESET_INVALID'
+                exit 0
+              fi
+
+              async_recovery="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$async_recovery_run_id")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_RECOVERY_READ_FAILED'; exit 0;
+                }
+              if ! jq -e --argjson run_id "$async_recovery_run_id" '
+                .id == $run_id
+                and .name == "R1 initial bootstrap recovery"
+                and .head_branch == "main"
+                and .event == "workflow_dispatch"
+                and .status == "completed"
+                and .conclusion == "success"
+                and (.head_sha | type) == "string"
+              ' <<<"$async_recovery" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_RECOVERY_INVALID'
+                exit 0
+              fi
+              async_recovery_sha="$(jq -er '.head_sha' <<<"$async_recovery")"
+              if [ "$async_recovery_sha" = "$SOURCE_SHA" ]; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_RECOVERY_SAME_SHA'
+                exit 0
+              fi
+              async_compare="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/compare/$async_recovery_sha...$SOURCE_SHA")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_LINEAGE_READ_FAILED'; exit 0;
+                }
+              if ! jq -e '.status == "ahead" and .behind_by == 0' <<<"$async_compare" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_LINEAGE_INVALID'
+                exit 0
+              fi
+
+              async_jobs="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$async_recovery_run_id/jobs?filter=latest&per_page=100")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_RECOVERY_JOBS_READ_FAILED'; exit 0;
+                }
+              if ! jq -e '
+                [.jobs[] | select(.name == "initial-bootstrap-recovery" and .conclusion == "success")] as $jobs
+                | ($jobs | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Invoke exact read-only recovery tag once" and .conclusion == "success"
+                )] | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Publish enum-only recovery evidence" and .conclusion == "success"
+                )] | length) == 1
+              ' <<<"$async_jobs" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_RECOVERY_PHASE_INVALID'
+                exit 0
+              fi
+
+              async_artifacts="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$async_recovery_run_id/artifacts?per_page=100")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_ARTIFACTS_READ_FAILED'; exit 0;
+                }
+              async_artifact_id="$(jq -r --arg name "r1-initial-bootstrap-recovery-evidence-$async_recovery_run_id" '
+                [.artifacts[] | select(.name == $name and .expired == false)]
+                | if length == 1 then .[0].id else empty end
+              ' <<<"$async_artifacts")"
+              if [ -z "$async_artifact_id" ]; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_ARTIFACT_NOT_EXACT'
+                exit 0
+              fi
+              async_zip="$RUNNER_TEMP/r1-autocontinue-async-recovery.zip"
+              curl --fail --silent --show-error --location \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/artifacts/$async_artifact_id/zip" \
+                --output "$async_zip" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_ARTIFACT_DOWNLOAD_FAILED'; exit 0;
+                }
+              async_classification="$RUNNER_TEMP/r1-autocontinue-async-classification.json"
+              unzip -p "$async_zip" classification.json >"$async_classification" || {
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_CLASSIFICATION_MISSING'; exit 0;
+              }
+              if ! jq -e '
+                .status == "PASS"
+                and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+                and .verdict == "RECOVERY_REQUIRED"
+                and .reason == "STAGING_RUN_PRESENT"
+              ' "$async_classification" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_CLASSIFICATION_INVALID'
+                exit 0
+              fi
+
+              allow_staging_resume='false'
+              allow_stale_staging_retirement='true'
+              async_invocation='true'
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_ATTEMPT_PROVEN'
+            elif [ "$orchestrator_preflight" = 'true' ]; then
               if ! jq -e --arg test "$regression_test" '
                 $test == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"
                 and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-autocontinue.yml" and .status != "removed")
@@ -426,7 +585,7 @@ jobs:
             unzip -p "$archive" classification.json > "$destination" || return 1
           }
 
-          if [ "$source_is_r1" = 'true' ] && [ "$orchestrator_preflight" != 'true' ]; then
+          if [ "$source_is_r1" = 'true' ] && [ "$orchestrator_preflight" != 'true' ] && [ "$async_provider_attempt" != 'true' ]; then
             observed_signature="$(jq -er '.observedSignature' <<<"$marker")"
             if [ "$(jq -r '.total_count' <<<"$existing")" -gt 100 ]; then
               echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_UNBOUNDED'
@@ -691,7 +850,8 @@ jobs:
             --arg ci_run_id "$SOURCE_CI_RUN_ID" \
             --arg resume "$allow_staging_resume" \
             --arg stale "$allow_stale_staging_retirement" \
-            '{ref:"main", inputs:{ci_run_id:$ci_run_id, allow_staging_resume:$resume, allow_stale_staging_retirement:$stale}}')"
+            --arg async "$async_invocation" \
+            '{ref:"main", inputs:{ci_run_id:$ci_run_id, allow_staging_resume:$resume, allow_stale_staging_retirement:$stale, async_invocation:$async}}')"
           curl --fail --silent --show-error \
             --request POST \
             --header "$auth_header" \
