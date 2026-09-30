@@ -544,6 +544,28 @@ test('post-timeout surface recovery can arm only one full read-only exact-revisi
   assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
 });
 
+test('async approval still requires one fresh full read-only recovery before any async provider attempt', () => {
+  const evidence = runbook.match(
+    /### Fresh full recovery before first async admission([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'async provider path must start from fresh durable-state evidence');
+  assert.match(evidence, /orchestrator `36773091950`/);
+  assert.match(evidence, /bootstrap child `36773555381`/);
+  assert.match(evidence, /FAIL \/ INITIAL_BOOTSTRAP_INVOKE_FAILED/);
+  assert.match(evidence, /PR #903/);
+  assert.match(evidence, /`4a520247056e2b55d323110761c3eb014c8d1975`/);
+  assert.match(evidence, /canonical CI\s+`36781760182`/);
+  assert.match(evidence, /Browser Quality `36781760087`/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Recovery-Probe: READY/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(evidence, /`surface_only=false`/);
+  assert.match(evidence, /cannot dispatch readiness\/orchestrator\/bootstrap/);
+  assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
+});
+
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {
   const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
   assert.ok(filter, 'extract the live jq marker filter from the workflow');
