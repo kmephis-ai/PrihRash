@@ -388,12 +388,14 @@ jobs:
             exit 1
           fi
 
-          if ! created_version_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/version.json" 2>/dev/null)"; then
-            echo 'INITIAL_BOOTSTRAP_DEPLOY_VERSION_METADATA_INVALID'
-            exit 1
+          if [ "${{ inputs.invocation_mode }}" = 'async' ]; then
+            if ! created_version_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/version.json" 2>/dev/null)"; then
+              echo 'INITIAL_BOOTSTRAP_DEPLOY_VERSION_METADATA_INVALID'
+              exit 1
+            fi
+            echo "::add-mask::${created_version_id}"
+            printf 'PRIHRASH_YC_CREATED_VERSION_ID=%s\n' "$created_version_id" >> "$GITHUB_ENV"
           fi
-          echo "::add-mask::${created_version_id}"
-          printf 'PRIHRASH_YC_CREATED_VERSION_ID=%s\n' "$created_version_id" >> "$GITHUB_ENV"
 
       - name: Verify exact asynchronous version contract
         if: ${{ inputs.invocation_mode == 'async' }}
@@ -788,3 +790,21 @@ jobs:
           path: ${{ runner.temp }}/r1-initial-bootstrap-evidence/classification.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Stop after accepted async admission until durable recovery
+        if: ${{ always() && inputs.invocation_mode == 'async' && steps.bootstrap-invoke.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/r1-initial-bootstrap-evidence/classification.json"
+          jq -e '
+            type == "object"
+            and (keys | sort) == ["code","status"]
+            and .status == "PASS"
+            and .code == "INITIAL_BOOTSTRAP_ASYNC_ACCEPTED"
+          ' "$evidence" >/dev/null || {
+            echo 'INITIAL_BOOTSTRAP_ASYNC_NONTERMINAL_EVIDENCE_INVALID'
+            exit 1
+          }
+          echo 'INITIAL_BOOTSTRAP_ASYNC_ACCEPTED_NONTERMINAL'
+          exit 1
