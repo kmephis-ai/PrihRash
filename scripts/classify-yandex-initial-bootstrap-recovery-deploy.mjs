@@ -118,6 +118,23 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function createFunctionVersionMetadataId(metadata) {
+  const expectedType = 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
+  if (!object(metadata) || metadata['@type'] !== expectedType) return null;
+  const hasProtoJsonId = Object.hasOwn(metadata, 'functionVersionId');
+  const hasYcJsonId = Object.hasOwn(metadata, 'function_version_id');
+  if (!hasProtoJsonId && !hasYcJsonId) return null;
+  const protoJsonId = metadata.functionVersionId;
+  const ycJsonId = metadata.function_version_id;
+  if (
+    (hasProtoJsonId && (typeof protoJsonId !== 'string' || protoJsonId.length === 0))
+    || (hasYcJsonId && (typeof ycJsonId !== 'string' || ycJsonId.length === 0))
+    || (hasProtoJsonId && hasYcJsonId && protoJsonId !== ycJsonId)
+    || Object.keys(metadata).some((key) => !['@type', 'functionVersionId', 'function_version_id'].includes(key))
+  ) return null;
+  return hasProtoJsonId ? protoJsonId : ycJsonId;
+}
+
 function readJson(path) {
   return readFile(path, 'utf8').then((text) => JSON.parse(text));
 }
@@ -274,10 +291,22 @@ export function classifyRecoveryFunctionDeployOutcome({
     if (object(operation.error)) return 'CREATE_OPERATION_FAILED';
     if (operation.done !== true || !object(operation.response)) return 'DEPLOYMENT_OUTCOME_UNCLASSIFIED';
 
-    const operationVersionId = operation.response.id;
-    if (typeof operationVersionId !== 'string' || operationVersionId.length === 0) {
+    const expectedVersionType = 'type.googleapis.com/yandex.cloud.serverless.functions.v1.Version';
+    if (operation.response['@type'] !== undefined && operation.response['@type'] !== expectedVersionType) {
       return 'CREATED_VERSION_NOT_PROVEN';
     }
+    const responseVersionId = operation.response.id;
+    if (responseVersionId !== undefined && (typeof responseVersionId !== 'string' || responseVersionId.length === 0)) {
+      return 'CREATED_VERSION_NOT_PROVEN';
+    }
+    const metadataVersionId = operation.metadata === undefined
+      ? undefined
+      : createFunctionVersionMetadataId(operation.metadata);
+    if (operation.metadata !== undefined && metadataVersionId === null) return 'CREATED_VERSION_NOT_PROVEN';
+    if ((responseVersionId === undefined && metadataVersionId === undefined)
+      || (responseVersionId !== undefined && metadataVersionId !== undefined
+        && responseVersionId !== metadataVersionId)) return 'CREATED_VERSION_NOT_PROVEN';
+    const operationVersionId = responseVersionId ?? metadataVersionId;
     const versionCandidates = versions.filter((version) => {
       if (!object(version) || !Array.isArray(version.tags)) return false;
       const createdAt = timestamp(version.created_at);
