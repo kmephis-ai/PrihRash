@@ -2412,6 +2412,19 @@ Exact agreement permits only the existing one write-free recovery invoke; missin
 history divergence fails closed before invoke. It does not authorize create/redeploy/IAM mutation,
 cleanup, bootstrap replay, timer, cutover or any Google/YDB write.
 
+The original #891 successor marker was:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36739560248
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
 ### Active tag-history interval correction after recovery `36755191147`
 
 PR #891 merged the source-step proof on exact main
