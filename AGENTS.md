@@ -225,9 +225,13 @@ accepted `Recovery-Version-Run-ID` уже обязан быть доказанн
 него ровно один step `Create exactly one read-only recovery Function version without invoking it` обязан
 завершиться `success`. Только timestamps этого exact step задают source window. Provider read-only path
 затем сверяет `version list`, полный immutable `GetVersionByTag` recovery config и `ListTagHistory`:
-один и тот же current `functionVersionId`, recovery tag, created/effectiveFrom внутри step window, без
-более позднего assignment; runtime/entrypoint/runtime service account, memory/timeout, recovery env,
-no-logging, metadata options и Lockbox secret mappings обязаны совпасть с create-only contract.
+один и тот же current `functionVersionId`, recovery tag, created/effectiveFrom внутри step window,
+а tag-history interval обязан быть активен в момент provider read: workflow фиксирует `observedAt`
+после чтения history и требует `effectiveFrom <= observedAt < effectiveTo`; более позднего assignment
+быть не должно. Не трактовать наличие `effectiveTo` как завершённый tag само по себе: Yandex REST
+возвращает future end timestamp и для текущего mapping. Runtime/entrypoint/runtime service account,
+memory/timeout, recovery env, no-logging, metadata options и Lockbox secret mappings обязаны совпасть
+с create-only contract.
 
 Этот source-step/tag-history proof не читает Operation list/Get и не использует Audit Trails. Exact
 совпадение разрешает только уже-gated существующий write-free recovery invoke; любое расхождение остаётся
