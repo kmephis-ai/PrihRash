@@ -73,6 +73,7 @@ jobs:
             | (exact_line("Recovery-Run-ID: ")) as $recovery_run
             | (exact_line("Recovery-Version-Run-ID: ")) as $recovery_version_run
             | (exact_line("Circuit-Rearm: ")) as $rearm
+            | (exact_line("Authority-Scope: ")) as $authority
             | (exact_line("Regression-Test: ")) as $test
             | {
                 valid: (
@@ -118,6 +119,18 @@ jobs:
                   ) or (
                     $attempt == ["Provider-Attempt: READY"]
                     and ($probe | length) == 0
+                    and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
+                    and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
+                    and $recovery == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                    and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                    and $authority == ["Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP"]
+                    and ($recovery_run | length) == 1
+                    and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
+                    and ($recovery_version_run | length) == 1
+                    and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: [1-9][0-9]*$"))
+                  ) or (
+                    $attempt == ["Provider-Attempt: READY"]
+                    and ($probe | length) == 0
                     and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED"]
                     and $expected == ["Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED"]
                     and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
@@ -134,10 +147,30 @@ jobs:
                   and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
                   and ($recovery_run | length) == 1
                   and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))),
-                recoveryVersionReuse: ($attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
+                recoveryVersionReuse: (($attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
                   and $probe == ["Recovery-Probe: READY"]
                   and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
                   and $recovery == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                  and ($recovery_run | length) == 1
+                  and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
+                  and ($recovery_version_run | length) == 1
+                  and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$")))
+                  or ($attempt == ["Provider-Attempt: READY"]
+                    and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
+                    and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
+                    and $recovery == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                    and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                    and $authority == ["Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP"]
+                    and ($recovery_run | length) == 1
+                    and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
+                    and ($recovery_version_run | length) == 1
+                    and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$")))),
+                auditSourcePermissionProbe: ($attempt == ["Provider-Attempt: READY"]
+                  and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
+                  and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
+                  and $recovery == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                  and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                  and $authority == ["Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP"]
                   and ($recovery_run | length) == 1
                   and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
                   and ($recovery_version_run | length) == 1
@@ -218,7 +251,8 @@ jobs:
             fi
           fi
 
-          if [ "$(jq -r '.recoveryVersionReuse' <<<"$marker")" = 'true' ]; then
+          if [ "$(jq -r '.recoveryVersionReuse' <<<"$marker")" = 'true' ] \
+            || [ "$(jq -r '.auditSourcePermissionProbe' <<<"$marker")" = 'true' ]; then
             source_pr_number="$(jq -er '.number | select(type == "number")' <<<"$source_pr")"
             source_files="$(curl --fail --silent --show-error \
               --header "$auth_header" --header "$accept_header" \
@@ -229,10 +263,9 @@ jobs:
               --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
                     any(.[]; .filename == $test and .status != "removed")
                     and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery.yml" and .status != "removed")
-                    and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
+                    and any(.[]; .filename == "scripts/classify-r1-temporary-audit-source-binding.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
                 and any(.[]; .filename == "AGENTS.md" and .status != "removed")
@@ -240,7 +273,9 @@ jobs:
                 and all(.[]; .filename | IN(
                   ".github/workflows/r1-initial-bootstrap-recovery.yml",
                   ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml",
+                  ".github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml",
                   "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs",
+                  "scripts/classify-r1-temporary-audit-source-binding.mjs",
                   "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs",
                   "tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs",
                   "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs",
@@ -524,6 +559,12 @@ jobs:
             source_pr_number="$(jq -er '.number | select(type == "number")' <<<"$source_pr")"
             dispatch_payload="$(jq -cn --arg run_id "$failed_run_id" --arg ci_run_id "$SOURCE_CI_RUN_ID" --arg pr_number "$source_pr_number" \
               '{ref:"main",inputs:{failed_run_id:$run_id,ci_run_id:$ci_run_id,source_pr_number:$pr_number}}')"
+          elif [ "$(jq -r '.auditSourcePermissionProbe' <<<"$marker")" = 'true' ]; then
+            failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
+            reuse_run_id="$(jq -er '.recoveryVersionRunId' <<<"$marker")"
+            source_pr_number="$(jq -er '.number | select(type == "number")' <<<"$source_pr")"
+            dispatch_payload="$(jq -cn --arg failed_run_id "$failed_run_id" --arg reuse_run_id "$reuse_run_id" --arg pr_number "$source_pr_number" \
+              '{ref:"main",inputs:{reuse_deploy_attempt_run_id:$reuse_run_id,reuse_failed_recovery_run_id:$failed_run_id,reuse_source_pr_number:$pr_number,audit_source_permission_probe:"true"}}')"
           elif [ "$(jq -r '.recoveryVersionReuse' <<<"$marker")" = 'true' ]; then
             failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
             reuse_run_id="$(jq -er '.recoveryVersionRunId' <<<"$marker")"

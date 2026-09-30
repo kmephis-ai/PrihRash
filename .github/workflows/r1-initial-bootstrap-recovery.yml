@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: ''
+      audit_source_permission_probe:
+        description: Allow one exact-scope temporary read-only source-binding classification for this reuse
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -62,6 +67,7 @@ jobs:
       REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
       REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
       REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
+      AUDIT_SOURCE_PERMISSION_PROBE: ${{ inputs.audit_source_permission_probe && '1' || '0' }}
       RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
       LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -101,6 +107,9 @@ jobs:
           fi
           if [ "$reuse_field_count" -eq 3 ] && [ -z "$YC_CLOUD_ID" ]; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_AUDIT_CLOUD_ID_MISSING'; exit 1
+          fi
+          if [ "$AUDIT_SOURCE_PERMISSION_PROBE" = '1' ] && [ "$reuse_field_count" -ne 3 ]; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_AUDIT_SOURCE_PERMISSION_INPUT_INCOMPLETE'; exit 1
           fi
           if [ -n "$REUSE_DEPLOY_ATTEMPT_RUN_ID" ]; then
             [[ "$REUSE_DEPLOY_ATTEMPT_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_RUN_ID_INVALID'; exit 1; }
@@ -149,6 +158,7 @@ jobs:
           REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
           REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
           REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
+          AUDIT_SOURCE_PERMISSION_PROBE: ${{ inputs.audit_source_permission_probe && '1' || '0' }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-gates"
@@ -377,7 +387,7 @@ jobs:
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_INACTIVE'; exit 1;
             }
             source_pr_body="$(jq -r '.body // ""' <<<"$current_source_pr")"
-            source_pr_marker="$(jq -Rn --arg body "$source_pr_body" --arg failed_id "$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" '
+            source_pr_marker="$(jq -Rn --arg body "$source_pr_body" --arg failed_id "$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "$REUSE_DEPLOY_ATTEMPT_RUN_ID" --arg permission_probe "$AUDIT_SOURCE_PERMISSION_PROBE" '
               def exact_line($prefix): ($body | split("\n") | map(select(startswith($prefix))));
               (exact_line("Provider-Attempt: ")) as $attempt
               | (exact_line("Recovery-Probe: ")) as $probe
@@ -387,16 +397,33 @@ jobs:
               | (exact_line("Recovery-Version-Run-ID: ")) as $version_run
               | (exact_line("Observed-Signature: ")) as $observed
               | (exact_line("Circuit-Rearm: ")) as $rearm
+              | (exact_line("Authority-Scope: ")) as $authority
               | (exact_line("Regression-Test: ")) as $test
-              | ($attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
-                and $probe == ["Recovery-Probe: READY"]
-                and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
-                and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
-                and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
-                and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
-                and ($observed | length) == 0
-                and ($rearm | length) == 0
-                and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
+              | (
+                ($permission_probe == "1"
+                  and $attempt == ["Provider-Attempt: READY"]
+                  and ($probe | length) == 0
+                  and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
+                  and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                  and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
+                  and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
+                  and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
+                  and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                  and $authority == ["Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP"]
+                  and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
+                or
+                ($permission_probe != "1"
+                  and $attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
+                  and $probe == ["Recovery-Probe: READY"]
+                  and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
+                  and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                  and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
+                  and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
+                  and ($observed | length) == 0
+                  and ($rearm | length) == 0
+                  and ($authority | length) == 0
+                  and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
+              )
             ')"
             [ "$source_pr_marker" = 'true' ] || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID'; exit 1;
@@ -695,6 +722,7 @@ jobs:
           OPERATION_CREATOR_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
           RUNTIME_SERVICE_ACCOUNT_ID: ${{ env.PRIHRASH_YC_FUNCTION_SA_ID }}
           YC_CLOUD_ID: ${{ secrets.YC_R1_CLOUD_ID }}
+          AUDIT_SOURCE_TEMPORARY_READ: ${{ inputs.audit_source_permission_probe && '1' || '0' }}
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-reuse-version"
@@ -707,7 +735,164 @@ jobs:
           audit_trail_evidence='RECOVERY_REUSE_AUDIT_NOT_ATTEMPTED'
           audit_source_decision='RECOVERY_REUSE_AUDIT_NOT_ATTEMPTED'
           audit_event_evidence='RECOVERY_REUSE_AUDIT_NOT_ATTEMPTED'
+          audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_NOT_REQUESTED'
+          binding_retirement_evidence='RECOVERY_REUSE_TEMP_AUDIT_BINDINGS_NOT_REQUIRED'
+          temporary_audit_viewer_added='false'
+          classify_binding() {
+            node scripts/classify-r1-temporary-audit-source-binding.mjs "$1" "$2" "$YC_WIF_SERVICE_ACCOUNT_ID"
+          }
+          read_folder_bindings() {
+            yc resource-manager folder list-access-bindings --id "$YC_FOLDER_ID" \
+              --format json --retry 0 --no-user-output >"$tmp/folder-bindings.json" \
+              2>"$tmp/folder-bindings.err"
+          }
+          ensure_folder_audit_viewer() {
+            local state
+            if ! yc resource-manager folder add-access-binding --help >/dev/null 2>&1 \
+              || ! yc resource-manager folder remove-access-binding --help >/dev/null 2>&1; then
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_CLI_COMMAND_UNAVAILABLE'
+              return 1
+            fi
+            if ! read_folder_bindings; then
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_BINDING_LIST_FAILED'
+              return 1
+            fi
+            state="$(classify_binding "$tmp/folder-bindings.json" 'audit-trails.viewer')" || state='READ_BINDING_RESPONSE_INVALID'
+            case "$state" in
+              EXACT_READ_BINDING_PRESENT)
+                audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_PREEXISTING'
+                return 0
+                ;;
+              EXACT_READ_BINDING_ABSENT) ;;
+              *)
+                audit_viewer_binding_evidence="RECOVERY_REUSE_TEMP_AUDIT_VIEWER_${state}"
+                return 1
+                ;;
+            esac
+            temporary_audit_viewer_added='true'
+            if yc resource-manager folder add-access-binding --id "$YC_FOLDER_ID" \
+              --role audit-trails.viewer --subject "serviceAccount:${YC_WIF_SERVICE_ACCOUNT_ID}" \
+              --format json --retry 0 --no-user-output \
+              >"$tmp/folder-binding-add.json" 2>"$tmp/folder-binding-add.err"; then
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADD_ACCEPTED'
+            else
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADD_FAILED'
+              if read_folder_bindings; then
+                state="$(classify_binding "$tmp/folder-bindings.json" 'audit-trails.viewer')" || state='READ_BINDING_RESPONSE_INVALID'
+                if [ "$state" = 'EXACT_READ_BINDING_PRESENT' ]; then
+                  audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADD_OUTCOME_UNCLASSIFIED'
+                elif [ "$state" != 'EXACT_READ_BINDING_ABSENT' ]; then
+                  audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADD_OUTCOME_UNCLASSIFIED'
+                fi
+              else
+                audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADD_OUTCOME_UNCLASSIFIED'
+              fi
+              return 1
+            fi
+            if ! read_folder_bindings; then
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_READBACK_FAILED'
+              return 1
+            fi
+            state="$(classify_binding "$tmp/folder-bindings.json" 'audit-trails.viewer')" || state='READ_BINDING_RESPONSE_INVALID'
+            if [ "$state" != 'EXACT_READ_BINDING_PRESENT' ]; then
+              audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_READBACK_UNPROVEN'
+              return 1
+            fi
+            audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADDED_VERIFIED'
+          }
+          ensure_exact_log_group_reader() {
+            local state
+            if ! yc logging group add-access-binding --help >/dev/null 2>&1 \
+              || ! yc logging group remove-access-binding --help >/dev/null 2>&1; then
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_CLI_COMMAND_UNAVAILABLE'
+              return 1
+            fi
+            if ! read_log_bindings; then
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_BINDING_LIST_FAILED'
+              return 1
+            fi
+            state="$(classify_binding "$tmp/log-group-bindings.json" 'logging.reader')" || state='READ_BINDING_RESPONSE_INVALID'
+            case "$state" in
+              EXACT_READ_BINDING_PRESENT)
+                logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_PREEXISTING'
+                return 0
+                ;;
+              EXACT_READ_BINDING_ABSENT) ;;
+              *)
+                logging_reader_binding_evidence="RECOVERY_REUSE_TEMP_LOGGING_READER_${state}"
+                return 1
+                ;;
+            esac
+            temporary_logging_reader_added='true'
+            if yc logging group add-access-binding --id "$audit_log_group_id" \
+              --role logging.reader --subject "serviceAccount:${YC_WIF_SERVICE_ACCOUNT_ID}" \
+              --format json --retry 0 --no-user-output \
+              >"$tmp/log-group-binding-add.json" 2>"$tmp/log-group-binding-add.err"; then
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADD_ACCEPTED'
+            else
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADD_FAILED'
+              if read_log_bindings; then
+                state="$(classify_binding "$tmp/log-group-bindings.json" 'logging.reader')" || state='READ_BINDING_RESPONSE_INVALID'
+                if [ "$state" = 'EXACT_READ_BINDING_PRESENT' ]; then
+                  logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADD_OUTCOME_UNCLASSIFIED'
+                elif [ "$state" != 'EXACT_READ_BINDING_ABSENT' ]; then
+                  logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADD_OUTCOME_UNCLASSIFIED'
+                fi
+              else
+                logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADD_OUTCOME_UNCLASSIFIED'
+              fi
+              return 1
+            fi
+            if ! read_log_bindings; then
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_READBACK_FAILED'
+              return 1
+            fi
+            state="$(classify_binding "$tmp/log-group-bindings.json" 'logging.reader')" || state='READ_BINDING_RESPONSE_INVALID'
+            if [ "$state" != 'EXACT_READ_BINDING_PRESENT' ]; then
+              logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_READBACK_UNPROVEN'
+              return 1
+            fi
+            logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_ADDED_VERIFIED'
+          }
+          cleanup_temp_bindings() {
+            local failed='false' state
+            if [ "$temporary_logging_reader_added" = 'true' ]; then
+              yc logging group remove-access-binding --id "$audit_log_group_id" \
+                --role logging.reader --subject "serviceAccount:${YC_WIF_SERVICE_ACCOUNT_ID}" \
+                --format json --retry 0 --no-user-output \
+                >"$tmp/log-group-binding-remove.json" 2>"$tmp/log-group-binding-remove.err" || true
+              if read_log_bindings; then
+                state="$(classify_binding "$tmp/log-group-bindings.json" 'logging.reader')" || state='READ_BINDING_RESPONSE_INVALID'
+                if [ "$state" != 'EXACT_READ_BINDING_ABSENT' ]; then failed='true'; fi
+              else
+                failed='true'
+              fi
+            fi
+            if [ "$temporary_audit_viewer_added" = 'true' ]; then
+              yc resource-manager folder remove-access-binding --id "$YC_FOLDER_ID" \
+                --role audit-trails.viewer --subject "serviceAccount:${YC_WIF_SERVICE_ACCOUNT_ID}" \
+                --format json --retry 0 --no-user-output \
+                >"$tmp/folder-binding-remove.json" 2>"$tmp/folder-binding-remove.err" || true
+              if read_folder_bindings; then
+                state="$(classify_binding "$tmp/folder-bindings.json" 'audit-trails.viewer')" || state='READ_BINDING_RESPONSE_INVALID'
+                if [ "$state" != 'EXACT_READ_BINDING_ABSENT' ]; then failed='true'; fi
+              else
+                failed='true'
+              fi
+            fi
+            if [ "$failed" = 'true' ]; then
+              binding_retirement_evidence='RECOVERY_REUSE_TEMP_AUDIT_BINDING_RETIREMENT_UNPROVEN'
+              return 1
+            fi
+            if [ "$temporary_audit_viewer_added" = 'true' ] || [ "$temporary_logging_reader_added" = 'true' ]; then
+              binding_retirement_evidence='RECOVERY_REUSE_TEMP_AUDIT_BINDINGS_RETIRED_VERIFIED'
+            fi
+            return 0
+          }
           write_reuse_result() {
+            local exit_code=$?
+            trap - EXIT
+            if ! cleanup_temp_bindings && [ "$exit_code" -eq 0 ]; then exit_code=1; fi
             enum_only() {
               case "$1" in
                 EXACT_RECOVERY_VERSION_CREATED|CREATE_OPERATION_*|CREATED_VERSION_NOT_PROVEN|DEPLOYMENT_OUTCOME_UNCLASSIFIED|RECOVERY_*|DIAGNOSTIC_FAILED|AUDIT_EVENT_READ_NOT_ATTEMPTED|AUDIT_CREATE_EVENT_*|AUDIT_LOG_*|AUDIT_TRAIL_*|EXISTING_APPLICABLE_AUDIT_SOURCE|NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE|SOURCE_EVIDENCE_UNUSABLE|SOURCE_EVIDENCE_AMBIGUOUS) printf '%s' "$1" ;;
@@ -722,8 +907,12 @@ jobs:
               --arg audit_trail "$(enum_only "$audit_trail_evidence")" \
               --arg audit_decision "$(enum_only "$audit_source_decision")" \
               --arg audit_event "$(enum_only "$audit_event_evidence")" \
-              '{recoveryVersionReuse:$reuse,versionMetadataEvidence:$version,operationListEvidence:$operation_list,tagHistoryEvidence:$tag_history,auditTrailEvidence:$audit_trail,auditSourceDecision:$audit_decision,auditCreateEventEvidence:$audit_event}' \
+              --arg audit_viewer "$(enum_only "$audit_viewer_binding_evidence")" \
+              --arg logging_reader "$(enum_only "$logging_reader_binding_evidence")" \
+              --arg binding_retirement "$(enum_only "$binding_retirement_evidence")" \
+              '{recoveryVersionReuse:$reuse,versionMetadataEvidence:$version,operationListEvidence:$operation_list,tagHistoryEvidence:$tag_history,auditTrailEvidence:$audit_trail,auditSourceDecision:$audit_decision,auditCreateEventEvidence:$audit_event,auditViewerBindingEvidence:$audit_viewer,loggingReaderBindingEvidence:$logging_reader,bindingRetirementEvidence:$binding_retirement}' \
               > "$tmp/classification.json"
+            exit "$exit_code"
           }
           trap write_reuse_result EXIT
 
@@ -785,7 +974,16 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_TAGGED_VERSION_ID_UNPROVEN'; exit 1;
           }
           audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
-          if [ -z "$YC_CLOUD_ID" ]; then
+          audit_source_permission_ready='true'
+          if [ "$AUDIT_SOURCE_TEMPORARY_READ" = '1' ]; then
+            if ! ensure_folder_audit_viewer; then
+              audit_source_permission_ready='false'
+              audit_trail_evidence='AUDIT_TRAIL_TEMPORARY_VIEWER_SETUP_FAILED'
+            fi
+          fi
+          if [ "$audit_source_permission_ready" != 'true' ]; then
+            :
+          elif [ -z "$YC_CLOUD_ID" ]; then
             audit_trail_evidence='AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID'
           else
             target_trail_response="$tmp/target-folder-audit-trails.json"
@@ -824,7 +1022,14 @@ jobs:
             audit_log_group_id="$(cat "$tmp/audit-log-group-id")"
             echo "::add-mask::${audit_log_group_id}"
             audit_filter="json_payload.eventType = \"yandex.cloud.audit.serverless.functions.CreateFunctionVersion\" AND json_payload.details.functionId = \"${PRIHRASH_YC_FUNCTION_ID}\""
-            if ! yc logging read --group-id "$audit_log_group_id" \
+            logging_reader_ready='true'
+            if [ "$AUDIT_SOURCE_TEMPORARY_READ" = '1' ] && ! ensure_exact_log_group_reader; then
+              logging_reader_ready='false'
+              audit_event_evidence='AUDIT_LOG_TEMPORARY_READER_SETUP_FAILED'
+            fi
+            if [ "$logging_reader_ready" != 'true' ]; then
+              :
+            elif ! yc logging read --group-id "$audit_log_group_id" \
               --since "$RUN_STARTED_AT" --until "$RUN_FINISHED_AT" --limit 1000 \
               --max-response-size 10485760 --filter "$audit_filter" \
               --format json --retry 0 --no-user-output \

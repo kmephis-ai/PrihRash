@@ -57,6 +57,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
   assert.match(workflow, /Recovery-Version-Run-ID/);
   assert.match(workflow, /"surface_only":"true"/);
+  assert.match(workflow, /audit_source_permission_probe:"true"/);
+  assert.doesNotMatch(workflow, /audit_source_permission_probe:true/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-recovery\.yml/);
@@ -109,7 +111,10 @@ test('reuse core changeset permits a complete recovery-source fix without touchi
   const changesetFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
   assert.ok(changesetFilter, 'extract the bounded exact recovery-source changeset predicate');
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery\.yml"/);
-  assert.match(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs"/);
+  assert.match(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-r1-temporary-audit-source-binding\.mjs"/);
+  assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs"/);
+  assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml"/);
+  assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs"/);
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "AGENTS\.md"/);
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "docs\/R1_COMPLETION_SPRINT\.md"/);
   assert.doesNotMatch(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
@@ -316,6 +321,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     functionDeployRecovery: false,
     recoveryFunctionDeployAttempt: false,
     recoveryVersionReuse: false,
+    auditSourcePermissionProbe: false,
     recoveryRunId: null,
     recoveryVersionRunId: null,
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
@@ -333,6 +339,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     functionDeployRecovery: false,
     recoveryFunctionDeployAttempt: false,
     recoveryVersionReuse: false,
+    auditSourcePermissionProbe: false,
     recoveryRunId: null,
     recoveryVersionRunId: null,
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
@@ -345,6 +352,7 @@ test('unknown durable outcome accepts only the read-only classification marker p
     surfaceOnly: false,
     functionDeployRecovery: false,
     recoveryVersionReuse: false,
+    auditSourcePermissionProbe: false,
     recoveryFunctionDeployAttempt: false,
     recoveryRunId: null,
     recoveryVersionRunId: null,
@@ -382,6 +390,7 @@ test('unknown recovery Function deploy accepts only one exact-run read-only clas
     surfaceOnly: false,
     functionDeployRecovery: true,
     recoveryVersionReuse: false,
+    auditSourcePermissionProbe: false,
     recoveryFunctionDeployAttempt: false,
     recoveryRunId: '36341844854',
     recoveryVersionRunId: null,
@@ -425,6 +434,7 @@ test('Owner-authorized recovery Function create marker arms exactly one deploy-o
     functionDeployRecovery: false,
     recoveryFunctionDeployAttempt: true,
     recoveryVersionReuse: false,
+    auditSourcePermissionProbe: false,
     recoveryRunId: '36341844854',
     recoveryVersionRunId: null,
     regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
@@ -453,10 +463,14 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
       'Recovery-State': 'STAGING_PRESENT_UNCLASSIFIED',
       'Recovery-Run-ID': '36341844854',
       'Recovery-Version-Run-ID': '36611387299',
+      'Observed-Signature': null,
+      'Circuit-Rearm': null,
+      'Authority-Scope': null,
       'Regression-Test': 'tests/tooling/initial-bootstrap-recovery-workflow.test.mjs',
       ...overrides,
     };
-    const body = Object.entries(lines).map(([key, value]) => `${key}: ${value}`).join('\n');
+    const body = Object.entries(lines).filter(([, value]) => value !== null)
+      .map(([key, value]) => `${key}: ${value}`).join('\n');
     const result = spawnSync('jq', ['-Rn', '--arg', 'body', body, filter], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
@@ -467,6 +481,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
     surfaceOnly: false,
     functionDeployRecovery: false,
     recoveryVersionReuse: true,
+    auditSourcePermissionProbe: false,
     recoveryFunctionDeployAttempt: false,
     recoveryRunId: '36341844854',
     recoveryVersionRunId: '36611387299',
@@ -475,6 +490,34 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
   assert.equal(parse({ 'Recovery-Version-Run-ID': '0' }).valid, false);
   assert.equal(parse({ 'Recovery-Version-Run-ID': '36611387299\nRecovery-Version-Run-ID: 36611387299' }).valid, false);
   assert.equal(parse({ 'Provider-Attempt': 'READY' }).valid, false);
+  assert.deepEqual(parse({
+    'Provider-Attempt': 'READY',
+    'Recovery-Probe': null,
+    'Expected-Transition': 'TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY',
+    'Observed-Signature': 'INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
+    'Circuit-Rearm': 'ROOT_CAUSE_FIX',
+    'Authority-Scope': 'TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP',
+    'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  }), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: false,
+    recoveryVersionReuse: true,
+    auditSourcePermissionProbe: true,
+    recoveryFunctionDeployAttempt: false,
+    recoveryRunId: '36341844854',
+    recoveryVersionRunId: '36611387299',
+    regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  });
+  assert.equal(parse({
+    'Provider-Attempt': 'READY',
+    'Recovery-Probe': null,
+    'Expected-Transition': 'TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY',
+    'Observed-Signature': 'INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
+    'Circuit-Rearm': 'ROOT_CAUSE_FIX',
+    'Authority-Scope': 'CLOUD_WIDE_AUDIT_TRAIL_READER',
+    'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  }).valid, false);
 });
 
 test('post-PR-840 deployment failure remains unclassified and disarms deployment/invocation', () => {

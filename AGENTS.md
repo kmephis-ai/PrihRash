@@ -303,6 +303,19 @@ successor может обойти её прямым folder-scoped Audit Trails `
 обязан проверить `folderId`/`cloudId`, ProtoJSON empty repeated-field и pagination, затем принять
 терминальное source decision. Это не разрешает alias inference или replay.
 
+Если direct exact-folder list возвращает `AUDIT_TRAIL_LIST_PERMISSION_DENIED`, следующий causal
+successor может запросить ровно одну temporary `audit-trails.viewer` binding на exact folder и,
+только после доказанного единственного Cloud Logging destination, `logging.reader` на exact group.
+Обязательно доказать отсутствие каждого binding перед add и точный read-back после add, удалить только
+binding, созданный этим run, и независимо подтвердить retirement. Pre-existing binding не удаляется;
+malformed/duplicate/read-back/retirement evidence всегда STOP. Это Provider-Attempt READY
+temporary-authority path, не `NOT_AUTHORIZED`; он не разрешает Function create, необусловленный YDB
+invoke или replay.
+
+Exact permission-denial marker обязан совпасть с последним enum-only artifact и связывать exact
+failed recovery/version-source run IDs; scope ограничен Function folder и единственной доказанной
+Cloud Logging group, без parent-cloud или более широкого role binding.
+
 При смене ChatGPT ↔ OpenCode новый агент делает minimal fresh reconciliation, читает exact
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.

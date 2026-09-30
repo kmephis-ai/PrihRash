@@ -86,6 +86,23 @@ process/docs PR запрещён.
 pagination cases до одного source decision point; неизвестный результат остаётся unusable/ambiguous.
 Этот bypass не меняет authority и сам по себе не разрешает Function/YDB invoke.
 
+Если direct exact-folder `List` возвращает `AUDIT_TRAIL_LIST_PERMISSION_DENIED`, distinct causal blocker
+— отсутствующее read authority. Один Incident-M может временно добавить `audit-trails.viewer` только
+на эту папку и, лишь после доказанного единственного Cloud Logging destination, `logging.reader` на
+точную группу. Обязательно доказать отсутствие каждого binding перед add и точный read-back после add,
+удалить только binding, созданный этим run, и независимо подтвердить retirement. Pre-existing binding
+не удаляется; malformed/duplicate/read-back/retirement evidence всегда STOP. Missing/ambiguous IAM
+evidence останавливает дальнейшие source probes; marker является write-capable temporary-authority
+attempt и не разрешает Function create или replay.
+Marker обязан exact-bind-ить свежий `AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE`, failed
+recovery run `36341844854`, accepted deploy-only run `36611387299` и точный authority-scope из canonical
+runbook. Это одна bounded causal attempt: если binding/read/event outcome или retirement не доказан,
+YDB recovery invoke remains skipped and durable state remains UNKNOWN; same-SHA retry запрещён.
+
+Exact permission-denial marker обязан совпасть с последним enum-only artifact и связывать exact
+failed recovery/version-source run IDs; scope ограничен Function folder и единственной доказанной
+Cloud Logging group, без parent-cloud или более широкого role binding.
+
 ## Provider loop
 
 После merge root-cause PR выполняется только этот bounded цикл:

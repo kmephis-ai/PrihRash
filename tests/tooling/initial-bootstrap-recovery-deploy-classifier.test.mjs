@@ -13,6 +13,7 @@ import {
   classifyRecoveryAuditTrailSource,
   classifyRecoveryFunctionDeployOutcome,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
+import { classifyExactReadBinding } from '../../scripts/classify-r1-temporary-audit-source-binding.mjs';
 
 const runStartedAt = '2026-09-27T18:46:30Z';
 const runFinishedAt = '2026-09-27T18:46:38Z';
@@ -214,6 +215,25 @@ test('cloud trail response validation reports field-specific safe enums', () => 
   assert.equal(classify({ ...trail, createdAt: 'invalid-time' }), 'AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID');
   assert.equal(classify({ ...trail, destination: null }), 'AUDIT_TRAIL_TRAIL_DESTINATION_INVALID');
   assert.equal(classify({ ...trail, destination: { unknownDestination: {} } }), 'AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN');
+});
+
+test('temporary audit-source reader recognizes only one exact principal binding and fails closed on ambiguity', () => {
+  const roleId = 'audit-trails.viewer';
+  const serviceAccountId = 'synthetic-wif-service-account';
+  const exact = { role_id: roleId, subject: { type: 'serviceAccount', id: serviceAccountId } };
+  assert.equal(classifyExactReadBinding([], roleId, serviceAccountId), 'EXACT_READ_BINDING_ABSENT');
+  assert.equal(classifyExactReadBinding([exact], roleId, serviceAccountId), 'EXACT_READ_BINDING_PRESENT');
+  assert.equal(classifyExactReadBinding([{ roleId, subject: exact.subject }], roleId, serviceAccountId),
+    'EXACT_READ_BINDING_PRESENT');
+  assert.equal(classifyExactReadBinding([
+    { role_id: roleId, subject: { type: 'serviceAccount', id: 'other-principal' } },
+  ], roleId, serviceAccountId), 'EXACT_READ_BINDING_ABSENT');
+  assert.equal(classifyExactReadBinding([exact, exact], roleId, serviceAccountId), 'READ_BINDING_AMBIGUOUS');
+  assert.equal(classifyExactReadBinding({}, roleId, serviceAccountId), 'READ_BINDING_RESPONSE_INVALID');
+  assert.equal(classifyExactReadBinding([null], roleId, serviceAccountId), 'READ_BINDING_RESPONSE_INVALID');
+  assert.equal(classifyExactReadBinding([{ role_id: roleId }], roleId, serviceAccountId),
+    'READ_BINDING_RESPONSE_INVALID');
+  assert.equal(classifyExactReadBinding([exact], '', serviceAccountId), 'READ_BINDING_RESPONSE_INVALID');
 });
 
 test('exact-folder Audit Trails query resolves every source branch without cloud-wide folder enumeration', () => {
@@ -878,5 +898,18 @@ test('exact-folder trail CLI maps unreadable response JSON to one safe enum', ()
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'AUDIT_TRAIL_TRAIL_JSON_INVALID\n');
+  assert.equal(result.stderr, '');
+});
+
+test('temporary audit binding CLI maps unreadable provider JSON to one safe enum', () => {
+  const result = spawnSync(process.execPath, [
+    'scripts/classify-r1-temporary-audit-source-binding.mjs',
+    'missing-access-bindings.json',
+    'audit-trails.viewer',
+    'synthetic-service-account',
+  ], { encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'READ_BINDING_RESPONSE_INVALID\n');
   assert.equal(result.stderr, '');
 });
