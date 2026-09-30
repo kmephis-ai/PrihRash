@@ -24,6 +24,14 @@ on:
         options:
           - 'false'
           - 'true'
+      async_invocation:
+        description: Use Owner-approved async admission; acceptance is never COMMITTED
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   contents: read
@@ -596,11 +604,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs bootstrap)"
-          printf '%s\n' "$result" | jq -e '
+          child_kind='bootstrap'
+          if [ '${{ inputs.async_invocation }}' = 'true' ]; then
+            child_kind='async-bootstrap'
+          fi
+          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs "$child_kind")"
+          printf '%s\n' "$result" | jq -e --arg workflow "$child_kind" '
             .status == "PASS"
             and .code == "R1_BOOTSTRAP_ORCHESTRATOR_CHILD_WORKFLOW_COMPLETED"
-            and .workflow == "bootstrap"
+            and .workflow == $workflow
             and (.runId | type == "number")
             and (.conclusion | type == "string")
             and (.invokeStepConclusion | type == "string")
@@ -622,6 +634,9 @@ jobs:
               echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_RESULT_INCONSISTENT'
               exit 1
             }
+            if [ '${{ inputs.async_invocation }}' = 'true' ]; then
+              echo 'R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_ADMISSION_ACCEPTED'
+            fi
             exit 0
           fi
           if [ "$invoke_step" = 'NOT_REACHED' ] || [ "$invoke_step" = 'skipped' ]; then
@@ -631,9 +646,18 @@ jobs:
           echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_INVOKE_NON_SUCCESS'
           exit 1
 
-      - name: Classify durable state read-only after non-successful bootstrap invoke
+      - name: Wait for async Function execution window before durable recovery
+        id: async-window
+        if: ${{ always() && inputs.async_invocation == 'true' && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 610
+          echo 'elapsed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Classify durable state read-only after reached bootstrap invoke
         id: post-recovery
-        if: ${{ always() && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.conclusion != 'success' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        if: ${{ always() && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' && ((inputs.async_invocation == 'true' && steps.async-window.outputs.elapsed == 'true') || (inputs.async_invocation != 'true' && steps.bootstrap.outputs.conclusion != 'success')) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -686,7 +710,13 @@ jobs:
 
           status='FAIL'
           code='R1_BOOTSTRAP_ORCHESTRATOR_FAILED'
-          if [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
+          if [ '${{ inputs.async_invocation }}' = 'true' ] && [ -n "$POST_VERDICT" ] && [ -n "$POST_REASON" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED'
+          elif [ '${{ inputs.async_invocation }}' = 'true' ] && [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_RECOVERY_UNRESOLVED'
+          elif [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
             status='PASS'
             code='R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED'
           elif [ -n "$POST_VERDICT" ] && [ -n "$POST_REASON" ]; then
@@ -718,6 +748,7 @@ jobs:
             --arg postRecoveryReason "$POST_REASON" \
             --arg stagingResumeAuthorized "${{ inputs.allow_staging_resume }}" \
             --arg staleStagingRetirementAuthorized "${{ inputs.allow_stale_staging_retirement }}" \
+            --arg asyncInvocationRequested "${{ inputs.async_invocation }}" \
             '{
               status: $status,
               code: $code,
@@ -732,7 +763,8 @@ jobs:
               postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
               postRecoveryReason: ($postRecoveryReason | select(length > 0) // null),
               stagingResumeAuthorized: ($stagingResumeAuthorized == "true"),
-              staleStagingRetirementAuthorized: ($staleStagingRetirementAuthorized == "true")
+              staleStagingRetirementAuthorized: ($staleStagingRetirementAuthorized == "true"),
+              asyncInvocationRequested: ($asyncInvocationRequested == "true")
             }' > "$evidence_dir/classification.json"
 
       - name: Upload orchestrator evidence

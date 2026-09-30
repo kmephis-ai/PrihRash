@@ -18,6 +18,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
   assert.match(workflow, /ci_run_id:/);
   assert.match(workflow, /allow_staging_resume:/);
   assert.match(workflow, /allow_stale_staging_retirement:/);
+  assert.match(workflow, /async_invocation:/);
   assert.match(workflow, /default: 'false'/);
   assert.doesNotMatch(workflow, /\n\s+(push|pull_request|schedule|repository_dispatch|workflow_run):/);
   assert.match(workflow, /github\.repository == 'kmephis-ai\/PrihRash'/);
@@ -49,9 +50,11 @@ test('orchestrator recovery boundary stays read-only and includes historical pro
 
 test('orchestrator proceeds only from bounded recovery states and performs at most one bootstrap dispatch', async () => {
   const workflow = await text(WORKFLOW);
-  const bootstrapDispatches = workflow.match(/r1-bootstrap-orchestrator-child-workflow\.mjs bootstrap/g) ?? [];
+  const childDispatches = workflow.match(/r1-bootstrap-orchestrator-child-workflow\.mjs "\$child_kind"/g) ?? [];
 
-  assert.equal(bootstrapDispatches.length, 1);
+  assert.equal(childDispatches.length, 1);
+  assert.match(workflow, /child_kind='bootstrap'/);
+  assert.match(workflow, /child_kind='async-bootstrap'/);
   assert.match(workflow, /NOT_APPLIED/);
   assert.match(workflow, /EMPTY_DURABLE_STATE/);
   assert.match(workflow, /RECOVERY_REQUIRED/);
@@ -86,14 +89,18 @@ test('orchestrator proceeds only from bounded recovery states and performs at mo
 test('non-success after a reached bootstrap invoke gets one read-only classification and never a second bootstrap', async () => {
   const workflow = await text(WORKFLOW);
   const recoveryInvokes = workflow.match(/npm run initial-bootstrap-recovery:invoke/g) ?? [];
-  const bootstrapDispatches = workflow.match(/r1-bootstrap-orchestrator-child-workflow\.mjs bootstrap/g) ?? [];
+  const childDispatches = workflow.match(/r1-bootstrap-orchestrator-child-workflow\.mjs "\$child_kind"/g) ?? [];
 
   assert.equal(recoveryInvokes.length, 2);
-  assert.equal(bootstrapDispatches.length, 1);
+  assert.equal(childDispatches.length, 1);
   assert.match(workflow, /steps\.bootstrap\.outputs\.conclusion != 'success'/);
   assert.match(workflow, /steps\.bootstrap\.outputs\.invoke_step != 'NOT_REACHED'/);
   assert.match(workflow, /steps\.bootstrap\.outputs\.invoke_step != 'skipped'/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_POST_RECOVERY_FAILED/);
+  assert.match(workflow, /Wait for async Function execution window before durable recovery/);
+  assert.match(workflow, /sleep 610/);
+  assert.match(workflow, /inputs\.async_invocation == 'true'/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_ADMISSION_ACCEPTED/);
   assert.doesNotMatch(workflow, /controlled.*rebuild|cleanup|timer|cutover/i);
 });
 
@@ -102,12 +109,14 @@ test('child dispatcher can launch only canonical child workflows and fails close
 
   assert.match(dispatcher, /readiness: 'r1-yandex-readiness\.yml'/);
   assert.match(dispatcher, /bootstrap: 'r1-initial-shadow-bootstrap\.yml'/);
+  assert.match(dispatcher, /'async-bootstrap': 'r1-initial-shadow-bootstrap\.yml'/);
+  assert.match(dispatcher, /invocation_mode: 'async'/);
   assert.match(dispatcher, /repository !== REPOSITORY/);
   assert.match(dispatcher, /branch\?\.commit\?\.sha !== expectedSha/);
   assert.match(dispatcher, /branch\?\.protected !== true/);
   assert.match(dispatcher, /activeMainDispatch/);
   assert.match(dispatcher, /event === 'workflow_dispatch'/);
-  assert.match(dispatcher, /body: JSON\.stringify\(\{ ref: 'main' \}\)/);
+  assert.match(dispatcher, /inputs === null \? \{ ref: 'main' \} : \{ ref: 'main', inputs \}/);
   assert.match(dispatcher, /CHILD_WORKFLOW_ALREADY_ACTIVE/);
   assert.match(dispatcher, /CHILD_WORKFLOW_AMBIGUOUS/);
   assert.match(dispatcher, /Invoke exact initial bootstrap tag once/);
@@ -123,6 +132,9 @@ test('orchestrator publishes one retained privacy-safe evidence artifact includi
   assert.match(workflow, /classification\.json/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_RECOVERY_UNRESOLVED/);
+  assert.match(workflow, /asyncInvocationRequested/);
   assert.match(workflow, /stagingResumeAuthorized/);
   assert.match(workflow, /staleStagingRetirementAuthorized/);
   assert.match(workflow, /retention-days: 30/);
