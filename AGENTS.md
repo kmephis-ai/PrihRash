@@ -437,6 +437,49 @@ Cloud Logging group, без parent-cloud или более широкого role
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.
 
+### 8.2.1. Owner-approved async bootstrap circuit
+
+После исчерпания двух synchronous root-cause attempts для
+`FAIL/INITIAL_BOOTSTRAP_INVOKE_FAILED` sync circuit остаётся
+`BLOCKED_NEEDS_ROOT_CAUSE` и не переоткрывается. Owner decision из Issue #630 comment
+`5919735887` отдельно разрешает один bounded Yandex Cloud Functions async invocation contract.
+
+Async provider successor обязан использовать отдельный marker:
+
+```text
+Provider-Attempt: READY
+Async-Provider-Attempt: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED
+Recovery-State: STAGING_STALE_RETIREABLE
+Recovery-Run-ID: <exact fresh successful full recovery>
+Circuit-Rearm: OWNER_AUTHORIZED_ASYNC_INVOCATION
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Autocontinue для такого marker:
+
+- не запускает и не сбрасывает exhausted synchronous root-cause history circuit;
+- read-only проверяет exact Owner-decision comment и его scope;
+- принимает только distinct-SHA successful full recovery с exact recovery workflow/job/invoke phase,
+  ancestry к source SHA и enum artifact
+  `PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- разрешает только exact 4-file authority changeset:
+  autocontinue workflow/test + `AGENTS.md` + canonical bootstrap runbook;
+- dispatch-ит existing orchestrator только с
+  `allow_staging_resume=false`,
+  `allow_stale_staging_retirement=true`,
+  `async_invocation=true`;
+- не добавляет IAM bindings, YMQ resources, paid resources или retries.
+
+Async Function version обязана использовать `retriesCount=0`, empty success/failure targets и
+already-authorized exact Function invoker service account. `HTTP 202` означает только
+`INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`; это не `COMMITTED`. После любого reached async admission
+orchestrator ждёт не меньше 610 секунд при Function execution timeout 600 секунд, затем выполняет
+только existing read-only durable recovery. Любой ambiguous/non-success outcome остаётся STOP без
+same-SHA replay. Первый `COMMITTED` baseline всё равно требует independent reconciliation/catch-up;
+Google остаётся authoritative.
+
 ### 8.3. Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять все repository/process/provider решения,
