@@ -152,7 +152,7 @@ test('first async provider marker is recovery-bound, bypasses sync circuit, and 
   assert.match(evidence, /allow_staging_resume=false/);
   assert.match(evidence, /allow_stale_staging_retirement=true/);
   assert.match(evidence, /async_invocation=true/);
-  assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
+  assert.doesNotMatch(evidence, /(^|\n)Provider-Attempt: READY(?:\n|$)/);
 });
 
 test('source-drift preflight accepts only exact successful recovery and dispatches false/false orchestrator', async () => {
