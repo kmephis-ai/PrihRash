@@ -112,6 +112,19 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 прекратить Audit-source path и сменить causal model; unusable/ambiguous → STOP; version still unproven →
 отдельная причинная гипотеза provenance, без повторения этого probe/SHA.
 
+После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
+`CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
+`CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation
+actor/time, успешном завершённом operation, unique version-list match внутри source run window, exact
+active recovery tag version и полной runtime/entrypoint/service-account конфигурации. Любой response ID
+должен совпасть; missing/malformed/conflicting/ambiguous metadata завершает recovery без invoke/redeploy.
+Exact proof разрешает лишь уже-gated один write-free recovery invoke, который классифицирует durable state;
+он не доказывает `COMMITTED`. PR обязан включить полный набор synthetic fixtures, exact run/phase guards,
+artifact preservation и обновить `AGENTS.md` и runbook в том же Incident-M. Терминальные результаты
+различны: exact proof → read-only durable classification; proof absent/invalid → stop UNKNOWN без
+Function/YDB invoke. Для наблюдённого `CREATED_VERSION_NOT_PROVEN` pre-invoke stop не повторяет Audit
+Trails/IAM/deploy paths.
+
 Если autocontinue выдаёт `REUSE_SOURCE_RUN_NOT_EXACT`, сверить identity roles до следующего dispatch:
 `Recovery-Run-ID` — оригинальный target failed recovery, `Recovery-Version-Run-ID` — успешный create-only
 source для него, `Recovery-Classification-Run-ID` — exact latest failed reuse-verification predecessor.

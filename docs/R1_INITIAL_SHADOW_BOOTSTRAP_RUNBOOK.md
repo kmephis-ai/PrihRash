@@ -2275,3 +2275,51 @@ and version metadata permits only the existing single read-only recovery invoke 
 no applicable source ends this branch and changes causal model; unusable/ambiguous source, binding state,
 read-back, event correlation, or retirement evidence ends STOP with invoke skipped. No widening, retry,
 Function create/deploy, bootstrap replay, or inferred cleanup is allowed.
+
+### Alternate exact recovery-version proof from CreateFunctionVersion operation metadata
+
+On exact main `b05ae9696b9a5c5dc60b865b73129e439a98a344`, recovery `36713248229` failed at
+`Verify exact accepted recovery Function version for reuse`; deploy and invoke were skipped. Its enum-only
+artifact reported `RECOVERY_REUSE_VERSION_NOT_PROVEN / CREATED_VERSION_NOT_PROVEN`, and the independent
+Owner read-only source classification reached terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`. The
+Audit-source and temporary permission branches are therefore closed for this target.
+
+The Yandex Cloud API contract offers an independent proof already present in the exact Function operation
+list: `CreateVersion` returns an operation whose metadata type is
+`CreateFunctionVersionMetadata`, with the ID of the version being created in `function_version_id`;
+successful `response` is a `Version` with `id`. The new causal hypothesis is that the existing classifier
+requires only `response.id` and discards the operation's typed resource identity. Recovery may use metadata
+ID only when all of these agree: unique completed, error-free create operation by the expected actor in
+the accepted version run's bounded time window; exact documented metadata type and a single consistent
+version ID; optional response ID agrees; exactly one same-window version-list record has that ID and
+recovery tag; and the active tag lookup has the same ID with exact runtime, entrypoint and runtime service
+account. ProtoJSON `functionVersionId` and the Yandex CLI's protobuf `function_version_id` encoding are
+both covered; conflicting aliases, wrong `@type`, unknown fields, empty ID, duplicate operations/versions,
+wrong tag/configuration or incomplete lists remain unproven. No raw operation/version payload or IDs enter
+artifacts.
+
+The exact successor marker is one full read-only recovery classification, bound to original failed target
+`36341844854`, accepted create-only source `36611387299`, and latest failed reuse-classification
+`36713248229`:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36713248229
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Distinct terminal actions are required: exact metadata/version/tag/configuration proof skips Function
+create and every Audit/IAM query, then permits exactly one existing write-free recovery invoke for
+durable-state classification; absent, malformed, conflicting or ambiguous proof publishes enum-only
+evidence and leaves deploy/invoke skipped with state UNKNOWN. The second outcome does not authorize
+another provenance discriminator, permission attempt, deployment, cleanup or replay. Even a successful
+classification does not itself prove `COMMITTED`; follow its state-specific gates and independent YDB
+reconciliation. Full API shape, malformed/oneof/conflict cases, and terminal transitions are synthetic
+fixtures in this one Incident-M, alongside exact caller/canonical failed-run and source-history guards.
+For the observed `CREATED_VERSION_NOT_PROVEN` signature, invalid/missing typed metadata also stops before
+Audit Trails/IAM fallback so the already-terminal source branch is not replayed.

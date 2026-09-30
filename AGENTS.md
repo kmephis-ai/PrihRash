@@ -192,6 +192,23 @@ failed phase/source/version history, не добавляет IAM bindings и п�
 Audit-source ветку и требует смены causal model; `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` остаётся STOP.
 Не повторять workflow с теми же SHA/run IDs; никакого infer cleanup, IAM mutation, create или replay.
 
+Если свежая read-only классификация для того же failed reuse-verification run доказала
+`NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
+model на независимый exact version proof по typed metadata уже существующей Yandex
+`CreateFunctionVersion` operation: API contract задаёт metadata type
+`yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata` с `function_version_id`, а её
+значение обязано совпасть с ровно одной version в exact time window, активным recovery tag и полной
+runtime/entrypoint/runtime-service-account конфигурацией. `Operation.response` ID, если присутствует,
+обязан совпасть; malformed, missing, conflicting или ambiguous metadata остаётся STOP. Только exact
+совпадение разрешает единственный уже-gated write-free recovery invoke без Audit Trails или IAM reads;
+иначе deploy/invoke остаются skipped и recovery state UNKNOWN. Marker остаётся
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`, `Recovery-State: STAGING_PRESENT_UNCLASSIFIED`
+с exact target, accepted-version source и failed-classification run IDs. Это иной proof source, а не
+новый enum/read-shape refinement; для наблюдённого `CREATED_VERSION_NOT_PROVEN` failed classifier
+останавливается до Audit Trails/IAM fallback, synthetic fixtures и все terminal cases входят в тот же
+causal PR.
+
 Для этого stage-specific reuse marker три run identity различны и обязательны: `Recovery-Run-ID` —
 оригинальный failed recovery target, `Recovery-Version-Run-ID` — успешный create-only source именно для
 этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification

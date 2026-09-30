@@ -482,6 +482,89 @@ test('recovery deploy classifier proves only a unique exact version correlated t
   );
 });
 
+test('recovery deploy classifier proves the exact created version from typed operation metadata when response omits its ID', () => {
+  const expectedType = 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
+  const operation = exactEvidence().operations[0];
+  const metadataOperation = {
+    ...operation,
+    response: { '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.Version' },
+    metadata: { '@type': expectedType, functionVersionId: 'synthetic-version' },
+  };
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [metadataOperation] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [{
+      ...metadataOperation,
+      metadata: { '@type': expectedType, function_version_id: 'synthetic-version' },
+    }] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [{
+      ...metadataOperation,
+      response: { id: 'synthetic-version' },
+      metadata: { '@type': expectedType, functionVersionId: 'synthetic-version' },
+    }] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+  for (const invalidMetadata of [
+    { functionVersionId: 'synthetic-version' },
+    { '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.OtherMetadata', functionVersionId: 'synthetic-version' },
+    { '@type': expectedType },
+    { '@type': expectedType, functionVersionId: '' },
+    { '@type': expectedType, functionVersionId: 'synthetic-version', function_version_id: 'other-version' },
+    { '@type': expectedType, functionVersionId: 'synthetic-version', unexpected: true },
+  ]) {
+    assert.equal(
+      classifyRecoveryFunctionDeployOutcome(exactEvidence({
+        operations: [{ ...metadataOperation, metadata: invalidMetadata }],
+      })),
+      'CREATED_VERSION_NOT_PROVEN',
+    );
+  }
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [{
+      ...metadataOperation,
+      response: { id: 'different-response-version' },
+    }] })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, response: {} }],
+      versions: [{ ...exactEvidence().versions[0], id: 'different-listed-version' }],
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ operations: [{
+      ...metadataOperation,
+      response: { '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.OtherVersion' },
+    }] })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, done: false }],
+    })),
+    'CREATE_OPERATION_IN_PROGRESS',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, error: { code: 7 } }],
+    })),
+    'CREATE_OPERATION_FAILED',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, response: undefined }],
+    })),
+    'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
+  );
+});
+
 test('recovery deploy classifier distinguishes missing, ambiguous, pending, and failed operations', () => {
   assert.equal(
     classifyRecoveryFunctionDeployOutcome(exactEvidence({

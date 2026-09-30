@@ -99,6 +99,20 @@ test('recovery version reuse queries Audit Trails directly for the exact validat
   assert.match(reuseBlock, /if \[ -z "\$YC_CLOUD_ID" \]; then[\s\S]*AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID/);
 });
 
+test('exact CreateFunctionVersion operation metadata proof exits before Audit Trails or IAM fallback', () => {
+  const reuseStart = workflow.indexOf('      - name: Verify exact accepted recovery Function version for reuse');
+  const reuseEnd = workflow.indexOf('      - name: Deploy recovery-only Function version', reuseStart);
+  const reuseBlock = workflow.slice(reuseStart, reuseEnd);
+  const exactProof = reuseBlock.indexOf("if [ \"$reuse_evidence\" = 'EXACT_RECOVERY_VERSION_CREATED' ]; then");
+  const unprovenStop = reuseBlock.indexOf("if [ \"$reuse_evidence\" = 'CREATED_VERSION_NOT_PROVEN' ]; then");
+  const auditFallback = reuseBlock.indexOf("target_trail_response=\"$tmp/target-folder-audit-trails.json\"");
+  assert.ok(exactProof >= 0 && unprovenStop > exactProof && auditFallback > unprovenStop);
+  assert.match(reuseBlock, /reuse_status='EXACT_RECOVERY_VERSION_CREATED'[\s\S]*printf 'reuse_status=%s\\n' "\$reuse_status" >> "\$GITHUB_OUTPUT"[\s\S]*exit 0/);
+  assert.match(reuseBlock, /if \[ "\$reuse_evidence" = 'CREATED_VERSION_NOT_PROVEN' \]; then[\s\S]*reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'[\s\S]*exit 1[\s\S]*target_trail_response=/);
+  assert.match(recoveryDeployClassifier, /CreateFunctionVersionMetadata/);
+  assert.match(recoveryDeployClassifier, /metadataVersionId/);
+});
+
 test('temporary audit permission probe is source-marker-bound and retires only per-run bindings', () => {
   assert.match(workflow, /audit_source_permission_probe:/);
   assert.match(workflow, /AUDIT_SOURCE_PERMISSION_PROBE: \$\{\{ inputs\.audit_source_permission_probe/);
