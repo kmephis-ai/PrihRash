@@ -15,8 +15,8 @@ jobs:
     env:
       SOURCE_SHA: 4da687ef15d718020cbb404df7417e371aeaa11f
       TARGET_BRANCH: incident/r1-create-step-tag-history-proof
-      PATCH_GZ_SHA256: 4f261ae71d7637bdfed18fcea870f1a42ff073bdecc0c99947facf9b9461f980
-      PATCH_SHA256: 7bdc68a90c3cad33f40b75fb9af3f6121fc917deb48c7bfa869e5fcbe6a52097
+      PATCH_GZ_SHA256: 4bff817c8ff44b7ba2873495ba5081563a6cdbfe128768e64a91d43fb594fa52
+      PATCH_SHA256: e7d875727d1eaaf2e346764231ab8404637f038db72c37ff15aefc44ebbd79e8
     steps:
       - name: Checkout transport payload
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
