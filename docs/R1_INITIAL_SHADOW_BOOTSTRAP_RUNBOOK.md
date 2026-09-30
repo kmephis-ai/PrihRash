@@ -2081,3 +2081,38 @@ is inferred.
 
 Local Windows Node 22 verification normalizes workflow fixture line endings before extracting jq
 predicates; this keeps the paired recovery/caller fixtures equivalent to the Linux CI source text.
+
+### Terminal Audit-source evidence and exact-folder source bypass after #881
+
+On exact main `7012c9ee9bffacce0bbe153ca05501b4d5fdadc4`, the single canonical read-only reuse recovery
+`36663137154` passed exact failed-run, accepted deploy-run, source-PR marker and private Function gates.
+It read Function version/operation/tag metadata and the Audit Trails source, then published only the
+enum artifact `r1-initial-bootstrap-recovery-reuse-evidence-36663137154`:
+
+```text
+recoveryVersionReuse=RECOVERY_REUSE_VERSION_NOT_PROVEN
+versionMetadataEvidence=CREATED_VERSION_NOT_PROVEN
+operationListEvidence=RECOVERY_REUSE_OPERATION_LIST_READ
+tagHistoryEvidence=RECOVERY_REUSE_TAG_HISTORY_READ
+auditTrailEvidence=AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND
+auditSourceDecision=SOURCE_EVIDENCE_UNUSABLE
+auditCreateEventEvidence=AUDIT_EVENT_READ_NOT_ATTEMPTED
+```
+
+Function/Lockbox gates had already validated the exact configured target folder, but Cloud-wide
+`ListFolders` did not return it. This proves the inventory prerequisite unusable for this target; it
+does not prove that no Audit Trail exists or whether the one-shot Function-version create applied.
+The source branch outcome is terminal `SOURCE_EVIDENCE_UNUSABLE`; no more folder-inventory enums are
+authorized. Recovery Function create/deploy/invoke were skipped; no Google/YDB read/write, replay,
+cleanup, or authority change occurred.
+
+The causal successor changes the lookup model: both recovery reuse and deploy-recovery query the
+existing Audit Trails `List` endpoint directly for the exact `YC_FOLDER_ID` already proven by Function
+and Lockbox metadata, avoiding Cloud-wide folder inventory. It binds each returned trail to the exact
+folder and cloud and keeps pagination/malformed response proof fail-closed. Synthetic fixtures cover
+the decision end-to-end: a unique applicable pre-existing Cloud Logging source allows only exact event
+correlation; empty trails—including omitted `trails` under ProtoJSON—end as
+`NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`; malformed, paginated, mismatched or ambiguous evidence ends
+as `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS`. Only exact applicable source plus unique exact event can
+classify the accepted Function version; no such result authorizes another create, invoke, replay,
+cleanup, or authority change.

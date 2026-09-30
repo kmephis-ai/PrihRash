@@ -15,6 +15,11 @@ const runbook = (await readFile(
   new URL('../../docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md', import.meta.url),
   'utf8',
 )).replace(/\r\n/g, '\n');
+const agents = (await readFile(new URL('../../AGENTS.md', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
+const completionSprint = (await readFile(
+  new URL('../../docs/R1_COMPLETION_SPRINT.md', import.meta.url),
+  'utf8',
+)).replace(/\r\n/g, '\n');
 
 test('recovery autocontinue is a bounded exact-main read-only dispatch surface', () => {
   assert.match(workflow, /workflow_run:/);
@@ -744,6 +749,25 @@ test('PR-867 recovery result is the current Audit Trails source decision boundar
   assert.match(evidence, /protobuf JSON omitting an empty repeated field/);
   assert.match(evidence, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE/);
   assert.match(evidence, /SOURCE_EVIDENCE_UNUSABLE/);
+});
+
+test('post-#881 SOURCE_EVIDENCE_UNUSABLE changes the Audit-source model to exact-folder decision', () => {
+  const evidence = runbook.match(
+    /### Terminal Audit-source evidence and exact-folder source bypass after #881([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the terminal source result and changed root-cause solution must be recorded');
+  assert.match(evidence, /auditTrailEvidence=AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND/);
+  assert.match(evidence, /auditSourceDecision=SOURCE_EVIDENCE_UNUSABLE/);
+  assert.match(evidence, /directly for the exact `YC_FOLDER_ID`/);
+  assert.match(evidence, /omitted `trails`/);
+  assert.match(evidence, /`NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`/);
+  assert.match(evidence, /`SOURCE_EVIDENCE_UNUSABLE\/AMBIGUOUS`/);
+  assert.match(agents, /Если Cloud-wide `ListFolders` не возвращает точный `YC_FOLDER_ID`/);
+  assert.match(completionSprint, /Если Cloud-wide `ListFolders` не содержит уже точно проверенный `YC_FOLDER_ID`/);
+  assert.match(recoveryWorkflow, /--audit-folder-trails/);
+  assert.match(recoveryWorkflow, /--audit-folder-trails/);
+  assert.doesNotMatch(recoveryWorkflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
+  assert.doesNotMatch(workflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
 });
 
 test('PR-866 exact CI list lookup failure is recorded before any Yandex authentication', () => {

@@ -80,6 +80,12 @@ terminal pre-provider block. Не дробить это на pagination/enum ref
 ветку и сменить causal model. Правило синхронизируется в `AGENTS.md` в том же causal PR; отдельный
 process/docs PR запрещён.
 
+Если Cloud-wide `ListFolders` не содержит уже точно проверенный `YC_FOLDER_ID`, root-cause successor
+может напрямую прочитать Audit Trails в этой папке, минуя вспомогательную инвентаризацию. Он должен
+синхронно классифицировать точные folder/cloud identity, пустой ProtoJSON `trails`, malformed и
+pagination cases до одного source decision point; неизвестный результат остаётся unusable/ambiguous.
+Этот bypass не меняет authority и сам по себе не разрешает Function/YDB invoke.
+
 ## Provider loop
 
 После merge root-cause PR выполняется только этот bounded цикл:

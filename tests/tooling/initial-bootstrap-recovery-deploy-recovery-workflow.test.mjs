@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml', 'utf8');
-const autocontinue = await readFile('.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', 'utf8');
-const classifier = await readFile('scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs', 'utf8');
-const ciClassifier = await readFile('scripts/classify-github-ci-run.mjs', 'utf8');
+const workflow = (await readFile('.github/workflows/r1-initial-bootstrap-recovery-deploy-recovery.yml', 'utf8')).replace(/\r\n/g, '\n');
+const autocontinue = (await readFile('.github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml', 'utf8')).replace(/\r\n/g, '\n');
+const classifier = (await readFile('scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs', 'utf8')).replace(/\r\n/g, '\n');
+const ciClassifier = (await readFile('scripts/classify-github-ci-run.mjs', 'utf8')).replace(/\r\n/g, '\n');
 
 test('failed recovery Function deploy has an exact-main read-only metadata recovery path', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -38,18 +38,16 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /serverless-functions\.api\.cloud\.yandex\.net\/functions\/v1\/functions\/\$\{function_id\}:tagHistory/);
   assert.match(workflow, /data-urlencode "tag=\$\{TARGET_TAG\}"/);
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
-  assert.match(workflow, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders/);
   assert.match(workflow, /YC_CLOUD_ID: \$\{\{ secrets\.YC_R1_CLOUD_ID \}\}/);
   assert.match(workflow, /if \[ -z "\$YC_CLOUD_ID" \]/);
-  assert.match(workflow, /data-urlencode "cloudId=\$\{cloud_id\}"/);
   assert.match(workflow, /audittrails\.api\.cloud\.yandex\.net\/audit-trails\/v1\/trails/);
-  assert.match(workflow, /data-urlencode "folderId=\$\{cloud_folder_ids\[\$index\]\}"/);
+  assert.match(workflow, /data-urlencode "folderId=\$\{YC_FOLDER_ID\}"/);
   assert.match(workflow, /yc logging read --group-id "\$audit_log_group_id"/);
   assert.match(workflow, /json_payload\.eventType = \\"yandex\.cloud\.audit\.serverless\.functions\.CreateFunctionVersion/);
-  assert.match(workflow, /--audit-cloud-trails "\$tmp\/cloud-folders\.json" "\$cloud_id" "\$YC_FOLDER_ID"/);
-  assert.match(workflow, /--audit-cloud-folder-ids "\$tmp\/cloud-folders\.json" "\$cloud_id" "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /--audit-folder-trails "\$trail_response" "\$cloud_id" "\$YC_FOLDER_ID"/);
+  assert.doesNotMatch(workflow, /--audit-cloud-folder-ids|--audit-cloud-trails|resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders/);
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
-  assert.match(classifier, /folders\.length > 100/);
+  assert.match(classifier, /inspectRecoveryAuditTrailFolderCoverage\(trailResponse, cloudId, targetFolderId, runFinishedAt\)/);
   assert.match(workflow, /--audit-events "\$tmp\/audit-events\.json"/);
   assert.match(workflow, /auditTrailSourceEvidence:\$audit_trail,auditSourceDecision:\$audit_source_decision,auditCreateFunctionVersionEvidence:\$audit_event/);
   assert.match(workflow, /EXISTING_APPLICABLE_AUDIT_SOURCE\|NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE\|SOURCE_EVIDENCE_UNUSABLE\|SOURCE_EVIDENCE_AMBIGUOUS/);
@@ -61,7 +59,7 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /RECOVERY_DEPLOY_INPUT_INVALID\|RECOVERY_VERSION_ENTRY_INVALID\|RECOVERY_VERSION_TAGS_INVALID\|RECOVERY_VERSION_TIMESTAMP_INVALID\|RECOVERY_METADATA_JSON_INVALID\|RECOVERY_CLASSIFIER_INTERNAL_ERROR\|RECOVERY_TAG_HISTORY_READ_FAILED\|RECOVERY_TAG_HISTORY_METADATA_INVALID\|RECOVERY_TAG_HISTORY_INCOMPLETE\|RECOVERY_TAG_HISTORY_AMBIGUOUS\|RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED\|RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT\|RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT\|RECOVERY_UNTAGGED_VERSION_AMBIGUOUS\|RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN\|RECOVERY_VERSION_LIST_INCOMPLETE\|RECOVERY_OPERATION_LIST_INCOMPLETE\) ;;/);
   assert.match(workflow, /AUDIT_TRAIL_METADATA_INVALID\|AUDIT_TRAIL_LIST_INCOMPLETE\|AUDIT_TRAIL_SOURCE_NOT_CONFIGURED/);
   assert.match(workflow, /--audit-trail-http-status "\$trail_list_http"/);
-  assert.match(workflow, /--audit-folder-list-http-status "\$folder_list_http"/);
+  assert.match(workflow, /--audit-trail-http-status "\$trail_list_http"/);
   assert.match(workflow, /AUDIT_TRAIL_AUTHENTICATION_REQUIRED/);
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED/);
   assert.match(workflow, /AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED/);

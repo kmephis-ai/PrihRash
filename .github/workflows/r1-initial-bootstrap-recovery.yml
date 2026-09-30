@@ -784,63 +784,32 @@ jobs:
             reuse_status='RECOVERY_REUSE_TAGGED_VERSION_ID_UNPROVEN'
             echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_TAGGED_VERSION_ID_UNPROVEN'; exit 1;
           }
-          audit_trail_evidence='AUDIT_TRAIL_FOLDER_LIST_READ_FAILED'
-          folder_list_http='000'
-          if folder_list_http="$(curl --silent --show-error --output "$tmp/cloud-folders.json" \
-            --write-out '%{http_code}' --get \
-            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
-            --header 'Accept: application/json' \
-            --data-urlencode "cloudId=${YC_CLOUD_ID}" \
-            --data-urlencode 'pageSize=1000' \
-            'https://resource-manager.api.cloud.yandex.net/resource-manager/v1/folders' \
-            2>"$tmp/cloud-folders.err")"; then
-            case "$folder_list_http" in
-              2??)
-                audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                  --audit-cloud-folder-ids "$tmp/cloud-folders.json" "$YC_CLOUD_ID" "$YC_FOLDER_ID" \
-                  "$tmp/cloud-folder-ids.json")" || audit_trail_evidence='AUDIT_TRAIL_FOLDER_METADATA_INVALID'
-                ;;
-              *)
-                audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                  --audit-folder-list-http-status "$folder_list_http")"
-                ;;
-            esac
-          fi
-
-          if [ "$audit_trail_evidence" = 'FOLDER_LIST_READY' ]; then
-            mapfile -t cloud_folder_ids < <(jq -er '.[]' "$tmp/cloud-folder-ids.json")
-            trail_response_files=()
-            cloud_trail_lists_ready=true
-            for index in "${!cloud_folder_ids[@]}"; do
-              trail_response="$tmp/cloud-audit-trails-${index}.json"
-              trail_list_http='000'
-              if ! trail_list_http="$(curl --silent --show-error --output "$trail_response" \
-                --write-out '%{http_code}' --get \
-                --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
-                --header 'Accept: application/json' \
-                --data-urlencode "folderId=${cloud_folder_ids[$index]}" \
-                --data-urlencode 'pageSize=1000' \
-                'https://audittrails.api.cloud.yandex.net/audit-trails/v1/trails' \
-                2>"$tmp/cloud-audit-trails-${index}.err")"; then
-                audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
-                cloud_trail_lists_ready=false
-                break
-              fi
-              case "$trail_list_http" in
-                2??) trail_response_files+=("$trail_response") ;;
+          audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
+          if [ -z "$YC_CLOUD_ID" ]; then
+            audit_trail_evidence='AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID'
+          else
+            target_trail_response="$tmp/target-folder-audit-trails.json"
+            target_trail_list_http='000'
+            if target_trail_list_http="$(curl --silent --show-error --output "$target_trail_response" \
+              --write-out '%{http_code}' --get \
+              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+              --header 'Accept: application/json' \
+              --data-urlencode "folderId=${YC_FOLDER_ID}" \
+              --data-urlencode 'pageSize=1000' \
+              'https://audittrails.api.cloud.yandex.net/audit-trails/v1/trails' \
+              2>"$tmp/target-folder-audit-trails.err")"; then
+              case "$target_trail_list_http" in
+                2??)
+                  audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+                    --audit-folder-trails "$target_trail_response" "$YC_CLOUD_ID" "$YC_FOLDER_ID" \
+                    "$RUN_FINISHED_AT" "$tmp/audit-log-group-id")" || \
+                    audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
+                  ;;
                 *)
                   audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                    --audit-trail-http-status "$trail_list_http")"
-                  cloud_trail_lists_ready=false
-                  break
+                    --audit-trail-http-status "$target_trail_list_http")"
                   ;;
               esac
-            done
-            if [ "$cloud_trail_lists_ready" = 'true' ]; then
-              audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                --audit-cloud-trails "$tmp/cloud-folders.json" "$YC_CLOUD_ID" "$YC_FOLDER_ID" \
-                "$RUN_FINISHED_AT" "$tmp/audit-log-group-id" "${trail_response_files[@]}")" || \
-                audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
             fi
           fi
           case "$audit_trail_evidence" in

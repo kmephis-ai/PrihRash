@@ -384,16 +384,34 @@ export function classifyRecoveryAuditTrailSource(response, runFinishedAt) {
 }
 
 function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt) {
+  const inventory = inspectAuditTrailCloudFolderInventory(folderResponse, cloudId, targetFolderId);
+  if (inventory.evidence !== 'FOLDER_LIST_READY') return { evidence: inventory.evidence };
+  return inspectRecoveryAuditTrailCoverageForFolders(
+    inventory.folderIds, trailResponses, cloudId, targetFolderId, runFinishedAt,
+  );
+}
+
+function inspectRecoveryAuditTrailFolderCoverage(trailResponse, cloudId, targetFolderId, runFinishedAt) {
+  if (typeof cloudId !== 'string' || cloudId.length === 0) {
+    return { evidence: 'AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID' };
+  }
+  if (typeof targetFolderId !== 'string' || targetFolderId.length === 0) {
+    return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID' };
+  }
+  return inspectRecoveryAuditTrailCoverageForFolders(
+    [targetFolderId], [trailResponse], cloudId, targetFolderId, runFinishedAt,
+  );
+}
+
+function inspectRecoveryAuditTrailCoverageForFolders(folderIds, trailResponses, cloudId, targetFolderId, runFinishedAt) {
   try {
     const targetFinishedAt = timestamp(runFinishedAt);
     if (targetFinishedAt === null || typeof cloudId !== 'string' || cloudId.length === 0
       || typeof targetFolderId !== 'string' || targetFolderId.length === 0
+      || !Array.isArray(folderIds) || !folderIds.includes(targetFolderId)
       || !Array.isArray(trailResponses)) {
       return { evidence: 'AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID' };
     }
-    const inventory = inspectAuditTrailCloudFolderInventory(folderResponse, cloudId, targetFolderId);
-    if (inventory.evidence !== 'FOLDER_LIST_READY') return { evidence: inventory.evidence };
-    const { folderIds } = inventory;
     if (trailResponses.length !== folderIds.length) {
       return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH' };
     }
@@ -616,6 +634,10 @@ export function classifyRecoveryAuditTrailCloudCoverage(folderResponse, trailRes
   return inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt).evidence;
 }
 
+export function classifyRecoveryAuditTrailFolderCoverage(trailResponse, cloudId, targetFolderId, runFinishedAt) {
+  return inspectRecoveryAuditTrailFolderCoverage(trailResponse, cloudId, targetFolderId, runFinishedAt).evidence;
+}
+
 export function classifyAuditTrailSourceDecision(sourceEvidence, eventEvidence) {
   if (sourceEvidence === 'AUDIT_TRAIL_SOURCE_AMBIGUOUS'
     || eventEvidence === 'AUDIT_CREATE_EVENT_AMBIGUOUS'
@@ -779,6 +801,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         ]);
         const result = inspectRecoveryAuditTrailCloudCoverage(
           folderResponse, trailResponses, cloudId, targetFolderId, runFinishedAt,
+        );
+        if (result.logGroupId) await writeFile(locatorPath, result.logGroupId, 'utf8');
+        process.stdout.write(`${ENUMS.has(result.evidence) ? result.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
+      } catch {
+        process.stdout.write('AUDIT_TRAIL_TRAIL_JSON_INVALID\n');
+      }
+    }
+  } else if (cliArgs[0] === '--audit-folder-trails') {
+    const [trailPath, cloudId, targetFolderId, runFinishedAt, locatorPath] = cliArgs.slice(1);
+    if (!trailPath || !cloudId || !targetFolderId || !runFinishedAt || !locatorPath) {
+      process.stdout.write('AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID\n');
+      process.exitCode = 2;
+    } else {
+      try {
+        const trailResponse = await readJson(trailPath);
+        const result = inspectRecoveryAuditTrailFolderCoverage(
+          trailResponse, cloudId, targetFolderId, runFinishedAt,
         );
         if (result.logGroupId) await writeFile(locatorPath, result.logGroupId, 'utf8');
         process.stdout.write(`${ENUMS.has(result.evidence) ? result.evidence : 'AUDIT_TRAIL_CLASSIFIER_FAILED'}\n`);
