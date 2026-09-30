@@ -44,7 +44,7 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_SOURCE_RUN_NOT_EXACT/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_RUN_NOT_EXACT/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_PHASE_NOT_PROVEN/);
-  assert.match(workflow, /newer_recovery_count/);
+  assert.match(workflow, /latest_history_decision/);
   assert.match(workflow, /actions\/workflows\/r1-initial-bootstrap-recovery-deploy-attempt\.yml\/runs/);
   assert.match(workflow, /\.workflow_id\|type=="number"/);
   assert.doesNotMatch(workflow, /\.name=="R1 initial bootstrap recovery deploy-only attempt"/);
@@ -101,7 +101,7 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
 
 test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
   const newerRunBlock = workflow.slice(workflow.indexOf('newer_run="$(curl'));
-  const runFilter = newerRunBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--arg source_sha "\$source_failed_sha" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
+  const runFilter = newerRunBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--argjson source_id "\$failed_run_id" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
   assert.ok(runFilter, 'extract the live intervening recovery run identity filter');
   const newerJobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
   const filter = newerJobsBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
@@ -120,12 +120,14 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     status: 'completed',
     conclusion: 'failure',
     head_sha: 'c'.repeat(40),
+    created_at: '2026-09-29T23:12:25Z',
     ...overrides,
   });
   const provesExactInterveningRun = (run) => {
     const result = spawnSync('jq', [
       '-e', '--argjson', 'id', '36643931461', '--argjson', 'workflow_id', '370292276',
-      '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40), runFilter,
+      '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40),
+      '--arg', 'source_created', '2026-09-27T18:45:46Z', '--argjson', 'source_id', '36341844854', runFilter,
     ], { input: JSON.stringify(run), encoding: 'utf8' });
     return result.status === 0 && result.stdout.trim() === 'true';
   };
@@ -135,6 +137,9 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
   assert.equal(provesExactInterveningRun(runRecord({ head_sha: 'd'.repeat(40) })), false);
   assert.equal(provesExactInterveningRun(runRecord({ head_sha: 'a'.repeat(40) })), false);
   assert.equal(provesExactInterveningRun(runRecord({ status: 'in_progress' })), false);
+  assert.equal(provesExactInterveningRun(runRecord({ created_at: 'invalid' })), false);
+  assert.equal(provesExactInterveningRun(runRecord({ created_at: '2026-09-27T18:45:46Z' })), true);
+  assert.equal(provesExactInterveningRun(runRecord({ id: 1 })), false);
 
   const job = (overrides = {}) => ({ jobs: [{
     name: 'initial-bootstrap-recovery',
@@ -169,6 +174,63 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     ],
   })), false);
   assert.equal(provesPreinvokeReuseStop({ jobs: [...job().jobs, ...job().jobs] }), false);
+});
+
+test('bounded recovery history selects only its latest source-relative run and classifies source-only, newer, or unusable', (t) => {
+  const filter = workflow.match(/latest_history_decision="\$\(jq -r --arg created "\$source_failed_created_at" --argjson id "\$failed_run_id" '\n([\s\S]*?)\n\s*' <<<"\$recovery_history"\)"/)?.[1];
+  assert.ok(filter, 'extract the canonical bounded latest-run decision');
+  assert.match(workflow, /--data-urlencode "created=\$\{source_failed_created_at\}\.\.\*"/);
+  assert.match(workflow, /--data-urlencode 'per_page=1'/);
+  assert.match(workflow, /--data-urlencode 'sort=created' --data-urlencode 'direction=desc'/);
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const sourceCreatedAt = '2026-09-27T18:45:46Z';
+  const sourceId = 36341844854;
+  const decide = (run) => {
+    const result = spawnSync('jq', ['-r', '--arg', 'created', sourceCreatedAt, '--argjson', 'id', String(sourceId), filter], {
+      input: JSON.stringify({ workflow_runs: [run] }), encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  assert.equal(decide({ id: sourceId, created_at: sourceCreatedAt }), 'SOURCE_ONLY');
+  assert.equal(decide({ id: 36643931461, created_at: '2026-09-29T23:12:25Z' }), 'NEWER:36643931461');
+  assert.equal(decide({ id: sourceId + 1, created_at: sourceCreatedAt }), `NEWER:${sourceId + 1}`);
+  assert.equal(decide({ id: sourceId - 1, created_at: sourceCreatedAt }), 'UNCLASSIFIED');
+  assert.equal(decide({ id: sourceId, created_at: '2026-09-27T18:40:00Z' }), 'UNCLASSIFIED');
+  assert.equal(decide({ id: 'malformed', created_at: sourceCreatedAt }), 'UNCLASSIFIED');
+});
+
+test('bounded recovery history query classifies source-only, latest successor, and malformed history as terminal decisions', (t) => {
+  const filter = workflow.match(/latest_history_decision="\$\(jq -r --arg created "\$source_failed_created_at" --argjson id "\$failed_run_id" '\n([\s\S]*?)\n\s*' <<<"\$recovery_history"\)"/)?.[1];
+  assert.ok(filter, 'extract the bounded latest recovery decision from the caller');
+  assert.match(workflow, /--data-urlencode "created=\$\{source_failed_created_at\}\.\.\*"/);
+  assert.match(workflow, /--data-urlencode 'per_page=1'/);
+  assert.match(workflow, /--data-urlencode 'sort=created' --data-urlencode 'direction=desc'/);
+  assert.doesNotMatch(workflow, /REUSE_RECOVERY_HISTORY_INCOMPLETE.*per_page=100/);
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const failedRunId = 36341844854;
+  const createdAt = '2026-09-27T18:45:46Z';
+  const decide = (latest) => {
+    const result = spawnSync('jq', ['-r', '--arg', 'created', createdAt, '--argjson', 'id', String(failedRunId), filter], {
+      input: JSON.stringify({ total_count: 20, workflow_runs: [latest] }), encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  assert.equal(decide({ id: failedRunId, created_at: createdAt }), 'SOURCE_ONLY');
+  assert.equal(decide({ id: 36643931461, created_at: '2026-09-29T23:12:25Z' }), 'NEWER:36643931461');
+  assert.equal(decide({ id: failedRunId + 1, created_at: createdAt }), `NEWER:${failedRunId + 1}`);
+  assert.equal(decide({ id: failedRunId - 1, created_at: createdAt }), 'UNCLASSIFIED');
+  assert.equal(decide({ id: failedRunId, created_at: '2026-09-27T18:40:00Z' }), 'UNCLASSIFIED');
+  assert.equal(decide({ id: 'invalid', created_at: createdAt }), 'UNCLASSIFIED');
 });
 
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {

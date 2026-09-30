@@ -283,6 +283,13 @@ Successor после pre-provider CI/autocontinue changeset stop остаётс�
 включать полную допустимую causal changeset, тестируемые caller/recovery predicates и terminal outcomes;
 повтор `enum -> PR -> probe -> более точный enum -> PR` запрещён.
 
+Bounded recovery history использует exact failed-run GET и server-side `created` window к latest
+recovery predecessor: autocontinue берёт только latest, работающий recovery workflow — current run
+плюс latest predecessor. Source-only history либо один exact distinct-SHA failed verification stop с
+deploy/invoke `skipped` разрешают оставшиеся exact gates; иной/missing/ambiguous latest predecessor
+блокирует dispatch. Не возвращаться к полной-history pagination: неразрешённый bounded result требует
+пересмотра causal model, а не page-size/telemetry-only PR.
+
 Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`
 достигнут) запрещён отдельный PR только для `omitted trails => []`. Один causal PR обязан завершить
 ветку исходом `EXISTING_APPLICABLE_AUDIT_SOURCE`, `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` либо

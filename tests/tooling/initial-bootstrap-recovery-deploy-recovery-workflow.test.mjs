@@ -72,8 +72,9 @@ test('recovery deploy classification reads provider metadata only and publishes 
   assert.match(workflow, /AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID/);
-  assert.match(classifier, /function protobufRepeatedField\(record, name\)/);
-  assert.match(classifier, /protobufRepeatedField\(response, 'trails'\)/);
+  assert.match(classifier, /function protoJsonRepeatedField\(record, name\)/);
+  assert.match(classifier, /protoJsonRepeatedField\(response, 'trails'\)/);
+  assert.match(classifier, /protoJsonRepeatedField\(response, 'folders'\)/);
   assert.match(classifier, /Protobuf JSON omits empty repeated fields/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID/);
   assert.match(workflow, /AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH/);

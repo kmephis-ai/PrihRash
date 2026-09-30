@@ -322,6 +322,12 @@ test('omitted protobuf repeated fields reach the same terminal empty-source deci
   assert.equal(classifyRecoveryAuditTrailCloudCoverage(
     folders, [{ nextPageToken: 'synthetic-next-page' }, {}], cloudId, targetFolderId, runFinishedAt,
   ), 'AUDIT_TRAIL_LIST_INCOMPLETE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'SOURCE_EVIDENCE_UNUSABLE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', 'AUDIT_CREATE_EVENT_AMBIGUOUS',
+  ), 'SOURCE_EVIDENCE_AMBIGUOUS');
 });
 
 function exactEvidence(overrides = {}) {

@@ -134,7 +134,7 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /name: Invoke exact read-only recovery tag once\s+if: inputs\.reuse_deploy_attempt_run_id == '' \|\| steps\.reuse-version\.outputs\.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'/);
   assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN/);
-  assert.match(workflow, /newer_recovery_count/);
+  assert.match(workflow, /latest_history_decision/);
   assert.match(workflow, /--arg current_sha "\$GITHUB_SHA" --arg source_sha "\$source_failed_sha"/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_RUN_NOT_EXACT/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_PHASE_NOT_PROVEN/);
@@ -157,7 +157,7 @@ test('read-only reuse requires exact accepted deploy history and version metadat
 
 test('recovery caller intervening-run predicates reject source/current SHA and ambiguous phases', (t) => {
   const runBlock = workflow.slice(workflow.indexOf('newer_run="$(curl'));
-  const runFilter = runBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--arg source_sha "\$source_failed_sha" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
+  const runFilter = runBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--argjson source_id "\$REUSE_FAILED_RECOVERY_RUN_ID" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
   const jobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
   const jobsFilter = jobsBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
   assert.ok(runFilter, 'extract canonical recovery run identity predicate');
@@ -176,17 +176,22 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     status: 'completed',
     conclusion: 'failure',
     head_sha: 'c'.repeat(40),
+    created_at: '2026-09-29T23:12:25Z',
     ...overrides,
   });
-  const exactRun = (value) => spawnSync('jq', [
+  const exactRun = (value, sourceId = 36341844854) => spawnSync('jq', [
     '-e', '--argjson', 'id', '17', '--argjson', 'workflow_id', '29',
-    '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40), runFilter,
+    '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40),
+    '--arg', 'source_created', '2026-09-27T18:45:46Z', '--argjson', 'source_id', String(sourceId), runFilter,
   ], { input: JSON.stringify(value), encoding: 'utf8' }).status === 0;
   assert.equal(exactRun(runRecord()), true);
   for (const mismatch of [
     { id: 18 }, { workflow_id: 30 }, { event: 'push' }, { status: 'in_progress' },
     { conclusion: 'success' }, { head_sha: 'd'.repeat(40) }, { head_sha: 'a'.repeat(40) },
+    { created_at: 'invalid' }, { created_at: '2026-09-27T18:45:46Z', id: 36341844853 },
   ]) assert.equal(exactRun(runRecord(mismatch)), false);
+  assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 16), true);
+  assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 18), false);
 
   const job = (overrides = {}) => ({ jobs: [{
     name: 'initial-bootstrap-recovery',
@@ -219,6 +224,47 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'failure' },
   ] })), false);
+});
+
+test('bounded recovery history in the running workflow binds the current run and one latest predecessor', (t) => {
+  const responseGuard = workflow.match(/if ! jq -e --argjson self "\$GITHUB_RUN_ID" '\n([\s\S]*?)\n\s*' <<<"\$recovery_history"/)?.[1];
+  assert.ok(responseGuard, 'extract the canonical current-run and one-predecessor response guard');
+  const filter = workflow.match(/latest_history_decision="\$\(jq -r --arg created "\$source_failed_created_at" --argjson id "\$REUSE_FAILED_RECOVERY_RUN_ID" '\n([\s\S]*?)\n\s*' <<<"\$recovery_history"\)"/)?.[1];
+  assert.ok(filter, 'extract the canonical bounded latest-prior decision');
+  assert.match(workflow, /--data-urlencode 'per_page=2'/);
+  assert.match(workflow, /--data-urlencode 'sort=created' --data-urlencode 'direction=desc'/);
+  assert.match(workflow, /\.workflow_runs\[0\]\.id == \$self/);
+  assert.match(workflow, /latest_history_decision/);
+  assert.match(workflow, /and \(\.created_at \| type == "string" and test\("\^\[0-9\]/);
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const currentRunId = 500;
+  const currentRun = { id: currentRunId, created_at: '2026-09-30T02:00:00Z' };
+  const sourceRun = { id: 36341844854, created_at: '2026-09-27T18:45:46Z' };
+  const latestCandidate = { id: 36643931461, created_at: '2026-09-29T23:12:25Z' };
+  const responsePassesGuard = (history) => spawnSync('jq', [
+    '-e', '--argjson', 'self', String(currentRunId), responseGuard,
+  ], { input: JSON.stringify(history), encoding: 'utf8' }).status === 0;
+  assert.equal(responsePassesGuard({ total_count: 20, workflow_runs: [currentRun, sourceRun] }), true);
+  assert.equal(responsePassesGuard({ total_count: 20, workflow_runs: [currentRun, latestCandidate] }), true);
+  assert.equal(responsePassesGuard({ total_count: 20, workflow_runs: [sourceRun, currentRun] }), false);
+  assert.equal(responsePassesGuard({ total_count: 20, workflow_runs: [currentRun, sourceRun, latestCandidate] }), false);
+  assert.equal(responsePassesGuard({ total_count: 20, workflow_runs: [currentRun, currentRun] }), false);
+  assert.equal(responsePassesGuard({ total_count: 1, workflow_runs: [currentRun, sourceRun] }), false);
+  const decide = (prior) => {
+    const result = spawnSync('jq', [
+      '-r', '--arg', 'created', sourceRun.created_at, '--argjson', 'id', String(sourceRun.id), filter,
+    ], { input: JSON.stringify({ total_count: 20, workflow_runs: [currentRun, prior] }), encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  assert.equal(decide(sourceRun), 'SOURCE_ONLY');
+  assert.equal(decide(latestCandidate), 'NEWER:36643931461');
+  assert.equal(decide({ ...latestCandidate, created_at: 'invalid' }), 'UNCLASSIFIED');
+  assert.equal(decide({ ...sourceRun, id: sourceRun.id - 1 }), 'UNCLASSIFIED');
 });
 
 test('read-only reuse authorization PR is distinct from the historical deploy-authority PR', (t) => {

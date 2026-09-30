@@ -66,6 +66,13 @@ Pre-provider CI/autocontinue changeset stop не начинает новую cau
 caller/recovery predicates и terminal outcomes. Последовательность `enum -> PR -> probe -> более точный enum -> PR`
 запрещена.
 
+Recovery-history root model использует exact failed-run GET и server-side `created` window к latest
+predecessor вместо полной истории: autocontinue берёт latest, текущий recovery workflow проверяет себя
+и latest prior. Source-only и один exact distinct-SHA failed verification stop с deploy/invoke `skipped`
+могут перейти к оставшимся gates; missing, ambiguous, active или иной latest predecessor остаётся
+terminal pre-provider block. Не дробить это на pagination/enum refinements; если bounded decision не
+подтверждён, пересмотреть causal model.
+
 Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`
 достигнут) запрещён отдельный PR только ради `omitted trails => []`. Один causal PR должен довести
 источник до `EXISTING_APPLICABLE_AUDIT_SOURCE`, `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` либо

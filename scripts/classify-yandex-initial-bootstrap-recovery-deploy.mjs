@@ -106,7 +106,7 @@ function object(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function protobufRepeatedField(record, name) {
+function protoJsonRepeatedField(record, name) {
   return record[name] === undefined ? [] : record[name];
 }
 
@@ -310,7 +310,7 @@ function inspectRecoveryAuditTrailSource(response, runFinishedAt) {
     const targetFinishedAt = timestamp(runFinishedAt);
     if (targetFinishedAt === null) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
     if (!object(response)) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
-    const trails = protobufRepeatedField(response, 'trails');
+    const trails = protoJsonRepeatedField(response, 'trails');
     if (!Array.isArray(trails)) return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
     if (response.nextPageToken !== undefined) {
       if (typeof response.nextPageToken !== 'string') return { evidence: 'AUDIT_TRAIL_METADATA_INVALID' };
@@ -410,7 +410,7 @@ function inspectRecoveryAuditTrailCloudCoverage(folderResponse, trailResponses, 
       if (!object(response)) return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID' };
       // Protobuf JSON omits empty repeated fields; omission is the canonical empty-list value.
       // Explicit null or another type remains malformed and fail-closed.
-      const trails = protobufRepeatedField(response, 'trails');
+      const trails = protoJsonRepeatedField(response, 'trails');
       if (!Array.isArray(trails)) return { evidence: 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID' };
       if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
         return { evidence: 'AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID' };
@@ -564,7 +564,7 @@ function inspectAuditTrailCloudFolderInventory(response, cloudId, targetFolderId
   }
   // Protobuf JSON omits empty repeated fields; omission is the canonical empty-list value.
   // Explicit null or another type remains malformed and fail-closed.
-  const folders = protobufRepeatedField(response, 'folders');
+  const folders = protoJsonRepeatedField(response, 'folders');
   if (!Array.isArray(folders)) return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
   if (response.nextPageToken !== undefined && typeof response.nextPageToken !== 'string') {
     return { evidence: 'AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID' };
