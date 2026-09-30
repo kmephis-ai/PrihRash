@@ -2587,3 +2587,65 @@ retirement/read-back, readiness non-PASS, bootstrap non-success or unknown provi
 recovery boundary. Google stays authoritative until a separately proven COMMITTED shadow baseline and
 required independent reconciliation/catch-up.
 
+### Native HTTPS transport after bootstrap `36768370208`
+
+Source-drift orchestrator `36768088603` on exact main
+`874879d1cfc4b19ddbdaba8117d0d6cc710ecb2e` proved the guarded stale-STAGING route before the
+new bootstrap attempt:
+
+- initial recovery completed and allowed the stale-retirement path;
+- fresh readiness `36768236046` completed `PASS / READINESS_READY`;
+- exact-main recheck passed;
+- exactly one write-capable bootstrap child `36768370208` was dispatched.
+
+The child passed exact-source, provider, private/trigger-free and final exact-main gates, deployed the
+dedicated `r1-initial-bootstrap` version with `--execution-timeout 600s`, then reached the single
+financial shadow invoke. The invoke returned privacy-safe
+`FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED` after approximately 301 seconds. It did not return a
+Function/application enum and did not reach the invoker's explicit `630s` timeout classification.
+
+The mandatory post-invoke recovery in the same orchestrator completed successfully and returned
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`. Privacy-safe diagnostics again proved:
+
+- `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- durable revision evidence `COMPLETE_CURRENT_RUN_ONLY`;
+- verified current `STALE_STAGING_CURRENT_STATE_EMPTY`;
+- source decode `NONE`;
+- exact current-run source `EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`.
+
+Therefore `COMMITTED` is not proven, the attempt on this SHA is consumed, and no same-SHA replay is
+allowed.
+
+The causal transport mismatch is outside migration semantics. Node's built-in `fetch()` is backed by
+Undici, whose HTTP parser uses a default `headersTimeout` of 300 seconds. The bootstrap invoker set an
+outer `AbortSignal.timeout(630000)`, but that did not disable the shorter internal parser timeout.
+Yandex Cloud Functions supports the configured 600-second execution envelope, so the 301-second
+transport stop is not evidence that the Function execution timeout itself was exhausted.
+
+The bounded successor removes only that hidden client-side boundary:
+
+- `scripts/invoke-yandex-initial-bootstrap.mjs` uses `node:https.request` instead of global
+  `fetch()`;
+- one explicit 630-second overall timer destroys the HTTPS request with the existing bounded timeout
+  classification;
+- the existing 64 KiB response cap, exact private HTTPS URL/tag, bearer auth, enum-only response
+  parser and non-success taxonomy are unchanged;
+- no retry is added;
+- Function memory/600-second timeout, migration cap, YDB write set, stale-retirement predicates,
+  reconciliation, authority and financial semantics are unchanged;
+- the transport workaround retires with the temporary R1 bootstrap provider surface.
+
+The successor marker is:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: INITIAL_BOOTSTRAP_COMMITTED
+Recovery-State: STAGING_STALE_RETIREABLE
+Circuit-Rearm: ROOT_CAUSE_FIX
+Regression-Test: tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+```
+
+Only a new exact-main SHA may consume this root-cause attempt. Any non-success/unknown invoke outcome
+again requires the orchestrator's single post-invoke read-only recovery and stops without replay.
+
