@@ -110,11 +110,13 @@ jobs:
             any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml" and .status != "removed")
             and any(.[]; .filename == "scripts/classify-r1-async-deploy-recovery.mjs" and .status != "removed")
             and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs" and .status != "removed")
+            and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs" and .status != "removed")
             and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
             and all(.[]; .filename | IN(
               ".github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml",
               "scripts/classify-r1-async-deploy-recovery.mjs",
               "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs",
+              "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs",
               "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
             ))
           ' <<<"$files" >/dev/null || { echo 'R1_ASYNC_DEPLOY_RECOVERY_CHANGESET_INVALID'; exit 1; }
