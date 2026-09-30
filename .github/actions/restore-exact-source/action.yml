@@ -32,22 +32,30 @@ runs:
         curl --fail --silent --show-error \
           --header "$auth_header" \
           --header 'Accept: application/vnd.github+json' \
-          "$api/actions/workflows/ci.yml/runs?branch=main&per_page=100" \
+          "$api/actions/runs?head_sha=${SOURCE_SHA}&per_page=100" \
           --output "$tmp/ci-runs.json" || {
             echo 'R1_EXACT_SOURCE_CI_READ_FAILED'
             exit 1
           }
 
         run_id="$(jq -er --arg sha "$SOURCE_SHA" '
-          [.workflow_runs[]
-            | select(
-                .name == "CI"
-                and .head_sha == $sha
-                and .head_branch == "main"
-                and (.event == "push" or .event == "workflow_dispatch")
-                and .conclusion == "success"
-              )]
-          | if length == 1 then .[0].id else error("exact CI run count mismatch") end
+          def candidates($event):
+            [.workflow_runs[]
+              | select(
+                  .name == "CI"
+                  and .path == ".github/workflows/ci.yml"
+                  and .head_sha == $sha
+                  and .head_branch == "main"
+                  and .event == $event
+                  and .status == "completed"
+                  and .conclusion == "success"
+                )];
+          (candidates("push")) as $push
+          | (candidates("workflow_dispatch")) as $manual
+          | if ($push | length) == 1 then $push[0].id
+            elif ($push | length) == 0 and ($manual | length) == 1 then $manual[0].id
+            else error("exact canonical CI run count mismatch")
+            end
         ' "$tmp/ci-runs.json")" || {
           echo 'R1_EXACT_SOURCE_CI_NOT_UNIQUE'
           exit 1
