@@ -87,6 +87,8 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /npm run initial-bootstrap:invoke:async/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED_NONTERMINAL/);
+  assert.match(workflow, /Stop after accepted async admission until durable recovery/);
   assert.doesNotMatch(workflow, /npm run (?:readiness|schema-bootstrap|schema-upgrade-003):invoke/);
 });
 
