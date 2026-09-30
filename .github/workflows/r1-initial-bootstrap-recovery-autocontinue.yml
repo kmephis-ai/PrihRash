@@ -254,30 +254,80 @@ jobs:
             fi
             failed_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
             source_reuse_run_id="$(jq -er '.recoveryVersionRunId' <<<"$marker")"
-            failed_recoveries="$(curl --fail --silent --show-error \
+            recovery_history="$(curl --fail --silent --show-error \
               --header "$auth_header" --header "$accept_header" \
-              "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100")" || {
+              "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&per_page=100")" || {
                 echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_RECOVERY_HISTORY_READ_FAILED'; exit 0;
               }
-            latest_failed_id="$(jq -er '[.workflow_runs[] | select(
-              .name == "R1 initial bootstrap recovery" and .head_branch == "main"
-              and .event == "workflow_dispatch" and .conclusion == "failure"
-            )] | sort_by(.created_at,.id) | reverse | .[0].id // empty' <<<"$failed_recoveries" 2>/dev/null || true)"
-            if [ "$failed_run_id" != "$latest_failed_id" ]; then
-              echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_RUN_NOT_LATEST'; exit 0
+            if [ "$(jq '.workflow_runs | length' <<<"$recovery_history")" -ge 100 ]; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_RECOVERY_HISTORY_INCOMPLETE'; exit 0
             fi
-            failed_jobs="$(curl --fail --silent --show-error \
+            source_failed_run="$(jq -cer --argjson id "$failed_run_id" '[.workflow_runs[] | select(
+              .id == $id and .name == "R1 initial bootstrap recovery" and .head_branch == "main"
+              and .event == "workflow_dispatch" and .conclusion == "failure"
+              and (.workflow_id | type == "number") and (.created_at | type == "string")
+              and (.head_sha | type == "string" and test("^[0-9a-f]{40}$"))
+            )] | if length == 1 then .[0] else empty end' <<<"$recovery_history")" || {
+              echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_RUN_NOT_EXACT'; exit 0
+            }
+            source_workflow_id="$(jq -er '.workflow_id' <<<"$source_failed_run")"
+            source_failed_sha="$(jq -er '.head_sha' <<<"$source_failed_run")"
+            source_failed_created_at="$(jq -er '.created_at' <<<"$source_failed_run")"
+            if [ "$source_failed_sha" = "$SOURCE_SHA" ]; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_RUN_SAME_SHA'; exit 0
+            fi
+            source_failed_jobs="$(curl --fail --silent --show-error \
               --header "$auth_header" --header "$accept_header" \
               "$api/actions/runs/${failed_run_id}/jobs?filter=latest&per_page=100")" || {
-                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_JOBS_READ_FAILED'; exit 0;
+                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_JOBS_READ_FAILED'; exit 0
               }
-            if ! jq -e '[.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
+            if ! jq -e --argjson workflow_id "$source_workflow_id" '[.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs|length)==1
+              and $jobs[0].conclusion=="failure"
               and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1
               and ([$jobs[0].steps[]?|select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")]|length)==1
             ' <<<"$failed_jobs" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 0
             fi
+            newer_recovery_ids="$(jq -r --arg created "$source_failed_created_at" --argjson id "$failed_run_id" '
+              [.workflow_runs[] | select(.created_at > $created or (.created_at == $created and .id > $id))]
+              | sort_by(.created_at,.id) | .[].id
+            ' <<<"$recovery_history")"
+            newer_recovery_count=0
+            while IFS= read -r newer_run_id; do
+              [ -n "$newer_run_id" ] || continue
+              newer_recovery_count=$((newer_recovery_count + 1))
+              if [ "$newer_recovery_count" -gt 1 ]; then
+                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_HISTORY_AMBIGUOUS'; exit 0
+              fi
+              newer_run="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" "$api/actions/runs/${newer_run_id}")" || {
+                  echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_RUN_READ_FAILED'; exit 0
+                }
+              if ! jq -e --argjson id "$newer_run_id" --argjson workflow_id "$source_workflow_id" \
+                --arg current_sha "$SOURCE_SHA" --arg source_sha "$source_failed_sha" '
+                .id==$id and .workflow_id==$workflow_id and .head_branch=="main"
+                and .event=="workflow_dispatch" and .status=="completed" and .conclusion=="failure"
+                and .head_sha!=$current_sha and .head_sha!=$source_sha
+                and (.head_sha|test("^[0-9a-f]{40}$"))
+              ' <<<"$newer_run" >/dev/null; then
+                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_RUN_NOT_EXACT'; exit 0
+              fi
+              newer_jobs="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/${newer_run_id}/jobs?filter=latest&per_page=100")" || {
+                  echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_JOBS_READ_FAILED'; exit 0
+                }
+              if ! jq -e '
+                [.jobs[] | select(.name=="initial-bootstrap-recovery")] as $jobs
+                | ($jobs|length)==1 and $jobs[0].conclusion=="failure"
+                and ([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")]|length)==1
+                and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")]|length)==1
+                and ([$jobs[0].steps[]?|select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")]|length)==1
+              ' <<<"$newer_jobs" >/dev/null; then
+                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_PHASE_NOT_PROVEN'; exit 0
+              fi
+            done <<<"$newer_recovery_ids"
             reuse_attempts="$(curl --fail --silent --show-error \
               --header "$auth_header" --header "$accept_header" \
               "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")" || {

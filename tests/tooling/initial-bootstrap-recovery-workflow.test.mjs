@@ -134,6 +134,9 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /name: Invoke exact read-only recovery tag once\s+if: inputs\.reuse_deploy_attempt_run_id == '' \|\| steps\.reuse-version\.outputs\.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'/);
   assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN/);
+  assert.match(workflow, /newer_recovery_count/);
+  assert.match(workflow, /Verify exact accepted recovery Function version for reuse.*conclusion == "failure"/);
+  assert.match(workflow, /\.id != \$self[\s\S]*\.created_at > \$created/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID/);
   assert.match(workflow, /\.number == \$number and \.merged_at != null and \.merge_commit_sha == \$sha/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NOT_EXACT/);
