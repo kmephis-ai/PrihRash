@@ -2587,3 +2587,63 @@ retirement/read-back, readiness non-PASS, bootstrap non-success or unknown provi
 recovery boundary. Google stays authoritative until a separately proven COMMITTED shadow baseline and
 required independent reconciliation/catch-up.
 
+### Fresh durable classification after source-drift rebase bootstrap `36768370208`
+
+PR #897 merged the exact source-drift rearm on main
+`874879d1cfc4b19ddbdaba8117d0d6cc710ecb2e`. Exact-main CI `36767899771` and Browser Quality
+`36767900016` passed. Autocontinue `36768010215` dispatched orchestrator `36768088603` with
+ordinary staging resume disabled and stale-STAGING retirement enabled.
+
+The orchestrator re-established the fresh recovery boundary, observed
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH + COMPLETE_CURRENT_RUN_ONLY +
+STALE_STAGING_CURRENT_STATE_EMPTY`, armed only stale-STAGING retirement, completed its retirement
+path, then required fresh readiness. Readiness `36768236046` passed before the orchestrator dispatched
+exactly one write-capable initial bootstrap child `36768370208`.
+
+The bootstrap child passed every pre-invoke gate, deployed the exact private trigger-free Function
+version with `execution-timeout=600s`, and re-verified exact current main immediately before the
+financial shadow invocation. The invoke began at approximately `2026-09-30T19:50:42Z` and the caller
+returned about 301 seconds later with the privacy-safe terminal:
+
+```text
+FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED
+```
+
+The child therefore finished non-successfully. Orchestrator did not replay it. Its mandatory immediate
+post-invoke read-only recovery completed at approximately `2026-09-30T19:56:20Z` and still reported:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+This early post-invoke recovery is not sufficient to infer the final durable outcome: the Function
+version itself allows execution for up to 600 seconds, so a lost caller transport does not prove that
+server-side execution stopped at the same instant. The write outcome therefore remains UNKNOWN until a
+fresh read-only classification is performed only after the maximum execution window has elapsed. No
+same-SHA replay, retirement, resume, cleanup, readiness, bootstrap, timer, cutover or authority change is
+authorized from the early recovery.
+
+The next new-SHA successor is read-only only:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION
+Recovery-State: UNKNOWN_AFTER_NON_SUCCESS
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Autocontinue may dispatch only `r1-initial-bootstrap-recovery.yml` with `surface_only=true`.
+If that fresh classification proves a terminal applied/committed state, follow the corresponding
+independent reconciliation path. If it returns only
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, a separate new-SHA full read-only exact-revision
+classification is required before any causal transport fix or later write. Any unknown/ambiguous result
+remains a recovery boundary. Google stays authoritative and the first verified `COMMITTED` shadow
+baseline is still not proven by this checkpoint.
+
