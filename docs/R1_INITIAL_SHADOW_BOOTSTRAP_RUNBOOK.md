@@ -2494,4 +2494,3 @@ already documented **pre-write orchestrator preflight** with
 read-only recovery before readiness/bootstrap and produce the exact pre-write orchestrator signature
 required before any later `SOURCE_DRIFT_REBASE`. No stale retirement or write-capable bootstrap is
 authorized by this checkpoint.
-
