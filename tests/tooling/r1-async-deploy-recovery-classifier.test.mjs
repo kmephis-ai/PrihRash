@@ -4,7 +4,6 @@ import { classifyAsyncDeployRecovery } from '../../scripts/classify-r1-async-dep
 
 const functionId = 'synthetic-function';
 const runtimeSa = 'synthetic-runtime-sa';
-const wifSa = 'synthetic-wif-sa';
 
 function evidence(overrides = {}) {
   return {
@@ -13,27 +12,21 @@ function evidence(overrides = {}) {
       role_id: 'functions.functionInvoker',
       subject: { type: 'serviceAccount', id: runtimeSa },
     }],
-    runtimeServiceAccountBindings: [{
-      role_id: 'iam.serviceAccounts.user',
-      subject: { type: 'serviceAccount', id: wifSa },
-    }],
     functionId,
     runtimeServiceAccountId: runtimeSa,
-    wifServiceAccountId: wifSa,
     deployStartedAt: '2026-09-30T22:10:31Z',
     deployFinishedAt: '2026-09-30T22:10:34Z',
     ...overrides,
   };
 }
 
-test('absent failed-window version plus existing exact IAM boundary is safe only for config correction', () => {
+test('absent failed-window version plus runtime invoker binding is safe only for config correction', () => {
   assert.deepEqual(classifyAsyncDeployRecovery(evidence()), {
     status: 'PASS',
     code: 'R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIED',
     verdict: 'SAFE_TO_CORRECT_CONFIG',
     previousWrite: 'NOT_APPLIED',
     runtimeInvoker: 'PRESENT',
-    wifRuntimeServiceAccountUser: 'PRESENT',
   });
 });
 
@@ -52,9 +45,7 @@ test('tagged or failed-window version blocks any blind replay', () => {
     'PREVIOUS_VERSION_PRESENT',
   );
   assert.equal(
-    classifyAsyncDeployRecovery(evidence({
-      versions: [{ ...version, tags: [] }],
-    })).verdict,
+    classifyAsyncDeployRecovery(evidence({ versions: [{ ...version, tags: [] }] })).verdict,
     'PREVIOUS_VERSION_PRESENT',
   );
 });
@@ -76,13 +67,9 @@ test('ambiguous provider evidence remains blocked', () => {
   assert.equal(result.verdict, 'PREVIOUS_WRITE_AMBIGUOUS');
 });
 
-test('missing runtime invoker or WIF user-on-runtime authority blocks correction', () => {
+test('missing current runtime invoker binding blocks correction', () => {
   assert.equal(
     classifyAsyncDeployRecovery(evidence({ functionBindings: [] })).verdict,
-    'IAM_BOUNDARY_MISSING',
-  );
-  assert.equal(
-    classifyAsyncDeployRecovery(evidence({ runtimeServiceAccountBindings: [] })).verdict,
     'IAM_BOUNDARY_MISSING',
   );
 });
