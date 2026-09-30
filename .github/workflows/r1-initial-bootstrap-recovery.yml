@@ -987,10 +987,11 @@ jobs:
           else
             printf '{"nextPageToken":"tag-history-read-failed"}\n' >"$tmp/tag-history.json"
           fi
+          proof_observed_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
           reuse_status='RECOVERY_REUSE_CLASSIFIER_FAILED'
           if reuse_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
             --successful-source-step-version "$tmp/versions.json" "$tmp/tagged-version.json" \
-            "$tmp/tag-history.json" "$RUN_STARTED_AT" "$RUN_FINISHED_AT" \
+            "$tmp/tag-history.json" "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$proof_observed_at" \
             "$RUNTIME_SERVICE_ACCOUNT_ID" "$PRIHRASH_YC_FUNCTION_ID" \
             "$YC_LOCKBOX_SECRET_ID" "$PRIHRASH_LOCKBOX_VERSION_ID")"; then
             version_evidence="$reuse_evidence"
