@@ -51,18 +51,17 @@ jobs:
           git -C target apply "$RUNNER_TEMP/r1-tag-history.patch"
           git -C target diff --check
 
-          cat > "$RUNNER_TEMP/expected-files" <<'EOF'
-.github/workflows/r1-initial-bootstrap-recovery.yml
-AGENTS.md
-docs/R1_COMPLETION_SPRINT.md
-docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
-scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs
-tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs
-tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
-tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
-EOF
+          printf '%s\n' \
+            '.github/workflows/r1-initial-bootstrap-recovery.yml' \
+            'AGENTS.md' \
+            'docs/R1_COMPLETION_SPRINT.md' \
+            'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md' \
+            'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs' \
+            'tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs' \
+            'tests/tooling/initial-bootstrap-recovery-workflow.test.mjs' \
+            'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs' \
+            | sort > "$RUNNER_TEMP/expected-files"
           git -C target diff --name-only | sort > "$RUNNER_TEMP/actual-files"
-          sort "$RUNNER_TEMP/expected-files" -o "$RUNNER_TEMP/expected-files"
           diff -u "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
 
           git -C target switch -c "$TARGET_BRANCH"
