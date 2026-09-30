@@ -135,7 +135,7 @@ test('source-drift preflight accepts only exact successful recovery and dispatch
   assert.match(preflightGate, /RECOVERY_REQUIRED/);
   assert.match(preflightGate, /STAGING_RUN_PRESENT/);
   assert.doesNotMatch(preflightGate, /allow_staging_resume='true'|allow_stale_staging_retirement='true'/);
-  assert.match(workflow, /source_is_r1" = 'true' \] && \[ "\$orchestrator_preflight" != 'true'/);
+  assert.match(workflow, /source_is_r1" = 'true'[\s\S]*?orchestrator_preflight" != 'true'[\s\S]*?async_provider_attempt" != 'true'/);
   assert.match(workflow, /allow_staging_resume='false'/);
   assert.match(workflow, /allow_stale_staging_retirement='false'/);
 });
@@ -153,7 +153,64 @@ test('source-drift rebase requires exact pre-write evidence and arms stale retir
   assert.match(workflow, /and \$recovery == \["Recovery-State: STAGING_STALE_RETIREABLE"\]/);
   assert.match(workflow, /allow_staging_resume='false'/);
   assert.match(workflow, /allow_stale_staging_retirement='true'/);
-  assert.match(workflow, /\{ref:"main", inputs:\{ci_run_id:\$ci_run_id, allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale\}\}/);
+  assert.match(workflow, /async_invocation:\$async/);
+});
+
+test('Owner-approved async attempt is a distinct circuit with exact recovery proof and no sync history bypass', async () => {
+  const workflow = await workflowText();
+  const asyncParser = workflow.match(
+    /async_marker="\$\(jq -Rn --arg body "\$source_pr_body" '([\s\S]*?)\n            '\)"/,
+  )?.[1];
+
+  assert.ok(asyncParser, 'async marker parser must remain explicit');
+  assert.match(asyncParser, /Provider-Attempt: /);
+  assert.match(asyncParser, /Async-Provider-Attempt: /);
+  assert.match(asyncParser, /Provider-Attempt: READY/);
+  assert.match(asyncParser, /Async-Provider-Attempt: READY/);
+  assert.match(asyncParser, /Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(asyncParser, /Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED/);
+  assert.match(asyncParser, /Recovery-State: STAGING_STALE_RETIREABLE/);
+  assert.match(asyncParser, /Circuit-Rearm: OWNER_AUTHORIZED_ASYNC_INVOCATION/);
+  assert.match(asyncParser, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
+  assert.match(asyncParser, /tests\/tooling\/r1-initial-bootstrap-autocontinue-workflow\.test\.mjs/);
+  assert.match(asyncParser, /\$observed_signature \| length\) == 0/);
+
+  assert.match(workflow, /async_provider_attempt='false'/);
+  assert.match(workflow, /async_provider_attempt='true'/);
+  assert.match(workflow, /allow_staging_resume='false'/);
+  assert.match(workflow, /allow_stale_staging_retirement='true'/);
+  assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_CHANGESET_INVALID/);
+  assert.match(workflow, /\.github\/workflows\/r1-initial-bootstrap-autocontinue\.yml/);
+  assert.match(workflow, /tests\/tooling\/r1-initial-bootstrap-autocontinue-workflow\.test\.mjs/);
+  assert.match(workflow, /AGENTS\.md/);
+  assert.match(workflow, /docs\/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK\.md/);
+
+  assert.match(workflow, /issues\/comments\/5919735887/);
+  assert.match(workflow, /Owner-Decision: APPROVED/);
+  assert.match(workflow, /Decision-Scope: R1_ASYNC_INVOCATION_CONTRACT/);
+  assert.match(workflow, /Sync-Circuit: BLOCKED_NEEDS_ROOT_CAUSE/);
+  assert.match(workflow, /Retries: MUST_BE_ZERO/);
+  assert.match(workflow, /YMQ: FORBIDDEN_FOR_THIS_ITEM/);
+  assert.match(workflow, /New-Paid-Resources: FORBIDDEN/);
+  assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_OWNER_DECISION_INVALID/);
+
+  assert.match(workflow, /actions\/runs\/\$async_recovery_run_id/);
+  assert.match(workflow, /\.path == "\.github\/workflows\/r1-initial-bootstrap-recovery\.yml"/);
+  assert.match(workflow, /compare\/\$async_recovery_sha\.\.\.\$SOURCE_SHA/);
+  assert.match(workflow, /Invoke exact read-only recovery tag once/);
+  assert.match(workflow, /r1-initial-bootstrap-recovery-evidence-\$async_recovery_run_id/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
+  assert.match(workflow, /RECOVERY_REQUIRED/);
+  assert.match(workflow, /STAGING_RUN_PRESENT/);
+  assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_AUTHORITY_PROVEN/);
+
+  assert.match(
+    workflow,
+    /source_is_r1" = 'true'[\s\S]*?orchestrator_preflight" != 'true'[\s\S]*?async_provider_attempt" != 'true'[\s\S]*?observed_signature=/,
+  );
+  assert.match(workflow, /--arg async "\$async_provider_attempt"/);
+  assert.match(workflow, /async_invocation:\$async/);
+  assert.doesNotMatch(workflow, /async_provider_attempt='true'[\s\S]{0,600}prior_root_cause_attempts=/);
 });
 
 test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate incident keys cross-run', async () => {
