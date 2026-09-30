@@ -2221,9 +2221,11 @@ Recovery-Classification-Run-ID: 36697361841
 Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
 ```
 
-The target ID remains the original failed recovery with deploy failed/invoke skipped. The accepted
-version-source ID remains bound to that target. The classification ID is only the latest
-source-relative failed reuse-verification preflight, with deploy and invoke skipped. Caller and canonical
+The target ID remains the original failed recovery with deploy failed/invoke skipped. Since the target
+run predates the reuse-verification step, its step may be absent or the unique step may be `skipped`; a
+duplicate or failed verification step blocks. The accepted version-source ID remains bound to that
+target. The classification ID is only the latest source-relative failed reuse-verification preflight,
+with deploy and invoke skipped. Caller and canonical
 recovery independently require the classification ID to equal the exact latest predecessor and verify
 its job/step phase. Missing, mismatched, duplicate or intervening run evidence stops before dispatch.
 Terminal read-only outcomes remain: applicable exact source → existing recovery only; no applicable

@@ -295,7 +295,11 @@ jobs:
               [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs | length) == 1
               and $jobs[0].conclusion == "failure"
-              and ([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1
+              and (
+                ([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse")] | length) == 0
+                or (([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse")] | length) == 1
+                  and ([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1)
+              )
               and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
               and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
             ' <<<"$source_failed_jobs" >/dev/null; then

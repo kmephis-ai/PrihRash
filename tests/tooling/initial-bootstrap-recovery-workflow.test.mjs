@@ -225,8 +225,18 @@ test('recovery reuse keeps original target phase separate from the failed prefli
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
   ])), true);
   assert.equal(classifiesOriginalTarget(originalTarget([
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ])), true);
+  assert.equal(classifiesOriginalTarget(originalTarget([
     { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
     { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ])), false);
+  assert.equal(classifiesOriginalTarget(originalTarget([
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
   ])), false);
   assert.equal(classifiesOriginalTarget({ jobs: [] }), false);

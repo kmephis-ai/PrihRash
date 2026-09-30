@@ -225,6 +225,21 @@ test('reuse binds the original deploy-failed target and exact failed preflight p
   ], { input: JSON.stringify(jobs), encoding: 'utf8' }).status === 0;
   assert.equal(provesSourceFailedPhase(failedSourceJobs()), true);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), true);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
     { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
     { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },

@@ -118,7 +118,9 @@ source для него, `Recovery-Classification-Run-ID` — exact latest failed
 Для текущего boundary эти IDs соответственно `36341844854`, `36611387299`, `36697361841`.
 Последний run и его deploy/invoke `skipped` phase должны быть подтверждены независимо от target run;
 не подменять target ID тем preflight predecessor. Успех CI не разрешает recovery dispatch без совпадения
-трёх identities и latest-source-relative history.
+трёх identities и latest-source-relative history. Historical target verifier step может отсутствовать
+(workflow version до reuse feature) либо быть единственным `skipped`; duplicate/failed verifier evidence
+для target блокирует. Classification predecessor требует exact failed verifier + skipped deploy/invoke.
 
 ## Provider loop
 
