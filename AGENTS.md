@@ -175,7 +175,11 @@ STOP до dispatch.
 `scripts/classify-github-ci-run.mjs` против exact SHA; повторный list-query по CI history не должен
 подменять уже известную identity и создавать artificial ambiguity/eventual-consistency blocker.
 List-based discovery допускается только как fail-closed fallback для manual path без explicit CI run ID.
-Artifact по-прежнему обязан пройти exact source SHA/package digest verification.
+Artifact по-прежнему обязан пройти exact source SHA/package digest verification. Если такой handoff
+исправляет preflight, остановившийся до provider access на `R1_EXACT_SOURCE_CI_NOT_UNIQUE`, тот же
+`Orchestrator-Preflight: READY` successor может включать только exact handoff surface:
+restore action, orchestrator input plumbing, их targeted tests и уже обязательные preflight
+workflow/test + AGENTS/runbook; любой другой файл fail-closed до dispatch.
 
 После неуспешного write-capable bootstrap invoke и неуспешной post-invoke recovery
 долговечное состояние остаётся неизвестным. Для такого случая successor PR может запросить
