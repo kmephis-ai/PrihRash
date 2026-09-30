@@ -2755,3 +2755,61 @@ child. Any non-success/unknown result again requires its single post-invoke read
 stops without replay. Google remains authoritative until a separately proven `COMMITTED` baseline
 and required independent reconciliation/catch-up.
 
+### Async invocation contract after exhausted synchronous circuit
+
+Exact-main `14004f4119781a2cd02208cc0e6fe9aeb3ee802c` consumed the second bounded synchronous
+root-cause attempt. CI `36772888005`, Browser Quality `36772888054` and readiness
+`36773320121` passed. Orchestrator `36773091950` completed mandatory post-invoke recovery after
+bootstrap `36773555381`.
+
+The bootstrap passed every pre-invoke gate but returned:
+
+```text
+FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED
+```
+
+The native HTTPS caller survived a materially different interval than the prior Undici path, so the
+previous 300-second client parser timeout was not the complete root cause. Post-invoke recovery again
+proved only:
+
+```text
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+The synchronous attempt circuit is therefore terminally `BLOCKED_NEEDS_ROOT_CAUSE`; no third sync
+bootstrap or same-boundary transport replay is allowed.
+
+Owner 2026-10-01 approved a separate bounded Yandex Cloud Functions asynchronous invocation contract.
+Current Yandex Cloud documentation marks asynchronous invocation as Preview. The version-level contract
+supports zero retries, a service account allowed to invoke the Function, and empty success/failure
+targets. The HTTPS caller uses `integration=async` and receives HTTP 202 on accepted admission.
+
+PrihRash adopts the following stricter R1 contract:
+
+- tag: `r1-initial-bootstrap-async`;
+- `async-max-retries=0`;
+- existing exact Function invoker service account only; no IAM widening;
+- no Yandex Message Queue destinations and no new paid resources;
+- `HTTP 202` maps only to
+  `PASS / INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`;
+- response body is discarded and cannot prove application result;
+- async admission has a short bounded client timeout and no retry;
+- provider-capable workflow is not part of the first contract slice;
+- after future one-shot async admission, wait at least the full configured Function execution window
+  before durable read-only recovery;
+- only recovery may classify applied/failed/unknown state;
+- first `COMMITTED` still requires independent reconciliation and required catch-up.
+
+The first implementation slice contains only
+`scripts/invoke-yandex-initial-bootstrap-async.mjs`, synthetic integration tests, and these canonical
+process rules. It has no provider marker and must not dispatch Yandex readiness/orchestrator/bootstrap.
+
+Provider-Attempt: NOT_AUTHORIZED
+Async-Contract: REPOSITORY_ONLY
+Expected-Transition: ASYNC_INVOCATION_CONTRACT_VERIFIED
+Regression-Test: tests/integration/yandex-initial-bootstrap-async-invoker.test.mjs
+

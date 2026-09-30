@@ -240,6 +240,31 @@ GitHub Actions run JSON may set `.name` to dynamic `run-name`/`display_title`, n
 name. Source identity must be bound by exact `/actions/workflows/<file>.yml/runs` provenance and
 `workflow_id`; source/attempt history must not filter exact endpoint records against static `.name`.
 
+## Owner-approved asynchronous invocation boundary
+
+После bootstrap `36773555381` второй root-cause attempt для
+`FAIL/INITIAL_BOOTSTRAP_INVOKE_FAILED` consumed, поэтому обычный synchronous circuit обязан
+оставаться `BLOCKED_NEEDS_ROOT_CAUSE`.
+
+Owner 2026-10-01 разрешил отдельный bounded R1 item для asynchronous invocation contract.
+Этот путь не считается третьим sync attempt и не сбрасывает history. Contract first:
+
+- repository/test-only slice до отдельного provider marker;
+- `integration=async` и отдельный `r1-initial-bootstrap-async` tag;
+- `async-max-retries=0`;
+- no YMQ success/failure targets;
+- no new paid resources;
+- no IAM widening: async service account должен уже иметь exact Function
+  `functions.functionInvoker`;
+- `HTTP 202` означает только admission, не `COMMITTED`;
+- durable classification только read-only recovery после full execution window;
+- any ambiguity/non-success stops without replay.
+
+Provider-capable successor обязан повторно доказать exact main, canonical CI, fresh recovery,
+stale-retirement/read-back, readiness, exact async version config и единственный async admission.
+После admission workflow не ждёт application response по HTTPS и не делает retry; итог определяется
+только durable recovery. Google остаётся authoritative.
+
 ## Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,
