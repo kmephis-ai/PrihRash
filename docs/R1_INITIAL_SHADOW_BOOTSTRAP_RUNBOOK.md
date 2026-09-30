@@ -2232,3 +2232,46 @@ Terminal read-only outcomes remain: applicable exact source → existing recover
 pre-existing source → stop this Audit-source branch and change causal model; unusable/ambiguous → STOP;
 version provenance still unproven → stop before Audit-source/Function/YDB access. No temporary IAM,
 deploy, replay, cleanup or authority change is armed.
+
+### Exact-folder permission rearm after recovery `36709073723`
+
+On exact main `0c402cae1231ebcf9f98438d48b1893e9925e16c`, the corrected identity-bound full read-only
+recovery `36709073723` published the enum-only artifact
+`r1-initial-bootstrap-recovery-reuse-evidence-36709073723`:
+
+```text
+recoveryVersionReuse=RECOVERY_REUSE_VERSION_NOT_PROVEN
+versionMetadataEvidence=CREATED_VERSION_NOT_PROVEN
+operationListEvidence=RECOVERY_REUSE_OPERATION_LIST_READ
+tagHistoryEvidence=RECOVERY_REUSE_TAG_HISTORY_READ
+auditTrailEvidence=AUDIT_TRAIL_LIST_PERMISSION_DENIED
+auditViewerBindingEvidence=RECOVERY_REUSE_TEMP_AUDIT_VIEWER_NOT_REQUESTED
+loggingReaderBindingEvidence=RECOVERY_REUSE_TEMP_LOGGING_READER_NOT_REQUESTED
+bindingRetirementEvidence=RECOVERY_REUSE_TEMP_AUDIT_BINDINGS_NOT_REQUIRED
+```
+
+The source branch has now reached a deterministic exact-folder permission denial after unique folder/cloud
+query; this is the source decision for the permission hypothesis. One Incident-M may request exactly one
+temporary `audit-trails.viewer` binding at the exact Function folder, and only after a unique pre-existing
+Cloud Logging destination is proven, one `logging.reader` binding at that exact group. The current role
+binding pre-state must be absent before each add; post-add read-back must be exact. Cleanup may remove only
+bindings this run added and independently prove them absent. Existing permissions are preserved.
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE
+Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Circuit-Rearm: ROOT_CAUSE_FIX
+Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36709073723
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Terminal outcomes differ: unique applicable pre-existing Cloud Logging source + unique exact create event
+and version metadata permits only the existing single read-only recovery invoke after verified cleanup;
+no applicable source ends this branch and changes causal model; unusable/ambiguous source, binding state,
+read-back, event correlation, or retirement evidence ends STOP with invoke skipped. No widening, retry,
+Function create/deploy, bootstrap replay, or inferred cleanup is allowed.

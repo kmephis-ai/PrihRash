@@ -115,7 +115,7 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 Если autocontinue выдаёт `REUSE_SOURCE_RUN_NOT_EXACT`, сверить identity roles до следующего dispatch:
 `Recovery-Run-ID` — оригинальный target failed recovery, `Recovery-Version-Run-ID` — успешный create-only
 source для него, `Recovery-Classification-Run-ID` — exact latest failed reuse-verification predecessor.
-Для текущего boundary эти IDs соответственно `36341844854`, `36611387299`, `36697361841`.
+Для текущего permission-attempt marker эти IDs соответственно `36341844854`, `36611387299`, `36709073723`.
 Последний run и его deploy/invoke `skipped` phase должны быть подтверждены независимо от target run;
 не подменять target ID тем preflight predecessor. Успех CI не разрешает recovery dispatch без совпадения
 трёх identities и latest-source-relative history. Historical target verifier step может отсутствовать

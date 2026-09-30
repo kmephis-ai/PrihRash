@@ -87,12 +87,14 @@ jobs:
                       ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
                         and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"]
                         and ($recovery_run | length) == 0
-                        and ($recovery_version_run | length) == 0)
+                        and ($recovery_version_run | length) == 0
+                        and ($recovery_classification_run | length) == 0)
                       or
                       ($expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
                         and ($recovery | length) == 1
                         and ($recovery_run | length) == 0
                         and ($recovery_version_run | length) == 0
+                        and ($recovery_classification_run | length) == 0
                         and ($recovery[0] | IN(
                           "Recovery-State: EMPTY_DURABLE_STATE",
                           "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
@@ -115,6 +117,7 @@ jobs:
                         and ($recovery_run | length) == 1
                         and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
                         and ($recovery_version_run | length) == 0
+                        and ($recovery_classification_run | length) == 0
                       )
                     )
                   ) or (
@@ -140,6 +143,7 @@ jobs:
                     and $rearm == ["Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY"]
                     and $recovery_run == ["Recovery-Run-ID: 36341844854"]
                     and ($recovery_version_run | length) == 0
+                    and ($recovery_classification_run | length) == 0
                   ))
                   and ($test | length) == 1
                   and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
@@ -151,7 +155,8 @@ jobs:
                 functionDeployRecovery: ($expected == ["Expected-Transition: READ_ONLY_FUNCTION_DEPLOY_CLASSIFICATION"]
                   and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
                   and ($recovery_run | length) == 1
-                  and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))),
+                  and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
+                  and ($recovery_classification_run | length) == 0),
                 recoveryVersionReuse: (($attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
                   and $probe == ["Recovery-Probe: READY"]
                   and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
