@@ -2402,15 +2402,17 @@ Read-only provider proof must agree on all of the following before any Function 
   `nodejs22`, `index.initialBootstrapRecoveryHandler`, exact runtime service account, 1 GiB, 150 s,
   three recovery mode env flags set to `0`, no logging, expected metadata options and the five exact
   Lockbox environment/key mappings;
-- `ListTagHistory` has exactly one current recovery-tag assignment to the same `functionVersionId` with
-  `effectiveFrom` inside the same step window and no later assignment.
+- `ListTagHistory` has exactly one recovery-tag assignment to the same `functionVersionId` with
+  `effectiveFrom` inside the same step window. Workflow captures `observedAt` after the provider reads
+  and requires the history interval to be active at that moment:
+  `effectiveFrom <= observedAt < effectiveTo`; no later assignment is allowed.
 
 This proof intentionally does not read Function Operations, `OperationService.Get` or Audit Trails.
 Exact agreement permits only the existing one write-free recovery invoke; missing/ambiguous/time/config/
 history divergence fails closed before invoke. It does not authorize create/redeploy/IAM mutation,
 cleanup, bootstrap replay, timer, cutover or any Google/YDB write.
 
-The exact successor marker remains:
+The original #891 successor marker was:
 
 ```text
 Provider-Attempt: NOT_AUTHORIZED
@@ -2423,5 +2425,41 @@ Recovery-Classification-Run-ID: 36739560248
 Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
 ```
 
-Exact source-step/tag-history agreement → one durable read-only classification. Any other result leaves
-durable state UNKNOWN and stops this proof path without another Operation/Audit discriminator.
+### Active tag-history interval correction after recovery `36755191147`
+
+PR #891 merged the source-step proof on exact main
+`b17e8951f279b4f3609d2f7b080d63860699f984`. Guarded recovery `36755191147` reached
+`Verify exact accepted recovery Function version for reuse` and stopped fail-closed; deploy and invoke
+were skipped, Operation/Audit paths were not read, and no IAM/Google/YDB write occurred.
+
+A fresh Owner-authenticated read-only provider reconciliation localized the mismatch without exposing
+resource IDs or financial data. Every version fingerprint invariant matched the create-only contract:
+active status, runtime/entrypoint/service account, recovery tag, 1 GiB, 150 s, exact three recovery env
+flags, no logging, metadata options, five Lockbox mappings, one version-list candidate and
+`createdAt=2026-09-29T18:21:40.841Z` inside the exact source-step window. The matching tag-history record
+also points to the same function/version/tag with
+`effectiveFrom=2026-09-29T18:22:01.556Z`, but Yandex returns
+`effectiveTo=2099-12-31T23:59:59Z` for that still-active mapping.
+
+The failed classifier incorrectly required `effectiveTo` to be absent. Yandex API defines
+`effectiveTo` as the timestamp when the tag stops being active, so a future value is an active interval,
+not retirement. The bounded correction therefore records `observedAt` after reading tag history and
+accepts only `effectiveFrom <= observedAt < effectiveTo`, while still rejecting malformed/expired
+intervals and any later assignment. This is a correction inside the same source-step/tag-history causal
+model, not a new provider discriminator.
+
+The exact successor marker is:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36755191147
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Exact active-interval agreement permits only the existing write-free recovery invoke. Any mismatch keeps
+durable state UNKNOWN and stops before invoke; no create/redeploy/IAM mutation/cleanup/replay is armed.

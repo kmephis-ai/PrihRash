@@ -173,6 +173,27 @@ test('successful create-step plus tag-history root model replaces exhausted Oper
   assert.match(recoveryWorkflow, /Create exactly one read-only recovery Function version without invoking it/);
 });
 
+test('active tag-history interval correction remains bound to recovery 36755191147', () => {
+  const evidence = runbook.match(
+    /### Active tag-history interval correction after recovery `36755191147`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the active tag interval correction must be canonical and exact-run-bound');
+  for (const line of [
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36755191147',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  ]) assert.ok(evidence.includes(line), `runbook preserves active-interval identity ${line}`);
+  assert.match(evidence, /effectiveFrom=2026-09-29T18:22:01\.556Z/);
+  assert.match(evidence, /effectiveTo=2099-12-31T23:59:59Z/);
+  assert.match(evidence, /effectiveFrom <= observedAt < effectiveTo/);
+  assert.match(evidence, /deploy and invoke\s+were skipped/);
+  assert.match(agents, /effectiveFrom <= observedAt < effectiveTo/);
+  assert.match(completionSprint, /effectiveFrom <= observedAt < effectiveTo/);
+  assert.match(recoveryWorkflow, /proof_observed_at/);
+  assert.match(recoveryWorkflow, /"\$RUN_STARTED_AT" "\$RUN_FINISHED_AT" "\$proof_observed_at"/);
+});
+
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
   const filter = workflow.match(/--argjson id "\$source_reuse_run_id" --arg expected[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$reuse_attempts"/)?.[1];
   assert.ok(filter, 'extract the live source-run selection filter');

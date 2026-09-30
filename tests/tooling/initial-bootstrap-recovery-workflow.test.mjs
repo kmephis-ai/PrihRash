@@ -102,8 +102,11 @@ test('exact successful source create-step and immutable tag history bypass Opera
   assert.match(workflow, /reuse_source_started_at=.*reuse_started_at/s);
   assert.match(workflow, /reuse_source_finished_at=.*reuse_finished_at/s);
   assert.match(workflow, /RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED/);
+  assert.match(workflow, /proof_observed_at="\$\(node -e 'process\.stdout\.write\(new Date\(\)\.toISOString\(\)\)'\)"/);
+  assert.match(workflow, /"\$RUN_STARTED_AT" "\$RUN_FINISHED_AT" "\$proof_observed_at"/);
   assert.match(recoveryDeployClassifier, /classifyRecoveryVersionFromSuccessfulSourceStep/);
   assert.match(recoveryDeployClassifier, /functionTagHistoryRecord/);
+  assert.match(recoveryDeployClassifier, /effectiveTo > observed/);
   assert.match(recoveryDeployClassifier, /exactRecoveryTaggedVersion/);
 });
 
