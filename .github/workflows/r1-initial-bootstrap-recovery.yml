@@ -322,11 +322,11 @@ jobs:
                 --header 'Accept: application/vnd.github+json' \
                 "$api/actions/runs/${newer_run_id}/jobs?filter=latest&per_page=100")"
               if ! jq -e '
-                [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
-                | ($jobs | length) == 1 and $jobs[0].conclusion == "failure"
-                and ([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
-                and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1
-                and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
+                [.jobs[] | select(.name == "initial-bootstrap-recovery" and .conclusion == "failure"
+                  and ([.steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
+                  and ([.steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1
+                  and ([.steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1)]
+                | length == 1
               ' <<<"$newer_jobs" >/dev/null; then
                 echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_PHASE_NOT_PROVEN'; exit 1;
               fi

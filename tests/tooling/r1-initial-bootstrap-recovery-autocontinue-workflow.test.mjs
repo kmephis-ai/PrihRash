@@ -98,7 +98,8 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
 });
 
 test('reuse history only discounts a prior failed version-proof attempt when deploy and invoke were skipped', (t) => {
-  const filter = workflow.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
+  const newerJobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
+  const filter = newerJobsBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
   assert.ok(filter, 'extract the live intervening-recovery phase classifier');
   const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
   if (jq.error?.code === 'ENOENT') {
@@ -115,13 +116,14 @@ test('reuse history only discounts a prior failed version-proof attempt when dep
     ],
     ...overrides,
   }] });
+  let lastResult;
   const provesPreinvokeReuseStop = (jobs) => {
-    const result = spawnSync('jq', ['-e', filter], {
+    lastResult = spawnSync('jq', ['-e', filter], {
       input: JSON.stringify(jobs), encoding: 'utf8',
     });
-    return result.status === 0 && result.stdout.trim() === 'true';
+    return lastResult.status === 0 && lastResult.stdout.trim() === 'true';
   };
-  assert.equal(provesPreinvokeReuseStop(job()), true);
+  assert.equal(provesPreinvokeReuseStop(job()), true, lastResult.stderr || lastResult.stdout);
   assert.equal(provesPreinvokeReuseStop(job({ conclusion: 'success' })), false);
   assert.equal(provesPreinvokeReuseStop(job({
     steps: [
