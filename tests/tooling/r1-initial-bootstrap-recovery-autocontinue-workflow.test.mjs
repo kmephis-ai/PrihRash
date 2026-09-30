@@ -501,6 +501,29 @@ test('bounded recovery history query classifies source-only, latest successor, a
   assert.equal(decide({ id: 'invalid', created_at: createdAt }), 'UNCLASSIFIED');
 });
 
+test('latest transport-lost bootstrap remains read-only until fresh durable classification', () => {
+  const evidence = runbook.match(
+    /### Fresh durable classification after source-drift rebase bootstrap `36768370208`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+
+  assert.ok(evidence, 'latest non-success write attempt must remain bound to a fresh read-only recovery');
+  assert.match(evidence, /`874879d1cfc4b19ddbdaba8117d0d6cc710ecb2e`/);
+  assert.match(evidence, /orchestrator `36768088603`/);
+  assert.match(evidence, /Readiness `36768236046` passed/);
+  assert.match(evidence, /bootstrap child `36768370208`/);
+  assert.match(evidence, /FAIL \/ INITIAL_BOOTSTRAP_INVOKE_FAILED/);
+  assert.match(evidence, /about 301 seconds later/);
+  assert.match(evidence, /`execution-timeout=600s`/);
+  assert.match(evidence, /RECOVERY_REQUIRED \/ STAGING_RUN_PRESENT/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /Recovery-Probe: READY/);
+  assert.match(evidence, /Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION/);
+  assert.match(evidence, /Recovery-State: UNKNOWN_AFTER_NON_SUCCESS/);
+  assert.match(evidence, /surface_only=true/);
+  assert.match(evidence, /No\nsame-SHA replay, retirement, resume, cleanup, readiness, bootstrap, timer, cutover or authority change/);
+  assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
+});
+
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {
   const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
   assert.ok(filter, 'extract the live jq marker filter from the workflow');
