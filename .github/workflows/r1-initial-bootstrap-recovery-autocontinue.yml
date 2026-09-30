@@ -230,12 +230,9 @@ jobs:
                 any(.[]; .filename == $test and .status != "removed")
                 and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery.yml" and .status != "removed")
                 and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
-                and any(.[]; .filename == "scripts/classify-r1-recovery-deploy-attempt-history.mjs" and .status != "removed")
-                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml" and .status != "removed")
                 and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/r1-recovery-deploy-attempt-history.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
+                and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
                 and any(.[]; .filename == "AGENTS.md" and .status != "removed")
@@ -243,14 +240,9 @@ jobs:
                 and all(.[]; .filename | IN(
                   ".github/workflows/r1-initial-bootstrap-recovery.yml",
                   ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml",
-                  "scripts/classify-r1-recovery-deploy-attempt-history.mjs",
                   "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs",
-                  ".github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml",
                   "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs",
-                  "tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs",
-                  "tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs",
                   "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs",
-                  "tests/tooling/r1-recovery-deploy-attempt-history.test.mjs",
                   "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs",
                   "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md",
                   "AGENTS.md",
