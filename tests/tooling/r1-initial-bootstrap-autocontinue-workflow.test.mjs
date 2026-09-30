@@ -105,6 +105,33 @@ test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery st
   assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
 });
 
+test('source-drift preflight accepts only exact successful recovery and dispatches false/false orchestrator', async () => {
+  const workflow = await workflowText();
+  const preflightGate = workflow.match(
+    /if \[ "\$orchestrator_preflight" = 'true' \]; then([\s\S]*?)\n\s*else\n\s*rearm_mode=/,
+  )?.[1];
+
+  assert.ok(preflightGate, 'preflight branch must remain separately bounded');
+  assert.match(workflow, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(workflow, /Orchestrator-Preflight: READY/);
+  assert.match(workflow, /Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(workflow, /Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(workflow, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
+  assert.match(workflow, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
+  assert.match(preflightGate, /PREFLIGHT_CHANGESET_INVALID/);
+  assert.match(preflightGate, /compare\/\$preflight_recovery_sha\.\.\.\$SOURCE_SHA/);
+  assert.match(preflightGate, /Deploy recovery-only Function version/);
+  assert.match(preflightGate, /Invoke exact read-only recovery tag once/);
+  assert.match(preflightGate, /r1-initial-bootstrap-recovery-evidence-\$preflight_recovery_run_id/);
+  assert.match(preflightGate, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
+  assert.match(preflightGate, /RECOVERY_REQUIRED/);
+  assert.match(preflightGate, /STAGING_RUN_PRESENT/);
+  assert.doesNotMatch(preflightGate, /allow_staging_resume='true'|allow_stale_staging_retirement='true'/);
+  assert.match(workflow, /source_is_r1" = 'true' \] && \[ "\$orchestrator_preflight" != 'true'/);
+  assert.match(workflow, /allow_staging_resume='false'/);
+  assert.match(workflow, /allow_stale_staging_retirement='false'/);
+});
+
 test('source-drift rebase requires exact pre-write evidence and arms stale retirement only', async () => {
   const workflow = await workflowText();
   const sourceDriftGate = workflow.match(
