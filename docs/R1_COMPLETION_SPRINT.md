@@ -112,6 +112,14 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 прекратить Audit-source path и сменить causal model; unusable/ambiguous → STOP; version still unproven →
 отдельная причинная гипотеза provenance, без повторения этого probe/SHA.
 
+Если autocontinue выдаёт `REUSE_SOURCE_RUN_NOT_EXACT`, сверить identity roles до следующего dispatch:
+`Recovery-Run-ID` — оригинальный target failed recovery, `Recovery-Version-Run-ID` — успешный create-only
+source для него, `Recovery-Classification-Run-ID` — exact latest failed reuse-verification predecessor.
+Для текущего boundary эти IDs соответственно `36341844854`, `36611387299`, `36697361841`.
+Последний run и его deploy/invoke `skipped` phase должны быть подтверждены независимо от target run;
+не подменять target ID тем preflight predecessor. Успех CI не разрешает recovery dispatch без совпадения
+трёх identities и latest-source-relative history.
+
 ## Provider loop
 
 После merge root-cause PR выполняется только этот bounded цикл:

@@ -295,13 +295,8 @@ jobs:
               [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs | length) == 1
               and $jobs[0].conclusion == "failure"
-              and (
-                (([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
-                  and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1)
-                or
-                (([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1
-                  and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1)
-              )
+              and ([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1
+              and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
               and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
             ' <<<"$source_failed_jobs" >/dev/null; then
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 1;
@@ -406,19 +401,22 @@ jobs:
               | (exact_line("Recovery-State: ")) as $state
               | (exact_line("Recovery-Run-ID: ")) as $failed_run
               | (exact_line("Recovery-Version-Run-ID: ")) as $version_run
+              | (exact_line("Recovery-Classification-Run-ID: ")) as $classification_run
               | (exact_line("Observed-Signature: ")) as $observed
               | (exact_line("Circuit-Rearm: ")) as $rearm
               | (exact_line("Authority-Scope: ")) as $authority
               | (exact_line("Regression-Test: ")) as $test
-              | (
+              | {
+                valid: (
                 ($permission_probe == "1"
                   and $attempt == ["Provider-Attempt: READY"]
                   and ($probe | length) == 0
                   and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
                   and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
-                  and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
-                  and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
-                  and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
+                   and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
+                   and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
+                   and ($classification_run | length) == 0
+                   and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
                   and $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
                   and $authority == ["Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP"]
                   and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
@@ -428,17 +426,29 @@ jobs:
                   and $probe == ["Recovery-Probe: READY"]
                   and $expected == ["Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION"]
                   and $state == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
-                  and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
-                  and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
-                  and ($observed | length) == 0
+                   and $failed_run == [("Recovery-Run-ID: " + $failed_id)]
+                   and $version_run == [("Recovery-Version-Run-ID: " + $version_id)]
+                   and (($classification_run | length) == 0 or (($classification_run | length) == 1
+                     and ($classification_run[0] | test("^Recovery-Classification-Run-ID: [1-9][0-9]*$"))))
+                   and ($observed | length) == 0
                   and ($rearm | length) == 0
                   and ($authority | length) == 0
                   and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs"])
-              )
+               )
+                ,
+                classificationRunId: (if ($classification_run | length) == 1
+                  and ($classification_run[0] | test("^Recovery-Classification-Run-ID: ([1-9][0-9]*)$"))
+                  then ($classification_run[0] | sub("^Recovery-Classification-Run-ID: "; "")) else null end)
+              }
             ')"
-            [ "$source_pr_marker" = 'true' ] || {
+            if [ "$(jq -r '.valid' <<<"$source_pr_marker")" != 'true' ]; then
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID'; exit 1;
-            }
+            fi
+            source_classification_run_id="$(jq -r '.classificationRunId // ""' <<<"$source_pr_marker")"
+            if [ -n "$source_classification_run_id" ] \
+              && { [ -z "$newer_run_id" ] || [ "$newer_run_id" != "$source_classification_run_id" ]; }; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_CLASSIFICATION_RUN_NOT_LATEST_PREDECESSOR'; exit 1;
+            fi
 
             reuse_attempts="$(curl --fail --silent --show-error --header "$auth_header" \
               --header 'Accept: application/vnd.github+json' \
