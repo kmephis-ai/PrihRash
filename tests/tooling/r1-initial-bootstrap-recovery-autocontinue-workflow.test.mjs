@@ -57,6 +57,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
   assert.match(workflow, /Recovery-Version-Run-ID/);
   assert.match(workflow, /"surface_only":"true"/);
+  assert.match(workflow, /audit_source_permission_probe:"true"/);
+  assert.doesNotMatch(workflow, /audit_source_permission_probe:true/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_WRITER_ACTIVE/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-recovery\.yml/);
