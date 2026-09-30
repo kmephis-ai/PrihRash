@@ -2896,3 +2896,62 @@ one-shot successor can use `STAGING_STALE_RETIREABLE`, another recovery state, o
 approval for the async delivery model does not convert unknown durable state into write authority.
 Google remains authoritative and `COMMITTED` is still unproven.
 
+### First Owner-approved async provider attempt after recovery `36782526425`
+
+Owner decision in Issue #630 comment `5919735887` approved a distinct bounded asynchronous
+invocation contract after the synchronous transport circuit exhausted two root-cause attempts. That
+decision does not reopen the synchronous circuit and does not itself authorize a write.
+
+PR #904 merged to exact main `0c2c4f06a5da00eec5bf4d8654f03930fc69c546`. Canonical CI and
+Browser Quality passed, Gate C stopped before provider mutation, ordinary bootstrap autocontinue did
+not dispatch an orchestrator, and recovery autocontinue dispatched exactly one full read-only
+recovery `36782526425`.
+
+Recovery `36782526425` completed successfully. Exact-source, provider, private/trigger-free and
+single read-only invoke gates passed. Privacy-safe evidence is:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+The state is not resumable. A first async attempt may proceed only through the existing orchestrator's
+fresh stale-STAGING retirement/read-back path, followed by fresh readiness. The async delivery model
+is already present on main from #902/#903: distinct async tag, `retries=0`, existing WIF Function
+invoker, empty success/failure targets, no YMQ, no IAM mutation, HTTP 202 admission-only, 610-second
+post-admission wait and read-only durable recovery.
+
+The exact authority marker is:
+
+```text
+Provider-Attempt: READY
+Async-Provider-Attempt: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED
+Recovery-State: STAGING_STALE_RETIREABLE
+Recovery-Run-ID: 36782526425
+Circuit-Rearm: OWNER_AUTHORIZED_ASYNC_INVOCATION
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Autocontinue must prove Owner comment `5919735887`, exact recovery identity/job/invoke/artifact and
+recovery-SHA ancestry, then dispatch only:
+
+```text
+allow_staging_resume=false
+allow_stale_staging_retirement=true
+async_invocation=true
+```
+
+The synchronous `ROOT_CAUSE_FIX` attempt counter is not evaluated or reset by this path. A 202
+response is never mapped to `COMMITTED`. Only
+`R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED` after the full execution window
+may establish the durable next state. Any mismatch stops before dispatch; any reached async attempt
+is one-shot on its exact SHA. Google remains authoritative until a separately proven first
+`COMMITTED` baseline and independent reconciliation/catch-up.
+
