@@ -13,6 +13,12 @@ export function classifyExactReadBinding(response, roleId, serviceAccountId) {
     if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
       return 'READ_BINDING_RESPONSE_INVALID';
     }
+    const hasSnakeRole = Object.hasOwn(binding, 'role_id');
+    const hasCamelRole = Object.hasOwn(binding, 'roleId');
+    if (hasSnakeRole && hasCamelRole
+      && (typeof binding.role_id !== 'string' || typeof binding.roleId !== 'string' || binding.role_id !== binding.roleId)) {
+      return 'READ_BINDING_RESPONSE_INVALID';
+    }
     const bindingRole = binding.role_id ?? binding.roleId;
     const subject = binding.subject;
     if (typeof bindingRole !== 'string' || !subject || typeof subject !== 'object' || Array.isArray(subject)

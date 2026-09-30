@@ -129,7 +129,8 @@ jobs:
                     and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
                     and ($recovery_version_run | length) == 1
                     and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: [1-9][0-9]*$"))
-                    and ($recovery_classification_run | length) == 0
+                    and (($recovery_classification_run | length) == 0 or (($recovery_classification_run | length) == 1
+                      and ($recovery_classification_run[0] | test("^Recovery-Classification-Run-ID: [1-9][0-9]*$"))))
                   ) or (
                     $attempt == ["Provider-Attempt: READY"]
                     and ($probe | length) == 0
@@ -171,7 +172,8 @@ jobs:
                     and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
                     and ($recovery_version_run | length) == 1
                     and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$"))
-                    and ($recovery_classification_run | length) == 0)),
+                    and (($recovery_classification_run | length) == 0 or (($recovery_classification_run | length) == 1
+                    and ($recovery_classification_run[0] | test("^Recovery-Classification-Run-ID: ([1-9][0-9]*)$")))))),
                 auditSourcePermissionProbe: ($attempt == ["Provider-Attempt: READY"]
                   and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
                   and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]

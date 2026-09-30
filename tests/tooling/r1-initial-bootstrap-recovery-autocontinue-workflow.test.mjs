@@ -633,6 +633,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
     'Observed-Signature': 'INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
     'Circuit-Rearm': 'ROOT_CAUSE_FIX',
     'Authority-Scope': 'TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP',
+    'Recovery-Classification-Run-ID': '36697361841',
     'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   }), {
     valid: true,
@@ -644,6 +645,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
     recoveryRunId: '36341844854',
     recoveryVersionRunId: '36611387299',
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+    recoveryClassificationRunId: '36697361841',
   });
   assert.equal(parse({
     'Provider-Attempt': 'READY',

@@ -397,6 +397,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     'Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP',
     'Recovery-Run-ID: 36341844854',
     'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36697361841',
     'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   ].join('\n');
   const permissionResult = spawnSync('jq', [
@@ -406,7 +407,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     '--arg', 'permission_probe', '1', filter,
   ], { encoding: 'utf8' });
   assert.equal(permissionResult.status, 0, permissionResult.stderr);
-  assert.deepEqual(JSON.parse(permissionResult.stdout), { valid: true, classificationRunId: null });
+  assert.deepEqual(JSON.parse(permissionResult.stdout), { valid: true, classificationRunId: '36697361841' });
 });
 
 test('initial bootstrap recovery persists only enum-only classification evidence', () => {

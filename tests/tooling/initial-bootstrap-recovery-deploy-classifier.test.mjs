@@ -225,6 +225,12 @@ test('temporary audit-source reader recognizes only one exact principal binding 
   assert.equal(classifyExactReadBinding([exact], roleId, serviceAccountId), 'EXACT_READ_BINDING_PRESENT');
   assert.equal(classifyExactReadBinding([{ roleId, subject: exact.subject }], roleId, serviceAccountId),
     'EXACT_READ_BINDING_PRESENT');
+  assert.equal(classifyExactReadBinding([{ role_id: roleId, roleId, subject: exact.subject }], roleId, serviceAccountId),
+    'EXACT_READ_BINDING_PRESENT');
+  assert.equal(classifyExactReadBinding([{ role_id: roleId, roleId: 'logging.reader', subject: exact.subject }], roleId, serviceAccountId),
+    'READ_BINDING_RESPONSE_INVALID');
+  assert.equal(classifyExactReadBinding([{ role_id: null, roleId, subject: exact.subject }], roleId, serviceAccountId),
+    'READ_BINDING_RESPONSE_INVALID');
   assert.equal(classifyExactReadBinding([
     { role_id: roleId, subject: { type: 'serviceAccount', id: 'other-principal' } },
   ], roleId, serviceAccountId), 'EXACT_READ_BINDING_ABSENT');
