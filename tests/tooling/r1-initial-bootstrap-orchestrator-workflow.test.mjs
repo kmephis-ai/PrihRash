@@ -16,6 +16,9 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /ci_run_id:/);
+  assert.match(workflow, /bootstrap_invocation_mode:/);
+  assert.match(workflow, /default: sync/);
+  assert.match(workflow, /- sync[\s\S]*- async/);
   assert.match(workflow, /allow_staging_resume:/);
   assert.match(workflow, /allow_stale_staging_retirement:/);
   assert.match(workflow, /default: 'false'/);
@@ -107,13 +110,41 @@ test('child dispatcher can launch only canonical child workflows and fails close
   assert.match(dispatcher, /branch\?\.protected !== true/);
   assert.match(dispatcher, /activeMainDispatch/);
   assert.match(dispatcher, /event === 'workflow_dispatch'/);
-  assert.match(dispatcher, /body: JSON\.stringify\(\{ ref: 'main' \}\)/);
+  assert.match(dispatcher, /const dispatchBody = inputs === null/);
+  assert.match(dispatcher, /\{ ref: 'main', inputs \}/);
+  assert.match(dispatcher, /invocation_mode: invocationMode/);
+  assert.match(dispatcher, /result\.invocationMode = invocationMode/);
   assert.match(dispatcher, /CHILD_WORKFLOW_ALREADY_ACTIVE/);
   assert.match(dispatcher, /CHILD_WORKFLOW_AMBIGUOUS/);
   assert.match(dispatcher, /Invoke exact initial bootstrap tag once/);
   assert.match(dispatcher, /run\.conclusion === 'success' && invokeStepConclusion !== 'success'/);
   assert.match(dispatcher, /result\.conclusion = 'inconsistent'/);
   assert.match(dispatcher, /result\.invokeStepConclusion = 'UNKNOWN'/);
+});
+
+test('async bootstrap mode waits beyond execution window and can only end in durable recovery classification', async () => {
+  const workflow = await text(WORKFLOW);
+
+  assert.match(workflow, /bootstrap "\$mode"/);
+  assert.match(workflow, /\.invocationMode == \$mode/);
+  assert.match(workflow, /Download exact async bootstrap admission evidence/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED/);
+  assert.match(workflow, /sleep 630/);
+  assert.match(
+    workflow,
+    /inputs\.bootstrap_invocation_mode == 'async'[\s\S]*steps\.bootstrap\.outputs\.invoke_step != 'skipped'[\s\S]*initial-bootstrap-recovery:invoke/,
+  );
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_RECOVERY_CLASSIFIED/);
+  assert.match(workflow, /bootstrapInvocationMode/);
+  assert.match(workflow, /asyncAdmissionAccepted/);
+  assert.match(
+    workflow,
+    /if \[ "\$BOOTSTRAP_INVOCATION_MODE" = 'sync' \][\s\S]*R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED/,
+  );
+  assert.doesNotMatch(
+    workflow,
+    /if \[ "\$BOOTSTRAP_INVOCATION_MODE" = 'async' \][^\n]*R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED/,
+  );
 });
 
 test('orchestrator publishes one retained privacy-safe evidence artifact including resume authorization', async () => {
