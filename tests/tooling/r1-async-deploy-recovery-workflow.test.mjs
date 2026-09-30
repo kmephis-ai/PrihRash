@@ -19,9 +19,10 @@ test('async deploy recovery is exact-main CI-triggered and read-only', async () 
   assert.match(workflow, /Deploy initial-bootstrap-only Function version/);
   assert.match(workflow, /yc serverless function version list --function-id/);
   assert.match(workflow, /yc serverless function list-access-bindings/);
-  assert.match(workflow, /yc iam service-account list-access-bindings/);
+  assert.doesNotMatch(workflow, /yc iam service-account list-access-bindings/);
   assert.match(workflow, /classify-r1-async-deploy-recovery\.mjs/);
   assert.match(workflow, /SAFE_TO_CORRECT_CONFIG/);
+  assert.match(workflow, /runtimeInvoker/);
   assert.match(workflow, /r1-async-deploy-recovery-evidence-/);
   assert.doesNotMatch(workflow, /serverless function version create/);
   assert.doesNotMatch(workflow, /functions\.yandexcloud\.net/);
