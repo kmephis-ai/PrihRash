@@ -2323,3 +2323,22 @@ reconciliation. Full API shape, malformed/oneof/conflict cases, and terminal tra
 fixtures in this one Incident-M, alongside exact caller/canonical failed-run and source-history guards.
 For the observed `CREATED_VERSION_NOT_PROVEN` signature, invalid/missing typed metadata also stops before
 Audit Trails/IAM fallback so the already-terminal source branch is not replayed.
+
+### PR #888 recovery autocontinue stopped before provider on the exact changeset guard
+
+On exact main `4d59cb8af731c37b25f2661c5ae24be3863cc00f`, CI `36730652859`, Browser Quality
+`36730653007`, and CodeQL passed after PR #888. Recovery autocontinue `36730770276` read and validated
+its exact marker/run identities, then stopped with `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`:
+the marker named `tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs`, which was
+not included in PR #888's changed files. No `R1 initial bootstrap recovery` run was dispatched, no
+Yandex query occurred, and no Function/YDB invoke or mutation happened. This gate failure does not
+consume a provider classification attempt or change the last exact recovery predecessor `36713248229`.
+
+The successor remains the same Incident-M and keeps the exact marker/run identities above. Its complete
+changeset includes the named autocontinue regression test, canonical recovery workflow and regression
+test, caller workflow test, runbook, `AGENTS.md`, and completion sprint docs. The fixture verifies the
+typed metadata decision and every matched-operation fail-closed exit before Audit/IAM fallback; the
+autocontinue fixture verifies exact failed-phase/source identities and the required regression file is
+part of the merged PR before dispatch. Expected terminal outcomes remain exact guarded read-only recovery
+dispatch or pre-provider STOP with no provider calls. Do not manually dispatch, alter the marker/run IDs,
+retry this SHA, or infer provider activity from autocontinue success.

@@ -104,11 +104,11 @@ test('exact CreateFunctionVersion operation metadata proof exits before Audit Tr
   const reuseEnd = workflow.indexOf('      - name: Deploy recovery-only Function version', reuseStart);
   const reuseBlock = workflow.slice(reuseStart, reuseEnd);
   const exactProof = reuseBlock.indexOf("if [ \"$reuse_evidence\" = 'EXACT_RECOVERY_VERSION_CREATED' ]; then");
-  const unprovenStop = reuseBlock.indexOf("if [ \"$reuse_evidence\" = 'CREATED_VERSION_NOT_PROVEN' ]; then");
+  const unprovenStop = reuseBlock.indexOf('case "$reuse_evidence" in\n            CREATE_OPERATION_AMBIGUOUS|');
   const auditFallback = reuseBlock.indexOf("target_trail_response=\"$tmp/target-folder-audit-trails.json\"");
   assert.ok(exactProof >= 0 && unprovenStop > exactProof && auditFallback > unprovenStop);
   assert.match(reuseBlock, /reuse_status='EXACT_RECOVERY_VERSION_CREATED'[\s\S]*printf 'reuse_status=%s\\n' "\$reuse_status" >> "\$GITHUB_OUTPUT"[\s\S]*exit 0/);
-  assert.match(reuseBlock, /if \[ "\$reuse_evidence" = 'CREATED_VERSION_NOT_PROVEN' \]; then[\s\S]*reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'[\s\S]*exit 1[\s\S]*target_trail_response=/);
+  assert.match(reuseBlock, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN\|DEPLOYMENT_OUTCOME_UNCLASSIFIED\)[\s\S]*reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'[\s\S]*exit 1[\s\S]*target_trail_response=/);
   assert.match(recoveryDeployClassifier, /CreateFunctionVersionMetadata/);
   assert.match(recoveryDeployClassifier, /metadataVersionId/);
 });
