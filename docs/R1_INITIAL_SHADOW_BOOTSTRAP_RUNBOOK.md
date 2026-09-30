@@ -2647,3 +2647,39 @@ classification is required before any causal transport fix or later write. Any u
 remains a recovery boundary. Google stays authoritative and the first verified `COMMITTED` shadow
 baseline is still not proven by this checkpoint.
 
+### Full exact-revision classification after surface recovery `36770022601`
+
+PR #898 merged the post-invoke durable-state checkpoint on exact main
+`41d7f988ed73e55e97eabb624a4f1d0f2aafb321`. Push CI `36769871707` passed and recovery
+autocontinue `36769984568` dispatched exactly one recovery run `36770022601` with
+`surface_only=true` after the prior bootstrap Function's 600-second execution window had elapsed.
+
+The surface recovery completed successfully. Its recovery Function was private and trigger-free, the
+read-only invoke succeeded, and its privacy-safe classification was:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+```
+
+No financial bootstrap, readiness, resume, stale retirement, cleanup or authority switch was dispatched
+from this successor. The result does not prove a `COMMITTED` baseline and surface-only mode does not
+carry enough exact revision/source evidence to decide whether the surviving STAGING is safely resumable,
+stale-retireable, or otherwise unclassified.
+
+Canonical recovery therefore requires one distinct new-SHA **full read-only** classification before any
+transport root-cause implementation or another write-capable attempt:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Autocontinue may dispatch only the full read-only recovery workflow. Any `APPLIED`, `NOT_APPLIED`,
+`RECOVERY_REQUIRED`, revision/source diagnostic or ambiguity from that run is evidence for the next
+causal decision only; it does not itself authorize replay. Google remains authoritative and first
+verified `COMMITTED` shadow is still unproven.
+
