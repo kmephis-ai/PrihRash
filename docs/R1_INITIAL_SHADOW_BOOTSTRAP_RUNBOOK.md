@@ -2059,3 +2059,25 @@ Recovery-Run-ID: 36341844854
 Recovery-Version-Run-ID: 36611387299
 Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
 ```
+
+### Recovery autocontinue exact phase-predicate correction after #880
+
+On exact main `78893a3cff86b3e7b352e5fc1c8f5b7805cb27be`, recovery autocontinue run
+`36661175672` reached the reuse source phase check but its shell referenced unset `failed_jobs`
+instead of the fetched exact response `source_failed_jobs`. Under `set -u` this produced
+`R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_PHASE_NOT_PROVEN` before dispatch. The same SHA's Gate C run
+`36661175607` independently stopped at `GATE_C_PR_AUTHORITY_MARKER_INVALID`; readiness, deployment,
+invoke and provider authentication steps were skipped. No Yandex/Google/YDB request or provider state
+mutation occurred.
+
+The successor corrects the response binding and adds jq fixtures for a unique exact failed deploy with
+skipped invoke, wrong conclusion/phase, absent or duplicate recovery jobs, and duplicate phase steps.
+The decision remains terminal: only one exact matching job/phase advances to the existing bounded
+latest-predecessor and reuse-source gates; false, missing, duplicate, or malformed evidence stops before
+dispatch. If every downstream exact gate passes, the only authorized continuation remains the single
+read-only exact revision classification for failed run `36341844854` using accepted version run
+`36611387299`; any mismatch remains UNKNOWN and no create, invoke, replay, cleanup, or authority change
+is inferred.
+
+Local Windows Node 22 verification normalizes workflow fixture line endings before extracting jq
+predicates; this keeps the paired recovery/caller fixtures equivalent to the Linux CI source text.

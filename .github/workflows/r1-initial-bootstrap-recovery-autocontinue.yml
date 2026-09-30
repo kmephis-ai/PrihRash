@@ -286,7 +286,7 @@ jobs:
               and $jobs[0].conclusion=="failure"
               and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1
               and ([$jobs[0].steps[]?|select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")]|length)==1
-            ' <<<"$failed_jobs" >/dev/null; then
+            ' <<<"$source_failed_jobs" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 0
             fi
             recovery_history="$(curl --fail --silent --show-error --get \

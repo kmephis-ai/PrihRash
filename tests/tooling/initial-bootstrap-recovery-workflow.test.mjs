@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const workflow = await readFile('.github/workflows/r1-initial-bootstrap-recovery.yml', 'utf8');
+const workflow = (await readFile('.github/workflows/r1-initial-bootstrap-recovery.yml', 'utf8')).replace(/\r\n/g, '\n');
 const packageScript = await readFile('scripts/package-yandex-initial-bootstrap-recovery-function.mjs', 'utf8');
 const verifier = await readFile('scripts/verify-yandex-initial-bootstrap-recovery-package.mjs', 'utf8');
 const invoker = await readFile('scripts/invoke-yandex-initial-bootstrap-recovery.mjs', 'utf8');
@@ -189,7 +189,7 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     { id: 18 }, { workflow_id: 30 }, { event: 'push' }, { status: 'in_progress' },
     { conclusion: 'success' }, { head_sha: 'd'.repeat(40) }, { head_sha: 'a'.repeat(40) },
     { created_at: 'invalid' }, { created_at: '2026-09-27T18:45:46Z', id: 36341844853 },
-  ]) assert.equal(exactRun(runRecord(mismatch)), false);
+  ]) assert.equal(exactRun(runRecord(mismatch)), false, JSON.stringify(mismatch));
   assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 16), true);
   assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 18), false);
 
