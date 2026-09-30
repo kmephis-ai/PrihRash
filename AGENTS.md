@@ -169,6 +169,14 @@ retirement, resume или cleanup: ожидается stop на initial read-onl
 позже служить входом отдельного `SOURCE_DRIFT_REBASE`. Missing/ambiguous/mismatched evidence всегда
 STOP до dispatch.
 
+Для autocontinue-triggered R1 provider/orchestrator workflow exact successful canonical CI identity
+нужно передавать как run ID из исходного `workflow_run`, если downstream restore/gate поддерживает
+такой input. Downstream обязан read-only получить именно этот run и проверить его через canonical
+`scripts/classify-github-ci-run.mjs` против exact SHA; повторный list-query по CI history не должен
+подменять уже известную identity и создавать artificial ambiguity/eventual-consistency blocker.
+List-based discovery допускается только как fail-closed fallback для manual path без explicit CI run ID.
+Artifact по-прежнему обязан пройти exact source SHA/package digest verification.
+
 После неуспешного write-capable bootstrap invoke и неуспешной post-invoke recovery
 долговечное состояние остаётся неизвестным. Для такого случая successor PR может запросить
 только одну read-only recovery на новом exact SHA с
