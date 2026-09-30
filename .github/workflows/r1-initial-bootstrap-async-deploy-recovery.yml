@@ -1,0 +1,290 @@
+name: R1 async deploy recovery
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: r1-async-deploy-recovery
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    if: >-
+      github.repository == 'kmephis-ai/PrihRash'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+      && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout exact CI source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
+      - name: Verify exact read-only diagnostic authority
+        id: authority
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY"
+          auth_header="Authorization: Bearer $GH_API_TOKEN"
+          accept_header='Accept: application/vnd.github+json'
+
+          current="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/branches/main")"
+          jq -e --arg sha "$SOURCE_SHA" '.commit.sha == $sha and .protected == true' <<<"$current" >/dev/null || {
+            echo 'R1_ASYNC_DEPLOY_RECOVERY_MAIN_NOT_EXACT'; exit 1;
+          }
+
+          prs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/commits/$SOURCE_SHA/pulls")"
+          source_pr="$(jq -cer --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            [.[] | select(
+              .merged_at != null
+              and .merge_commit_sha == $sha
+              and .base.ref == "main"
+              and .head.repo.full_name == $repo
+              and (.title | startswith("R1 #630:"))
+            )] | if length == 1 then .[0] else empty end
+          ' <<<"$prs" || true)"
+          test -n "$source_pr" || { echo 'R1_ASYNC_DEPLOY_RECOVERY_SOURCE_PR_NOT_EXACT'; exit 1; }
+
+          body="$(jq -r '.body // ""' <<<"$source_pr")"
+          marker="$(jq -Rn --arg body "$body" '
+            def exact_line($prefix): ($body | split("\n") | map(select(startswith($prefix))));
+            (exact_line("Provider-Attempt: ")) as $provider
+            | (exact_line("Async-Deploy-Recovery: ")) as $recovery
+            | (exact_line("Failed-Async-Deploy-Run-ID: ")) as $run
+            | (exact_line("Failed-Async-Deploy-SHA: ")) as $sha
+            | (exact_line("Expected-Transition: ")) as $expected
+            | (exact_line("Regression-Test: ")) as $test
+            | {
+                valid: (
+                  $provider == ["Provider-Attempt: NOT_AUTHORIZED"]
+                  and $recovery == ["Async-Deploy-Recovery: READY"]
+                  and $run == ["Failed-Async-Deploy-Run-ID: 36783942040"]
+                  and $sha == ["Failed-Async-Deploy-SHA: c8c45e88e1e3c58f7b168c56ae4f1edc1d850c16"]
+                  and $expected == ["Expected-Transition: READ_ONLY_ASYNC_DEPLOY_CLASSIFICATION"]
+                  and $test == ["Regression-Test: tests/tooling/r1-async-deploy-recovery-classifier.test.mjs"]
+                ),
+                failedRunId: 36783942040,
+                failedSha: "c8c45e88e1e3c58f7b168c56ae4f1edc1d850c16"
+              }
+          ')"
+          jq -e '.valid == true' <<<"$marker" >/dev/null || {
+            echo 'R1_ASYNC_DEPLOY_RECOVERY_MARKER_INVALID'; exit 1;
+          }
+
+          source_pr_number="$(jq -er '.number' <<<"$source_pr")"
+          files="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/pulls/$source_pr_number/files?per_page=100")"
+          test "$(jq 'length' <<<"$files")" -lt 100 || { echo 'R1_ASYNC_DEPLOY_RECOVERY_CHANGESET_UNBOUNDED'; exit 1; }
+          jq -e '
+            any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml" and .status != "removed")
+            and any(.[]; .filename == "scripts/classify-r1-async-deploy-recovery.mjs" and .status != "removed")
+            and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs" and .status != "removed")
+            and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs" and .status != "removed")
+            and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+            and all(.[]; .filename | IN(
+              ".github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml",
+              "scripts/classify-r1-async-deploy-recovery.mjs",
+              "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs",
+              "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs",
+              "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+            ))
+          ' <<<"$files" >/dev/null || { echo 'R1_ASYNC_DEPLOY_RECOVERY_CHANGESET_INVALID'; exit 1; }
+
+          failed_run_id="$(jq -r '.failedRunId' <<<"$marker")"
+          failed_sha="$(jq -r '.failedSha' <<<"$marker")"
+          failed_run="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/actions/runs/$failed_run_id")"
+          jq -e --arg sha "$failed_sha" --argjson run_id "$failed_run_id" '
+            .id == $run_id
+            and .name == "R1 initial shadow bootstrap"
+            and .head_sha == $sha
+            and .head_branch == "main"
+            and .event == "workflow_dispatch"
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' <<<"$failed_run" >/dev/null || { echo 'R1_ASYNC_DEPLOY_RECOVERY_FAILED_RUN_INVALID'; exit 1; }
+
+          lineage="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/compare/$failed_sha...$SOURCE_SHA")"
+          jq -e '.status == "ahead" and .behind_by == 0' <<<"$lineage" >/dev/null || {
+            echo 'R1_ASYNC_DEPLOY_RECOVERY_LINEAGE_INVALID'; exit 1;
+          }
+
+          failed_jobs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" "$api/actions/runs/$failed_run_id/jobs?filter=latest&per_page=100")"
+          step="$(jq -cer '
+            [.jobs[] | select(.name == "initial-shadow-bootstrap" and .conclusion == "failure")
+              | .steps[]
+              | select(.name == "Deploy initial-bootstrap-only Function version" and .conclusion == "failure")]
+            | if length == 1 then .[0] else empty end
+          ' <<<"$failed_jobs" || true)"
+          test -n "$step" || { echo 'R1_ASYNC_DEPLOY_RECOVERY_FAILED_STEP_NOT_EXACT'; exit 1; }
+          deploy_started_at="$(jq -er '.started_at' <<<"$step")"
+          deploy_finished_at="$(jq -er '.completed_at' <<<"$step")"
+
+          {
+            printf 'FAILED_DEPLOY_STARTED_AT=%s\n' "$deploy_started_at"
+            printf 'FAILED_DEPLOY_FINISHED_AT=%s\n' "$deploy_finished_at"
+          } >> "$GITHUB_ENV"
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          printf '%s\n' "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange exact GitHub OIDC token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-async-deploy-recovery-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+          oidc_status="$(curl --silent --show-error --output "$tmp/oidc.json" --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}")"
+          case "$oidc_status" in 2??) ;; *) echo 'R1_ASYNC_DEPLOY_RECOVERY_OIDC_FAILED'; exit 1 ;; esac
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
+          echo "::add-mask::${oidc_token}"
+          token_payload="${oidc_token#*.}"; token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"; token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;; 2) token_payload="${token_payload}==" ;; 3) token_payload="${token_payload}=" ;;
+            *) echo 'R1_ASYNC_DEPLOY_RECOVERY_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json" 2>/dev/null
+          jq -e --arg issuer "$OIDC_ISSUER" --arg audience "$OIDC_AUDIENCE" --arg subject "$OIDC_SUBJECT" '
+            .iss == $issuer
+            and ((.aud == $audience) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $audience))
+            and .sub == $subject
+          ' "$tmp/claims.json" >/dev/null || { echo 'R1_ASYNC_DEPLOY_RECOVERY_OIDC_CLAIMS_INVALID'; exit 1; }
+
+          iam_status="$(curl --silent --show-error --output "$tmp/iam.json" --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token')"
+          case "$iam_status" in 2??) ;; *) echo 'R1_ASYNC_DEPLOY_RECOVERY_WIF_EXCHANGE_FAILED'; exit 1 ;; esac
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Read async deploy surface only
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-async-deploy-recovery"
+          mkdir -p "$tmp"
+
+          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_FUNCTION_READ_FAILED'; exit 1;
+            }
+          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_RUNTIME_SA_READ_FAILED'; exit 1;
+            }
+          runtime_sa_id="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")"
+
+          echo "::add-mask::${function_id}"
+          echo "::add-mask::${runtime_sa_id}"
+          echo "::add-mask::${YC_WIF_SERVICE_ACCOUNT_ID}"
+
+          yc serverless function list-access-bindings --id "$function_id" \
+            --format json --retry 0 --no-user-output >"$tmp/function-bindings.json" 2>"$tmp/function-bindings.err" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_FUNCTION_BINDINGS_READ_FAILED'; exit 1;
+            }
+          yc iam service-account list-access-bindings --id "$runtime_sa_id" --limit 1000 \
+            --format json --retry 0 --no-user-output >"$tmp/runtime-bindings.json" 2>"$tmp/runtime-bindings.err" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_RUNTIME_BINDINGS_READ_FAILED'; exit 1;
+            }
+          yc serverless function version list --function-id "$function_id" --limit 1000 \
+            --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_VERSION_LIST_FAILED'; exit 1;
+            }
+
+          result="$(node scripts/classify-r1-async-deploy-recovery.mjs \
+            "$tmp/versions.json" "$tmp/function-bindings.json" "$tmp/runtime-bindings.json" \
+            "$function_id" "$runtime_sa_id" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            "$FAILED_DEPLOY_STARTED_AT" "$FAILED_DEPLOY_FINISHED_AT")" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIER_FAILED'; exit 1;
+            }
+          evidence_dir="$RUNNER_TEMP/r1-async-deploy-recovery-evidence"
+          mkdir -p "$evidence_dir"
+          printf '%s\n' "$result" | jq -c -e '
+            select(
+              type == "object"
+              and .status == "PASS"
+              and .code == "R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIED"
+              and (.verdict | IN(
+                "SAFE_TO_CORRECT_CONFIG",
+                "PREVIOUS_WRITE_AMBIGUOUS",
+                "PREVIOUS_VERSION_PRESENT",
+                "IAM_BOUNDARY_MISSING",
+                "BLOCKED"
+              ))
+              and (.previousWrite | IN("NOT_APPLIED", "VERSION_PRESENT", "AMBIGUOUS"))
+              and (.runtimeInvoker | IN("PRESENT", "ABSENT"))
+              and (.wifRuntimeServiceAccountUser | IN("PRESENT", "ABSENT"))
+              and (keys | sort) == [
+                "code",
+                "previousWrite",
+                "runtimeInvoker",
+                "status",
+                "verdict",
+                "wifRuntimeServiceAccountUser"
+              ]
+            )
+          ' >"$evidence_dir/classification.json" || {
+            echo 'R1_ASYNC_DEPLOY_RECOVERY_EVIDENCE_INVALID'; exit 1;
+          }
+
+      - name: Upload enum-only async deploy recovery evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-async-deploy-recovery-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-async-deploy-recovery-evidence/classification.json
+          if-no-files-found: error
+          retention-days: 30

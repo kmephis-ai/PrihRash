@@ -2954,3 +2954,55 @@ non-202 admission, or post-window recovery ambiguity stops without replay. No th
 bootstrap is authorized. Google remains authoritative until a separately proven first `COMMITTED`
 baseline and independent reconciliation/catch-up.
 
+### Read-only recovery after failed first async version deployment `36783942040`
+
+The first Owner-approved async orchestrator reached its guarded write-capable child only after fresh
+stale-STAGING retirement/read-back and readiness. Child `36783942040` passed exact-source, readiness,
+OIDC, provider-boundary and exact-main checks, but failed at
+`Deploy initial-bootstrap-only Function version` before async config read-back or any Function
+invocation. The async admission step was skipped, so no `HTTP 202` was accepted and no async financial
+shadow execution was started by that child.
+
+The create command returned nonzero with stderr kept private on the runner. Therefore its provider write
+outcome is not inferred from the exit code. Before any corrected deployment, PrihRash performs one
+new-SHA **read-only async deploy recovery** covering the exact failed deploy step window.
+
+External Yandex documentation confirms that the CLI flags used by the failed attempt are current:
+`--async-max-retries` and `--async-service-account-id`. It also confirms that assigning a service
+account to a resource requires the caller to be allowed to use that service account
+(`iam.serviceAccounts.user`). Existing PrihRash IAM design already grants deployment WIF the right to
+use the exact runtime SA `prihrash-initial-bootstrap`, while that runtime SA is retained as an exact
+Function `functions.functionInvoker`. No IAM widening is authorized.
+
+The diagnostic marker is:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Async-Deploy-Recovery: READY
+Failed-Async-Deploy-Run-ID: 36783942040
+Failed-Async-Deploy-SHA: c8c45e88e1e3c58f7b168c56ae4f1edc1d850c16
+Expected-Transition: READ_ONLY_ASYNC_DEPLOY_CLASSIFICATION
+Regression-Test: tests/tooling/r1-async-deploy-recovery-classifier.test.mjs
+```
+
+After exact-main CI, temporary workflow
+`.github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml` may perform only:
+
+- read the exact failed GitHub job timestamps;
+- read the dedicated Function/version list;
+- read exact Function access bindings;
+- read access bindings **on** the runtime service account;
+- classify whether an async-tag or failed-window version already exists;
+- classify whether runtime SA has exact Function `functions.functionInvoker`;
+- classify whether deployment WIF has `iam.serviceAccounts.user` on runtime SA;
+- publish one enum-only artifact.
+
+It must not create/update/delete Function versions, invoke Functions, mutate IAM, touch Google/YDB data,
+retire STAGING, run readiness/bootstrap, or infer application success.
+
+Only
+`SAFE_TO_CORRECT_CONFIG / NOT_APPLIED / runtimeInvoker=PRESENT /
+wifRuntimeServiceAccountUser=PRESENT` may support a later distinct fix that changes async executor from
+deployment WIF to the already-authorized runtime SA. Any existing/ambiguous version or missing IAM
+boundary remains STOP and does not authorize replay.
+
