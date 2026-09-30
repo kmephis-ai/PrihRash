@@ -197,7 +197,10 @@ Audit-source ветку и требует смены causal model; `SOURCE_EVIDE
 этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification
 predecessor с deploy/invoke `skipped`. Для текущего boundary это соответственно `36341844854`,
 `36611387299`, `36697361841`. Autocontinue и canonical recovery обязаны обе проверить последнее
-сопоставление; не переиспользовать classification run как target recovery ID.
+сопоставление; target guard допускает, что historical workflow ещё не имел reuse-verification step
+(или имел ровно один `skipped`), но не принимает duplicate/failed verification; classification run
+сам обязан иметь точный failed-verification/deploy-skipped/invoke-skipped phase. Не переиспользовать
+classification run как target recovery ID.
 
 Standing delegation из §8.3 разрешает автономно выбирать и выполнять последующие stage-appropriate
 read-only probes без нового per-probe Owner confirmation. Для того же failed recovery run после
