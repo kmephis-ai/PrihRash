@@ -2896,3 +2896,61 @@ one-shot successor can use `STAGING_STALE_RETIREABLE`, another recovery state, o
 approval for the async delivery model does not convert unknown durable state into write authority.
 Google remains authoritative and `COMMITTED` is still unproven.
 
+### First async provider attempt after fresh full recovery `36782526425`
+
+Exact main `0c2c4f06a5da00eec5bf4d8654f03930fc69c546` contains the Owner-approved async
+contract/plumbing from PRs #902/#903 plus the read-only pre-attempt boundary from PR #904. Canonical
+CI `36782383319` and Browser Quality `36782383316` passed.
+
+Full recovery `36782526425` then completed `SUCCESS` on that exact main. Its single read-only
+recovery invoke returned:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+This evidence still forbids resume. It does allow the existing guarded stale-STAGING retirement path,
+but only inside a distinct new-SHA orchestrator run that repeats fresh recovery/read-back and readiness
+before any bootstrap child.
+
+The first async provider attempt is a separate Owner-approved delivery-model attempt and does not
+reopen or reset the exhausted synchronous `ROOT_CAUSE_FIX` circuit. Its autocontinue marker is:
+
+```text
+Async-Provider-Attempt: READY
+Owner-Decision: R1_ASYNC_INVOCATION_CONTRACT_APPROVED
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED
+Recovery-State: STAGING_STALE_RETIREABLE
+Recovery-Run-ID: 36782526425
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+The marker is valid only for a process-only changeset containing the autocontinue workflow, its focused
+regression test and this runbook. Autocontinue must independently verify recovery run
+`36782526425`, its successful read-only invoke, its enum-only artifact, and ancestry to the new exact
+main SHA. It then dispatches the existing orchestrator only with:
+
+```text
+allow_staging_resume=false
+allow_stale_staging_retirement=true
+async_invocation=true
+```
+
+The orchestrator must re-prove fresh stale retirement/read-back and readiness. The bootstrap child may
+create exactly one async-configured Function version with retries `0`, existing invoker service
+account and empty success/failure targets, then perform one `HTTP 202` admission. Admission is never
+`COMMITTED`. After any reached async admission the orchestrator waits 610 seconds and only then
+classifies durable state through the existing read-only recovery path.
+
+Any marker ambiguity, ancestry mismatch, recovery/artifact mismatch, changed main, async config mismatch,
+non-202 admission, or post-window recovery ambiguity stops without replay. No third synchronous
+bootstrap is authorized. Google remains authoritative until a separately proven first `COMMITTED`
+baseline and independent reconciliation/catch-up.
+
