@@ -221,12 +221,30 @@ jobs:
                 and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "AGENTS.md" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
-                and all(.[]; .filename | IN(
-                  ".github/workflows/r1-initial-bootstrap-autocontinue.yml",
-                  "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs",
-                  "AGENTS.md",
-                  "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
-                ))
+                and (
+                  all(.[]; .filename | IN(
+                    ".github/workflows/r1-initial-bootstrap-autocontinue.yml",
+                    "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs",
+                    "AGENTS.md",
+                    "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                  ))
+                  or (
+                    any(.[]; .filename == ".github/actions/restore-exact-source/action.yml" and .status != "removed")
+                    and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-orchestrator.yml" and .status != "removed")
+                    and any(.[]; .filename == "tests/tooling/exact-source-artifact.test.mjs" and .status != "removed")
+                    and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs" and .status != "removed")
+                    and all(.[]; .filename | IN(
+                      ".github/actions/restore-exact-source/action.yml",
+                      ".github/workflows/r1-initial-bootstrap-autocontinue.yml",
+                      ".github/workflows/r1-initial-bootstrap-orchestrator.yml",
+                      "tests/tooling/exact-source-artifact.test.mjs",
+                      "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs",
+                      "tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs",
+                      "AGENTS.md",
+                      "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                    ))
+                  )
+                )
               ' <<<"$source_files" >/dev/null; then
                 echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_CHANGESET_INVALID'
                 exit 0
