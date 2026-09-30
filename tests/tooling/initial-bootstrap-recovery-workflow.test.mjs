@@ -86,6 +86,19 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
 });
 
+test('recovery version reuse queries Audit Trails directly for the exact validated folder and reaches source decision', () => {
+  const reuseStart = workflow.indexOf('      - name: Verify exact accepted recovery Function version for reuse');
+  const reuseEnd = workflow.indexOf('      - name: Deploy recovery-only Function version', reuseStart);
+  const reuseBlock = workflow.slice(reuseStart, reuseEnd);
+  assert.ok(reuseStart >= 0 && reuseEnd > reuseStart);
+  assert.match(reuseBlock, /--data-urlencode "folderId=\$\{YC_FOLDER_ID\}"/);
+  assert.match(reuseBlock, /--audit-folder-trails "\$target_trail_response" "\$YC_CLOUD_ID" "\$YC_FOLDER_ID"/);
+  assert.doesNotMatch(reuseBlock, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders|--audit-cloud-folder-ids|--audit-cloud-trails/);
+  assert.match(reuseBlock, /audit_source_decision="\$\(node scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
+  assert.match(reuseBlock, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE\|SOURCE_EVIDENCE_UNUSABLE\|SOURCE_EVIDENCE_AMBIGUOUS/);
+  assert.match(reuseBlock, /if \[ -z "\$YC_CLOUD_ID" \]; then[\s\S]*AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID/);
+});
+
 test('read-only reuse requires exact accepted deploy history and version metadata, then skips every create', () => {
   assert.match(workflow, /reuse_deploy_attempt_run_id:/);
   assert.match(workflow, /reuse_failed_recovery_run_id:/);
@@ -108,8 +121,8 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.doesNotMatch(workflow, /functionTagHistoryRecord"\:\[\]\}/);
   assert.match(workflow, /YC_CLOUD_ID: \$\{\{ secrets\.YC_R1_CLOUD_ID \}\}/);
   assert.match(workflow, /--audit-source-decision/);
-  assert.match(workflow, /--audit-cloud-folder-ids/);
-  assert.match(workflow, /--audit-cloud-trails/);
+  assert.match(workflow, /--audit-folder-trails "\$target_trail_response" "\$YC_CLOUD_ID" "\$YC_FOLDER_ID"/);
+  assert.doesNotMatch(workflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
   assert.match(workflow, /--audit-events/);
   assert.match(workflow, /\$expected_reuse_version_id/);
   assert.match(workflow, /audit_source_decision" = 'EXISTING_APPLICABLE_AUDIT_SOURCE'/);

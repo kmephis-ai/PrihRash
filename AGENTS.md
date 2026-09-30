@@ -297,6 +297,12 @@ deploy/invoke `skipped` разрешают оставшиеся exact gates; и�
 и сменить causal model. Синхронизировать это правило с `docs/R1_COMPLETION_SPRINT.md` в том же PR;
 отдельный process/docs PR запрещён.
 
+Если Cloud-wide `ListFolders` не возвращает точный `YC_FOLDER_ID`, который уже прошёл Function и
+Lockbox metadata gates, не продолжать enum/refinement ветки инвентаризации. Законченный причинный
+successor может обойти её прямым folder-scoped Audit Trails `List` только для этого точного ID;
+обязан проверить `folderId`/`cloudId`, ProtoJSON empty repeated-field и pagination, затем принять
+терминальное source decision. Это не разрешает alias inference или replay.
+
 При смене ChatGPT ↔ OpenCode новый агент делает minimal fresh reconciliation, читает exact
 `AGENTS.md`, `docs/R1_COMPLETION_SPRINT.md`, applicable R1 runbook и latest handover в динамически
 определённом active R1 Issue, после чего продолжает с `Next-Safe-Action`, а не из stale session memory.

@@ -227,10 +227,9 @@ jobs:
               }
             if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e \
               --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
-                any(.[]; .filename == $test and .status != "removed")
-                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery.yml" and .status != "removed")
-                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
-                and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
+                    any(.[]; .filename == $test and .status != "removed")
+                    and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery.yml" and .status != "removed")
+                    and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-recovery-workflow.test.mjs" and .status != "removed")
