@@ -143,8 +143,9 @@ test('reuse core changeset permits a complete recovery-source fix without touchi
 });
 
 test('read-only reuse changesets do not require temporary-IAM code while permission attempts still do', (t) => {
-  const baseFilter = workflow.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
-  const permissionFilter = workflow.match(/&& ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  const reuseBlock = workflow.slice(workflow.indexOf('if [ "$(jq -r \'.recoveryVersionReuse\''));
+  const baseFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  const permissionFilter = reuseBlock.match(/&& ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
   assert.ok(baseFilter, 'extract the shared source-PR changeset gate');
   assert.ok(permissionFilter, 'extract the additional temporary-permission changeset gate');
   const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
@@ -166,7 +167,7 @@ test('read-only reuse changesets do not require temporary-IAM code while permiss
     const base = spawnSync('jq', ['-e', '--arg', 'test', commonFiles[0], baseFilter], {
       input: sourceFiles, encoding: 'utf8',
     });
-    if (base.status !== 0) return false;
+    assert.equal(base.status, 0, `source changeset predicate rejected synthetic fixture: ${base.stderr || base.stdout}; filter=${baseFilter}; files=${sourceFiles}`);
     if (!permissionProbe) return true;
     return spawnSync('jq', ['-e', permissionFilter], { input: sourceFiles, encoding: 'utf8' }).status === 0;
   };
