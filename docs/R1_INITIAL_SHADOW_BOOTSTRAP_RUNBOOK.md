@@ -2199,3 +2199,34 @@ continues only through the existing read-only Audit-source/recovery gates. Exact
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, and `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` have distinct terminal next steps; a
 still-unproven version stops before Audit-source/IAM access and changes the provenance root-cause
 hypothesis. Same-SHA/run-ID replay, cleanup, permission widening, create, and YDB replay remain forbidden.
+
+### Distinct target, version-source, and classification run IDs after `REUSE_SOURCE_RUN_NOT_EXACT`
+
+On exact main `78e5b09d65b39c8b5607335c3595730894ff345f`, recovery autocontinue run `36702973467`
+stopped before dispatch with `R1_RECOVERY_AUTOCONTINUE_REUSE_SOURCE_RUN_NOT_EXACT`. PR #884 incorrectly
+put failed verification run `36697361841` into `Recovery-Run-ID`; the successful version-source run
+`36611387299` was created for original target failed recovery run `36341844854`. No recovery workflow or
+Yandex/YDB provider request followed this caller-only stop; durable state remains UNKNOWN.
+
+The next `NOT_AUTHORIZED` read-only marker binds all three exact identities:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36697361841
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+The target ID remains the original failed recovery with deploy failed/invoke skipped. The accepted
+version-source ID remains bound to that target. The classification ID is only the latest
+source-relative failed reuse-verification preflight, with deploy and invoke skipped. Caller and canonical
+recovery independently require the classification ID to equal the exact latest predecessor and verify
+its job/step phase. Missing, mismatched, duplicate or intervening run evidence stops before dispatch.
+Terminal read-only outcomes remain: applicable exact source → existing recovery only; no applicable
+pre-existing source → stop this Audit-source branch and change causal model; unusable/ambiguous → STOP;
+version provenance still unproven → stop before Audit-source/Function/YDB access. No temporary IAM,
+deploy, replay, cleanup or authority change is armed.

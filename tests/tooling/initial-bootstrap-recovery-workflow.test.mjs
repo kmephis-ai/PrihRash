@@ -179,6 +179,8 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_PHASE_NOT_PROVEN/);
   assert.match(workflow, /\.id != \$self[\s\S]*\.created_at > \$created/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID/);
+  assert.match(workflow, /Recovery-Classification-Run-ID/);
+  assert.match(workflow, /source_classification_run_id.*newer_run_id/s);
   assert.match(workflow, /\.number == \$number and \.merged_at != null and \.merge_commit_sha == \$sha/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_PR_NOT_EXACT/);
   assert.match(workflow, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
@@ -194,7 +196,10 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_INACTIVE/);
 });
 
-test('recovery caller intervening-run predicates reject source/current SHA and ambiguous phases', (t) => {
+test('recovery reuse keeps original target phase separate from the failed preflight predecessor', (t) => {
+  const sourceFailedBlock = workflow.slice(workflow.indexOf('source_failed_jobs="$(curl'));
+  const sourceFailedFilter = sourceFailedBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$source_failed_jobs"/)?.[1];
+  assert.ok(sourceFailedFilter, 'extract the original failed recovery target phase predicate');
   const runBlock = workflow.slice(workflow.indexOf('newer_run="$(curl'));
   const runFilter = runBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--argjson source_id "\$REUSE_FAILED_RECOVERY_RUN_ID" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
   const jobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
@@ -206,6 +211,26 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     t.skip('jq CLI is unavailable');
     return;
   }
+  const originalTarget = (steps) => ({ jobs: [{
+    name: 'initial-bootstrap-recovery',
+    conclusion: 'failure',
+    steps,
+  }] });
+  const classifiesOriginalTarget = (value) => spawnSync('jq', ['-e', sourceFailedFilter], {
+    input: JSON.stringify(value), encoding: 'utf8',
+  }).status === 0;
+  assert.equal(classifiesOriginalTarget(originalTarget([
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ])), true);
+  assert.equal(classifiesOriginalTarget(originalTarget([
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ])), false);
+  assert.equal(classifiesOriginalTarget({ jobs: [] }), false);
+
   const runRecord = (overrides = {}) => ({
     id: 17,
     workflow_id: 29,
@@ -331,6 +356,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     'Recovery-State: STAGING_PRESENT_UNCLASSIFIED',
     'Recovery-Run-ID: 36341844854',
     'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36697361841',
     'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   ].join('\n');
   const parse = (marker) => {
@@ -342,10 +368,16 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
   };
-  assert.equal(parse(body), true);
-  assert.equal(parse(body.replace('Recovery-Version-Run-ID: 36611387299', 'Recovery-Version-Run-ID: 36611387298')), false);
-  assert.equal(parse(`${body}\nObserved-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`), false);
-  assert.equal(parse(body.replace('Provider-Attempt: NOT_AUTHORIZED', 'Provider-Attempt: READY')), false);
+  assert.deepEqual(parse(body), { valid: true, classificationRunId: '36697361841' });
+  assert.equal(parse(body.replace('Recovery-Version-Run-ID: 36611387299', 'Recovery-Version-Run-ID: 36611387298')).valid, false);
+  assert.equal(parse(body.replace('Recovery-Classification-Run-ID: 36697361841', 'Recovery-Classification-Run-ID: 0')).valid, false);
+  assert.equal(parse(`${body}\nRecovery-Classification-Run-ID: 36697361841`).valid, false);
+  assert.equal(parse(`${body}\nObserved-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`).valid, false);
+  assert.equal(parse(body.replace('Provider-Attempt: NOT_AUTHORIZED', 'Provider-Attempt: READY')).valid, false);
+  assert.deepEqual(parse(body.replace('\nRecovery-Classification-Run-ID: 36697361841', '')), {
+    valid: true,
+    classificationRunId: null,
+  });
   const permissionBody = [
     'Provider-Attempt: READY',
     'Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
@@ -364,7 +396,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     '--arg', 'permission_probe', '1', filter,
   ], { encoding: 'utf8' });
   assert.equal(permissionResult.status, 0, permissionResult.stderr);
-  assert.equal(JSON.parse(permissionResult.stdout), true);
+  assert.deepEqual(JSON.parse(permissionResult.stdout), { valid: true, classificationRunId: null });
 });
 
 test('initial bootstrap recovery persists only enum-only classification evidence', () => {

@@ -192,6 +192,13 @@ failed phase/source/version history, не добавляет IAM bindings и п�
 Audit-source ветку и требует смены causal model; `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` остаётся STOP.
 Не повторять workflow с теми же SHA/run IDs; никакого infer cleanup, IAM mutation, create или replay.
 
+Для этого stage-specific reuse marker три run identity различны и обязательны: `Recovery-Run-ID` —
+оригинальный failed recovery target, `Recovery-Version-Run-ID` — успешный create-only source именно для
+этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification
+predecessor с deploy/invoke `skipped`. Для текущего boundary это соответственно `36341844854`,
+`36611387299`, `36697361841`. Autocontinue и canonical recovery обязаны обе проверить последнее
+сопоставление; не переиспользовать classification run как target recovery ID.
+
 Standing delegation из §8.3 разрешает автономно выбирать и выполнять последующие stage-appropriate
 read-only probes без нового per-probe Owner confirmation. Для того же failed recovery run после
 `missing`/`ambiguous` probe каждый successor требует нового exact SHA и новой repository causal

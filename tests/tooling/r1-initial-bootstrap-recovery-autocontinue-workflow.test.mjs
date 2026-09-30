@@ -89,6 +89,18 @@ test('Owner anti-S-unit rules and exact reuse-preflight recovery are synchronize
   assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
   assert.match(evidence, /does not add\/remove IAM bindings/);
   assert.match(evidence, /SOURCE_EVIDENCE_UNUSABLE\/AMBIGUOUS/);
+  const identityEvidence = runbook.match(
+    /### Distinct target, version-source, and classification run IDs after `REUSE_SOURCE_RUN_NOT_EXACT`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(identityEvidence, 'the pre-dispatch identity-role correction must be documented');
+  assert.match(identityEvidence, /Recovery-Run-ID: 36341844854/);
+  assert.match(identityEvidence, /Recovery-Version-Run-ID: 36611387299/);
+  assert.match(identityEvidence, /Recovery-Classification-Run-ID: 36697361841/);
+  assert.match(identityEvidence, /No recovery workflow or\s+Yandex\/YDB provider request followed/);
+  for (const source of [agents, completionSprint]) {
+    assert.match(source, /Recovery-Classification-Run-ID/);
+    assert.match(source, /36697361841/);
+  }
 });
 
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
@@ -183,7 +195,7 @@ test('read-only reuse changesets do not require temporary-IAM code while permiss
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_TEMP_PERMISSION_CHANGESET_INVALID/);
 });
 
-test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
+test('reuse binds the original deploy-failed target and exact failed preflight predecessor separately', (t) => {
   const sourceFailedBlock = workflow.slice(workflow.indexOf('source_failed_jobs="$(curl'));
   const sourceFailedFilter = sourceFailedBlock.match(/if ! jq -e --argjson workflow_id "\$source_workflow_id" '([\s\S]*?)\n\s*' <<<"\$source_failed_jobs"/)?.[1];
   assert.ok(sourceFailedFilter, 'extract the source failed-run phase filter from its exact jobs response');
@@ -216,7 +228,7 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
     { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
-  ] })), true);
+  ] })), false);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ conclusion: 'success' })), false);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
     { name: 'Deploy recovery-only Function version', conclusion: 'success' },
@@ -282,6 +294,8 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
   assert.equal(provesExactInterveningRun(runRecord({ status: 'in_progress' })), false);
   assert.equal(provesExactInterveningRun(runRecord({ created_at: 'invalid' })), false);
   assert.equal(provesExactInterveningRun(runRecord({ created_at: '2026-09-27T18:45:46Z' })), true);
+  assert.match(workflow, /classification_run_id="\$\(jq -r '\.recoveryClassificationRunId \/\/ ""' <<<"\$marker"\)"/);
+  assert.match(workflow, /\[ "\$newer_run_id" != "\$classification_run_id" \]/);
   assert.equal(provesExactInterveningRun(runRecord({ id: 1 })), false);
 
   const job = (overrides = {}) => ({ jobs: [{
@@ -553,6 +567,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
       'Recovery-State': 'STAGING_PRESENT_UNCLASSIFIED',
       'Recovery-Run-ID': '36341844854',
       'Recovery-Version-Run-ID': '36611387299',
+      'Recovery-Classification-Run-ID': null,
       'Observed-Signature': null,
       'Circuit-Rearm': null,
       'Authority-Scope': null,
@@ -579,7 +594,23 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
   });
   assert.equal(parse({ 'Recovery-Version-Run-ID': '0' }).valid, false);
   assert.equal(parse({ 'Recovery-Version-Run-ID': '36611387299\nRecovery-Version-Run-ID: 36611387299' }).valid, false);
+  assert.equal(parse({ 'Recovery-Classification-Run-ID': '0' }).valid, false);
+  assert.equal(parse({
+    'Recovery-Classification-Run-ID': '36697361841\nRecovery-Classification-Run-ID: 36697361841',
+  }).valid, false);
   assert.equal(parse({ 'Provider-Attempt': 'READY' }).valid, false);
+  assert.deepEqual(parse({ 'Recovery-Classification-Run-ID': '36697361841' }), {
+    valid: true,
+    surfaceOnly: false,
+    functionDeployRecovery: false,
+    recoveryFunctionDeployAttempt: false,
+    recoveryVersionReuse: true,
+    auditSourcePermissionProbe: false,
+    recoveryRunId: '36341844854',
+    recoveryVersionRunId: '36611387299',
+    regressionTest: 'tests/tooling/initial-bootstrap-recovery-workflow.test.mjs',
+    recoveryClassificationRunId: '36697361841',
+  });
   assert.deepEqual(parse({
     'Provider-Attempt': 'READY',
     'Recovery-Probe': null,

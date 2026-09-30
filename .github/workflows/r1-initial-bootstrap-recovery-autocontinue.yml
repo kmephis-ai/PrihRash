@@ -72,6 +72,7 @@ jobs:
             | (exact_line("Recovery-State: ")) as $recovery
             | (exact_line("Recovery-Run-ID: ")) as $recovery_run
             | (exact_line("Recovery-Version-Run-ID: ")) as $recovery_version_run
+            | (exact_line("Recovery-Classification-Run-ID: ")) as $recovery_classification_run
             | (exact_line("Circuit-Rearm: ")) as $rearm
             | (exact_line("Authority-Scope: ")) as $authority
             | (exact_line("Regression-Test: ")) as $test
@@ -128,6 +129,7 @@ jobs:
                     and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
                     and ($recovery_version_run | length) == 1
                     and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: [1-9][0-9]*$"))
+                    and ($recovery_classification_run | length) == 0
                   ) or (
                     $attempt == ["Provider-Attempt: READY"]
                     and ($probe | length) == 0
@@ -140,6 +142,8 @@ jobs:
                   ))
                   and ($test | length) == 1
                   and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
+                  and (($recovery_classification_run | length) == 0 or (($recovery_classification_run | length) == 1
+                    and ($recovery_classification_run[0] | test("^Recovery-Classification-Run-ID: [1-9][0-9]*$"))))
                 ),
                 surfaceOnly: ($expected == ["Expected-Transition: READ_ONLY_DURABLE_CLASSIFICATION"]
                   and $recovery == ["Recovery-State: UNKNOWN_AFTER_NON_SUCCESS"]),
@@ -154,7 +158,9 @@ jobs:
                   and ($recovery_run | length) == 1
                   and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
                   and ($recovery_version_run | length) == 1
-                  and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$")))
+                  and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$"))
+                  and (($recovery_classification_run | length) == 0 or (($recovery_classification_run | length) == 1
+                    and ($recovery_classification_run[0] | test("^Recovery-Classification-Run-ID: ([1-9][0-9]*)$")))))
                   or ($attempt == ["Provider-Attempt: READY"]
                     and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
                     and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
@@ -164,7 +170,8 @@ jobs:
                     and ($recovery_run | length) == 1
                     and ($recovery_run[0] | test("^Recovery-Run-ID: ([1-9][0-9]*)$"))
                     and ($recovery_version_run | length) == 1
-                    and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$")))),
+                    and ($recovery_version_run[0] | test("^Recovery-Version-Run-ID: ([1-9][0-9]*)$"))
+                    and ($recovery_classification_run | length) == 0)),
                 auditSourcePermissionProbe: ($attempt == ["Provider-Attempt: READY"]
                   and $observed == ["Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE"]
                   and $expected == ["Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY"]
@@ -190,6 +197,10 @@ jobs:
                 regressionTest: (if ($test | length) == 1
                   then ($test[0] | sub("^Regression-Test: "; "")) else null end)
               }
+              + (if ($recovery_classification_run | length) == 1
+                   and ($recovery_classification_run[0] | test("^Recovery-Classification-Run-ID: ([1-9][0-9]*)$"))
+                 then {recoveryClassificationRunId: ($recovery_classification_run[0] | sub("^Recovery-Classification-Run-ID: "; ""))}
+                 else {} end)
           ')"
           if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
             echo 'R1_RECOVERY_AUTOCONTINUE_MARKER_INVALID'
@@ -324,13 +335,8 @@ jobs:
             if ! jq -e --argjson workflow_id "$source_workflow_id" '[.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs|length)==1
               and $jobs[0].conclusion=="failure"
-              and (
-                (([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")]|length)==1
-                  and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")]|length)==1)
-                or
-                (([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="skipped")]|length)==1
-                  and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1)
-              )
+              and ([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="skipped")]|length)==1
+              and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1
               and ([$jobs[0].steps[]?|select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")]|length)==1
             ' <<<"$source_failed_jobs" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 0
@@ -364,6 +370,11 @@ jobs:
               NEWER:*) newer_run_id="${latest_history_decision#NEWER:}" ;;
               *) echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_RECOVERY_HISTORY_INCOMPLETE'; exit 0 ;;
             esac
+            classification_run_id="$(jq -r '.recoveryClassificationRunId // ""' <<<"$marker")"
+            if [ -n "$classification_run_id" ] \
+              && { [ -z "$newer_run_id" ] || [ "$newer_run_id" != "$classification_run_id" ]; }; then
+              echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_CLASSIFICATION_RUN_NOT_LATEST_PREDECESSOR'; exit 0
+            fi
             if [ -n "$newer_run_id" ]; then
               newer_run="$(curl --fail --silent --show-error \
                 --header "$auth_header" --header "$accept_header" "$api/actions/runs/${newer_run_id}")" || {
