@@ -2503,3 +2503,46 @@ After the preflight completes, only an exact recovery-blocked signature plus fre
 empty evidence may arm a separate `Recovery-State: STAGING_STALE_RETIREABLE /
 Circuit-Rearm: SOURCE_DRIFT_REBASE` successor.
 
+### Exact-source CI selection blocker after preflight `36765633980`
+
+PR #895 merged the repository-native false/false preflight gate on exact main
+`8eba3ae4de7ddd0078482e7916ed3bd82cb34132`. Exact-main CI `36765501292` completed successfully
+and published the non-expired exact-source artifact
+`r1-exact-source-8eba3ae4de7ddd0078482e7916ed3bd82cb34132`.
+
+Autocontinue then dispatched orchestrator `36765633980`, but it stopped **before any Yandex CLI,
+OIDC/provider resolution, recovery deployment or YDB read**. The failing step was
+`Restore verified exact-source artifact` with `R1_EXACT_SOURCE_CI_NOT_UNIQUE`; every provider,
+recovery, readiness and bootstrap step remained skipped. The failure therefore does not consume a
+provider attempt and does not change durable financial state.
+
+The restore composite action had already passed a repository-wide exact-SHA CI gate, but then queried
+the broader workflow-run collection `actions/workflows/ci.yml/runs?branch=main&per_page=100` and
+required exactly one combined successful push/manual candidate. Current GitHub evidence independently
+proves one successful canonical push CI run for the exact SHA and one matching non-expired artifact.
+The bounded correction makes the restore selector use the repository-wide exact-SHA endpoint
+`actions/runs?head_sha=<SOURCE_SHA>`, additionally requires
+`.path == ".github/workflows/ci.yml"`, `main`, completed success, and deterministically prefers the
+single push run. A manually dispatched main CI is accepted only when no push candidate exists and is
+itself unique. Multiple push candidates, multiple manual-only candidates, no candidate, wrong path,
+wrong SHA or non-success remain fail-closed.
+
+This correction stays inside the existing preflight Incident-M. Its successor PR may contain only the
+previous preflight process files plus the exact-source restore action/test pair; no `src/`, runtime,
+provider workflow, financial semantic or authority change is admitted. The marker remains:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Orchestrator-Preflight: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36761995601
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+After merge and canonical CI, exactly one new-SHA false/false orchestrator preflight is permitted.
+Same-SHA rerun of `36765633980` is forbidden. A successful restore does not itself authorize stale
+retirement: only exact subsequent orchestrator recovery-blocked evidence can feed a separate
+`SOURCE_DRIFT_REBASE`.
+
