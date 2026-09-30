@@ -15,6 +15,7 @@ test('R1 bootstrap orchestrator has one manual entrypoint and no autonomous trig
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /ci_run_id:/);
   assert.match(workflow, /allow_staging_resume:/);
   assert.match(workflow, /allow_stale_staging_retirement:/);
   assert.match(workflow, /default: 'false'/);
@@ -32,6 +33,7 @@ test('orchestrator recovery boundary stays read-only and includes historical pro
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /uses: \.\/\.github\/actions\/restore-exact-source/);
+  assert.match(workflow, /ci-run-id: \$\{\{ inputs\.ci_run_id \}\}/);
   assert.doesNotMatch(workflow, /npm run package:initial-bootstrap-recovery/);
   assert.match(workflow, /index\.initialBootstrapRecoveryHandler/);
   assert.match(workflow, /--tags r1-initial-bootstrap-recovery/);
