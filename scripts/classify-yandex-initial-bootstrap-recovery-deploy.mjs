@@ -189,6 +189,164 @@ export function selectExactRecoveryCreateOperationId({
   return operation.id;
 }
 
+function exactRecoveryTaggedVersion(
+  version,
+  runtimeServiceAccountId,
+  functionId,
+  lockboxSecretId,
+  lockboxVersionId,
+) {
+  if (
+    !object(version)
+    || typeof version.id !== 'string'
+    || version.id.length === 0
+    || version.functionId !== functionId
+    || version.status !== 'ACTIVE'
+    || version.runtime !== 'nodejs22'
+    || version.entrypoint !== 'index.initialBootstrapRecoveryHandler'
+    || version.serviceAccountId !== runtimeServiceAccountId
+    || !Array.isArray(version.tags)
+    || !version.tags.includes('r1-initial-bootstrap-recovery')
+    || !object(version.resources)
+    || version.resources.memory !== '1073741824'
+    || version.executionTimeout !== '150s'
+    || !object(version.environment)
+    || version.environment.PRIHRASH_R1_RECOVERY_SURFACE_ONLY !== '0'
+    || version.environment.PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY !== '0'
+    || version.environment.PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY !== '0'
+    || Object.keys(version.environment).length !== 3
+    || !object(version.logOptions)
+    || version.logOptions.disabled !== true
+    || !object(version.metadataOptions)
+    || version.metadataOptions.gceHttpEndpoint !== 'ENABLED'
+    || version.metadataOptions.awsV1HttpEndpoint !== 'DISABLED'
+    || !Array.isArray(version.secrets)
+    || version.secrets.length !== 5
+  ) return false;
+
+  const expectedSecrets = new Map([
+    ['PRIHRASH_GOOGLE_SPREADSHEET_ID', 'google_spreadsheet_id'],
+    ['PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL', 'google_service_account_email'],
+    ['PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY', 'google_service_account_private_key'],
+    ['PRIHRASH_YDB_CONNECTION_STRING', 'ydb_connection_string'],
+    ['PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE', 'initial_bootstrap_private_historical_evidence'],
+  ]);
+  const secretIds = new Set();
+  const secretVersionIds = new Set();
+  const secretEnvironmentVariables = new Set();
+  for (const secret of version.secrets) {
+    if (
+      !object(secret)
+      || secret.id !== lockboxSecretId
+      || secret.versionId !== lockboxVersionId
+      || expectedSecrets.get(secret.environmentVariable) !== secret.key
+      || secretEnvironmentVariables.has(secret.environmentVariable)
+    ) return false;
+    secretIds.add(secret.id);
+    secretVersionIds.add(secret.versionId);
+    secretEnvironmentVariables.add(secret.environmentVariable);
+  }
+  return secretIds.size === 1
+    && secretVersionIds.size === 1
+    && secretEnvironmentVariables.size === expectedSecrets.size;
+}
+
+export function classifyRecoveryVersionFromSuccessfulSourceStep({
+  versions,
+  taggedVersion,
+  tagHistory,
+  stepStartedAt,
+  stepFinishedAt,
+  runtimeServiceAccountId,
+  functionId,
+  lockboxSecretId,
+  lockboxVersionId,
+}) {
+  try {
+    const start = timestamp(stepStartedAt);
+    const finish = timestamp(stepFinishedAt);
+    if (
+      start === null
+      || finish === null
+      || finish < start
+      || typeof runtimeServiceAccountId !== 'string'
+      || runtimeServiceAccountId.length === 0
+      || typeof functionId !== 'string'
+      || functionId.length === 0
+      || typeof lockboxSecretId !== 'string'
+      || lockboxSecretId.length === 0
+      || typeof lockboxVersionId !== 'string'
+      || lockboxVersionId.length === 0
+      || !Array.isArray(versions)
+      || versions.length >= 1_000
+      || !object(tagHistory)
+      || !exactRecoveryTaggedVersion(
+        taggedVersion,
+        runtimeServiceAccountId,
+        functionId,
+        lockboxSecretId,
+        lockboxVersionId,
+      )
+    ) return 'CREATED_VERSION_NOT_PROVEN';
+
+    const lowerBound = start - 5_000;
+    const upperBound = finish + 5_000;
+    const candidates = versions.filter((version) => {
+      if (!object(version) || !Array.isArray(version.tags)) return false;
+      const createdAt = timestamp(version.created_at);
+      return version.id === taggedVersion.id
+        && version.function_id === functionId
+        && version.tags.includes('r1-initial-bootstrap-recovery')
+        && createdAt !== null
+        && createdAt >= lowerBound
+        && createdAt <= upperBound;
+    });
+    if (candidates.length !== 1) return 'CREATED_VERSION_NOT_PROVEN';
+
+    const taggedCreatedAt = timestamp(taggedVersion.createdAt);
+    if (
+      taggedCreatedAt === null
+      || taggedCreatedAt < lowerBound
+      || taggedCreatedAt > upperBound
+      || timestamp(candidates[0].created_at) !== taggedCreatedAt
+    ) return 'CREATED_VERSION_NOT_PROVEN';
+
+    const historyRecords = tagHistory.functionTagHistoryRecord === undefined
+      ? []
+      : tagHistory.functionTagHistoryRecord;
+    if (!Array.isArray(historyRecords)) return 'CREATED_VERSION_NOT_PROVEN';
+    if (
+      tagHistory.nextPageToken !== undefined
+      && (typeof tagHistory.nextPageToken !== 'string' || tagHistory.nextPageToken.length > 0)
+    ) return 'CREATED_VERSION_NOT_PROVEN';
+
+    const matchingHistory = historyRecords.filter((record) => {
+      if (!object(record) || record.tag !== 'r1-initial-bootstrap-recovery') return false;
+      const effectiveFrom = timestamp(record.effectiveFrom);
+      return record.functionId === functionId
+        && record.functionVersionId === taggedVersion.id
+        && effectiveFrom !== null
+        && effectiveFrom >= lowerBound
+        && effectiveFrom <= upperBound
+        && record.effectiveTo === undefined;
+    });
+    if (matchingHistory.length !== 1) return 'CREATED_VERSION_NOT_PROVEN';
+
+    const matchingEffectiveFrom = timestamp(matchingHistory[0].effectiveFrom);
+    if (historyRecords.some((record) => (
+      object(record)
+      && record.functionId === functionId
+      && record.tag === 'r1-initial-bootstrap-recovery'
+      && timestamp(record.effectiveFrom) !== null
+      && timestamp(record.effectiveFrom) > matchingEffectiveFrom
+    ))) return 'CREATED_VERSION_NOT_PROVEN';
+
+    return 'EXACT_RECOVERY_VERSION_CREATED';
+  } catch {
+    return 'RECOVERY_CLASSIFIER_INTERNAL_ERROR';
+  }
+}
+
 function readJson(path) {
   return readFile(path, 'utf8').then((text) => JSON.parse(text));
 }
@@ -959,6 +1117,38 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       process.exitCode = 2;
     } else {
       process.stdout.write(`${classifyAuditTrailSourceDecision(sourceEvidence, eventEvidence)}\n`);
+    }
+  } else if (cliArgs[0] === '--successful-source-step-version') {
+    const [, versionsPath, taggedVersionPath, tagHistoryPath, stepStartedAt, stepFinishedAt,
+      runtimeServiceAccountId, functionId, lockboxSecretId, lockboxVersionId] = cliArgs;
+    if (!versionsPath || !taggedVersionPath || !tagHistoryPath || !stepStartedAt || !stepFinishedAt
+      || !runtimeServiceAccountId || !functionId || !lockboxSecretId || !lockboxVersionId) {
+      process.stdout.write('CREATED_VERSION_NOT_PROVEN\n');
+      process.exitCode = 1;
+    } else {
+      try {
+        const [versions, taggedVersion, tagHistory] = await Promise.all([
+          readJson(versionsPath),
+          readJson(taggedVersionPath),
+          readJson(tagHistoryPath),
+        ]);
+        const result = classifyRecoveryVersionFromSuccessfulSourceStep({
+          versions,
+          taggedVersion,
+          tagHistory,
+          stepStartedAt,
+          stepFinishedAt,
+          runtimeServiceAccountId,
+          functionId,
+          lockboxSecretId,
+          lockboxVersionId,
+        });
+        process.stdout.write(`${ENUMS.has(result) ? result : 'DIAGNOSTIC_FAILED'}\n`);
+        if (result !== 'EXACT_RECOVERY_VERSION_CREATED') process.exitCode = 1;
+      } catch {
+        process.stdout.write('RECOVERY_METADATA_JSON_INVALID\n');
+        process.exitCode = 1;
+      }
     }
   } else if (cliArgs[0] === '--select-exact-recovery-create-operation-id') {
     const [, operationsPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, outputPath] = cliArgs;

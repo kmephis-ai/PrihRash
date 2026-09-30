@@ -63,7 +63,8 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_ALREADY_DISPATCHED/);
   assert.match(workflow, /r1-initial-bootstrap-recovery\.yml/);
   assert.match(recoveryWorkflow, /functions\/\$\{PRIHRASH_YC_FUNCTION_ID\}:tagHistory/);
-  assert.match(recoveryWorkflow, /--audit-source-decision/);
+  assert.match(recoveryWorkflow, /--successful-source-step-version/);
+  assert.match(recoveryWorkflow, /RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED/);
   assert.match(recoveryWorkflow, /Publish enum-only accepted-version proof outcome/);
   assert.match(workflow, /"\$api\/actions\/workflows\/\$recovery_workflow\/dispatches"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
@@ -126,7 +127,7 @@ test('PR #888 pre-provider reuse changeset stop remains bound to the typed-versi
   assert.match(preProviderStop, /No `R1 initial bootstrap recovery` run was dispatched/);
   assert.match(workflow, /any\(\.\[\]; \.filename == \$test and \.status != "removed"\)/);
   assert.match(workflow, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
-  assert.match(recoveryWorkflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN/);
+  assert.doesNotMatch(recoveryWorkflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN/);
 });
 
 test('OperationService.Get alternate version proof remains exact-bound and has distinct fail-closed outcomes', () => {
@@ -145,8 +146,31 @@ test('OperationService.Get alternate version proof remains exact-bound and has d
   assert.match(evidence, /remain UNKNOWN/);
   assert.match(agents, /OperationService\.Get/);
   assert.match(completionSprint, /OperationService\.Get/);
-  assert.match(recoveryWorkflow, /operation\.api\.cloud\.yandex\.net\/operations\/v1\/operations/);
-  assert.match(recoveryWorkflow, /"\$RUNTIME_SERVICE_ACCOUNT_ID" "\$operation_id"/);
+  assert.doesNotMatch(recoveryWorkflow, /operation\.api\.cloud\.yandex\.net\/operations\/v1\/operations/);
+  assert.match(recoveryWorkflow, /--successful-source-step-version/);
+});
+
+test('successful create-step plus tag-history root model replaces exhausted Operation provenance', () => {
+  const evidence = runbook.match(
+    /### Exact successful create-step \+ immutable tag history after recovery `36739560248`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the post-Operation root model must be canonical and exact-run-bound');
+  for (const line of [
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36739560248',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  ]) assert.ok(evidence.includes(line), `runbook preserves source-step proof identity ${line}`);
+  assert.match(evidence, /18:21:37Z/);
+  assert.match(evidence, /18:22:02Z/);
+  assert.match(evidence, /GetVersionByTag/);
+  assert.match(evidence, /ListTagHistory/);
+  assert.match(evidence, /does not read Function Operations/);
+  assert.match(agents, /provider-independent source fact из GitHub Actions/);
+  assert.match(completionSprint, /successful step/);
+  assert.match(recoveryWorkflow, /--successful-source-step-version/);
+  assert.match(recoveryWorkflow, /RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED/);
+  assert.match(recoveryWorkflow, /Create exactly one read-only recovery Function version without invoking it/);
 });
 
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
@@ -1003,9 +1027,8 @@ test('post-#881 SOURCE_EVIDENCE_UNUSABLE changes the Audit-source model to exact
   assert.match(evidence, /`SOURCE_EVIDENCE_UNUSABLE\/AMBIGUOUS`/);
   assert.match(agents, /Если Cloud-wide `ListFolders` не возвращает точный `YC_FOLDER_ID`/);
   assert.match(completionSprint, /Если Cloud-wide `ListFolders` не содержит уже точно проверенный `YC_FOLDER_ID`/);
-  assert.match(recoveryWorkflow, /--audit-folder-trails/);
-  assert.match(recoveryWorkflow, /--audit-folder-trails/);
-  assert.doesNotMatch(recoveryWorkflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
+  assert.doesNotMatch(recoveryWorkflow, /--audit-folder-trails|--audit-cloud-folder-ids|--audit-cloud-trails/);
+  assert.match(recoveryWorkflow, /--successful-source-step-version/);
   assert.doesNotMatch(workflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
 });
 

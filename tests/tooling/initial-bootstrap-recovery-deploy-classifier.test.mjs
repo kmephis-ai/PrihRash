@@ -15,6 +15,7 @@ import {
   classifyRecoveryAuditTrailFolderCoverage,
   classifyRecoveryAuditTrailSource,
   classifyRecoveryFunctionDeployOutcome,
+  classifyRecoveryVersionFromSuccessfulSourceStep,
   selectExactRecoveryCreateOperationId,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
 import { classifyExactReadBinding } from '../../scripts/classify-r1-temporary-audit-source-binding.mjs';
@@ -454,6 +455,125 @@ function exactEvidence(overrides = {}) {
     ...overrides,
   };
 }
+
+function sourceStepEvidence(overrides = {}) {
+  const functionId = 'synthetic-function';
+  const lockboxSecretId = 'synthetic-secret';
+  const lockboxVersionId = 'synthetic-secret-version';
+  const secrets = [
+    ['PRIHRASH_GOOGLE_SPREADSHEET_ID', 'google_spreadsheet_id'],
+    ['PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL', 'google_service_account_email'],
+    ['PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY', 'google_service_account_private_key'],
+    ['PRIHRASH_YDB_CONNECTION_STRING', 'ydb_connection_string'],
+    ['PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE', 'initial_bootstrap_private_historical_evidence'],
+  ].map(([environmentVariable, key]) => ({
+    id: lockboxSecretId,
+    versionId: lockboxVersionId,
+    key,
+    environmentVariable,
+  }));
+  const taggedVersion = {
+    id: 'synthetic-version',
+    functionId: 'synthetic-function',
+    createdAt: '2026-09-27T18:46:34Z',
+    status: 'ACTIVE',
+    runtime: 'nodejs22',
+    entrypoint: 'index.initialBootstrapRecoveryHandler',
+    serviceAccountId: runtimeServiceAccount,
+    resources: { memory: '1073741824' },
+    executionTimeout: '150s',
+    tags: ['r1-initial-bootstrap-recovery'],
+    environment: {
+      PRIHRASH_R1_RECOVERY_SURFACE_ONLY: '0',
+      PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: '0',
+      PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY: '0',
+    },
+    logOptions: { disabled: true },
+    metadataOptions: { gceHttpEndpoint: 'ENABLED', awsV1HttpEndpoint: 'DISABLED' },
+    secrets,
+  };
+  return {
+    versions: [{
+      id: 'synthetic-version',
+      function_id: 'synthetic-function',
+      tags: ['r1-initial-bootstrap-recovery'],
+      created_at: '2026-09-27T18:46:34Z',
+    }],
+    taggedVersion,
+    tagHistory: { functionTagHistoryRecord: [{
+      functionId: 'synthetic-function',
+      functionVersionId: 'synthetic-version',
+      tag: 'r1-initial-bootstrap-recovery',
+      effectiveFrom: '2026-09-27T18:46:35Z',
+    }] },
+    stepStartedAt: runStartedAt,
+    stepFinishedAt: runFinishedAt,
+    runtimeServiceAccountId: runtimeServiceAccount,
+    functionId: 'synthetic-function',
+    lockboxSecretId: 'synthetic-secret',
+    lockboxVersionId: 'synthetic-secret-version',
+    ...overrides,
+  };
+}
+
+test('successful exact create-step plus immutable tag/version history proves the recovery version without Operation metadata', () => {
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence()),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      tagHistory: { functionTagHistoryRecord: [{
+        functionId: 'synthetic-function',
+        functionVersionId: 'other-version',
+        tag: 'r1-initial-bootstrap-recovery',
+        effectiveFrom: '2026-09-27T18:46:35Z',
+      }] },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      stepStartedAt: '2026-09-27T18:40:00Z',
+      stepFinishedAt: '2026-09-27T18:40:10Z',
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      taggedVersion: { ...sourceStepEvidence().taggedVersion, entrypoint: 'index.otherHandler' },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      tagHistory: { functionTagHistoryRecord: [
+        ...sourceStepEvidence().tagHistory.functionTagHistoryRecord,
+        {
+          functionId: 'synthetic-function',
+          functionVersionId: 'other-version',
+          tag: 'r1-initial-bootstrap-recovery',
+          effectiveFrom: '2026-09-27T18:46:37Z',
+        },
+      ] },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  const duplicateSecretEvidence = sourceStepEvidence();
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      taggedVersion: {
+        ...duplicateSecretEvidence.taggedVersion,
+        secrets: [
+          duplicateSecretEvidence.taggedVersion.secrets[0],
+          duplicateSecretEvidence.taggedVersion.secrets[0],
+          ...duplicateSecretEvidence.taggedVersion.secrets.slice(2),
+        ],
+      },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+});
 
 test('recovery deploy classifier proves only a unique exact version correlated to the failed create operation', () => {
   assert.equal(

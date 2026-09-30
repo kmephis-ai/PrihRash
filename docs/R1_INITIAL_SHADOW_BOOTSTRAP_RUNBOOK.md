@@ -2380,3 +2380,48 @@ Terminal actions differ: exact Get/list/version/tag agreement → one durable re
 missing/ambiguous/error/mismatch → remain UNKNOWN, no invoke/redeploy/cleanup/replay and stop this proof
 path. A successful recovery classification still does not prove `COMMITTED` without independent YDB
 reconciliation. This is a distinct resource provenance bypass, not another refinement of ListOperations.
+
+### Exact successful create-step + immutable tag history after recovery `36739560248`
+
+The distinct `OperationService.Get` attempt on exact main
+`4da687ef15d718020cbb404df7417e371aeaa11f` reached the same terminal
+`RECOVERY_REUSE_VERSION_NOT_PROVEN / CREATED_VERSION_NOT_PROVEN`; deploy/invoke remained skipped and no
+IAM/Google/YDB write occurred. That closes Operation list/Get response provenance for this version.
+
+The successor root model no longer asks Yandex Operation metadata which version was created. GitHub run
+`36611387299` is already the exact accepted create-only source for failed target `36341844854`; its job
+`deploy-only-attempt` has exactly one successful step
+`Create exactly one read-only recovery Function version without invoking it`. The step ran from
+`2026-09-29T18:21:37Z` through `2026-09-29T18:22:02Z`. Those step timestamps, not the wider workflow
+window, define the source observation.
+
+Read-only provider proof must agree on all of the following before any Function invoke:
+
+- one version-list row with recovery tag and `created_at` inside the exact step window;
+- `GetVersionByTag` returns that same active version ID and the complete create-only runtime fingerprint:
+  `nodejs22`, `index.initialBootstrapRecoveryHandler`, exact runtime service account, 1 GiB, 150 s,
+  three recovery mode env flags set to `0`, no logging, expected metadata options and the five exact
+  Lockbox environment/key mappings;
+- `ListTagHistory` has exactly one current recovery-tag assignment to the same `functionVersionId` with
+  `effectiveFrom` inside the same step window and no later assignment.
+
+This proof intentionally does not read Function Operations, `OperationService.Get` or Audit Trails.
+Exact agreement permits only the existing one write-free recovery invoke; missing/ambiguous/time/config/
+history divergence fails closed before invoke. It does not authorize create/redeploy/IAM mutation,
+cleanup, bootstrap replay, timer, cutover or any Google/YDB write.
+
+The exact successor marker remains:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36739560248
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Exact source-step/tag-history agreement → one durable read-only classification. Any other result leaves
+durable state UNKNOWN and stops this proof path without another Operation/Audit discriminator.

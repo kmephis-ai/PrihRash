@@ -133,6 +133,22 @@ typed CreateFunctionVersion metadata, optional Version response ID и unique act
 classification. Один Incident-M включает REST adapter, all response/oneof/phase fixtures, privacy guard,
 caller/recovery changeset gates и docs; это не разрешение на третью response-shape discriminator PR.
 
+Если exact `OperationService.Get` path остаётся `CREATED_VERSION_NOT_PROVEN`, следующий root model
+перестаёт использовать Operation provenance вообще. Источником причинной связи становится уже доказанный
+GitHub Actions source run: exact `deploy-only-attempt` обязан иметь ровно один successful step
+`Create exactly one read-only recovery Function version without invoking it`; его `started_at/completed_at`
+задают узкое immutable source-step window. В этом окне provider read-only proof принимает только одну
+version с recovery tag, exact active `GetVersionByTag` runtime/config fingerprint и один current
+`ListTagHistory` record `tag -> functionVersionId` с тем же ID/effectiveFrom. Текущая tag mapping не
+может иметь более позднего assignment. Operation list/Get и Audit Trails не участвуют.
+
+Exact source-step + version/tag/history agreement разрешает только существующий write-free recovery invoke
+по уже действующим marker/exact-main/history gates. Любая missing/ambiguous/config/time/history divergence
+завершает flow fail-closed до Function invoke; create/redeploy/IAM/YDB/Google mutation, cleanup и replay
+остаются запрещены. Один Incident-M включает classifier, workflow, source-step/history fixtures,
+autocontinue changeset guard и синхронизацию runbook/AGENTS; это materially different provenance model,
+а не ещё один discriminator прежнего Operation path.
+
 Если merged reuse-source PR на exact-main заканчивается
 `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`, recovery-провайдер не dispatch-ился и read-only
 classification остаётся неиспользованной. Successor остаётся частью этого Incident-M: новый SHA,
