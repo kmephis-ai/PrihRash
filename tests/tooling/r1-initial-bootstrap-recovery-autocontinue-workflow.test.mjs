@@ -99,7 +99,7 @@ test('Owner anti-S-unit rules and exact reuse-preflight recovery are synchronize
   assert.match(identityEvidence, /No recovery workflow or\s+Yandex\/YDB provider request followed/);
   for (const source of [agents, completionSprint]) {
     assert.match(source, /Recovery-Classification-Run-ID/);
-    assert.match(source, /36697361841/);
+    assert.match(source, /36709073723/);
   }
 });
 
@@ -633,6 +633,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
     'Observed-Signature': 'INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
     'Circuit-Rearm': 'ROOT_CAUSE_FIX',
     'Authority-Scope': 'TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP',
+    'Recovery-Classification-Run-ID': '36709073723',
     'Regression-Test': 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
   }), {
     valid: true,
@@ -644,6 +645,7 @@ test('accepted-version recovery marker arms only reuse of its exact deploy run, 
     recoveryRunId: '36341844854',
     recoveryVersionRunId: '36611387299',
     regressionTest: 'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+    recoveryClassificationRunId: '36709073723',
   });
   assert.equal(parse({
     'Provider-Attempt': 'READY',

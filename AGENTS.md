@@ -195,8 +195,8 @@ Audit-source ветку и требует смены causal model; `SOURCE_EVIDE
 Для этого stage-specific reuse marker три run identity различны и обязательны: `Recovery-Run-ID` —
 оригинальный failed recovery target, `Recovery-Version-Run-ID` — успешный create-only source именно для
 этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification
-predecessor с deploy/invoke `skipped`. Для текущего boundary это соответственно `36341844854`,
-`36611387299`, `36697361841`. Autocontinue и canonical recovery обязаны обе проверить последнее
+predecessor с deploy/invoke `skipped`. Для текущего permission-attempt marker это соответственно
+`36341844854`, `36611387299`, `36709073723`. Autocontinue и canonical recovery обязаны обе проверить последнее
 сопоставление; target guard допускает, что historical workflow ещё не имел reuse-verification step
 (или имел ровно один `skipped`), но не принимает duplicate/failed verification; classification run
 сам обязан иметь точный failed-verification/deploy-skipped/invoke-skipped phase. Не переиспользовать
