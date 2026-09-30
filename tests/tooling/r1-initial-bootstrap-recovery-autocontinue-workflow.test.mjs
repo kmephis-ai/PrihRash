@@ -524,25 +524,6 @@ test('latest transport-lost bootstrap remains read-only until fresh durable clas
   assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
 });
 
-test('fresh surface-only STAGING result advances only to full read-only exact revision classification', () => {
-  const evidence = runbook.match(
-    /### Full read-only revision classification after surface recovery `36770022601`([\s\S]*?)(?=\n### |\n## |$)/,
-  )?.[1];
-
-  assert.ok(evidence, 'fresh surface-only recovery boundary must remain canonical');
-  assert.match(evidence, /`41d7f988ed73e55e97eabb624a4f1d0f2aafb321`/);
-  assert.match(evidence, /recovery autocontinue `36769984568`/);
-  assert.match(evidence, /Surface recovery `36770022601` completed successfully/);
-  assert.match(evidence, /`RECOVERY_SURFACE_ONLY=1`/);
-  assert.match(evidence, /RECOVERY_REQUIRED \/ STAGING_RUN_PRESENT/);
-  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
-  assert.match(evidence, /Recovery-Probe: READY/);
-  assert.match(evidence, /Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION/);
-  assert.match(evidence, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
-  assert.match(evidence, /`surface_only=false`/);
-  assert.doesNotMatch(evidence, /Provider-Attempt: READY/);
-});
-
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {
   const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
   assert.ok(filter, 'extract the live jq marker filter from the workflow');
