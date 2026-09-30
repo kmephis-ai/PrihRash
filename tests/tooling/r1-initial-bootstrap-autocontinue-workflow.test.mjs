@@ -34,7 +34,11 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /merge_commit_sha == \$sha/);
   assert.match(workflow, /base\.ref == "main"/);
   assert.match(workflow, /head\.repo\.full_name == \$repo/);
-  assert.match(workflow, /startswith\("R1 #453:"\)/);
+  assert.match(workflow, /R1 completion sprint: пробить первый COMMITTED shadow baseline/);
+  assert.match(workflow, /tracking_issue_number/);
+  assert.match(workflow, /r1_title_prefix="R1 #\\\$\\\{tracking_issue_number\\\}:"/);
+  assert.match(workflow, /startsWith\(\$prefix\)|startswith\(\$prefix\)/i);
+  assert.doesNotMatch(workflow, /R1 #453:|issues\/453|NOT_R1_453_SOURCE/);
   assert.match(workflow, /Provider-Attempt: READY/);
   assert.match(workflow, /Observed-Signature:/);
   assert.match(workflow, /Expected-Transition:/);
@@ -72,7 +76,10 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /length == 1/);
   assert.doesNotMatch(workflow, /commit_title=/);
   assert.match(workflow, /issues\/453/);
-  assert.match(workflow, /issue_state.*open/s);
+  assert.match(workflow, /TRACKING_ISSUE_NOT_EXACT/);
+  assert.match(workflow, /TRACKING_ISSUES_UNBOUNDED/);
+  assert.match(workflow, /issues\/\\\$\\\{tracking_issue_number\\\}/);
+  assert.match(workflow, /\.title == "R1 completion sprint: пробить первый COMMITTED shadow baseline"/);
   assert.match(workflow, /branches\/main/g);
   assert.match(workflow, /SOURCE_SHA/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/runs/);
