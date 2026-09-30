@@ -34,13 +34,15 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /test\("\^R1 #\[1-9\]\[0-9\]\*:"\)/);
   assert.match(workflow, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
   assert.match(workflow, /all\(\.\[\]; \.filename \| IN\(/);
-  assert.match(workflow, /tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs/);
+  assert.match(workflow, /tests\/tooling\/initial-bootstrap-recovery-workflow\.test\.mjs/);
   assert.match(workflow, /scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
   assert.match(workflow, /tests\/tooling\/initial-bootstrap-recovery-deploy-classifier\.test\.mjs/);
   assert.match(workflow, /reuse_deploy_attempt_run_id/);
   assert.match(workflow, /reuse_failed_recovery_run_id/);
   assert.match(workflow, /reuse_source_pr_number/);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_SOURCE_RUN_NOT_EXACT/);
+  assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_PHASE_NOT_PROVEN/);
+  assert.match(workflow, /newer_recovery_count/);
   assert.match(workflow, /actions\/workflows\/r1-initial-bootstrap-recovery-deploy-attempt\.yml\/runs/);
   assert.match(workflow, /\.workflow_id\|type=="number"/);
   assert.doesNotMatch(workflow, /\.name=="R1 initial bootstrap recovery deploy-only attempt"/);
@@ -93,6 +95,50 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
   assert.equal(select([{ ...validRun, workflow_id: undefined }]), false);
   assert.equal(select([validRun, { ...validRun }]), false);
   assert.equal(select([{ ...validRun, conclusion: 'failure' }]), false);
+});
+
+test('reuse history only discounts a prior failed version-proof attempt when deploy and invoke were skipped', (t) => {
+  const newerJobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
+  const filter = newerJobsBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
+  assert.ok(filter, 'extract the live intervening-recovery phase classifier');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const job = (overrides = {}) => ({ jobs: [{
+    name: 'initial-bootstrap-recovery',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ],
+    ...overrides,
+  }] });
+  let lastResult;
+  const provesPreinvokeReuseStop = (jobs) => {
+    lastResult = spawnSync('jq', ['-e', filter], {
+      input: JSON.stringify(jobs), encoding: 'utf8',
+    });
+    return lastResult.status === 0 && lastResult.stdout.trim() === 'true';
+  };
+  assert.equal(provesPreinvokeReuseStop(job()), true, lastResult.stderr || lastResult.stdout);
+  assert.equal(provesPreinvokeReuseStop(job({ conclusion: 'success' })), false);
+  assert.equal(provesPreinvokeReuseStop(job({
+    steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ],
+  })), false);
+  assert.equal(provesPreinvokeReuseStop(job({
+    steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'failure' },
+    ],
+  })), false);
 });
 
 test('unknown durable outcome accepts only the read-only classification marker pair', (t) => {

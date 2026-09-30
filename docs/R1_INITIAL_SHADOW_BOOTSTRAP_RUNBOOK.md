@@ -1936,6 +1936,15 @@ for operation-metadata candidate cases, and an enum-only artifact for every pre-
 Only exact operation proof or exact actor/function/time/version audit proof bound to the active tag can
 admit the one read-only invoke. All other classifier/source outcomes stop with no redeploy or invoke.
 
+PR #877 merged as `42fceefea0a9d38997f6604dc1e73315ccef0649`; its exact-main CI, Browser Quality and CodeQL
+passed. Recovery autocontinue run `36647818262` stopped at
+`R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID` before issuing another recovery dispatch. The stopped
+caller has a bounded interpretation: it was the exact PR-change-set gate, not provider or YDB activity.
+Because that source main contains the failed recovery version-proof run `36643931461`, the integrated
+successor proves that all intervening recovery runs after the original create failure are either the exact
+deployment-failed/invoke-skipped source or one bounded version-proof-failed/deploy-skipped/invoke-skipped
+read-only pre-invoke stop on a distinct SHA. Any other intervening outcome blocks the path.
+
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
 preflight, it reads the Function version list, operation list, exact recovery tag and bounded tag history;
 it never substitutes a synthetic empty tag history for a provider read failure. Existing
