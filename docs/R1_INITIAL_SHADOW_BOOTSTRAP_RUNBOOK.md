@@ -2813,3 +2813,54 @@ Async-Contract: REPOSITORY_ONLY
 Expected-Transition: ASYNC_INVOCATION_CONTRACT_VERIFIED
 Regression-Test: tests/integration/yandex-initial-bootstrap-async-invoker.test.mjs
 
+### Async workflow integration contract — provider still not armed
+
+The repository-only async admission contract is now integrated into the existing canonical R1 bootstrap
+engine without creating a second bootstrap engine.
+
+`r1-initial-shadow-bootstrap.yml` accepts `invocation_mode=sync|async`, defaulting to the existing
+synchronous behavior. Async mode is additionally fail-closed by all of the following:
+
+- the existing WIF service account must already hold exact `functions.functionInvoker` on the
+  private target Function before and after version deployment;
+- the version uses tag `r1-initial-bootstrap-async`;
+- version creation specifies `--async-max-retries 0` and the existing WIF invoker service account;
+- no success/failure YMQ target flag is present;
+- exact tag read-back must prove the newly-created version id, Node.js 22 runtime, bootstrap
+  entrypoint, 600-second execution timeout, existing runtime service account, disabled logging,
+  `retriesCount=0`, the exact async invoker service account, and `emptyTarget` for both success and
+  failure destinations;
+- only `HTTP 202` becomes `PASS / INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`;
+- accepted async admission intentionally leaves the child workflow nonterminal/failing after its
+  enum-only artifact is uploaded, so no existing historical classifier can confuse GitHub workflow
+  success with financial `COMMITTED`.
+
+`r1-initial-bootstrap-orchestrator.yml` reuses the same recovery/readiness/bootstrap engine with a
+new default-`sync` invocation mode. For `async` it:
+
+1. dispatches exactly one bootstrap child with `invocation_mode=async`;
+2. downloads and validates the exact child admission artifact;
+3. waits 630 seconds, which is beyond the configured 600-second Function execution window;
+4. performs exactly one existing read-only durable recovery regardless of accepted/non-success
+   admission once the invoke step was reached;
+5. emits only `R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_RECOVERY_CLASSIFIED` after durable recovery.
+
+Async child success or `HTTP 202` can never map directly to
+`R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED`. A later bounded successor may interpret fresh durable recovery
+and perform independent reconciliation/catch-up, but only under a separate exact-main marker.
+
+This integration slice does not modify ordinary/recovery autocontinue and therefore cannot dispatch an
+async provider attempt after merge.
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Async-Integration: READY_FOR_CI_ONLY
+Sync-Circuit: BLOCKED_NEEDS_ROOT_CAUSE
+Expected-Transition: ASYNC_ORCHESTRATOR_CONTRACT_VERIFIED
+Regression-Test: tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+Regression-Test: tests/tooling/r1-initial-shadow-bootstrap-workflow.test.mjs
+```
+
+Google remains authoritative. No first verified `COMMITTED` shadow baseline is proven by this
+integration contract.
+
