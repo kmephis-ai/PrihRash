@@ -68,7 +68,7 @@ function activeMainDispatch(run) {
     && ACTIVE_STATUSES.has(run?.status);
 }
 
-async function dispatchAndResolveRun(token, workflow, expectedSha) {
+async function dispatchAndResolveRun(token, workflow, expectedSha, inputs = null) {
   await requireExactMain(token, expectedSha);
   const beforeRuns = await listDispatchRuns(token, workflow);
   if (beforeRuns.some(activeMainDispatch)) {
@@ -76,10 +76,13 @@ async function dispatchAndResolveRun(token, workflow, expectedSha) {
   }
   const beforeIds = new Set(beforeRuns.map((run) => run.id));
 
+  const dispatchBody = inputs === null
+    ? { ref: 'main' }
+    : { ref: 'main', inputs };
   await githubJson(`/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ref: 'main' }),
+    body: JSON.stringify(dispatchBody),
   });
 
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
@@ -122,11 +125,14 @@ async function bootstrapInvokeConclusion(token, runId) {
 async function main() {
   const kind = process.argv[2];
   const workflow = WORKFLOWS[kind];
+  const invocationMode = kind === 'bootstrap' ? (process.argv[3] ?? 'sync') : null;
   const token = process.env.GITHUB_TOKEN;
   const repository = process.env.GITHUB_REPOSITORY;
   const expectedSha = process.env.PRIHRASH_R1_EXPECTED_MAIN_SHA ?? process.env.GITHUB_SHA;
   if (
     workflow === undefined
+    || (kind === 'bootstrap' && !['sync', 'async'].includes(invocationMode))
+    || (kind !== 'bootstrap' && process.argv[3] !== undefined)
     || repository !== REPOSITORY
     || !nonBlank(token)
     || !/^[0-9a-f]{40}$/.test(expectedSha ?? '')
@@ -137,7 +143,12 @@ async function main() {
   }
 
   try {
-    const runId = await dispatchAndResolveRun(token, workflow, expectedSha);
+    const runId = await dispatchAndResolveRun(
+      token,
+      workflow,
+      expectedSha,
+      kind === 'bootstrap' ? { invocation_mode: invocationMode } : null,
+    );
     const run = await waitForCompletion(token, runId, expectedSha);
     const result = {
       status: 'PASS',
@@ -147,6 +158,7 @@ async function main() {
       conclusion: run.conclusion,
     };
     if (kind === 'bootstrap') {
+      result.invocationMode = invocationMode;
       const invokeStepConclusion = await bootstrapInvokeConclusion(token, runId);
       if (run.conclusion === 'success' && invokeStepConclusion !== 'success') {
         result.conclusion = 'inconsistent';
