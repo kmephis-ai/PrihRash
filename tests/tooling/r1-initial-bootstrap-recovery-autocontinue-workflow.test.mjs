@@ -100,6 +100,9 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
 });
 
 test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
+  const sourceFailedBlock = workflow.slice(workflow.indexOf('source_failed_jobs="$(curl'));
+  const sourceFailedFilter = sourceFailedBlock.match(/if ! jq -e --argjson workflow_id "\$source_workflow_id" '([\s\S]*?)\n\s*' <<<"\$source_failed_jobs"/)?.[1];
+  assert.ok(sourceFailedFilter, 'extract the source failed-run phase filter from its exact jobs response');
   const newerRunBlock = workflow.slice(workflow.indexOf('newer_run="$(curl'));
   const runFilter = newerRunBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--argjson source_id "\$failed_run_id" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
   assert.ok(runFilter, 'extract the live intervening recovery run identity filter');
@@ -111,6 +114,39 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     t.skip('jq CLI is unavailable');
     return;
   }
+  const failedSourceJobs = (overrides = {}) => ({ jobs: [{
+    name: 'initial-bootstrap-recovery',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ],
+    ...overrides,
+  }] });
+  const provesSourceFailedPhase = (jobs) => spawnSync('jq', [
+    '-e', '--argjson', 'workflow_id', '370292276', sourceFailedFilter,
+  ], { input: JSON.stringify(jobs), encoding: 'utf8' }).status === 0;
+  assert.equal(provesSourceFailedPhase(failedSourceJobs()), true);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ conclusion: 'success' })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'failure' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase({ jobs: [] }), false);
+  assert.equal(provesSourceFailedPhase({ jobs: [
+    ...failedSourceJobs().jobs,
+    ...failedSourceJobs().jobs,
+  ] }), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+
   const runRecord = (overrides = {}) => ({
     id: 36643931461,
     workflow_id: 370292276,
