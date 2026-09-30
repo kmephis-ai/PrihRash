@@ -37,20 +37,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo PUBLISH_CHECK_SOURCE
           test "$(git -C target rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(sha256sum transport/.transport/r1-tag-history.patch.gz | awk '{print $1}')" = "$PATCH_GZ_SHA256"
-          gzip -dc transport/.transport/r1-tag-history.patch.gz > "$RUNNER_TEMP/r1-tag-history.patch"
-          test "$(sha256sum "$RUNNER_TEMP/r1-tag-history.patch" | awk '{print $1}')" = "$PATCH_SHA256"
 
+          echo PUBLISH_CHECK_GZIP
+          actual_gz="$(sha256sum transport/.transport/r1-tag-history.patch.gz | awk '{print $1}')"
+          echo "PUBLISH_GZIP_MATCH=$([ "$actual_gz" = "$PATCH_GZ_SHA256" ] && echo yes || echo no)"
+          test "$actual_gz" = "$PATCH_GZ_SHA256"
+
+          echo PUBLISH_CHECK_PATCH
+          gzip -dc transport/.transport/r1-tag-history.patch.gz > "$RUNNER_TEMP/r1-tag-history.patch"
+          actual_patch="$(sha256sum "$RUNNER_TEMP/r1-tag-history.patch" | awk '{print $1}')"
+          echo "PUBLISH_PATCH_MATCH=$([ "$actual_patch" = "$PATCH_SHA256" ] && echo yes || echo no)"
+          test "$actual_patch" = "$PATCH_SHA256"
+
+          echo PUBLISH_CHECK_TARGET_BRANCH
           if git -C target ls-remote --exit-code origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
-            echo 'TARGET_BRANCH_ALREADY_EXISTS'
+            echo TARGET_BRANCH_ALREADY_EXISTS
             exit 1
           fi
 
+          echo PUBLISH_CHECK_APPLY
           git -C target apply --check --whitespace=error-all "$RUNNER_TEMP/r1-tag-history.patch"
           git -C target apply "$RUNNER_TEMP/r1-tag-history.patch"
           git -C target diff --check
 
+          echo PUBLISH_CHECK_FILESET
           printf '%s\n' \
             '.github/workflows/r1-initial-bootstrap-recovery.yml' \
             'AGENTS.md' \
@@ -64,9 +76,12 @@ jobs:
           git -C target diff --name-only | sort > "$RUNNER_TEMP/actual-files"
           diff -u "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
 
+          echo PUBLISH_COMMIT
           git -C target switch -c "$TARGET_BRANCH"
           git -C target config user.name "kmephis-ai"
           git -C target config user.email "kmephis@gmail.com"
           git -C target add --all
           git -C target commit -m "R1: prove recovery version from create step tag history"
+
+          echo PUBLISH_PUSH
           git -C target push origin "HEAD:refs/heads/$TARGET_BRANCH"
