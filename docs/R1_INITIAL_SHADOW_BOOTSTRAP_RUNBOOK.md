@@ -2683,3 +2683,68 @@ Autocontinue may dispatch only the full read-only recovery workflow. Any `APPLIE
 causal decision only; it does not itself authorize replay. Google remains authoritative and first
 verified `COMMITTED` shadow is still unproven.
 
+### Native HTTPS root-cause attempt after full recovery `36770812477`
+
+PR #900 merged the full read-only classification handoff on exact main
+`b7b221408d3e6e69c41e963f092e73b908e45b64`. Canonical CI `36770667208` and Browser Quality
+`36770666954` passed. Recovery autocontinue `36770773729` dispatched exactly one normal full
+read-only recovery `36770812477`; ordinary bootstrap autocontinue did not authorize an orchestrator
+write path.
+
+Full recovery `36770812477` completed successfully after the lost bootstrap Function's maximum
+execution window had elapsed. Exact-main/source/provider boundaries passed, the dedicated private
+trigger-free recovery Function was invoked read-only exactly once, and the privacy-safe result remained:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+Therefore the prior bootstrap did not become a verified `COMMITTED` baseline after caller transport
+loss. The surviving STAGING is again proven stale-retireable only under the existing guarded
+retirement/read-back path. Same-SHA replay remains forbidden.
+
+The remaining causal hypothesis is the bootstrap caller transport. Bootstrap `36768370208` reached the
+single write-capable invoke, then returned `INITIAL_BOOTSTRAP_INVOKE_FAILED` after approximately
+301 seconds although the deployed Function had a 600-second execution timeout and the invoker's intended
+overall deadline was 630 seconds. Node's built-in global `fetch()` is backed by Undici; Undici's
+documented default response-headers timeout is 300 seconds. The observed caller boundary is therefore
+consistent with an internal client timeout shorter than the explicit outer `AbortSignal` deadline.
+Yandex Cloud Functions supports the configured 600-second execution envelope, so this Incident-M does
+not increase the Function timeout.
+
+The bounded fix changes only the one-shot bootstrap HTTPS client:
+
+- `scripts/invoke-yandex-initial-bootstrap.mjs` uses built-in `node:https.request` instead of global
+  `fetch()`;
+- one explicit 630-second overall deadline covers connect + response headers + response body;
+- the request uses no reusable agent and adds no retry;
+- exact private Function URL/tag, bearer auth, 64 KiB response cap, enum-only parser and failure taxonomy
+  remain fail-closed;
+- migration/YDB semantics, caps, stale-retirement predicates, readiness, reconciliation and authority
+  are unchanged;
+- a dedicated synthetic HTTPS fixture covers the existing initial-bootstrap invoker suites without
+  changing controlled-rebuild transport tests.
+
+This is the first distinct-SHA root-cause attempt for the current deterministic post-invoke signature:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: INITIAL_BOOTSTRAP_COMMITTED
+Recovery-State: STAGING_STALE_RETIREABLE
+Circuit-Rearm: ROOT_CAUSE_FIX
+Regression-Test: tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+```
+
+Autocontinue may dispatch only one new exact-SHA orchestrator. It must first repeat fresh recovery,
+retire/read-back the stale STAGING only if the same safe predicates still hold, pass fresh readiness,
+then invoke at most one bootstrap child. Any non-success or unknown write outcome again requires the
+single post-invoke read-only recovery and stops without replay. Google remains authoritative until an
+independently proven `COMMITTED` shadow baseline and required reconciliation/catch-up.
+
