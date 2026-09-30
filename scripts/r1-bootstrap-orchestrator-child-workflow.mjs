@@ -2,6 +2,7 @@ const REPOSITORY = 'kmephis-ai/PrihRash';
 const WORKFLOWS = Object.freeze({
   readiness: 'r1-yandex-readiness.yml',
   bootstrap: 'r1-initial-shadow-bootstrap.yml',
+  'async-bootstrap': 'r1-initial-shadow-bootstrap.yml',
 });
 const ACTIVE_STATUSES = new Set(['queued', 'in_progress', 'waiting', 'pending', 'requested']);
 const POLL_MS = 3_000;
@@ -68,7 +69,7 @@ function activeMainDispatch(run) {
     && ACTIVE_STATUSES.has(run?.status);
 }
 
-async function dispatchAndResolveRun(token, workflow, expectedSha) {
+async function dispatchAndResolveRun(token, workflow, expectedSha, inputs = null) {
   await requireExactMain(token, expectedSha);
   const beforeRuns = await listDispatchRuns(token, workflow);
   if (beforeRuns.some(activeMainDispatch)) {
@@ -79,7 +80,7 @@ async function dispatchAndResolveRun(token, workflow, expectedSha) {
   await githubJson(`/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ref: 'main' }),
+    body: JSON.stringify(inputs === null ? { ref: 'main' } : { ref: 'main', inputs }),
   });
 
   const deadline = Date.now() + DISCOVERY_TIMEOUT_MS;
@@ -137,7 +138,10 @@ async function main() {
   }
 
   try {
-    const runId = await dispatchAndResolveRun(token, workflow, expectedSha);
+    const dispatchInputs = kind === 'async-bootstrap'
+      ? { invocation_mode: 'async' }
+      : null;
+    const runId = await dispatchAndResolveRun(token, workflow, expectedSha, dispatchInputs);
     const run = await waitForCompletion(token, runId, expectedSha);
     const result = {
       status: 'PASS',
@@ -146,7 +150,7 @@ async function main() {
       runId,
       conclusion: run.conclusion,
     };
-    if (kind === 'bootstrap') {
+    if (kind === 'bootstrap' || kind === 'async-bootstrap') {
       const invokeStepConclusion = await bootstrapInvokeConclusion(token, runId);
       if (run.conclusion === 'success' && invokeStepConclusion !== 'success') {
         result.conclusion = 'inconsistent';
