@@ -236,18 +236,14 @@ jobs:
             --format json --retry 0 --no-user-output >"$tmp/function-bindings.json" 2>"$tmp/function-bindings.err" || {
               echo 'R1_ASYNC_DEPLOY_RECOVERY_FUNCTION_BINDINGS_READ_FAILED'; exit 1;
             }
-          yc iam service-account list-access-bindings --id "$runtime_sa_id" --limit 1000 \
-            --format json --retry 0 --no-user-output >"$tmp/runtime-bindings.json" 2>"$tmp/runtime-bindings.err" || {
-              echo 'R1_ASYNC_DEPLOY_RECOVERY_RUNTIME_BINDINGS_READ_FAILED'; exit 1;
-            }
           yc serverless function version list --function-id "$function_id" --limit 1000 \
             --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err" || {
               echo 'R1_ASYNC_DEPLOY_RECOVERY_VERSION_LIST_FAILED'; exit 1;
             }
 
           result="$(node scripts/classify-r1-async-deploy-recovery.mjs \
-            "$tmp/versions.json" "$tmp/function-bindings.json" "$tmp/runtime-bindings.json" \
-            "$function_id" "$runtime_sa_id" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            "$tmp/versions.json" "$tmp/function-bindings.json" \
+            "$function_id" "$runtime_sa_id" \
             "$FAILED_DEPLOY_STARTED_AT" "$FAILED_DEPLOY_FINISHED_AT")" || {
               echo 'R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIER_FAILED'; exit 1;
             }
@@ -267,14 +263,12 @@ jobs:
               ))
               and (.previousWrite | IN("NOT_APPLIED", "VERSION_PRESENT", "AMBIGUOUS"))
               and (.runtimeInvoker | IN("PRESENT", "ABSENT"))
-              and (.wifRuntimeServiceAccountUser | IN("PRESENT", "ABSENT"))
               and (keys | sort) == [
                 "code",
                 "previousWrite",
                 "runtimeInvoker",
                 "status",
-                "verdict",
-                "wifRuntimeServiceAccountUser"
+                "verdict"
               ]
             )
           ' >"$evidence_dir/classification.json" || {
