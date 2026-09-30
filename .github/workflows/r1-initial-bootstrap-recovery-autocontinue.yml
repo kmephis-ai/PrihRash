@@ -9,6 +9,7 @@ on:
 
 permissions:
   actions: write
+  contents: read
   issues: read
   pull-requests: read
 
@@ -26,6 +27,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout exact successful main CI source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+
       - name: Dispatch guarded exact-main read-only recovery only
         shell: bash
         env:
@@ -232,6 +239,8 @@ jobs:
                 and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
                 and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
+                and any(.[]; .filename == "scripts/classify-r1-recovery-deploy-attempt-history.mjs" and .status != "removed")
+                and any(.[]; .filename == "tests/tooling/r1-recovery-deploy-attempt-history.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
@@ -241,8 +250,10 @@ jobs:
                   ".github/workflows/r1-initial-bootstrap-recovery.yml",
                   ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml",
                   "scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs",
+                  "scripts/classify-r1-recovery-deploy-attempt-history.mjs",
                   "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs",
                   "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs",
+                  "tests/tooling/r1-recovery-deploy-attempt-history.test.mjs",
                   "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs",
                   "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md",
                   "AGENTS.md",
@@ -304,28 +315,20 @@ jobs:
                 --header "$auth_header" --header "$accept_header" "$api/actions/runs/${newer_run_id}")" || {
                   echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_RUN_READ_FAILED'; exit 0
                 }
-              if ! jq -e --argjson id "$newer_run_id" --argjson workflow_id "$source_workflow_id" \
-                --arg current_sha "$SOURCE_SHA" --arg source_sha "$source_failed_sha" '
-                .id==$id and .workflow_id==$workflow_id and .head_branch=="main"
-                and .event=="workflow_dispatch" and .status=="completed" and .conclusion=="failure"
-                and .head_sha!=$current_sha and .head_sha!=$source_sha
-                and (.head_sha|test("^[0-9a-f]{40}$"))
-              ' <<<"$newer_run" >/dev/null; then
-                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_RUN_NOT_EXACT'; exit 0
-              fi
               newer_jobs="$(curl --fail --silent --show-error \
                 --header "$auth_header" --header "$accept_header" \
                 "$api/actions/runs/${newer_run_id}/jobs?filter=latest&per_page=100")" || {
                   echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_JOBS_READ_FAILED'; exit 0
                 }
-              if ! jq -e '
-                [.jobs[] | select(.name=="initial-bootstrap-recovery" and .conclusion=="failure"
-                  and ([.steps[]? | select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")] | length)==1
-                  and ([.steps[]? | select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")] | length)==1
-                  and ([.steps[]? | select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")] | length)==1)]
-                | length==1
-              ' <<<"$newer_jobs" >/dev/null; then
-                echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_INTERVENING_RECOVERY_PHASE_NOT_PROVEN'; exit 0
+              intervening_run_path="$RUNNER_TEMP/r1-recovery-reuse-intervening-run-${newer_run_id}.json"
+              intervening_jobs_path="$RUNNER_TEMP/r1-recovery-reuse-intervening-jobs-${newer_run_id}.json"
+              printf '%s' "$newer_run" > "$intervening_run_path"
+              printf '%s' "$newer_jobs" > "$intervening_jobs_path"
+              intervening_result="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs \
+                intervening-recovery "$intervening_run_path" "$intervening_jobs_path" \
+                "$SOURCE_SHA" "$source_failed_sha" "$source_workflow_id" "$newer_run_id")"
+              if [ "$intervening_result" != 'INTERVENING_RECOVERY_PREINVOKE_STOP_PROVEN' ]; then
+                echo "R1_RECOVERY_AUTOCONTINUE_REUSE_${intervening_result}"; exit 0
               fi
             done <<<"$newer_recovery_ids"
             reuse_attempts="$(curl --fail --silent --show-error \

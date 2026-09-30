@@ -7,6 +7,7 @@ import test from 'node:test';
 
 import {
   classifyRecoveryDeployAttemptHistory,
+  classifyRecoveryReuseInterveningRun,
   classifyRecoveryVersionReuseSourceHistory,
 } from '../../scripts/classify-r1-recovery-deploy-attempt-history.mjs';
 
@@ -59,6 +60,78 @@ test('a previous pre-provider stop is distinguishable from a consumed create att
   for (const conclusion of ['success', 'failure', 'cancelled']) {
     assert.equal(classify({ workflow_runs: [run()] }, jobs(conclusion)), 'PRIOR_ATTEMPT_CONSUMED');
   }
+});
+
+test('reuse accepts only one exact intervening read-only verification failure with deploy and invoke skipped', () => {
+  const runRecord = {
+    id: 36643931461,
+    name: 'R1 initial bootstrap recovery',
+    workflow_id: 370292276,
+    head_branch: 'main',
+    event: 'workflow_dispatch',
+    status: 'completed',
+    conclusion: 'failure',
+    head_sha: 'c'.repeat(40),
+  };
+  const jobRecord = (overrides = {}) => ({ jobs: [{
+    name: 'initial-bootstrap-recovery',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ],
+    ...overrides,
+  }] });
+  const options = {
+    run: runRecord,
+    jobs: jobRecord(),
+    currentSha: 'd'.repeat(40),
+    sourceSha: 'a'.repeat(40),
+    sourceWorkflowId: String(deployWorkflowId),
+    expectedRunId: String(runRecord.id),
+  };
+  assert.equal(classifyRecoveryReuseInterveningRun(options), 'INTERVENING_RECOVERY_PREINVOKE_STOP_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, expectedRunId: '1' }), 'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, run: { ...runRecord, head_sha: 'd'.repeat(40) } }),
+    'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, run: { ...runRecord, head_sha: 'a'.repeat(40) } }),
+    'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, run: { ...runRecord, status: 'in_progress' } }),
+    'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, run: { ...runRecord, event: 'push' } }),
+    'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, run: { ...runRecord, workflow_id: deployWorkflowId + 1 } }),
+    'INTERVENING_RECOVERY_RUN_NOT_EXACT');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, jobs: jobRecord({ conclusion: 'success' }) }),
+    'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, jobs: { jobs: [...jobRecord().jobs, ...jobRecord().jobs] } }),
+    'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({
+    ...options,
+    jobs: jobRecord({ steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ] }),
+  }), 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({
+    ...options,
+    jobs: jobRecord({ steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'failure' },
+    ] }),
+  }), 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({ ...options, jobs: jobRecord({ steps: [] }) }),
+    'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
+  assert.equal(classifyRecoveryReuseInterveningRun({
+    ...options,
+    jobs: jobRecord({ steps: [
+      ...jobRecord().jobs[0].steps,
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+    ] }),
+  }), 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN');
 });
 
 test('multiple distinct-SHA prior runs are accepted only when every exact create step was skipped', () => {

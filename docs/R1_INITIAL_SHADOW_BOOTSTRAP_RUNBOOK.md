@@ -1945,6 +1945,16 @@ successor proves that all intervening recovery runs after the original create fa
 deployment-failed/invoke-skipped source or one bounded version-proof-failed/deploy-skipped/invoke-skipped
 read-only pre-invoke stop on a distinct SHA. Any other intervening outcome blocks the path.
 
+PR #878 merged as `8f8e3e8d0e6e5baff3999aa6777a2de405c7bf18`; exact-main CI `36651858133`, Browser
+Quality `36651858153` and CodeQL `36651858180` passed. Its post-merge read-only autocontinue
+`36651940080` stopped before recovery dispatch with `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`:
+the marker and run identities were valid, but the source PR did not contain the full causal changeset
+required by the main-branch guard. No recovery workflow was dispatched; no Yandex or YDB probe ran.
+The successor stays in the same Incident-M boundary and adds the shared fixture-tested intervening-run
+classifier, protobuf repeated-field empty semantics through the terminal Audit Trails decision, full
+synthetic response/history cases and synchronized anti-drift process rule. It preserves the one-shot
+create as consumed; only an exact-main/CI-approved read-only reuse classification can dispatch once.
+
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
 preflight, it reads the Function version list, operation list, exact recovery tag and bounded tag history;
 it never substitutes a synthetic empty tag history for a provider read failure. Existing

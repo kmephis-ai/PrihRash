@@ -279,6 +279,10 @@ boundary к одному decision point. После двух distinct-SHA read-o
 третий discriminator-only PR запрещён: сменить root-cause model/solution, найти безопасный bypass или
 остановиться `BLOCKED_NEEDS_ROOT_CAUSE`.
 
+Successor после pre-provider CI/autocontinue changeset stop остаётся тем же Incident-M boundary:
+включать полную допустимую causal changeset, общие тестируемые классификаторы и terminal outcomes;
+повтор `enum -> PR -> probe -> более точный enum -> PR` запрещён.
+
 Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`
 достигнут) запрещён отдельный PR только для `omitted trails => []`. Один causal PR обязан завершить
 ветку исходом `EXISTING_APPLICABLE_AUDIT_SOURCE`, `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` либо

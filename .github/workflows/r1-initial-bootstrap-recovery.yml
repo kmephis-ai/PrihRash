@@ -309,26 +309,18 @@ jobs:
                 --header 'Accept: application/vnd.github+json' "$api/actions/runs/${newer_run_id}")" || {
                   echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_RUN_READ_FAILED'; exit 1;
                 }
-              if ! jq -e --argjson id "$newer_run_id" --argjson workflow_id "$source_workflow_id" \
-                --arg current_sha "$GITHUB_SHA" --arg source_sha "$source_failed_sha" '
-                .id == $id and .workflow_id == $workflow_id and .head_branch == "main"
-                and .event == "workflow_dispatch" and .status == "completed" and .conclusion == "failure"
-                and .head_sha != $current_sha and .head_sha != $source_sha
-                and (.head_sha | test("^[0-9a-f]{40}$"))
-              ' <<<"$newer_run" >/dev/null; then
-                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_RUN_NOT_EXACT'; exit 1;
-              fi
               newer_jobs="$(curl --fail --silent --show-error --header "$auth_header" \
                 --header 'Accept: application/vnd.github+json' \
                 "$api/actions/runs/${newer_run_id}/jobs?filter=latest&per_page=100")"
-              if ! jq -e '
-                [.jobs[] | select(.name == "initial-bootstrap-recovery" and .conclusion == "failure"
-                  and ([.steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
-                  and ([.steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1
-                  and ([.steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1)]
-                | length == 1
-              ' <<<"$newer_jobs" >/dev/null; then
-                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_PHASE_NOT_PROVEN'; exit 1;
+              intervening_run_path="$RUNNER_TEMP/r1-recovery-reuse-intervening-run-${newer_run_id}.json"
+              intervening_jobs_path="$RUNNER_TEMP/r1-recovery-reuse-intervening-jobs-${newer_run_id}.json"
+              printf '%s' "$newer_run" > "$intervening_run_path"
+              printf '%s' "$newer_jobs" > "$intervening_jobs_path"
+              intervening_result="$(node scripts/classify-r1-recovery-deploy-attempt-history.mjs \
+                intervening-recovery "$intervening_run_path" "$intervening_jobs_path" \
+                "$GITHUB_SHA" "$source_failed_sha" "$source_workflow_id" "$newer_run_id")"
+              if [ "$intervening_result" != 'INTERVENING_RECOVERY_PREINVOKE_STOP_PROVEN' ]; then
+                echo "INITIAL_BOOTSTRAP_RECOVERY_REUSE_${intervening_result}"; exit 1;
               fi
             done <<<"$newer_recovery_ids"
 

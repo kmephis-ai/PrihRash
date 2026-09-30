@@ -293,6 +293,37 @@ test('Audit Trails source branch reaches a terminal decision instead of another 
   ), 'SOURCE_EVIDENCE_UNUSABLE');
 });
 
+test('omitted protobuf repeated fields reach the same terminal empty-source decision as explicit empty lists', () => {
+  const cloudId = 'synthetic-cloud';
+  const targetFolderId = 'synthetic-target-folder';
+  const folders = { folders: [
+    { id: targetFolderId, cloudId, status: 'ACTIVE' },
+    { id: 'synthetic-other-folder', cloudId, status: 'ACTIVE' },
+  ] };
+  const omittedTrailLists = [{}, {}];
+  const explicitEmptyTrailLists = [{ trails: [] }, { trails: [] }];
+
+  assert.equal(classifyAuditTrailCloudFolderList({
+    folders: [{ id: targetFolderId, cloudId, status: 'ACTIVE' }],
+  }, cloudId, targetFolderId), 'FOLDER_LIST_READY');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(
+    folders, omittedTrailLists, cloudId, targetFolderId, runFinishedAt,
+  ), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(
+    folders, explicitEmptyTrailLists, cloudId, targetFolderId, runFinishedAt,
+  ), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyRecoveryAuditTrailSource({}, runFinishedAt), 'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_SOURCE_NOT_CONFIGURED', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(
+    folders, [{ trails: null }, {}], cloudId, targetFolderId, runFinishedAt,
+  ), 'AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID');
+  assert.equal(classifyRecoveryAuditTrailCloudCoverage(
+    folders, [{ nextPageToken: 'synthetic-next-page' }, {}], cloudId, targetFolderId, runFinishedAt,
+  ), 'AUDIT_TRAIL_LIST_INCOMPLETE');
+});
+
 function exactEvidence(overrides = {}) {
   const version = {
     id: 'synthetic-version',
