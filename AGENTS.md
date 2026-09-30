@@ -145,6 +145,30 @@ SHA может использовать `Recovery-State: STAGING_STALE_RETIREABL
   `allow_staging_resume=false` и `allow_stale_staging_retirement=true`;
 - retires вместе с временным R1 autocontinue/provider surface.
 
+Если fresh full read-only recovery уже доказала
+`INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, но для нового
+exact-main SHA ещё нет обязательной pre-write orchestrator signature, допускается один stage-specific
+repository-native preflight без write authority. Successor process-only PR использует только:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Orchestrator-Preflight: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: <exact successful full recovery run>
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Autocontinue обязан доказать exact successful recovery run, его read-only invoke phase, enum-only
+classification artifact, ancestry к source SHA и process-only changeset. Затем он dispatch-ит только
+orchestrator с `allow_staging_resume=false` и `allow_stale_staging_retirement=false`; root-cause
+history circuit для этого preflight не увеличивается. Такой run не разрешает readiness/bootstrap,
+retirement, resume или cleanup: ожидается stop на initial read-only recovery. Только его exact
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT` evidence может
+позже служить входом отдельного `SOURCE_DRIFT_REBASE`. Missing/ambiguous/mismatched evidence всегда
+STOP до dispatch.
+
 После неуспешного write-capable bootstrap invoke и неуспешной post-invoke recovery
 долговечное состояние остаётся неизвестным. Для такого случая successor PR может запросить
 только одну read-only recovery на новом exact SHA с
