@@ -257,6 +257,7 @@ export function classifyRecoveryVersionFromSuccessfulSourceStep({
   tagHistory,
   stepStartedAt,
   stepFinishedAt,
+  observedAt,
   runtimeServiceAccountId,
   functionId,
   lockboxSecretId,
@@ -265,10 +266,13 @@ export function classifyRecoveryVersionFromSuccessfulSourceStep({
   try {
     const start = timestamp(stepStartedAt);
     const finish = timestamp(stepFinishedAt);
+    const observed = timestamp(observedAt);
     if (
       start === null
       || finish === null
+      || observed === null
       || finish < start
+      || observed < finish
       || typeof runtimeServiceAccountId !== 'string'
       || runtimeServiceAccountId.length === 0
       || typeof functionId !== 'string'
@@ -323,12 +327,15 @@ export function classifyRecoveryVersionFromSuccessfulSourceStep({
     const matchingHistory = historyRecords.filter((record) => {
       if (!object(record) || record.tag !== 'r1-initial-bootstrap-recovery') return false;
       const effectiveFrom = timestamp(record.effectiveFrom);
+      const effectiveTo = timestamp(record.effectiveTo);
       return record.functionId === functionId
         && record.functionVersionId === taggedVersion.id
         && effectiveFrom !== null
         && effectiveFrom >= lowerBound
         && effectiveFrom <= upperBound
-        && record.effectiveTo === undefined;
+        && effectiveFrom <= observed
+        && effectiveTo !== null
+        && effectiveTo > observed;
     });
     if (matchingHistory.length !== 1) return 'CREATED_VERSION_NOT_PROVEN';
 
@@ -1120,9 +1127,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     }
   } else if (cliArgs[0] === '--successful-source-step-version') {
     const [, versionsPath, taggedVersionPath, tagHistoryPath, stepStartedAt, stepFinishedAt,
-      runtimeServiceAccountId, functionId, lockboxSecretId, lockboxVersionId] = cliArgs;
+      observedAt, runtimeServiceAccountId, functionId, lockboxSecretId, lockboxVersionId] = cliArgs;
     if (!versionsPath || !taggedVersionPath || !tagHistoryPath || !stepStartedAt || !stepFinishedAt
-      || !runtimeServiceAccountId || !functionId || !lockboxSecretId || !lockboxVersionId) {
+      || !observedAt || !runtimeServiceAccountId || !functionId || !lockboxSecretId || !lockboxVersionId) {
       process.stdout.write('CREATED_VERSION_NOT_PROVEN\n');
       process.exitCode = 1;
     } else {
@@ -1138,6 +1145,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           tagHistory,
           stepStartedAt,
           stepFinishedAt,
+          observedAt,
           runtimeServiceAccountId,
           functionId,
           lockboxSecretId,
