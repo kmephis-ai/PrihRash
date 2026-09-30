@@ -169,6 +169,17 @@ retirement, resume или cleanup: ожидается stop на initial read-onl
 позже служить входом отдельного `SOURCE_DRIFT_REBASE`. Missing/ambiguous/mismatched evidence всегда
 STOP до dispatch.
 
+Если этот preflight завершился **до любого Yandex/provider шага** на
+`Restore verified exact-source artifact` с `R1_EXACT_SOURCE_CI_NOT_UNIQUE`, это repository artifact
+handoff blocker, а не provider attempt и не новая financial/recovery classification. Один successor
+Incident-M на новом SHA может дополнительно к preflight process surface менять только
+`.github/actions/restore-exact-source/action.yml` и
+`tests/tooling/exact-source-artifact.test.mjs`. Selector обязан привязываться к exact SHA,
+предпочитать единственный successful `push/main` run canonical `.github/workflows/ci.yml`, использовать
+единственный successful manual `workflow_dispatch/main` только при отсутствии push-кандидата и
+fail-closed при любой иной неоднозначности. Same-SHA rerun запрещён; после merge successor снова
+разрешает только false/false orchestrator preflight.
+
 После неуспешного write-capable bootstrap invoke и неуспешной post-invoke recovery
 долговечное состояние остаётся неизвестным. Для такого случая successor PR может запросить
 только одну read-only recovery на новом exact SHA с
