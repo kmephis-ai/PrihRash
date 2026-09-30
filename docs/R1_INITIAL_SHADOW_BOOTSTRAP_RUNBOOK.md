@@ -2116,3 +2116,56 @@ correlation; empty trails—including omitted `trails` under ProtoJSON—end as
 as `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS`. Only exact applicable source plus unique exact event can
 classify the accepted Function version; no such result authorizes another create, invoke, replay,
 cleanup, or authority change.
+
+### Exact-folder Audit Trails permission denial and one-shot reader authorization
+
+On exact main `dcbd54c8ed12ad739b22910ac9e9938e4a332634`, canonical read-only recovery `36667055740`
+passed the exact failed-run and source-run gates, confirmed the private Function boundary, then the
+direct exact-folder `TrailService.List` returned `AUDIT_TRAIL_LIST_PERMISSION_DENIED`. Its enum-only
+artifact reported `RECOVERY_REUSE_VERSION_NOT_PROVEN`, `CREATED_VERSION_NOT_PROVEN` and
+`SOURCE_EVIDENCE_UNUSABLE`; version/operation/tag reads were metadata-only, and deploy/invoke were
+skipped. No Google/YDB access or Function mutation occurred. The direct folder bypass is correct, but
+the WIF principal currently lacks `audit-trails.viewer` at that folder.
+
+The next causal PR may arm one temporary read-only permission attempt only from the exact marker:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE
+Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Circuit-Rearm: ROOT_CAUSE_FIX
+Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+The workflow must read the exact existing binding set first. It may add `audit-trails.viewer` only at
+the exact Function folder if the WIF binding is absent; if one unique Cloud Logging destination is then
+proven, it may add `logging.reader` only at that exact group if absent. Existing bindings are never
+removed. Any role added by this run is removed after classification and independently verified absent;
+malformed/duplicate bindings, denied/failed grant, incomplete metadata, or unproven retirement stop the
+run without further event reads or Function invoke. Permission denial after the single bounded attempt
+ends this authority hypothesis; do not widen scope or cycle through more IAM enums. Function create,
+redeploy, bootstrap replay, Google/YDB writes, cleanup of staging, and authority switches remain forbidden.
+
+The permission-rearm PR uses this exact marker, bound to the latest privacy-safe denial artifact and
+the original accepted create-only version:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE
+Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Circuit-Rearm: ROOT_CAUSE_FIX
+Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+The canonical recovery workflow accepts this `READY` marker only with the explicit permission-probe
+input and exact merged source PR. Recovery autocontinue validates the IDs/history/source changeset and
+dispatches only that workflow. Other R1 autocontinue paths do not accept this source-permission
+signature; duplicate/ambiguous marker lines fail closed.

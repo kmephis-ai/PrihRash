@@ -99,6 +99,23 @@ test('recovery version reuse queries Audit Trails directly for the exact validat
   assert.match(reuseBlock, /if \[ -z "\$YC_CLOUD_ID" \]; then[\s\S]*AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID/);
 });
 
+test('temporary audit permission probe is source-marker-bound and retires only per-run bindings', () => {
+  assert.match(workflow, /audit_source_permission_probe:/);
+  assert.match(workflow, /AUDIT_SOURCE_PERMISSION_PROBE: \$\{\{ inputs\.audit_source_permission_probe/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE\/AUDIT_TRAIL_LIST_PERMISSION_DENIED\/SOURCE_EVIDENCE_UNUSABLE/);
+  assert.match(workflow, /TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY/);
+  assert.match(workflow, /Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP/);
+  assert.match(workflow, /RECOVERY_REUSE_TEMP_AUDIT_VIEWER_ADDED_VERIFIED/);
+  assert.match(workflow, /RECOVERY_REUSE_TEMP_LOGGING_READER_ADDED_VERIFIED/);
+  assert.match(workflow, /classify-r1-temporary-audit-source-binding\.mjs/);
+  assert.match(workflow, /resource-manager folder list-access-bindings --id "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /resource-manager folder add-access-binding --id "\$YC_FOLDER_ID"/);
+  assert.match(workflow, /logging group add-access-binding --id "\$audit_log_group_id"/);
+  assert.match(workflow, /remove-access-binding/);
+  assert.match(workflow, /bindingRetirementEvidence/);
+  assert.match(workflow, /trap write_reuse_result EXIT/);
+});
+
 test('read-only reuse requires exact accepted deploy history and version metadata, then skips every create', () => {
   assert.match(workflow, /reuse_deploy_attempt_run_id:/);
   assert.match(workflow, /reuse_failed_recovery_run_id:/);
@@ -281,7 +298,7 @@ test('bounded recovery history in the running workflow binds the current run and
 });
 
 test('read-only reuse authorization PR is distinct from the historical deploy-authority PR', (t) => {
-  const filter = workflow.match(/source_pr_marker="\$\(jq -Rn --arg body "\$source_pr_body" --arg failed_id "\$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "\$REUSE_DEPLOY_ATTEMPT_RUN_ID" '\r?\n([\s\S]*?)\r?\n            '\)"/)?.[1];
+  const filter = workflow.match(/source_pr_marker="\$\(jq -Rn --arg body "\$source_pr_body" --arg failed_id "\$REUSE_FAILED_RECOVERY_RUN_ID" --arg version_id "\$REUSE_DEPLOY_ATTEMPT_RUN_ID" --arg permission_probe "\$AUDIT_SOURCE_PERMISSION_PROBE" '\r?\n([\s\S]*?)\r?\n            '\)"/)?.[1];
   assert.ok(filter, 'extract the canonical reuse-authorization PR marker filter');
   const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
   if (jq.error?.code === 'ENOENT') {
@@ -301,7 +318,7 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
     const result = spawnSync('jq', [
       '-Rn', '--arg', 'body', marker,
       '--arg', 'failed_id', '36341844854',
-      '--arg', 'version_id', '36611387299', filter,
+      '--arg', 'version_id', '36611387299', '--arg', 'permission_probe', '0', filter,
     ], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
@@ -310,6 +327,25 @@ test('read-only reuse authorization PR is distinct from the historical deploy-au
   assert.equal(parse(body.replace('Recovery-Version-Run-ID: 36611387299', 'Recovery-Version-Run-ID: 36611387298')), false);
   assert.equal(parse(`${body}\nObserved-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`), false);
   assert.equal(parse(body.replace('Provider-Attempt: NOT_AUTHORIZED', 'Provider-Attempt: READY')), false);
+  const permissionBody = [
+    'Provider-Attempt: READY',
+    'Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_REUSE/AUDIT_TRAIL_LIST_PERMISSION_DENIED/SOURCE_EVIDENCE_UNUSABLE',
+    'Expected-Transition: TEMPORARY_AUDIT_SOURCE_READ_AND_CLASSIFY',
+    'Recovery-State: STAGING_PRESENT_UNCLASSIFIED',
+    'Circuit-Rearm: ROOT_CAUSE_FIX',
+    'Authority-Scope: TEMPORARY_AUDIT_VIEWER_AT_EXACT_FOLDER_AND_LOGGING_READER_AT_EXACT_CLOUD_LOG_GROUP',
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  ].join('\n');
+  const permissionResult = spawnSync('jq', [
+    '-Rn', '--arg', 'body', permissionBody,
+    '--arg', 'failed_id', '36341844854',
+    '--arg', 'version_id', '36611387299',
+    '--arg', 'permission_probe', '1', filter,
+  ], { encoding: 'utf8' });
+  assert.equal(permissionResult.status, 0, permissionResult.stderr);
+  assert.equal(JSON.parse(permissionResult.stdout), true);
 });
 
 test('initial bootstrap recovery persists only enum-only classification evidence', () => {
