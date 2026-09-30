@@ -8,7 +8,7 @@ import test from 'node:test';
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, '../..');
 const INVOKER = resolve(ROOT, 'scripts/invoke-yandex-initial-bootstrap.mjs');
-const FETCH_MOCK = resolve(ROOT, 'tests/fixtures/mock-yandex-function-fetch.mjs');
+const FETCH_MOCK = resolve(ROOT, 'tests/fixtures/mock-yandex-function-https.mjs');
 const FUNCTION_ID = 'synthetic-bootstrap-function-id';
 const PRIVATE_LOOKING = 'private-sheet-id grpcs://private-ydb private-token-value 12345';
 
