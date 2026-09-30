@@ -2463,3 +2463,43 @@ Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workfl
 
 Exact active-interval agreement permits only the existing write-free recovery invoke. Any mismatch keeps
 durable state UNKNOWN and stops before invoke; no create/redeploy/IAM mutation/cleanup/replay is armed.
+
+### Repository-native pre-write orchestrator preflight after recovery `36761995601`
+
+Recovery `36761995601` on exact main
+`1110c84e71999b710c888fea0ad0a0416dbf6858` successfully completed the accepted-version proof and
+single read-only recovery invoke. It returned
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT` with fresh
+privacy-safe diagnostics including `AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`,
+`COMPLETE_CURRENT_RUN_ONLY`, `STALE_STAGING_CURRENT_STATE_EMPTY`, source decode `NONE`, and
+`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`. No `COMMITTED` baseline was proven.
+
+PR #893 then removed the historical tracking-Issue number from ordinary autocontinue and exact-main CI
+on `3a9a7d0d3aa637c967644029e3da52443b198a6d` passed. The remaining canonical step before any
+`SOURCE_DRIFT_REBASE` is still one pre-write orchestrator run with both staging authority flags false.
+That run exists only to reproduce the exact orchestrator-level
+`R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT` signature before
+readiness/bootstrap.
+
+The stage-specific autocontinue marker for this step is:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Orchestrator-Preflight: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36761995601
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Autocontinue validates that exact recovery run, its successful read-only invoke, the enum-only recovery
+artifact, ancestor relation to the new source SHA, and a process-only changeset. It then dispatches the
+orchestrator with `allow_staging_resume=false` and `allow_stale_staging_retirement=false`. Any
+evidence mismatch stops before dispatch. This marker does **not** authorize stale retirement, resume,
+readiness, bootstrap, cleanup, timer, cutover, Google mutation or YDB financial writes.
+
+After the preflight completes, only an exact recovery-blocked signature plus fresh digest-mismatch/current-
+empty evidence may arm a separate `Recovery-State: STAGING_STALE_RETIREABLE /
+Circuit-Rearm: SOURCE_DRIFT_REBASE` successor.
+
