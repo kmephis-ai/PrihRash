@@ -130,7 +130,7 @@ test('reuse core changeset permits a complete recovery-source fix without touchi
   const changesetFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)"[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
   assert.ok(changesetFilter, 'extract the bounded exact recovery-source changeset predicate');
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery\.yml"/);
-  assert.match(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-r1-temporary-audit-source-binding\.mjs"/);
+  assert.doesNotMatch(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-r1-temporary-audit-source-binding\.mjs"/);
   assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs"/);
   assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-deploy-recovery\.yml"/);
   assert.doesNotMatch(changesetFilter, /and any\(\.\[]; \.filename == "tests\/tooling\/initial-bootstrap-recovery-deploy-recovery-workflow\.test\.mjs"/);
@@ -138,11 +138,15 @@ test('reuse core changeset permits a complete recovery-source fix without touchi
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "docs\/R1_COMPLETION_SPRINT\.md"/);
   assert.doesNotMatch(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
   assert.match(changesetFilter, /"\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
+  assert.match(workflow, /if \[ "\$\(jq -r '\.auditSourcePermissionProbe' <<<"\$marker"\)" = 'true' \]/);
+  assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_TEMP_PERMISSION_CHANGESET_INVALID/);
 });
 
 test('read-only reuse changesets do not require temporary-IAM code while permission attempts still do', (t) => {
-  const filter = workflow.match(/--argjson permission_probe "\$\(jq -r '\.auditSourcePermissionProbe' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
-  assert.ok(filter, 'extract the live source-PR changeset gate');
+  const baseFilter = workflow.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  const permissionFilter = workflow.match(/&& ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  assert.ok(baseFilter, 'extract the shared source-PR changeset gate');
+  assert.ok(permissionFilter, 'extract the additional temporary-permission changeset gate');
   const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
   if (jq.error?.code === 'ENOENT') {
     t.skip('jq CLI is unavailable');
@@ -157,9 +161,15 @@ test('read-only reuse changesets do not require temporary-IAM code while permiss
     'docs/R1_COMPLETION_SPRINT.md',
   ];
   const files = (names) => names.map((filename) => ({ filename, status: 'modified' }));
-  const permits = (names, permissionProbe) => spawnSync('jq', [
-    '-e', '--arg test', commonFiles[0], '--argjson permission_probe', String(permissionProbe), filter,
-  ], { input: JSON.stringify(files([...new Set([...commonFiles, ...names])])), encoding: 'utf8' }).status === 0;
+  const permits = (names, permissionProbe) => {
+    const sourceFiles = JSON.stringify(files([...new Set([...commonFiles, ...names])]));
+    const base = spawnSync('jq', ['-e', '--arg', 'test', commonFiles[0], baseFilter], {
+      input: sourceFiles, encoding: 'utf8',
+    });
+    if (base.status !== 0) return false;
+    if (!permissionProbe) return true;
+    return spawnSync('jq', ['-e', permissionFilter], { input: sourceFiles, encoding: 'utf8' }).status === 0;
+  };
 
   assert.equal(permits([], false), true);
   assert.equal(permits([], true), false);
@@ -169,6 +179,7 @@ test('read-only reuse changesets do not require temporary-IAM code while permiss
   ], true), true);
   assert.equal(permits(['scripts/classify-r1-temporary-audit-source-binding.mjs'], true), false);
   assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
+  assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_TEMP_PERMISSION_CHANGESET_INVALID/);
 });
 
 test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
