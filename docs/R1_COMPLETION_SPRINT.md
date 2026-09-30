@@ -125,6 +125,14 @@ artifact preservation и обновить `AGENTS.md` и runbook в том же 
 Function/YDB invoke. Для наблюдённого `CREATED_VERSION_NOT_PROVEN` pre-invoke stop не повторяет Audit
 Trails/IAM/deploy paths.
 
+Если merged reuse-source PR на exact-main заканчивается
+`R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`, recovery-провайдер не dispatch-ился и read-only
+classification остаётся неиспользованной. Successor остаётся частью этого Incident-M: новый SHA,
+неизменённый marker и три exact run IDs; regression test из marker должен быть включённым файлом PR
+наряду с required recovery/caller tests, runbook и процессными docs. Единый changeset fixture охватывает
+все допустимые caller/recovery predicates и заканчивается dispatch либо явным fail-closed stop; новый
+marker enum/probe или same-SHA retry не добавляются.
+
 Если autocontinue выдаёт `REUSE_SOURCE_RUN_NOT_EXACT`, сверить identity roles до следующего dispatch:
 `Recovery-Run-ID` — оригинальный target failed recovery, `Recovery-Version-Run-ID` — успешный create-only
 source для него, `Recovery-Classification-Run-ID` — exact latest failed reuse-verification predecessor.

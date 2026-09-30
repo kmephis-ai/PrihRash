@@ -325,6 +325,14 @@ Successor после pre-provider CI/autocontinue changeset stop остаётс�
 включать полную допустимую causal changeset, тестируемые caller/recovery predicates и terminal outcomes;
 повтор `enum -> PR -> probe -> более точный enum -> PR` запрещён.
 
+Если exact-main recovery autocontinue возвращает `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`,
+это pre-provider stop: recovery workflow не dispatch-ился, provider gate не достигнут, read-only
+classification не потреблена. Successor на новом exact SHA сохраняет неизменённый marker и exact
+`Recovery-Run-ID`/`Recovery-Version-Run-ID`/`Recovery-Classification-Run-ID`, включает указанную в marker
+`Regression-Test` вместе с canonical recovery workflow/test, autocontinue caller test, runbook и этими
+process docs; затем проходит существующие exact failed-phase/source-history guards. Не менять IDs,
+не повторять SHA и не считать autocontinue `success` доказательством recovery dispatch.
+
 Bounded recovery history использует exact failed-run GET и server-side `created` window к latest
 recovery predecessor: autocontinue берёт только latest, работающий recovery workflow — current run
 плюс latest predecessor. Source-only history либо один exact distinct-SHA failed verification stop с

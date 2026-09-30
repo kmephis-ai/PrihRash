@@ -103,6 +103,32 @@ test('Owner anti-S-unit rules and exact reuse-preflight recovery are synchronize
   }
 });
 
+test('PR #888 pre-provider reuse changeset stop remains bound to the typed-version proof Incident-M', () => {
+  const evidence = runbook.match(
+    /### Alternate exact recovery-version proof from CreateFunctionVersion operation metadata([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the current version-provenance root model must remain in the canonical runbook');
+  for (const line of [
+    'Provider-Attempt: NOT_AUTHORIZED',
+    'Recovery-Probe: READY',
+    'Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION',
+    'Recovery-State: STAGING_PRESENT_UNCLASSIFIED',
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36713248229',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  ]) assert.ok(evidence.includes(line), `runbook preserves exact guarded successor marker line: ${line}`);
+  const preProviderStop = runbook.match(
+    /### PR #888 recovery autocontinue stopped before provider on the exact changeset guard([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(preProviderStop, 'the exact changeset stop must remain a non-consuming pre-provider result');
+  assert.match(preProviderStop, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
+  assert.match(preProviderStop, /No `R1 initial bootstrap recovery` run was dispatched/);
+  assert.match(workflow, /any\(\.\[\]; \.filename == \$test and \.status != "removed"\)/);
+  assert.match(workflow, /tests\/tooling\/r1-initial-bootstrap-recovery-autocontinue-workflow\.test\.mjs/);
+  assert.match(recoveryWorkflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN/);
+});
+
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
   const filter = workflow.match(/--argjson id "\$source_reuse_run_id" --arg expected[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$reuse_attempts"/)?.[1];
   assert.ok(filter, 'extract the live source-run selection filter');
