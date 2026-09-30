@@ -179,10 +179,10 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     created_at: '2026-09-29T23:12:25Z',
     ...overrides,
   });
-  const exactRun = (value) => spawnSync('jq', [
-    '-e', '--argjson', 'id', String(value.id), '--argjson', 'workflow_id', '29',
+  const exactRun = (value, sourceId = 36341844854) => spawnSync('jq', [
+    '-e', '--argjson', 'id', '17', '--argjson', 'workflow_id', '29',
     '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40),
-    '--arg', 'source_created', '2026-09-27T18:45:46Z', '--argjson', 'source_id', '36341844854', runFilter,
+    '--arg', 'source_created', '2026-09-27T18:45:46Z', '--argjson', 'source_id', String(sourceId), runFilter,
   ], { input: JSON.stringify(value), encoding: 'utf8' }).status === 0;
   assert.equal(exactRun(runRecord()), true);
   for (const mismatch of [
@@ -190,7 +190,8 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     { conclusion: 'success' }, { head_sha: 'd'.repeat(40) }, { head_sha: 'a'.repeat(40) },
     { created_at: 'invalid' }, { created_at: '2026-09-27T18:45:46Z', id: 36341844853 },
   ]) assert.equal(exactRun(runRecord(mismatch)), false);
-  assert.equal(exactRun(runRecord({ id: 36341844855, created_at: '2026-09-27T18:45:46Z' })), true);
+  assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 16), true);
+  assert.equal(exactRun(runRecord({ id: 17, created_at: '2026-09-27T18:45:46Z' }), 18), false);
 
   const job = (overrides = {}) => ({ jobs: [{
     name: 'initial-bootstrap-recovery',

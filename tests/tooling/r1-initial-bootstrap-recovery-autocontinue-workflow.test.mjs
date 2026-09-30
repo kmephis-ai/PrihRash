@@ -125,7 +125,7 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
   });
   const provesExactInterveningRun = (run) => {
     const result = spawnSync('jq', [
-      '-e', '--argjson', 'id', String(run.id), '--argjson', 'workflow_id', '370292276',
+      '-e', '--argjson', 'id', '36643931461', '--argjson', 'workflow_id', '370292276',
       '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40),
       '--arg', 'source_created', '2026-09-27T18:45:46Z', '--argjson', 'source_id', '36341844854', runFilter,
     ], { input: JSON.stringify(run), encoding: 'utf8' });
@@ -138,8 +138,8 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
   assert.equal(provesExactInterveningRun(runRecord({ head_sha: 'a'.repeat(40) })), false);
   assert.equal(provesExactInterveningRun(runRecord({ status: 'in_progress' })), false);
   assert.equal(provesExactInterveningRun(runRecord({ created_at: 'invalid' })), false);
-  assert.equal(provesExactInterveningRun(runRecord({ created_at: '2026-09-27T18:45:46Z', id: 36341844855 })), true);
-  assert.equal(provesExactInterveningRun(runRecord({ created_at: '2026-09-27T18:45:46Z', id: 36341844853 })), false);
+  assert.equal(provesExactInterveningRun(runRecord({ created_at: '2026-09-27T18:45:46Z' })), true);
+  assert.equal(provesExactInterveningRun(runRecord({ id: 1 })), false);
 
   const job = (overrides = {}) => ({ jobs: [{
     name: 'initial-bootstrap-recovery',
