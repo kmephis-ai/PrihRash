@@ -81,6 +81,8 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /\.title == "R1 completion sprint: пробить первый COMMITTED shadow baseline"/);
   assert.match(workflow, /branches\/main/g);
   assert.match(workflow, /SOURCE_SHA/);
+  assert.match(workflow, /SOURCE_CI_RUN_ID: \$\{\{ github\.event\.workflow_run\.id \}\}/);
+  assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_CI_RUN_ID_INVALID/);
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/runs/);
   assert.match(workflow, /any\(\.head_sha == \$sha\)/);
   assert.match(workflow, /R1_BOOTSTRAP_AUTOCONTINUE_ALREADY_DISPATCHED/);
@@ -119,6 +121,12 @@ test('source-drift preflight accepts only exact successful recovery and dispatch
   assert.match(workflow, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(workflow, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
   assert.match(preflightGate, /PREFLIGHT_CHANGESET_INVALID/);
+  assert.match(preflightGate, /\.github\/actions\/restore-exact-source\/action\.yml/);
+  assert.match(preflightGate, /\.github\/workflows\/r1-initial-bootstrap-orchestrator\.yml/);
+  assert.match(preflightGate, /tests\/tooling\/exact-source-artifact\.test\.mjs/);
+  assert.match(preflightGate, /tests\/tooling\/r1-initial-bootstrap-orchestrator-workflow\.test\.mjs/);
+  assert.match(preflightGate, /all\(\.\[\]; \.filename \| IN\(/);
+  assert.doesNotMatch(preflightGate, /\.filename \| startswith\("src\/"\)/);
   assert.match(preflightGate, /compare\/\$preflight_recovery_sha\.\.\.\$SOURCE_SHA/);
   assert.match(preflightGate, /Deploy recovery-only Function version/);
   assert.match(preflightGate, /Invoke exact read-only recovery tag once/);
@@ -145,7 +153,7 @@ test('source-drift rebase requires exact pre-write evidence and arms stale retir
   assert.match(workflow, /and \$recovery == \["Recovery-State: STAGING_STALE_RETIREABLE"\]/);
   assert.match(workflow, /allow_staging_resume='false'/);
   assert.match(workflow, /allow_stale_staging_retirement='true'/);
-  assert.match(workflow, /\{ref:"main", inputs:\{allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale\}\}/);
+  assert.match(workflow, /\{ref:"main", inputs:\{ci_run_id:\$ci_run_id, allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale\}\}/);
 });
 
 test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate incident keys cross-run', async () => {

@@ -2503,3 +2503,42 @@ After the preflight completes, only an exact recovery-blocked signature plus fre
 empty evidence may arm a separate `Recovery-State: STAGING_STALE_RETIREABLE /
 Circuit-Rearm: SOURCE_DRIFT_REBASE` successor.
 
+### Exact CI run handoff after preflight `36765633980`
+
+PR #895 merged the repository-native preflight surface on exact main
+`8eba3ae4de7ddd0078482e7916ed3bd82cb34132`. Its push CI `36765501292` completed successfully,
+and autocontinue proved the exact prior recovery `36761995601` before dispatching orchestrator
+`36765633980` with both `allow_staging_resume=false` and
+`allow_stale_staging_retirement=false`.
+
+The orchestrator stopped **before any Yandex/provider action** at
+`Restore verified exact-source artifact`. The composite action emitted
+`R1_EXACT_SOURCE_CI_NOT_UNIQUE`; every YC/OIDC/recovery/readiness/bootstrap step was skipped. The
+general Actions state for the source SHA exposed the successful push CI, so this failure is treated as
+repository-side exact-CI rediscovery ambiguity, not as provider/durable-state evidence. No retirement,
+resume, bootstrap, cleanup or financial write occurred.
+
+Autocontinue already receives the exact successful CI identity as
+`github.event.workflow_run.id`. The successor therefore carries that ID through
+autocontinue → orchestrator `ci_run_id` → `restore-exact-source`. The restore action reads that exact
+run and validates it with `scripts/classify-github-ci-run.mjs` against the source SHA before downloading
+`r1-exact-source-<sha>`. Its existing bounded CI-list selector remains only as a manual-path fallback
+when no explicit CI run ID is provided.
+
+Because `36765633980` stopped before provider access, the same stage-specific preflight authority may
+continue only on a **new exact SHA** after this repository fix. The marker remains:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Orchestrator-Preflight: READY
+Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36761995601
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Success means only reaching the orchestrator-level recovery-blocked signature before readiness/bootstrap.
+Any exact-source or recovery mismatch remains STOP; `SOURCE_DRIFT_REBASE` is still not armed by this
+checkpoint.
+

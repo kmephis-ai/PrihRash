@@ -3,6 +3,11 @@ name: R1 initial bootstrap orchestrator
 on:
   workflow_dispatch:
     inputs:
+      ci_run_id:
+        description: Optional exact successful main CI run that triggered guarded autocontinue
+        required: false
+        default: ''
+        type: string
       allow_staging_resume:
         description: Allow one guarded application-level resume of exact durable STAGING evidence
         required: true
@@ -121,6 +126,7 @@ jobs:
         with:
           source-sha: ${{ github.sha }}
           github-token: ${{ github.token }}
+          ci-run-id: ${{ inputs.ci_run_id }}
 
       - name: Install Yandex Cloud CLI
         shell: bash

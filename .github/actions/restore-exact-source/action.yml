@@ -8,6 +8,10 @@ inputs:
   github-token:
     description: Token with read access to Actions artifacts.
     required: true
+  ci-run-id:
+    description: Optional exact successful canonical CI run ID for this source SHA.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -18,6 +22,7 @@ runs:
       env:
         GH_API_TOKEN: ${{ inputs.github-token }}
         SOURCE_SHA: ${{ inputs.source-sha }}
+        CI_RUN_ID: ${{ inputs.ci-run-id }}
       run: |
         set -euo pipefail
         test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
@@ -29,29 +34,58 @@ runs:
         mkdir -p "$tmp"
         api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
         auth_header="Authorization: Bearer ${GH_API_TOKEN}"
-        curl --fail --silent --show-error \
-          --header "$auth_header" \
-          --header 'Accept: application/vnd.github+json' \
-          "$api/actions/workflows/ci.yml/runs?branch=main&per_page=100" \
-          --output "$tmp/ci-runs.json" || {
-            echo 'R1_EXACT_SOURCE_CI_READ_FAILED'
+        if [ -n "$CI_RUN_ID" ]; then
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo 'R1_EXACT_SOURCE_CI_RUN_ID_INVALID'
             exit 1
           }
+          curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/actions/runs/$CI_RUN_ID" \
+            --output "$tmp/ci-run.json" || {
+              echo 'R1_EXACT_SOURCE_CI_RUN_READ_FAILED'
+              exit 1
+            }
+          ci_run_class="$(node scripts/classify-github-ci-run.mjs \
+            "$tmp/ci-run.json" "$CI_RUN_ID" "$SOURCE_SHA")"
+          case "$ci_run_class" in
+            CI_RUN_EXACT_SUCCESS) ;;
+            CI_RUN_INPUT_INVALID|CI_RUN_NOT_EXACT_SUCCESS|CI_RUN_METADATA_INVALID)
+              echo "R1_EXACT_SOURCE_${ci_run_class}"
+              exit 1
+              ;;
+            *)
+              echo 'R1_EXACT_SOURCE_CI_RUN_CLASSIFICATION_INVALID'
+              exit 1
+              ;;
+          esac
+          run_id="$CI_RUN_ID"
+        else
+          curl --fail --silent --show-error \
+            --header "$auth_header" \
+            --header 'Accept: application/vnd.github+json' \
+            "$api/actions/workflows/ci.yml/runs?branch=main&per_page=100" \
+            --output "$tmp/ci-runs.json" || {
+              echo 'R1_EXACT_SOURCE_CI_READ_FAILED'
+              exit 1
+            }
 
-        run_id="$(jq -er --arg sha "$SOURCE_SHA" '
-          [.workflow_runs[]
-            | select(
-                .name == "CI"
-                and .head_sha == $sha
-                and .head_branch == "main"
-                and (.event == "push" or .event == "workflow_dispatch")
-                and .conclusion == "success"
-              )]
-          | if length == 1 then .[0].id else error("exact CI run count mismatch") end
-        ' "$tmp/ci-runs.json")" || {
-          echo 'R1_EXACT_SOURCE_CI_NOT_UNIQUE'
-          exit 1
-        }
+          run_id="$(jq -er --arg sha "$SOURCE_SHA" '
+            [.workflow_runs[]
+              | select(
+                  .name == "CI"
+                  and .head_sha == $sha
+                  and .head_branch == "main"
+                  and (.event == "push" or .event == "workflow_dispatch")
+                  and .conclusion == "success"
+                )]
+            | if length == 1 then .[0].id else error("exact CI run count mismatch") end
+          ' "$tmp/ci-runs.json")" || {
+            echo 'R1_EXACT_SOURCE_CI_NOT_UNIQUE'
+            exit 1
+          }
+        fi
         echo "run-id=$run_id" >> "$GITHUB_OUTPUT"
 
     - name: Download exact-source artifact
