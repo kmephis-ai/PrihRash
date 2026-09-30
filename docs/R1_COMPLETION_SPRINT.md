@@ -125,6 +125,14 @@ artifact preservation и обновить `AGENTS.md` и runbook в том же 
 Function/YDB invoke. Для наблюдённого `CREATED_VERSION_NOT_PROVEN` pre-invoke stop не повторяет Audit
 Trails/IAM/deploy paths.
 
+Если typed metadata по существующей Function `ListOperations` projection остаётся unproven, следующий
+causal model меняет источник: `OperationService.Get` для единственного ID, локально выбранного из точного
+Function-scoped actor/time list operation. Этот independent resource read обязан подтвердить Get ID,
+typed CreateFunctionVersion metadata, optional Version response ID и unique active version/tag/config.
+Иначе fail-closed stop без Audit/IAM/deploy/invoke; exact match → только один existing write-free durable
+classification. Один Incident-M включает REST adapter, all response/oneof/phase fixtures, privacy guard,
+caller/recovery changeset gates и docs; это не разрешение на третью response-shape discriminator PR.
+
 Если merged reuse-source PR на exact-main заканчивается
 `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`, recovery-провайдер не dispatch-ился и read-only
 classification остаётся неиспользованной. Successor остаётся частью этого Incident-M: новый SHA,

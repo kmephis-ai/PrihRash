@@ -129,6 +129,26 @@ test('PR #888 pre-provider reuse changeset stop remains bound to the typed-versi
   assert.match(recoveryWorkflow, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN/);
 });
 
+test('OperationService.Get alternate version proof remains exact-bound and has distinct fail-closed outcomes', () => {
+  const evidence = runbook.match(
+    /### Exact OperationService\.Get provenance bypass after recovery `36734338396`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the alternate resource-read proof must be canonical and exact-run-bound');
+  for (const line of [
+    'Recovery-Run-ID: 36341844854',
+    'Recovery-Version-Run-ID: 36611387299',
+    'Recovery-Classification-Run-ID: 36734338396',
+    'Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+  ]) assert.ok(evidence.includes(line), `runbook preserves the exact recovery identity ${line}`);
+  assert.match(evidence, /OperationService\.Get/);
+  assert.match(evidence, /unique, done, error-free/);
+  assert.match(evidence, /remain UNKNOWN/);
+  assert.match(agents, /OperationService\.Get/);
+  assert.match(completionSprint, /OperationService\.Get/);
+  assert.match(recoveryWorkflow, /operation\.api\.cloud\.yandex\.net\/operations\/v1\/operations/);
+  assert.match(recoveryWorkflow, /"\$RUNTIME_SERVICE_ACCOUNT_ID" "\$operation_id"/);
+});
+
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
   const filter = workflow.match(/--argjson id "\$source_reuse_run_id" --arg expected[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$reuse_attempts"/)?.[1];
   assert.ok(filter, 'extract the live source-run selection filter');

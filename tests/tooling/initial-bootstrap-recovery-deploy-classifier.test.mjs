@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -12,6 +15,7 @@ import {
   classifyRecoveryAuditTrailFolderCoverage,
   classifyRecoveryAuditTrailSource,
   classifyRecoveryFunctionDeployOutcome,
+  selectExactRecoveryCreateOperationId,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs';
 import { classifyExactReadBinding } from '../../scripts/classify-r1-temporary-audit-source-binding.mjs';
 
@@ -425,6 +429,7 @@ function exactEvidence(overrides = {}) {
     created_at: '2026-09-27T18:46:34Z',
   };
   const operation = {
+    id: 'synthetic-operation',
     created_by: serviceAccount,
     created_at: '2026-09-27T18:46:33Z',
     done: true,
@@ -563,6 +568,82 @@ test('recovery deploy classifier proves the exact created version from typed ope
     })),
     'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
   );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, id: 'synthetic-operation' }],
+      expectedOperationId: 'synthetic-operation',
+    })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [{ ...metadataOperation, id: 'synthetic-operation' }],
+      expectedOperationId: 'different-operation',
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+});
+
+test('recovery Operation.Get bypass selects only one completed actor/time-bound list operation with its exact id', () => {
+  const operation = exactEvidence().operations[0];
+  const select = (operations) => selectExactRecoveryCreateOperationId({
+    operations,
+    runStartedAt,
+    runFinishedAt,
+    operationCreatorServiceAccountId: serviceAccount,
+  });
+
+  assert.equal(select([operation]), 'synthetic-operation');
+  assert.equal(select([operation, { ...operation, id: 'second-operation' }]), null);
+  assert.equal(select([{ ...operation, id: '' }]), null);
+  assert.equal(select([{ ...operation, created_by: 'other-deployer' }]), null);
+  assert.equal(select([{ ...operation, created_at: '2026-09-27T18:40:00Z' }]), null);
+  assert.equal(select([{ ...operation, done: false }]), null);
+  assert.equal(select([{ ...operation, error: { code: 7 } }]), null);
+  assert.equal(select([{ ...operation, response: undefined }]), null);
+  assert.equal(select([operation, { id: 'malformed-operation' }]), null);
+  assert.equal(select(Array.from({ length: 1_000 }, () => operation)), null);
+  assert.equal(select(null), null);
+});
+
+test('recovery operation-id selector keeps raw IDs runner-local and emits only its decision enum', () => {
+  const root = mkdtempSync(join(tmpdir(), 'recovery-operation-id-fixture-'));
+  const operationsPath = join(root, 'operations.json');
+  const outputPath = join(root, 'operation-id.txt');
+  const operation = exactEvidence().operations[0];
+  writeFileSync(operationsPath, JSON.stringify([operation]), 'utf8');
+  try {
+    const selected = spawnSync(process.execPath, [
+      'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
+      '--select-exact-recovery-create-operation-id',
+      operationsPath,
+      runStartedAt,
+      runFinishedAt,
+      serviceAccount,
+      outputPath,
+    ], { encoding: 'utf8' });
+    assert.equal(selected.status, 0);
+    assert.equal(selected.stdout, 'CREATE_OPERATION_ID_SELECTED\n');
+    assert.equal(selected.stderr, '');
+    assert.equal(readFileSync(outputPath, 'utf8'), 'synthetic-operation');
+    assert.doesNotMatch(selected.stdout, /synthetic-operation/);
+
+    writeFileSync(operationsPath, JSON.stringify([operation, { ...operation, id: 'second-operation' }]), 'utf8');
+    const ambiguous = spawnSync(process.execPath, [
+      'scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs',
+      '--select-exact-recovery-create-operation-id',
+      operationsPath,
+      runStartedAt,
+      runFinishedAt,
+      serviceAccount,
+      outputPath,
+    ], { encoding: 'utf8' });
+    assert.equal(ambiguous.status, 1);
+    assert.equal(ambiguous.stdout, 'CREATE_OPERATION_ID_NOT_PROVEN\n');
+    assert.equal(ambiguous.stderr, '');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('recovery deploy classifier distinguishes missing, ambiguous, pending, and failed operations', () => {

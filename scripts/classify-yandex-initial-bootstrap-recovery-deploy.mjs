@@ -135,6 +135,60 @@ function createFunctionVersionMetadataId(metadata) {
   return hasProtoJsonId ? protoJsonId : ycJsonId;
 }
 
+function matchingCreateOperations(operations, lowerBound, upperBound, operationCreatorServiceAccountId, expectedOperationId) {
+  return operations.filter((operation) => {
+    if (!object(operation)) return false;
+    const createdAt = timestamp(operation.created_at ?? operation.createdAt);
+    const createdBy = operation.created_by ?? operation.createdBy;
+    return createdBy === operationCreatorServiceAccountId
+      && createdAt !== null
+      && createdAt >= lowerBound
+      && createdAt <= upperBound
+      && (expectedOperationId === undefined || operation.id === expectedOperationId);
+  });
+}
+
+export function selectExactRecoveryCreateOperationId({
+  operations,
+  runStartedAt,
+  runFinishedAt,
+  operationCreatorServiceAccountId,
+}) {
+  const start = timestamp(runStartedAt);
+  const finish = timestamp(runFinishedAt);
+  if (
+    start === null
+    || finish === null
+    || finish < start
+    || typeof operationCreatorServiceAccountId !== 'string'
+    || operationCreatorServiceAccountId.length === 0
+    || !Array.isArray(operations)
+    || operations.length >= 1_000
+  ) return null;
+  if (operations.some((operation) => (
+    !object(operation)
+    || typeof operation.id !== 'string'
+    || operation.id.length === 0
+    || typeof (operation.created_by ?? operation.createdBy) !== 'string'
+    || (operation.created_by ?? operation.createdBy).length === 0
+    || timestamp(operation.created_at ?? operation.createdAt) === null
+  ))) return null;
+  const matchingOperations = matchingCreateOperations(
+    operations, start - 5_000, finish + 5_000, operationCreatorServiceAccountId,
+  );
+  if (matchingOperations.length !== 1) return null;
+  const [operation] = matchingOperations;
+  if (
+    !object(operation)
+    || typeof operation.id !== 'string'
+    || operation.id.length === 0
+    || operation.done !== true
+    || object(operation.error)
+    || !object(operation.response)
+  ) return null;
+  return operation.id;
+}
+
 function readJson(path) {
   return readFile(path, 'utf8').then((text) => JSON.parse(text));
 }
@@ -160,6 +214,7 @@ export function classifyRecoveryFunctionDeployOutcome({
   runFinishedAt,
   operationCreatorServiceAccountId,
   runtimeServiceAccountId,
+  expectedOperationId,
 }) {
   try {
     const start = timestamp(runStartedAt);
@@ -172,6 +227,8 @@ export function classifyRecoveryFunctionDeployOutcome({
       || operationCreatorServiceAccountId.length === 0
       || typeof runtimeServiceAccountId !== 'string'
       || runtimeServiceAccountId.length === 0
+      || (expectedOperationId !== undefined
+        && (typeof expectedOperationId !== 'string' || expectedOperationId.length === 0))
       || !Array.isArray(versions)
       || !Array.isArray(operations)
     ) return 'RECOVERY_DEPLOY_INPUT_INVALID';
@@ -180,15 +237,12 @@ export function classifyRecoveryFunctionDeployOutcome({
     const upperBound = finish + 5_000;
     if (versions.length >= 1_000) return 'RECOVERY_VERSION_LIST_INCOMPLETE';
     if (operations.length >= 1_000) return 'RECOVERY_OPERATION_LIST_INCOMPLETE';
-    const matchingOperations = operations.filter((operation) => {
-      if (!object(operation)) return false;
-      const createdAt = timestamp(operation.created_at ?? operation.createdAt);
-      const createdBy = operation.created_by ?? operation.createdBy;
-      return createdBy === operationCreatorServiceAccountId
-        && createdAt !== null
-        && createdAt >= lowerBound
-        && createdAt <= upperBound;
-    });
+    const matchingOperations = matchingCreateOperations(
+      operations, lowerBound, upperBound, operationCreatorServiceAccountId, expectedOperationId,
+    );
+    if (expectedOperationId !== undefined && matchingOperations.length === 0) {
+      return 'CREATED_VERSION_NOT_PROVEN';
+    }
     if (matchingOperations.length === 0) {
       const taggedCandidates = [];
       const untaggedVersions = [];
@@ -906,8 +960,35 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     } else {
       process.stdout.write(`${classifyAuditTrailSourceDecision(sourceEvidence, eventEvidence)}\n`);
     }
+  } else if (cliArgs[0] === '--select-exact-recovery-create-operation-id') {
+    const [, operationsPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, outputPath] = cliArgs;
+    if (!operationsPath || !runStartedAt || !runFinishedAt || !operationCreatorServiceAccountId || !outputPath) {
+      process.stdout.write('CREATE_OPERATION_ID_NOT_PROVEN\n');
+      process.exitCode = 1;
+    } else {
+      try {
+        const operations = await readJson(operationsPath);
+        const operationId = selectExactRecoveryCreateOperationId({
+          operations,
+          runStartedAt,
+          runFinishedAt,
+          operationCreatorServiceAccountId,
+        });
+        if (operationId === null) {
+          process.stdout.write('CREATE_OPERATION_ID_NOT_PROVEN\n');
+          process.exitCode = 1;
+        } else {
+          await writeFile(outputPath, operationId, 'utf8');
+          process.stdout.write('CREATE_OPERATION_ID_SELECTED\n');
+        }
+      } catch {
+        process.stdout.write('RECOVERY_METADATA_JSON_INVALID\n');
+        process.exitCode = 1;
+      }
+    }
   } else {
-    const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt, operationCreatorServiceAccountId, runtimeServiceAccountId] = cliArgs;
+    const [versionsPath, operationsPath, taggedVersionPath, tagHistoryPath, runStartedAt, runFinishedAt,
+      operationCreatorServiceAccountId, runtimeServiceAccountId, expectedOperationId] = cliArgs;
     if (!versionsPath || !operationsPath || !taggedVersionPath || !tagHistoryPath || !runStartedAt || !runFinishedAt || !operationCreatorServiceAccountId || !runtimeServiceAccountId) {
     process.stdout.write('RECOVERY_DEPLOY_INPUT_INVALID\n');
     process.exitCode = 2;
@@ -934,6 +1015,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         runFinishedAt,
         operationCreatorServiceAccountId,
         runtimeServiceAccountId,
+        ...(expectedOperationId === undefined ? {} : { expectedOperationId }),
       });
       process.stdout.write(`${ENUMS.has(result) ? result : 'DIAGNOSTIC_FAILED'}\n`);
       if (result === 'DIAGNOSTIC_FAILED') process.exitCode = 2;
