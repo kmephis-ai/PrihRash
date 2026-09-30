@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -349,4 +350,15 @@ test('resume read phases remain bounded runtime evidence through the bootstrap i
     assert.equal(result.exitCode, 2);
     assertSafeOutput(result, value);
   }
+});
+
+
+test('bootstrap invoker bypasses the Undici 300s headers timeout with one explicit native HTTPS deadline', async () => {
+  const source = await readFile(INVOKER, 'utf8');
+  assert.match(source, /request as httpsRequest.*node:https/);
+  assert.match(source, /const INVOKE_TIMEOUT_MS = 630_000/);
+  assert.match(source, /request\.destroy\(createTransportTimeoutError\(\)\)/);
+  assert.match(source, /setTimeout\([\s\S]*INVOKE_TIMEOUT_MS/);
+  assert.doesNotMatch(source, /\bfetch\s*\(/);
+  assert.doesNotMatch(source, /headersTimeout/);
 });
