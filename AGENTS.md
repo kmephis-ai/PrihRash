@@ -280,7 +280,7 @@ boundary к одному decision point. После двух distinct-SHA read-o
 остановиться `BLOCKED_NEEDS_ROOT_CAUSE`.
 
 Successor после pre-provider CI/autocontinue changeset stop остаётся тем же Incident-M boundary:
-включать полную допустимую causal changeset, общие тестируемые классификаторы и terminal outcomes;
+включать полную допустимую causal changeset, тестируемые caller/recovery predicates и terminal outcomes;
 повтор `enum -> PR -> probe -> более точный enum -> PR` запрещён.
 
 Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`

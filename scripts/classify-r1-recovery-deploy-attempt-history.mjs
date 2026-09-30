@@ -68,50 +68,6 @@ export function classifyRecoveryDeployAttemptHistory({
   return 'PRIOR_PREWRITE_STOP_ONLY';
 }
 
-export function classifyRecoveryReuseInterveningRun({
-  run,
-  jobs,
-  currentSha,
-  sourceSha,
-  sourceWorkflowId,
-  expectedRunId,
-}) {
-  if (!run || !Number.isSafeInteger(run.id) || run.id < 1
-    || !/^[0-9a-f]{40}$/.test(String(currentSha))
-    || !/^[0-9a-f]{40}$/.test(String(sourceSha))
-    || currentSha === sourceSha
-    || !/^[1-9][0-9]*$/.test(String(sourceWorkflowId))
-    || !/^[1-9][0-9]*$/.test(String(expectedRunId))
-    || run.id !== Number(expectedRunId)) {
-    return 'INTERVENING_RECOVERY_RUN_NOT_EXACT';
-  }
-  if (run.workflow_id !== Number(sourceWorkflowId)
-    || run.name !== 'R1 initial bootstrap recovery'
-    || run.head_branch !== 'main'
-    || run.event !== 'workflow_dispatch'
-    || run.status !== 'completed'
-    || run.conclusion !== 'failure'
-    || !/^[0-9a-f]{40}$/.test(String(run.head_sha))
-    || run.head_sha === currentSha
-    || run.head_sha === sourceSha) {
-    return 'INTERVENING_RECOVERY_RUN_NOT_EXACT';
-  }
-  if (!jobs || !Array.isArray(jobs.jobs)) return 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN';
-  const recoveryJobs = jobs.jobs.filter((job) => job && job.name === 'initial-bootstrap-recovery');
-  if (recoveryJobs.length !== 1 || recoveryJobs[0].conclusion !== 'failure'
-    || !Array.isArray(recoveryJobs[0].steps)) return 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN';
-  const stepConclusion = (name) => {
-    const matches = recoveryJobs[0].steps.filter((step) => step && step.name === name);
-    return matches.length === 1 ? matches[0].conclusion : null;
-  };
-  if (stepConclusion('Verify exact accepted recovery Function version for reuse') !== 'failure'
-    || stepConclusion('Deploy recovery-only Function version') !== 'skipped'
-    || stepConclusion('Invoke exact read-only recovery tag once') !== 'skipped') {
-    return 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN';
-  }
-  return 'INTERVENING_RECOVERY_PREINVOKE_STOP_PROVEN';
-}
-
 export function classifyRecoveryVersionReuseSourceHistory({
   runs,
   jobsByRun,
@@ -192,24 +148,6 @@ export function classifyRecoveryVersionReuseSourceHistory({
 }
 
 async function main(args) {
-  if (args[0] === 'intervening-recovery' && args.length === 7) {
-    try {
-      const [run, jobs] = await Promise.all([
-        readFile(args[1], 'utf8').then(JSON.parse),
-        readFile(args[2], 'utf8').then(JSON.parse),
-      ]);
-      return classifyRecoveryReuseInterveningRun({
-        run,
-        jobs,
-        currentSha: args[3],
-        sourceSha: args[4],
-        sourceWorkflowId: args[5],
-        expectedRunId: args[6],
-      });
-    } catch {
-      return 'INTERVENING_RECOVERY_PHASE_NOT_PROVEN';
-    }
-  }
   if (args[0] === 'reuse-source' && args.length === 7) {
     try {
       const [runs, jobMap] = await Promise.all([

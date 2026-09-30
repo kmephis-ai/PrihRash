@@ -135,7 +135,9 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN/);
   assert.match(workflow, /newer_recovery_count/);
-  assert.match(workflow, /node scripts\/classify-r1-recovery-deploy-attempt-history\.mjs \\\s+intervening-recovery/);
+  assert.match(workflow, /--arg current_sha "\$GITHUB_SHA" --arg source_sha "\$source_failed_sha"/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_RUN_NOT_EXACT/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_PHASE_NOT_PROVEN/);
   assert.match(workflow, /\.id != \$self[\s\S]*\.created_at > \$created/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_PR_AUTHORITY_INVALID/);
   assert.match(workflow, /\.number == \$number and \.merged_at != null and \.merge_commit_sha == \$sha/);
@@ -151,6 +153,72 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_CLASSIFICATION_FAILED/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_ISSUE_INACTIVE/);
+});
+
+test('recovery caller intervening-run predicates reject source/current SHA and ambiguous phases', (t) => {
+  const runBlock = workflow.slice(workflow.indexOf('newer_run="$(curl'));
+  const runFilter = runBlock.match(/if ! jq -e --argjson id "\$newer_run_id"[\s\S]*?--arg source_sha "\$source_failed_sha" '\n([\s\S]*?)\n\s*' <<<"\$newer_run"/)?.[1];
+  const jobsBlock = workflow.slice(workflow.indexOf('newer_jobs="$(curl'));
+  const jobsFilter = jobsBlock.match(/if ! jq -e '\n([\s\S]*?)\n\s*' <<<"\$newer_jobs"/)?.[1];
+  assert.ok(runFilter, 'extract canonical recovery run identity predicate');
+  assert.ok(jobsFilter, 'extract canonical recovery phase predicate');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const runRecord = (overrides = {}) => ({
+    id: 17,
+    workflow_id: 29,
+    name: 'R1 initial bootstrap recovery',
+    head_branch: 'main',
+    event: 'workflow_dispatch',
+    status: 'completed',
+    conclusion: 'failure',
+    head_sha: 'c'.repeat(40),
+    ...overrides,
+  });
+  const exactRun = (value) => spawnSync('jq', [
+    '-e', '--argjson', 'id', '17', '--argjson', 'workflow_id', '29',
+    '--arg', 'current_sha', 'd'.repeat(40), '--arg', 'source_sha', 'a'.repeat(40), runFilter,
+  ], { input: JSON.stringify(value), encoding: 'utf8' }).status === 0;
+  assert.equal(exactRun(runRecord()), true);
+  for (const mismatch of [
+    { id: 18 }, { workflow_id: 30 }, { event: 'push' }, { status: 'in_progress' },
+    { conclusion: 'success' }, { head_sha: 'd'.repeat(40) }, { head_sha: 'a'.repeat(40) },
+  ]) assert.equal(exactRun(runRecord(mismatch)), false);
+
+  const job = (overrides = {}) => ({ jobs: [{
+    name: 'initial-bootstrap-recovery',
+    conclusion: 'failure',
+    steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+      { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+      { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+    ],
+    ...overrides,
+  }] });
+  const exactPhases = (value) => spawnSync('jq', ['-e', jobsFilter], {
+    input: JSON.stringify(value), encoding: 'utf8',
+  }).status === 0;
+  assert.equal(exactPhases(job()), true);
+  assert.equal(exactPhases({ jobs: [...job().jobs, ...job().jobs] }), false);
+  assert.equal(exactPhases(job({ conclusion: 'success' })), false);
+  assert.equal(exactPhases(job({ steps: [] })), false);
+  assert.equal(exactPhases(job({ steps: [
+    ...job().jobs[0].steps,
+    { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(exactPhases(job({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(exactPhases(job({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'failure' },
+  ] })), false);
 });
 
 test('read-only reuse authorization PR is distinct from the historical deploy-authority PR', (t) => {

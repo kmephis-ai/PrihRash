@@ -62,8 +62,8 @@ discriminator-only PR запрещён: сменить root-cause model/solution
 process bypass либо остановиться `BLOCKED_NEEDS_ROOT_CAUSE`.
 
 Pre-provider CI/autocontinue changeset stop не начинает новую causal hypothesis: его successor
-остаётся тем же Incident-M и включает полную допустимую causal changeset, общий fixture-tested
-classifier и terminal outcomes. Последовательность `enum -> PR -> probe -> более точный enum -> PR`
+остаётся тем же Incident-M и включает полную допустимую causal changeset, fixture-tested
+caller/recovery predicates и terminal outcomes. Последовательность `enum -> PR -> probe -> более точный enum -> PR`
 запрещена.
 
 Для Audit Trails boundary после #867 (`AUDIT_TRAIL_TRAILS_FIELD_INVALID`, `TrailService.List`

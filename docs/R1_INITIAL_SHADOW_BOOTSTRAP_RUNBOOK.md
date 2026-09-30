@@ -1950,9 +1950,9 @@ Quality `36651858153` and CodeQL `36651858180` passed. Its post-merge read-only 
 `36651940080` stopped before recovery dispatch with `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID`:
 the marker and run identities were valid, but the source PR did not contain the full causal changeset
 required by the main-branch guard. No recovery workflow was dispatched; no Yandex or YDB probe ran.
-The successor stays in the same Incident-M boundary and adds the shared fixture-tested intervening-run
-classifier, protobuf repeated-field empty semantics through the terminal Audit Trails decision, full
-synthetic response/history cases and synchronized anti-drift process rule. It preserves the one-shot
+The successor stays in the same Incident-M boundary and pairs the exact run/job predicates in both
+caller and recovery workflows with synthetic fixtures, then carries protobuf repeated-field empty
+semantics through the terminal Audit Trails decision and synchronizes anti-drift process rules. It preserves the one-shot
 create as consumed; only an exact-main/CI-approved read-only reuse classification can dispatch once.
 
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
