@@ -531,7 +531,7 @@ test('post-timeout surface recovery can arm only one full read-only exact-revisi
 
   assert.ok(evidence, 'surface-only recovery must hand off to full read-only classification');
   assert.match(evidence, /`41d7f988ed73e55e97eabb624a4f1d0f2aafb321`/);
-  assert.match(evidence, /recovery autocontinue `36769984568`/);
+  assert.match(evidence, /recovery\s+autocontinue `36769984568`/);
   assert.match(evidence, /recovery run `36770022601`/);
   assert.match(evidence, /`surface_only=true`/);
   assert.match(evidence, /PASS \/ INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
