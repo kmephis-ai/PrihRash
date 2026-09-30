@@ -2463,3 +2463,35 @@ Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workfl
 
 Exact active-interval agreement permits only the existing write-free recovery invoke. Any mismatch keeps
 durable state UNKNOWN and stops before invoke; no create/redeploy/IAM mutation/cleanup/replay is armed.
+
+### Dynamic active tracking Issue after recovery `36761995601`
+
+Exact-main recovery `36761995601` on
+`1110c84e71999b710c888fea0ad0a0416dbf6858` successfully proved the accepted recovery Function
+version and completed the single write-free recovery invoke. Its privacy-safe classification is
+`PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT` with
+`AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`, durable revision evidence
+`COMPLETE_CURRENT_RUN_ONLY`, verified current
+`STALE_STAGING_CURRENT_STATE_EMPTY`, source decode `NONE`, and
+`EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`. This does not authorize resume, retirement, cleanup, or
+bootstrap replay by itself.
+
+The same exact-main CI triggered ordinary autocontinue `36761949007`, which stopped repository-side
+as `R1_BOOTSTRAP_AUTOCONTINUE_NOT_R1_453_SOURCE`: the workflow still recognized only PR titles
+`R1 #453:` and fetched Issue `#453`, while the active completion-sprint tracking Issue is `#630`.
+No orchestrator dispatch or provider mutation resulted from that stop.
+
+Autocontinue must not hardcode a historical tracking Issue. It now discovers exactly one open GitHub
+Issue whose body carries both `R1-Process: COMPLETION_SPRINT` and `Single-Writer: REQUIRED`, derives
+`tracking_issue_number`, requires the merged source PR and historical root-cause PRs to use
+`R1 #<tracking_issue_number>:`, and verifies that exact discovered Issue is still open. Missing or
+ambiguous discovery fails closed as `R1_BOOTSTRAP_AUTOCONTINUE_TRACKING_ISSUE_NOT_EXACT`. This is a
+repository process correction only; it adds no provider authority.
+
+After this correction is merged and canonical CI is green, the next bounded R1 action remains the
+already documented **pre-write orchestrator preflight** with
+`allow_staging_resume=false` and `allow_stale_staging_retirement=false`. It must stop during
+read-only recovery before readiness/bootstrap and produce the exact pre-write orchestrator signature
+required before any later `SOURCE_DRIFT_REBASE`. No stale retirement or write-capable bootstrap is
+authorized by this checkpoint.
+
