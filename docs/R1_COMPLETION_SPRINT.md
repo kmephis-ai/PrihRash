@@ -103,6 +103,15 @@ Exact permission-denial marker обязан совпасть с последни
 failed recovery/version-source run IDs; scope ограничен Function folder и единственной доказанной
 Cloud Logging group, без parent-cloud или более широкого role binding.
 
+Если temporary-permission source PR останавливается раньше IAM path: exact recovery reuse verification
+failed, deploy/invoke `skipped`, допустим только следующий stage-specific full read-only classification
+точных failed `Recovery-Run-ID` + accepted `Recovery-Version-Run-ID`. Он не повторяет permission attempt
+и не добавляет binding. В одном successor Incident-M source/current/intervening run phases проходят
+fixture-tested exact guards; cleanup/artifact trap обязан переживать version-proof exits. Результаты
+ведут к разным terminal actions: applicable source → только существующий read-only recovery; no source →
+прекратить Audit-source path и сменить causal model; unusable/ambiguous → STOP; version still unproven →
+отдельная причинная гипотеза provenance, без повторения этого probe/SHA.
+
 ## Provider loop
 
 После merge root-cause PR выполняется только этот bounded цикл:

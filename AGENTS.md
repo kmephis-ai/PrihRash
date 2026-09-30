@@ -177,6 +177,21 @@ Function, не вызывает Function/YDB и не разрешает след
 новый causal root-cause decision. Отсутствующее/неоднозначное provider evidence остаётся
 `RECOVERY_REQUIRED`; никаких inferred `NOT_APPLIED` или replay.
 
+Если exact-main `R1 initial bootstrap recovery` завершился `failure` на
+`Verify exact accepted recovery Function version for reuse`, а deploy и invoke остались `skipped`, это
+доказывает pre-invoke stop, но не доказывает применимость exact Function version или Audit-source.
+Допускается ровно одна новая full read-only classification с
+`Provider-Attempt: NOT_AUTHORIZED`, `Recovery-Probe: READY`,
+`Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION`,
+`Recovery-State: STAGING_PRESENT_UNCLASSIFIED`, точными `Recovery-Run-ID` и
+`Recovery-Version-Run-ID` из свежего evidence и regression guard
+`tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs`. Workflow проверяет exact
+failed phase/source/version history, не добавляет IAM bindings и публикует enum-only recovery evidence
+даже если version proof снова завершится до Audit-source read. `EXISTING_APPLICABLE_AUDIT_SOURCE`
+разрешает только уже-gated read-only recovery; `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` завершает
+Audit-source ветку и требует смены causal model; `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` остаётся STOP.
+Не повторять workflow с теми же SHA/run IDs; никакого infer cleanup, IAM mutation, create или replay.
+
 Standing delegation из §8.3 разрешает автономно выбирать и выполнять последующие stage-appropriate
 read-only probes без нового per-probe Owner confirmation. Для того же failed recovery run после
 `missing`/`ambiguous` probe каждый successor требует нового exact SHA и новой repository causal

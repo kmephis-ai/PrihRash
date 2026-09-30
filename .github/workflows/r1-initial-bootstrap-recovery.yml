@@ -295,7 +295,13 @@ jobs:
               [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs | length) == 1
               and $jobs[0].conclusion == "failure"
-              and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
+              and (
+                (([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
+                  and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1)
+                or
+                (([$jobs[0].steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1
+                  and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1)
+              )
               and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
             ' <<<"$source_failed_jobs" >/dev/null; then
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 1;
@@ -356,8 +362,13 @@ jobs:
                 "$api/actions/runs/${newer_run_id}/jobs?filter=latest&per_page=100")"
               if ! jq -e '
                 [.jobs[] | select(.name == "initial-bootstrap-recovery" and .conclusion == "failure"
-                  and ([.steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
-                  and ([.steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1
+                  and (
+                    (([.steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "failure")] | length) == 1
+                      and ([.steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "skipped")] | length) == 1)
+                    or
+                    (([.steps[]? | select(.name == "Verify exact accepted recovery Function version for reuse" and .conclusion == "skipped")] | length) == 1
+                      and ([.steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1)
+                  )
                   and ([.steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1)]
                 | length == 1
               ' <<<"$newer_jobs" >/dev/null; then
@@ -736,8 +747,10 @@ jobs:
           audit_source_decision='RECOVERY_REUSE_AUDIT_NOT_ATTEMPTED'
           audit_event_evidence='RECOVERY_REUSE_AUDIT_NOT_ATTEMPTED'
           audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_NOT_REQUESTED'
+          logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_NOT_REQUESTED'
           binding_retirement_evidence='RECOVERY_REUSE_TEMP_AUDIT_BINDINGS_NOT_REQUIRED'
           temporary_audit_viewer_added='false'
+          temporary_logging_reader_added='false'
           classify_binding() {
             node scripts/classify-r1-temporary-audit-source-binding.mjs "$1" "$2" "$YC_WIF_SERVICE_ACCOUNT_ID"
           }
@@ -899,7 +912,7 @@ jobs:
                 *) printf 'RECOVERY_REUSE_CLASSIFIER_OUTPUT_INVALID' ;;
               esac
             }
-            jq -cn \
+            if ! jq -cn \
               --arg reuse "$(enum_only "$reuse_status")" \
               --arg version "$(enum_only "$version_evidence")" \
               --arg operation_list "$(enum_only "$operation_list_evidence")" \
@@ -911,7 +924,10 @@ jobs:
               --arg logging_reader "$(enum_only "$logging_reader_binding_evidence")" \
               --arg binding_retirement "$(enum_only "$binding_retirement_evidence")" \
               '{recoveryVersionReuse:$reuse,versionMetadataEvidence:$version,operationListEvidence:$operation_list,tagHistoryEvidence:$tag_history,auditTrailEvidence:$audit_trail,auditSourceDecision:$audit_decision,auditCreateEventEvidence:$audit_event,auditViewerBindingEvidence:$audit_viewer,loggingReaderBindingEvidence:$logging_reader,bindingRetirementEvidence:$binding_retirement}' \
-              > "$tmp/classification.json"
+              > "$tmp/classification.json"; then
+              echo 'RECOVERY_REUSE_CLASSIFICATION_ARTIFACT_WRITE_FAILED'
+              exit_code=1
+            fi
             exit "$exit_code"
           }
           trap write_reuse_result EXIT
