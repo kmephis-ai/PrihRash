@@ -1,3 +1,5 @@
+import { request as httpsRequest } from 'node:https';
+
 const BOOTSTRAP_TAG = 'r1-initial-bootstrap';
 const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const MAX_CAPTURE_BYTES = 64 * 1024;
@@ -384,55 +386,103 @@ function safeHttpStatus(status) {
   return 'HTTP_OTHER';
 }
 
+function responseHeader(response, name) {
+  const value = response?.headers?.[name.toLowerCase()];
+  if (Array.isArray(value)) return value.length === 1 ? value[0] : null;
+  return typeof value === 'string' ? value : null;
+}
+
 function safeHttpFailure(response) {
   return Object.freeze({
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED',
-    httpStatus: safeHttpStatus(response.status),
-    functionError: response.headers.get('x-function-error')?.toLowerCase() === 'true'
+    httpStatus: safeHttpStatus(Number.isInteger(response?.statusCode) ? response.statusCode : 0),
+    functionError: responseHeader(response, 'x-function-error')?.toLowerCase() === 'true'
       ? 'PRESENT'
       : 'ABSENT',
   });
 }
 
 async function readLimitedUtf8(response) {
-  if (response.body === null) return '';
-  const reader = response.body.getReader();
   const chunks = [];
   let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!(value instanceof Uint8Array)) return null;
-      total += value.byteLength;
-      if (total > MAX_CAPTURE_BYTES) {
-        await reader.cancel();
-        return null;
-      }
-      chunks.push(value);
+  for await (const chunk of response) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += bytes.byteLength;
+    if (total > MAX_CAPTURE_BYTES) {
+      response.destroy();
+      return null;
     }
-  } finally {
-    reader.releaseLock();
+    chunks.push(bytes);
   }
 
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
   try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, total));
   } catch {
     return null;
   }
+}
+
+function createTransportTimeoutError() {
+  const error = new Error('initial bootstrap HTTPS invocation timeout');
+  error.name = 'TimeoutError';
+  return error;
 }
 
 function isTransportTimeout(error) {
   return error !== null
     && (typeof error === 'object' || typeof error === 'function')
     && Reflect.get(error, 'name') === 'TimeoutError';
+}
+
+function invokeRawHttps(url, iamToken) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let request;
+    let timeout;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      resolve(result);
+    };
+    const fail = (error) => {
+      finish(isTransportTimeout(error) ? SAFE_INVOKE_FUNCTION_TIMEOUT : SAFE_INVOKE_FAILURE);
+    };
+
+    try {
+      request = httpsRequest(url, {
+        method: 'POST',
+        headers: Object.freeze({ Authorization: `Bearer ${iamToken}` }),
+      }, async (response) => {
+        if (response.statusCode !== 200) {
+          const result = safeHttpFailure(response);
+          finish(result);
+          response.destroy();
+          return;
+        }
+        try {
+          const body = await readLimitedUtf8(response);
+          finish(body === null
+            ? SAFE_INVOKE_OUTPUT_INVALID
+            : (parseExactFunctionResult(body) ?? SAFE_INVOKE_OUTPUT_INVALID));
+        } catch (error) {
+          fail(error);
+        }
+      });
+    } catch (error) {
+      fail(error);
+      return;
+    }
+
+    request.once('error', fail);
+    timeout = setTimeout(
+      () => request.destroy(createTransportTimeoutError()),
+      INVOKE_TIMEOUT_MS,
+    );
+    request.end();
+  });
 }
 function normalizeQueryStatusDiagnostic(result) {
   if (
@@ -459,25 +509,7 @@ async function invokeInitialBootstrap(environment = process.env) {
   url.searchParams.set('tag', BOOTSTRAP_TAG);
   url.searchParams.set('integration', 'raw');
 
-  let response;
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: Object.freeze({ Authorization: `Bearer ${iamToken}` }),
-      signal: AbortSignal.timeout(INVOKE_TIMEOUT_MS),
-    });
-  } catch (error) {
-    return isTransportTimeout(error) ? SAFE_INVOKE_FUNCTION_TIMEOUT : SAFE_INVOKE_FAILURE;
-  }
-
-  if (response.status !== 200) {
-    if (response.body !== null) await response.body.cancel().catch(() => {});
-    return safeHttpFailure(response);
-  }
-
-  const body = await readLimitedUtf8(response);
-  if (body === null) return SAFE_INVOKE_OUTPUT_INVALID;
-  return parseExactFunctionResult(body) ?? SAFE_INVOKE_OUTPUT_INVALID;
+  return invokeRawHttps(url, iamToken);
 }
 
 const result = normalizeQueryStatusDiagnostic(await invokeInitialBootstrap());
