@@ -125,7 +125,8 @@ test('async invoker contract is short-lived admission-only and contains no retry
 
   assert.match(source, /request as httpsRequest.*node:https/);
   assert.match(source, /const ACCEPT_TIMEOUT_MS = 30_000/);
-  assert.match(source, /url\.searchParams\.set\('tag', 'r1-initial-bootstrap-async'\)/);
+  assert.match(source, /const BOOTSTRAP_TAG = 'r1-initial-bootstrap-async'/);
+  assert.match(source, /url\.searchParams\.set\('tag', BOOTSTRAP_TAG\)/);
   assert.match(source, /url\.searchParams\.set\('integration', 'async'\)/);
   assert.match(source, /statusCode === 202/);
   assert.match(source, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED/);
