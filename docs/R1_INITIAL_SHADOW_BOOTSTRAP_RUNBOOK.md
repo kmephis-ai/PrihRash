@@ -2342,3 +2342,41 @@ autocontinue fixture verifies exact failed-phase/source identities and the requi
 part of the merged PR before dispatch. Expected terminal outcomes remain exact guarded read-only recovery
 dispatch or pre-provider STOP with no provider calls. Do not manually dispatch, alter the marker/run IDs,
 retry this SHA, or infer provider activity from autocontinue success.
+
+### Exact OperationService.Get provenance bypass after recovery `36734338396`
+
+The approved typed-metadata/ListOperations classification run `36734338396` on exact main
+`c86aa0a831c7cf413aed4f432a706e39ad746dc5` completed failure at reuse version verification with
+`RECOVERY_REUSE_VERSION_NOT_PROVEN / CREATED_VERSION_NOT_PROVEN`; deploy/invoke and Audit/IAM fallback
+were skipped. This is terminal for the ListOperations response source; no same-source replay or extra
+enum refinement is allowed.
+
+The new read-only root model queries a different Yandex Cloud resource endpoint:
+[OperationService.Get](https://github.com/yandex-cloud/cloudapi/blob/master/yandex/cloud/operation/operation_service.proto).
+It first selects one Operation ID from the already-read exact Function-scoped list only if actor/time match
+the successful create-only source run and the operation is unique, done, error-free and has a response. It
+GETs that exact ID with the existing WIF token, then requires returned Operation.id to match, the typed
+`CreateFunctionVersionMetadata.function_version_id` to be exact, any Version response ID to agree, and the
+version list/current tag to identify one active runtime-contract-matching recovery version. Selection ID
+is runner-temporary and API payload remains private; only enum evidence is uploaded. Selection/Get errors,
+duplicates, wrong ID/type, incomplete/malformed operation, or version/tag/config mismatch all stop before
+Audit/IAM/deploy/invoke. Exact proof permits only the existing single write-free recovery invoke.
+
+The one-shot full read-only classification stays bound to failed target `36341844854`, accepted version
+source `36611387299`, and exact latest failed reuse verification `36734338396`:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36341844854
+Recovery-Version-Run-ID: 36611387299
+Recovery-Classification-Run-ID: 36734338396
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Terminal actions differ: exact Get/list/version/tag agreement → one durable read-only classification;
+missing/ambiguous/error/mismatch → remain UNKNOWN, no invoke/redeploy/cleanup/replay and stop this proof
+path. A successful recovery classification still does not prove `COMMITTED` without independent YDB
+reconciliation. This is a distinct resource provenance bypass, not another refinement of ListOperations.

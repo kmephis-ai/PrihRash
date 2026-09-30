@@ -209,6 +209,16 @@ runtime/entrypoint/runtime-service-account конфигурацией. `Operatio
 останавливается до Audit Trails/IAM fallback, synthetic fixtures и все terminal cases входят в тот же
 causal PR.
 
+Если exact metadata proof не доказан, не повторять `ListOperations` response-shape probes. Допускается один
+materially different read-only resource path: выбрать единственный completed/error-free actor/time-bound
+operation ID из уже прочитанного exact Function-scoped списка и запросить этот ID через Yandex
+`OperationService.Get`. ID хранить только runner-local; Get resource ID, typed metadata ID, optional
+response Version ID, unique active version/tag и full runtime contract обязаны совпасть. Любой missing,
+ambiguous, denied, malformed или conflicting результат завершает flow без Audit/IAM fallback и Function
+invoke; exact совпадение разрешает ровно один существующий write-free durable recovery invoke. Этот bypass
+— новая causal модель/provenance resource, а не discriminator refinement; все response/phase outcomes
+покрыть synthetic fixtures и одним marker-bound Incident-M.
+
 Для этого stage-specific reuse marker три run identity различны и обязательны: `Recovery-Run-ID` —
 оригинальный failed recovery target, `Recovery-Version-Run-ID` — успешный create-only source именно для
 этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification
