@@ -138,9 +138,11 @@ caller/recovery changeset gates и docs; это не разрешение на �
 GitHub Actions source run: exact `deploy-only-attempt` обязан иметь ровно один successful step
 `Create exactly one read-only recovery Function version without invoking it`; его `started_at/completed_at`
 задают узкое immutable source-step window. В этом окне provider read-only proof принимает только одну
-version с recovery tag, exact active `GetVersionByTag` runtime/config fingerprint и один current
-`ListTagHistory` record `tag -> functionVersionId` с тем же ID/effectiveFrom. Текущая tag mapping не
-может иметь более позднего assignment. Operation list/Get и Audit Trails не участвуют.
+version с recovery tag, exact active `GetVersionByTag` runtime/config fingerprint и один
+`ListTagHistory` record `tag -> functionVersionId` с тем же ID/effectiveFrom. После provider reads
+workflow фиксирует `observedAt`; history record считается current только если его интервал покрывает
+момент наблюдения: `effectiveFrom <= observedAt < effectiveTo`. Наличие future `effectiveTo` не означает
+retired tag; более позднего assignment быть не может. Operation list/Get и Audit Trails не участвуют.
 
 Exact source-step + version/tag/history agreement разрешает только существующий write-free recovery invoke
 по уже действующим marker/exact-main/history gates. Любая missing/ambiguous/config/time/history divergence
