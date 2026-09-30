@@ -16,44 +16,33 @@ function bindings(value) {
   return null;
 }
 
-function roleId(binding) {
-  return object(binding) ? (binding.role_id ?? binding.roleId) : null;
-}
-
-function subject(binding) {
-  return object(binding) && object(binding.subject) ? binding.subject : null;
-}
-
-function hasBinding(items, role, subjectId) {
+function hasRuntimeInvoker(items, runtimeServiceAccountId) {
   return items.some((binding) => {
-    const candidate = subject(binding);
-    return roleId(binding) === role
-      && candidate?.type === 'serviceAccount'
-      && candidate?.id === subjectId;
+    const role = binding?.role_id ?? binding?.roleId;
+    const subject = object(binding?.subject) ? binding.subject : null;
+    return role === 'functions.functionInvoker'
+      && subject?.type === 'serviceAccount'
+      && subject?.id === runtimeServiceAccountId;
   });
 }
 
 export function classifyAsyncDeployRecovery({
   versions,
   functionBindings,
-  runtimeServiceAccountBindings,
   functionId,
   runtimeServiceAccountId,
-  wifServiceAccountId,
   deployStartedAt,
   deployFinishedAt,
 }) {
+  const functionItems = bindings(functionBindings);
   if (
     !Array.isArray(versions)
     || versions.length >= 1_000
-    || !Array.isArray(bindings(functionBindings))
-    || !Array.isArray(bindings(runtimeServiceAccountBindings))
+    || !Array.isArray(functionItems)
     || typeof functionId !== 'string'
     || functionId.length === 0
     || typeof runtimeServiceAccountId !== 'string'
     || runtimeServiceAccountId.length === 0
-    || typeof wifServiceAccountId !== 'string'
-    || wifServiceAccountId.length === 0
   ) {
     return Object.freeze({
       status: 'STOP',
@@ -92,18 +81,7 @@ export function classifyAsyncDeployRecovery({
       && created <= upper;
   });
 
-  const functionItems = bindings(functionBindings);
-  const runtimeItems = bindings(runtimeServiceAccountBindings);
-  const runtimeInvoker = hasBinding(
-    functionItems,
-    'functions.functionInvoker',
-    runtimeServiceAccountId,
-  );
-  const wifCanUseRuntime = hasBinding(
-    runtimeItems,
-    'iam.serviceAccounts.user',
-    wifServiceAccountId,
-  );
+  const runtimeInvoker = hasRuntimeInvoker(functionItems, runtimeServiceAccountId);
 
   let previousWrite;
   if (tagged.length > 1 || candidates.length > 1) {
@@ -115,13 +93,13 @@ export function classifyAsyncDeployRecovery({
   }
 
   let verdict = 'BLOCKED';
-  if (previousWrite === 'NOT_APPLIED' && runtimeInvoker && wifCanUseRuntime) {
+  if (previousWrite === 'NOT_APPLIED' && runtimeInvoker) {
     verdict = 'SAFE_TO_CORRECT_CONFIG';
   } else if (previousWrite === 'AMBIGUOUS') {
     verdict = 'PREVIOUS_WRITE_AMBIGUOUS';
   } else if (previousWrite === 'VERSION_PRESENT') {
     verdict = 'PREVIOUS_VERSION_PRESENT';
-  } else if (!runtimeInvoker || !wifCanUseRuntime) {
+  } else if (!runtimeInvoker) {
     verdict = 'IAM_BOUNDARY_MISSING';
   }
 
@@ -131,32 +109,27 @@ export function classifyAsyncDeployRecovery({
     verdict,
     previousWrite,
     runtimeInvoker: runtimeInvoker ? 'PRESENT' : 'ABSENT',
-    wifRuntimeServiceAccountUser: wifCanUseRuntime ? 'PRESENT' : 'ABSENT',
   });
 }
 
 async function main(args) {
-  if (args.length !== 8) throw new Error('INVALID_ARGUMENTS');
+  if (args.length !== 6) throw new Error('INVALID_ARGUMENTS');
   const [
     versionsPath,
     functionBindingsPath,
-    runtimeBindingsPath,
     functionId,
     runtimeServiceAccountId,
-    wifServiceAccountId,
     deployStartedAt,
     deployFinishedAt,
   ] = args;
-  const [versions, functionBindings, runtimeServiceAccountBindings] = await Promise.all(
-    [versionsPath, functionBindingsPath, runtimeBindingsPath].map(async (path) => JSON.parse(await readFile(path, 'utf8'))),
+  const [versions, functionBindings] = await Promise.all(
+    [versionsPath, functionBindingsPath].map(async (filePath) => JSON.parse(await readFile(filePath, 'utf8'))),
   );
   return classifyAsyncDeployRecovery({
     versions,
     functionBindings,
-    runtimeServiceAccountBindings,
     functionId,
     runtimeServiceAccountId,
-    wifServiceAccountId,
     deployStartedAt,
     deployFinishedAt,
   });
