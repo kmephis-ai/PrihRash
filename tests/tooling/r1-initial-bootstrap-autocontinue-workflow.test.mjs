@@ -121,6 +121,12 @@ test('source-drift preflight accepts only exact successful recovery and dispatch
   assert.match(workflow, /Recovery-State: STAGING_PRESENT_UNCLASSIFIED/);
   assert.match(workflow, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
   assert.match(preflightGate, /PREFLIGHT_CHANGESET_INVALID/);
+  assert.match(preflightGate, /\.github\/actions\/restore-exact-source\/action\.yml/);
+  assert.match(preflightGate, /\.github\/workflows\/r1-initial-bootstrap-orchestrator\.yml/);
+  assert.match(preflightGate, /tests\/tooling\/exact-source-artifact\.test\.mjs/);
+  assert.match(preflightGate, /tests\/tooling\/r1-initial-bootstrap-orchestrator-workflow\.test\.mjs/);
+  assert.match(preflightGate, /all\(\.\[\]; \.filename \| IN\(/);
+  assert.doesNotMatch(preflightGate, /\.filename \| startswith\("src\/"\)/);
   assert.match(preflightGate, /compare\/\$preflight_recovery_sha\.\.\.\$SOURCE_SHA/);
   assert.match(preflightGate, /Deploy recovery-only Function version/);
   assert.match(preflightGate, /Invoke exact read-only recovery tag once/);
