@@ -505,9 +505,11 @@ function sourceStepEvidence(overrides = {}) {
       functionVersionId: 'synthetic-version',
       tag: 'r1-initial-bootstrap-recovery',
       effectiveFrom: '2026-09-27T18:46:35Z',
+      effectiveTo: '2099-12-31T23:59:59Z',
     }] },
     stepStartedAt: runStartedAt,
     stepFinishedAt: runFinishedAt,
+    observedAt: '2026-09-28T00:00:00Z',
     runtimeServiceAccountId: runtimeServiceAccount,
     functionId: 'synthetic-function',
     lockboxSecretId: 'synthetic-secret',
@@ -528,6 +530,7 @@ test('successful exact create-step plus immutable tag/version history proves the
         functionVersionId: 'other-version',
         tag: 'r1-initial-bootstrap-recovery',
         effectiveFrom: '2026-09-27T18:46:35Z',
+        effectiveTo: '2099-12-31T23:59:59Z',
       }] },
     })),
     'CREATED_VERSION_NOT_PROVEN',
@@ -554,8 +557,33 @@ test('successful exact create-step plus immutable tag/version history proves the
           functionVersionId: 'other-version',
           tag: 'r1-initial-bootstrap-recovery',
           effectiveFrom: '2026-09-27T18:46:37Z',
+          effectiveTo: '2099-12-31T23:59:59Z',
         },
       ] },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      tagHistory: { functionTagHistoryRecord: [{
+        ...sourceStepEvidence().tagHistory.functionTagHistoryRecord[0],
+        effectiveTo: '2026-09-27T23:00:00Z',
+      }] },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      tagHistory: { functionTagHistoryRecord: [{
+        ...sourceStepEvidence().tagHistory.functionTagHistoryRecord[0],
+        effectiveTo: 'not-a-timestamp',
+      }] },
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({
+      observedAt: '2026-09-27T18:46:20Z',
     })),
     'CREATED_VERSION_NOT_PROVEN',
   );
