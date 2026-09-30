@@ -1,0 +1,73 @@
+name: Local Git Publish R1 630 Tag History Proof
+
+on:
+  push:
+    branches:
+      - agent/local-mirror-r1-630-tag-history-proof
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: 4da687ef15d718020cbb404df7417e371aeaa11f
+      TARGET_BRANCH: incident/r1-create-step-tag-history-proof
+      PATCH_GZ_SHA256: 4f261ae71d7637bdfed18fcea870f1a42ff073bdecc0c99947facf9b9461f980
+      PATCH_SHA256: 7bdc68a90c3cad33f40b75fb9af3f6121fc917deb48c7bfa869e5fcbe6a52097
+    steps:
+      - name: Checkout transport payload
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: transport
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout exact source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 4da687ef15d718020cbb404df7417e371aeaa11f
+          path: target
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Verify, apply and publish exact local commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C target rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(sha256sum transport/.transport/r1-tag-history.patch.gz | awk '{print $1}')" = "$PATCH_GZ_SHA256"
+          gzip -dc transport/.transport/r1-tag-history.patch.gz > "$RUNNER_TEMP/r1-tag-history.patch"
+          test "$(sha256sum "$RUNNER_TEMP/r1-tag-history.patch" | awk '{print $1}')" = "$PATCH_SHA256"
+
+          if git -C target ls-remote --exit-code origin "refs/heads/$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo 'TARGET_BRANCH_ALREADY_EXISTS'
+            exit 1
+          fi
+
+          git -C target apply --check --whitespace=error-all "$RUNNER_TEMP/r1-tag-history.patch"
+          git -C target apply "$RUNNER_TEMP/r1-tag-history.patch"
+          git -C target diff --check
+
+          cat > "$RUNNER_TEMP/expected-files" <<'EOF'
+.github/workflows/r1-initial-bootstrap-recovery.yml
+AGENTS.md
+docs/R1_COMPLETION_SPRINT.md
+docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md
+scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs
+tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs
+tests/tooling/initial-bootstrap-recovery-workflow.test.mjs
+tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+EOF
+          git -C target diff --name-only | sort > "$RUNNER_TEMP/actual-files"
+          sort "$RUNNER_TEMP/expected-files" -o "$RUNNER_TEMP/expected-files"
+          diff -u "$RUNNER_TEMP/expected-files" "$RUNNER_TEMP/actual-files"
+
+          git -C target switch -c "$TARGET_BRANCH"
+          git -C target config user.name "kmephis-ai"
+          git -C target config user.email "kmephis@gmail.com"
+          git -C target add --all
+          git -C target commit -m "R1: prove recovery version from create step tag history"
+          git -C target push origin "HEAD:refs/heads/$TARGET_BRANCH"
