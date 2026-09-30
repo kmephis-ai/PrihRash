@@ -2,6 +2,15 @@ name: R1 initial shadow bootstrap
 
 on:
   workflow_dispatch:
+    inputs:
+      invocation_mode:
+        description: Bootstrap invocation mode; async admission is Owner-approved only through a separate orchestrator marker
+        required: true
+        default: sync
+        type: choice
+        options:
+          - sync
+          - async
 
 permissions:
   contents: read
@@ -250,6 +259,13 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_FUNCTION_PUBLIC'
             exit 1
           fi
+          if ! jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '
+            [.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject]
+            | any(.type == "serviceAccount" and .id == $id)
+          ' "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_BOOTSTRAP_WIF_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
 
           if ! yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
             --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err"; then
@@ -336,6 +352,16 @@ jobs:
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-deploy"
           mkdir -p "$tmp"
+          invocation_mode='${{ inputs.invocation_mode }}'
+          tag='r1-initial-bootstrap'
+          async_args=()
+          if [ "$invocation_mode" = 'async' ]; then
+            tag='r1-initial-bootstrap-async'
+            async_args=(
+              --async-max-retries 0
+              --async-service-account-id "$YC_WIF_SERVICE_ACCOUNT_ID"
+            )
+          fi
           if ! yc serverless function version create \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
@@ -344,7 +370,8 @@ jobs:
             --execution-timeout 600s \
             --source-path .artifacts/yandex-initial-bootstrap-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
-            --tags r1-initial-bootstrap \
+            --tags "$tag" \
+            "${async_args[@]}" \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
             --no-logging \
             --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
@@ -354,6 +381,42 @@ jobs:
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
             --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
             echo 'INITIAL_BOOTSTRAP_DEPLOY_FAILED'
+            exit 1
+          fi
+
+      - name: Verify exact async invocation configuration
+        if: ${{ inputs.invocation_mode == 'async' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-initial-bootstrap-async-config"
+          mkdir -p "$tmp"
+          if ! yc serverless function version get-by-tag \
+            --function-id "$PRIHRASH_YC_FUNCTION_ID" \
+            --tag r1-initial-bootstrap-async \
+            --format json-rest --retry 0 --no-user-output \
+            >"$tmp/version.json" 2>"$tmp/version.err"; then
+            echo 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_READ_FAILED'
+            exit 1
+          fi
+          if ! jq -e \
+            --arg runtime_sa "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --arg invoker_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+              .status == "ACTIVE"
+              and .runtime == "nodejs22"
+              and .entrypoint == "index.initialBootstrapHandler"
+              and .serviceAccountId == $runtime_sa
+              and (.tags | index("r1-initial-bootstrap-async") != null)
+              and (.executionTimeout == "600s")
+              and ((.resources.memory | tostring) == "1073741824")
+              and ((.asyncInvocationConfig.retriesCount | tostring) == "0")
+              and .asyncInvocationConfig.serviceAccountId == $invoker_sa
+              and (.asyncInvocationConfig.successTarget | has("emptyTarget"))
+              and ((.asyncInvocationConfig.successTarget | has("ymqTarget")) | not)
+              and (.asyncInvocationConfig.failureTarget | has("emptyTarget"))
+              and ((.asyncInvocationConfig.failureTarget | has("ymqTarget")) | not)
+            ' "$tmp/version.json" >/dev/null; then
+            echo 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_MISMATCH'
             exit 1
           fi
 
@@ -372,6 +435,13 @@ jobs:
           if jq -e '[.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id] | any(. == "allUsers" or . == "allAuthenticatedUsers")' \
             "$tmp/bindings.json" >/dev/null; then
             echo 'INITIAL_BOOTSTRAP_POSTFLIGHT_FUNCTION_PUBLIC'
+            exit 1
+          fi
+          if ! jq -e --arg id "$YC_WIF_SERVICE_ACCOUNT_ID" '
+            [.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject]
+            | any(.type == "serviceAccount" and .id == $id)
+          ' "$tmp/bindings.json" >/dev/null; then
+            echo 'INITIAL_BOOTSTRAP_POSTFLIGHT_WIF_INVOKER_BINDING_MISSING'
             exit 1
           fi
 
@@ -413,7 +483,11 @@ jobs:
           mkdir -p "$evidence_dir"
 
           set +e
-          npm run initial-bootstrap:invoke | tee "$tmp"
+          if [ '${{ inputs.invocation_mode }}' = 'async' ]; then
+            npm run initial-bootstrap:invoke-async | tee "$tmp"
+          else
+            npm run initial-bootstrap:invoke | tee "$tmp"
+          fi
           invoke_status="${PIPESTATUS[0]}"
           set -e
 
@@ -422,7 +496,10 @@ jobs:
             | .status as $status
             | .code as $code
             | select(
-                ($status == "PASS" and $code == "INITIAL_BOOTSTRAP_COMMITTED")
+                ($status == "PASS" and ($code | IN(
+                  "INITIAL_BOOTSTRAP_COMMITTED",
+                  "INITIAL_BOOTSTRAP_ASYNC_ACCEPTED"
+                )))
                 or ($status == "NOOP" and $code == "INITIAL_BOOTSTRAP_BASELINE_EXISTS")
                 or ($status == "STOP" and ($code | IN(
                   "INITIAL_BOOTSTRAP_CONTROLLED_REBUILD_REQUIRED",
@@ -431,6 +508,10 @@ jobs:
                 )))
                 or ($status == "FAIL" and ($code | IN(
                   "INITIAL_BOOTSTRAP_INVOKER_CONFIG_INVALID",
+                  "INITIAL_BOOTSTRAP_ASYNC_CONFIG_INVALID",
+                  "INITIAL_BOOTSTRAP_ASYNC_INVOKE_FAILED",
+                  "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_TIMEOUT",
+                  "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED",
                   "INITIAL_BOOTSTRAP_INVOKE_FAILED",
                   "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED",
                   "INITIAL_BOOTSTRAP_INVOKE_FUNCTION_TIMEOUT",
@@ -442,11 +523,14 @@ jobs:
                 )))
               )
             | select(
-                $code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                ($code != "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                 and $code != "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED")
                 or (
                   (.httpStatus | type) == "string"
                   and (.httpStatus | IN(
+                    "HTTP_2XX_OTHER",
                     "HTTP_400",
+                    "HTTP_401",
                     "HTTP_403",
                     "HTTP_404",
                     "HTTP_413",
@@ -632,7 +716,8 @@ jobs:
                   end
                 ),
                 httpStatus: (
-                  if $code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                  if ($code == "INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED"
+                      or $code == "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED")
                   then .httpStatus
                   else null
                   end
