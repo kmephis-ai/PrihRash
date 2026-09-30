@@ -265,6 +265,11 @@ stale-retirement/read-back, readiness, exact async version config и единс�
 После admission workflow не ждёт application response по HTTPS и не делает retry; итог определяется
 только durable recovery. Google остаётся authoritative.
 
+Integration implementation may add the mode/read-back/wait/recovery machinery to the existing canonical
+orchestrator before provider authority is armed. Such an integration PR must remain
+`Provider-Attempt: NOT_AUTHORIZED`, must not change autocontinue dispatch authority, and must keep an
+accepted async child nonterminal in GitHub workflow history until durable recovery is classified.
+
 ## Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,
