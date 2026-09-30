@@ -19,6 +19,9 @@ test('initial shadow bootstrap workflow is manual main-only and structurally gat
   const workflow = await text(WORKFLOW);
 
   assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /invocation_mode:/);
+  assert.match(workflow, /default: sync/);
+  assert.match(workflow, /- sync[\s\S]*- async/);
   assert.doesNotMatch(workflow, /\n\s+(push|pull_request|schedule|repository_dispatch):/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /github\.repository == 'kmephis-ai\/PrihRash'/);
@@ -54,7 +57,18 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
 
   assert.match(workflow, /\.artifacts\/yandex-initial-bootstrap-function/);
   assert.match(workflow, /index\.initialBootstrapHandler/);
-  assert.match(workflow, /--tags r1-initial-bootstrap/);
+  assert.match(workflow, /bootstrap_tag='r1-initial-bootstrap'/);
+  assert.match(workflow, /bootstrap_tag='r1-initial-bootstrap-async'/);
+  assert.match(workflow, /--tags "\$bootstrap_tag"/);
+  assert.match(workflow, /--async-max-retries 0/);
+  assert.match(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.doesNotMatch(workflow, /--async-(?:success|failure)-ymq-arn/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_POSTFLIGHT_ASYNC_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_VERSION_CONTRACT_MISMATCH/);
+  assert.match(workflow, /\.asyncInvocationConfig\.retriesCount == "0"/);
+  assert.match(workflow, /\.asyncInvocationConfig\.serviceAccountId == \$invoker_sa/);
+  assert.match(workflow, /has\("emptyTarget"\)/);
   assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--no-logging/);
@@ -70,6 +84,9 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
     assert.match(workflow, new RegExp(`key=${key}`));
   }
   assert.match(workflow, /npm run initial-bootstrap:invoke/);
+  assert.match(workflow, /npm run initial-bootstrap:invoke:async/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED/);
   assert.doesNotMatch(workflow, /npm run (?:readiness|schema-bootstrap|schema-upgrade-003):invoke/);
 });
 
