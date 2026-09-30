@@ -2542,3 +2542,48 @@ Success means only reaching the orchestrator-level recovery-blocked signature be
 Any exact-source or recovery mismatch remains STOP; `SOURCE_DRIFT_REBASE` is still not armed by this
 checkpoint.
 
+### Exact source-drift rebase gate after preflight `36767291650`
+
+PR #896 merged the exact CI run handoff on exact main
+`866e62a176daf2a873a37bdfe16b19960be4b165`. Push CI `36767139596` passed and published the
+exact-source artifact. Autocontinue `36767256576` proved the prior full recovery, carried that exact
+CI run ID into the orchestrator and dispatched preflight `36767291650` with
+`allow_staging_resume=false` and `allow_stale_staging_retirement=false`.
+
+The preflight restored the exact-source artifact successfully, passed exact-main/provider boundaries,
+deployed only the dedicated read-only recovery version, and stopped at its initial durable-state
+classification. Readiness and bootstrap were not dispatched. Privacy-safe evidence from this exact run:
+
+- orchestrator signature:
+  `R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED / RECOVERY_REQUIRED / STAGING_RUN_PRESENT`;
+- `R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH`;
+- `R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY`;
+- `R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY`;
+- `R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE`;
+- `R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN`;
+- readiness run: none;
+- bootstrap run/invoke: none.
+
+This is the canonical pre-write source-drift boundary. It is not a failed root-cause bootstrap attempt
+and does not authorize controlled rebuild, cap increase, ambiguous cleanup, timer or cutover. On one
+new exact SHA, the stage-specific `SOURCE_DRIFT_REBASE` may arm only the existing orchestrator with
+ordinary staging resume disabled and stale-STAGING retirement enabled. The provider path must repeat
+fresh recovery, require the same safe retirement conditions, then pass fresh readiness before any
+write-capable bootstrap child.
+
+The successor marker is:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT
+Expected-Transition: INITIAL_BOOTSTRAP_COMMITTED
+Recovery-State: STAGING_STALE_RETIREABLE
+Circuit-Rearm: SOURCE_DRIFT_REBASE
+Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs
+```
+
+Any changed recovery signature, non-empty verified current, ambiguous durable evidence, failed
+retirement/read-back, readiness non-PASS, bootstrap non-success or unknown provider outcome remains a
+recovery boundary. Google stays authoritative until a separately proven COMMITTED shadow baseline and
+required independent reconciliation/catch-up.
+
