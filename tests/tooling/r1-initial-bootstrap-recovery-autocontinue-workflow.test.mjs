@@ -104,6 +104,18 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
   assert.equal(select([{ ...validRun, conclusion: 'failure' }]), false);
 });
 
+test('reuse core changeset permits a complete recovery-source fix without touching its verified caller', () => {
+  const reuseBlock = workflow.slice(workflow.indexOf('if [ "$(jq -r \'.recoveryVersionReuse\''));
+  const changesetFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  assert.ok(changesetFilter, 'extract the bounded exact recovery-source changeset predicate');
+  assert.match(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery\.yml"/);
+  assert.match(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs"/);
+  assert.match(changesetFilter, /any\(\.\[]; \.filename == "AGENTS\.md"/);
+  assert.match(changesetFilter, /any\(\.\[]; \.filename == "docs\/R1_COMPLETION_SPRINT\.md"/);
+  assert.doesNotMatch(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
+  assert.match(changesetFilter, /"\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
+});
+
 test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
   const sourceFailedBlock = workflow.slice(workflow.indexOf('source_failed_jobs="$(curl'));
   const sourceFailedFilter = sourceFailedBlock.match(/if ! jq -e --argjson workflow_id "\$source_workflow_id" '([\s\S]*?)\n\s*' <<<"\$source_failed_jobs"/)?.[1];
