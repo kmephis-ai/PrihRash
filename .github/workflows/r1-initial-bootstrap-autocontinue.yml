@@ -38,11 +38,16 @@ jobs:
         env:
           GH_API_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_CI_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
           auth_header="Authorization: Bearer ${GH_API_TOKEN}"
           accept_header='Accept: application/vnd.github+json'
+          [[ "$SOURCE_CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || {
+            echo 'R1_BOOTSTRAP_AUTOCONTINUE_CI_RUN_ID_INVALID'
+            exit 0
+          }
 
           main_sha="$(curl --fail --silent --show-error \
             --header "$auth_header" \
@@ -665,9 +670,10 @@ jobs:
           fi
 
           dispatch_payload="$(jq -cn \
+            --arg ci_run_id "$SOURCE_CI_RUN_ID" \
             --arg resume "$allow_staging_resume" \
             --arg stale "$allow_stale_staging_retirement" \
-            '{ref:"main", inputs:{allow_staging_resume:$resume, allow_stale_staging_retirement:$stale}}')"
+            '{ref:"main", inputs:{ci_run_id:$ci_run_id, allow_staging_resume:$resume, allow_stale_staging_retirement:$stale}}')"
           curl --fail --silent --show-error \
             --request POST \
             --header "$auth_header" \
