@@ -86,39 +86,25 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
 });
 
-test('recovery version reuse queries Audit Trails directly for the exact validated folder and reaches source decision', () => {
-  const reuseStart = workflow.indexOf('      - name: Verify exact accepted recovery Function version for reuse');
-  const reuseEnd = workflow.indexOf('      - name: Deploy recovery-only Function version', reuseStart);
-  const reuseBlock = workflow.slice(reuseStart, reuseEnd);
-  assert.ok(reuseStart >= 0 && reuseEnd > reuseStart);
-  assert.match(reuseBlock, /--data-urlencode "folderId=\$\{YC_FOLDER_ID\}"/);
-  assert.match(reuseBlock, /--audit-folder-trails "\$target_trail_response" "\$YC_CLOUD_ID" "\$YC_FOLDER_ID"/);
-  assert.doesNotMatch(reuseBlock, /resource-manager\.api\.cloud\.yandex\.net\/resource-manager\/v1\/folders|--audit-cloud-folder-ids|--audit-cloud-trails/);
-  assert.match(reuseBlock, /audit_source_decision="\$\(node scripts\/classify-yandex-initial-bootstrap-recovery-deploy\.mjs/);
-  assert.match(reuseBlock, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE\|SOURCE_EVIDENCE_UNUSABLE\|SOURCE_EVIDENCE_AMBIGUOUS/);
-  assert.match(reuseBlock, /if \[ -z "\$YC_CLOUD_ID" \]; then[\s\S]*AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID/);
-});
-
-test('exact CreateFunctionVersion operation metadata proof exits before Audit Trails or IAM fallback', () => {
-  const reuseStart = workflow.indexOf('      - name: Verify exact accepted recovery Function version for reuse');
-  const reuseEnd = workflow.indexOf('      - name: Deploy recovery-only Function version', reuseStart);
-  const reuseBlock = workflow.slice(reuseStart, reuseEnd);
-  const getOperation = reuseBlock.indexOf('--select-exact-recovery-create-operation-id');
-  const directGet = reuseBlock.indexOf('https://operation.api.cloud.yandex.net/operations/v1/operations/${encoded_operation_id}');
-  const exactProof = reuseBlock.indexOf("if [ \"$reuse_evidence\" = 'EXACT_RECOVERY_VERSION_CREATED' ]; then");
-  const unprovenStop = reuseBlock.indexOf('case "$reuse_evidence" in\n            CREATE_OPERATION_AMBIGUOUS|');
-  const auditFallback = reuseBlock.indexOf("target_trail_response=\"$tmp/target-folder-audit-trails.json\"");
-  assert.ok(getOperation >= 0 && directGet > getOperation && exactProof > directGet);
-  assert.ok(unprovenStop > exactProof && auditFallback > unprovenStop);
-  assert.match(reuseBlock, /create-operation-get\.json[\s\S]*exact-operation-list\.json/);
-  assert.match(reuseBlock, /https:\/\/operation\.api\.cloud\.yandex\.net\/operations\/v1\/operations\/\$\{encoded_operation_id\}/);
-  assert.match(reuseBlock, /encodeURIComponent\(process\.argv\[1\]\)/);
-  assert.match(reuseBlock, /::add-mask::\$\{operation_id\}/);
-  assert.match(reuseBlock, /"\$RUNTIME_SERVICE_ACCOUNT_ID" "\$operation_id"/);
-  assert.match(reuseBlock, /reuse_status='EXACT_RECOVERY_VERSION_CREATED'[\s\S]*printf 'reuse_status=%s\\n' "\$reuse_status" >> "\$GITHUB_OUTPUT"[\s\S]*exit 0/);
-  assert.match(reuseBlock, /CREATE_OPERATION_AMBIGUOUS\|CREATE_OPERATION_IN_PROGRESS\|CREATE_OPERATION_FAILED\|CREATED_VERSION_NOT_PROVEN\|DEPLOYMENT_OUTCOME_UNCLASSIFIED\)[\s\S]*reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'[\s\S]*exit 1[\s\S]*target_trail_response=/);
-  assert.match(recoveryDeployClassifier, /CreateFunctionVersionMetadata/);
-  assert.match(recoveryDeployClassifier, /metadataVersionId/);
+test('exact successful source create-step and immutable tag history bypass Operation provenance before invoke', () => {
+  const sourceProof = workflow.indexOf('--successful-source-step-version');
+  const operationRead = workflow.indexOf('yc serverless function list-operations', sourceProof);
+  const operationGet = workflow.indexOf('operation.api.cloud.yandex.net/operations/v1/operations', sourceProof);
+  const auditRead = workflow.indexOf('target-folder-audit-trails.json', sourceProof);
+  const successExit = workflow.indexOf("reuse_status='EXACT_RECOVERY_VERSION_CREATED'", sourceProof);
+  assert.ok(sourceProof >= 0 && successExit > sourceProof);
+  assert.ok(operationRead === -1 || operationRead > successExit);
+  assert.ok(operationGet === -1 || operationGet > successExit);
+  assert.ok(auditRead === -1 || auditRead > successExit);
+  assert.match(workflow, /reuse-attempt-\$\{REUSE_DEPLOY_ATTEMPT_RUN_ID\}-jobs\.json/);
+  assert.match(workflow, /Create exactly one read-only recovery Function version without invoking it/);
+  assert.match(workflow, /\.conclusion == "success"/);
+  assert.match(workflow, /reuse_source_started_at=.*reuse_started_at/s);
+  assert.match(workflow, /reuse_source_finished_at=.*reuse_finished_at/s);
+  assert.match(workflow, /RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED/);
+  assert.match(recoveryDeployClassifier, /classifyRecoveryVersionFromSuccessfulSourceStep/);
+  assert.match(recoveryDeployClassifier, /functionTagHistoryRecord/);
+  assert.match(recoveryDeployClassifier, /exactRecoveryTaggedVersion/);
 });
 
 test('temporary audit permission probe is source-marker-bound and retires only per-run bindings', () => {
@@ -166,28 +152,25 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /functions\/\$\{PRIHRASH_YC_FUNCTION_ID\}:tagHistory/);
   assert.match(workflow, /data-urlencode 'pageSize=1000'/);
   assert.doesNotMatch(workflow, /functionTagHistoryRecord"\:\[\]\}/);
-  assert.match(workflow, /YC_CLOUD_ID: \$\{\{ secrets\.YC_R1_CLOUD_ID \}\}/);
-  assert.match(workflow, /--audit-source-decision/);
-  assert.match(workflow, /--audit-folder-trails "\$target_trail_response" "\$YC_CLOUD_ID" "\$YC_FOLDER_ID"/);
-  assert.doesNotMatch(workflow, /--audit-cloud-folder-ids|--audit-cloud-trails/);
-  assert.match(workflow, /--audit-events/);
-  assert.match(workflow, /\$expected_reuse_version_id/);
-  assert.match(workflow, /audit_source_decision" = 'EXISTING_APPLICABLE_AUDIT_SOURCE'/);
-  assert.match(workflow, /EXISTING_APPLICABLE_AUDIT_SOURCE/);
-  assert.match(workflow, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE/);
-  assert.match(workflow, /SOURCE_EVIDENCE_UNUSABLE/);
+  assert.match(workflow, /--successful-source-step-version/);
+  assert.match(workflow, /reuse-attempt-\$\{REUSE_DEPLOY_ATTEMPT_RUN_ID\}-jobs\.json/);
+  assert.match(workflow, /\.started_at/);
+  assert.match(workflow, /\.completed_at/);
+  assert.match(workflow, /RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED/);
+  assert.doesNotMatch(
+    workflow.slice(
+      workflow.indexOf('      - name: Verify exact accepted recovery Function version for reuse'),
+      workflow.indexOf('      - name: Deploy recovery-only Function version'),
+    ),
+    /list-operations|operation\.api\.cloud\.yandex\.net|--audit-source-decision|--audit-events/,
+  );
   assert.match(workflow, /Publish enum-only accepted-version proof outcome/);
   assert.match(workflow, /steps\.reuse-version\.outcome != 'skipped'/);
   assert.match(workflow, /trap write_reuse_result EXIT/);
   assert.match(workflow, /recoveryVersionReuse:\$reuse/);
   assert.match(workflow, /versionMetadataEvidence/);
-  assert.match(workflow, /auditSourceDecision/);
-  assert.match(workflow, /auditCreateEventEvidence/);
-  assert.match(workflow, /RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT/);
-  assert.match(workflow, /AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN/);
+  assert.match(workflow, /tagHistoryEvidence/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT/);
-  assert.match(workflow, /audit-events\.err/);
-  assert.doesNotMatch(workflow, /cat "\$tmp\/audit-events\.json"/);
   assert.match(recoveryDeployClassifier, /EXACT_RECOVERY_VERSION_CREATED/);
   assert.match(workflow, /name: Deploy recovery-only Function version\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
   assert.match(workflow, /name: Re-verify exact current main before recovery deployment\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);

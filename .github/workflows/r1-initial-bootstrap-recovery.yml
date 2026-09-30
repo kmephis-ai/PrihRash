@@ -541,8 +541,23 @@ jobs:
             ' <<<"$reuse_source_pr" >/dev/null || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_SOURCE_MARKER_INVALID'; exit 1;
             }
-            reuse_started_at="$(jq -er '.run_started_at' <<<"$reuse_source_run")"
-            reuse_finished_at="$(jq -er '.updated_at' <<<"$reuse_source_run")"
+            reuse_source_jobs_path="$tmp/reuse-attempt-${REUSE_DEPLOY_ATTEMPT_RUN_ID}-jobs.json"
+            reuse_create_step="$(jq -cer '
+              [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
+              | if ($jobs | length) != 1 then empty else
+                  [$jobs[0].steps[]? | select(
+                    .name == "Create exactly one read-only recovery Function version without invoking it"
+                    and .conclusion == "success"
+                    and (.started_at | type == "string")
+                    and (.completed_at | type == "string")
+                  )]
+                  | if length == 1 then .[0] else empty end
+                end
+            ' "$reuse_source_jobs_path")" || {
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_CREATE_STEP_NOT_EXACT'; exit 1;
+            }
+            reuse_started_at="$(jq -er '.started_at' <<<"$reuse_create_step")"
+            reuse_finished_at="$(jq -er '.completed_at' <<<"$reuse_create_step")"
             printf 'reuse_source_started_at=%s\nreuse_source_finished_at=%s\nreuse_source_sha=%s\n' \
               "$reuse_started_at" "$reuse_finished_at" "$reuse_source_sha" >> "$GITHUB_OUTPUT"
           fi
@@ -952,12 +967,8 @@ jobs:
             --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err" || {
               echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_LIST_FAILED'; exit 1;
             }
-          operation_list_evidence='RECOVERY_REUSE_OPERATION_LIST_READ_FAILED'
-          if yc serverless function list-operations --id "$PRIHRASH_YC_FUNCTION_ID" --limit 1000 \
-            --format json --retry 0 --no-user-output >"$tmp/operations.json" 2>"$tmp/operations.err"; then
-            operation_list_evidence='RECOVERY_REUSE_OPERATION_LIST_READ'
-            operations_read='true'
-          fi
+          operation_list_evidence='RECOVERY_REUSE_OPERATION_LIST_NOT_ATTEMPTED'
+          operations_read='false'
           reuse_status='RECOVERY_REUSE_TAG_READ_FAILED'
           if ! yc serverless function version get-by-tag --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --tag r1-initial-bootstrap-recovery --format json-rest --retry 0 --no-user-output \
@@ -977,167 +988,20 @@ jobs:
             printf '{"nextPageToken":"tag-history-read-failed"}\n' >"$tmp/tag-history.json"
           fi
           reuse_status='RECOVERY_REUSE_CLASSIFIER_FAILED'
-          if [ "$operations_read" = 'true' ]; then
-            reuse_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-              "$tmp/versions.json" "$tmp/operations.json" "$tmp/tagged-version.json" "$tmp/tag-history.json" \
-              "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$OPERATION_CREATOR_SERVICE_ACCOUNT_ID" "$RUNTIME_SERVICE_ACCOUNT_ID")" || {
-                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_CLASSIFICATION_FAILED'; exit 1;
-              }
-          else
-            reuse_evidence='RECOVERY_REUSE_OPERATION_LIST_READ_FAILED'
-          fi
-          version_evidence="$reuse_evidence"
-          if [ "$reuse_evidence" = 'CREATED_VERSION_NOT_PROVEN' ]; then
-            operation_id_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-              --select-exact-recovery-create-operation-id "$tmp/operations.json" \
-              "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$OPERATION_CREATOR_SERVICE_ACCOUNT_ID" \
-              "$tmp/create-operation-id")" || operation_id_evidence='CREATE_OPERATION_ID_NOT_PROVEN'
-            if [ "$operation_id_evidence" != 'CREATE_OPERATION_ID_SELECTED' ]; then
-              reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'
-              exit 1
-            fi
-            operation_id="$(cat "$tmp/create-operation-id")"
-            echo "::add-mask::${operation_id}"
-            encoded_operation_id="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$operation_id")"
-            if ! curl --fail --silent --show-error \
-              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
-              --header 'Accept: application/json' \
-              "https://operation.api.cloud.yandex.net/operations/v1/operations/${encoded_operation_id}" \
-              --output "$tmp/create-operation-get.json" 2>"$tmp/create-operation-get.err"; then
-              reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'
-              exit 1
-            fi
-            jq -cn --slurpfile operation "$tmp/create-operation-get.json" '$operation' \
-              > "$tmp/exact-operation-list.json"
-            reuse_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-              "$tmp/versions.json" "$tmp/exact-operation-list.json" "$tmp/tagged-version.json" "$tmp/tag-history.json" \
-              "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$OPERATION_CREATOR_SERVICE_ACCOUNT_ID" \
-              "$RUNTIME_SERVICE_ACCOUNT_ID" "$operation_id")" || {
-                reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
-                echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'; exit 1;
-              }
+          if reuse_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
+            --successful-source-step-version "$tmp/versions.json" "$tmp/tagged-version.json" \
+            "$tmp/tag-history.json" "$RUN_STARTED_AT" "$RUN_FINISHED_AT" \
+            "$RUNTIME_SERVICE_ACCOUNT_ID" "$PRIHRASH_YC_FUNCTION_ID" \
+            "$YC_LOCKBOX_SECRET_ID" "$PRIHRASH_LOCKBOX_VERSION_ID")"; then
             version_evidence="$reuse_evidence"
-          fi
-          if [ "$reuse_evidence" = 'EXACT_RECOVERY_VERSION_CREATED' ]; then
-            reuse_status='EXACT_RECOVERY_VERSION_CREATED'
-            printf 'reuse_status=%s\n' "$reuse_status" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "$reuse_evidence" in
-            CREATE_OPERATION_AMBIGUOUS|CREATE_OPERATION_IN_PROGRESS|CREATE_OPERATION_FAILED|CREATED_VERSION_NOT_PROVEN|DEPLOYMENT_OUTCOME_UNCLASSIFIED)
-              reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'
-              exit 1
-              ;;
-          esac
-          case "$reuse_evidence" in
-            CREATE_OPERATION_AMBIGUOUS|CREATE_OPERATION_IN_PROGRESS|CREATE_OPERATION_FAILED|RECOVERY_TAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW|RECOVERY_TAGGED_VERSION_AMBIGUOUS|RECOVERY_TAGGED_VERSION_METADATA_UNPROVEN|RECOVERY_TAG_HISTORY_METADATA_INVALID|RECOVERY_TAG_HISTORY_INCOMPLETE|RECOVERY_TAG_HISTORY_AMBIGUOUS|RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED|RECOVERY_TAG_HISTORY_VERSION_CANDIDATE_PRESENT|RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT|RECOVERY_UNTAGGED_VERSION_AMBIGUOUS|RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN|CREATED_VERSION_NOT_PROVEN|DEPLOYMENT_OUTCOME_UNCLASSIFIED|RECOVERY_REUSE_OPERATION_LIST_READ_FAILED|RECOVERY_REUSE_TAG_HISTORY_READ_FAILED) ;;
-            *)
-              reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'; exit 1;
-              ;;
-          esac
-
-          expected_reuse_version_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/tagged-version.json")" || {
-            reuse_status='RECOVERY_REUSE_TAGGED_VERSION_ID_UNPROVEN'
-            echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_TAGGED_VERSION_ID_UNPROVEN'; exit 1;
-          }
-          audit_trail_evidence='AUDIT_TRAIL_LIST_READ_FAILED'
-          audit_source_permission_ready='true'
-          if [ "$AUDIT_SOURCE_TEMPORARY_READ" = '1' ]; then
-            if ! ensure_folder_audit_viewer; then
-              audit_source_permission_ready='false'
-              audit_trail_evidence='AUDIT_TRAIL_TEMPORARY_VIEWER_SETUP_FAILED'
+            if [ "$reuse_evidence" = 'EXACT_RECOVERY_VERSION_CREATED' ]; then
+              reuse_status='EXACT_RECOVERY_VERSION_CREATED'
+              printf 'reuse_status=%s\n' "$reuse_status" >> "$GITHUB_OUTPUT"
+              exit 0
             fi
-          fi
-          if [ "$audit_source_permission_ready" != 'true' ]; then
-            :
-          elif [ -z "$YC_CLOUD_ID" ]; then
-            audit_trail_evidence='AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID'
           else
-            target_trail_response="$tmp/target-folder-audit-trails.json"
-            target_trail_list_http='000'
-            if target_trail_list_http="$(curl --silent --show-error --output "$target_trail_response" \
-              --write-out '%{http_code}' --get \
-              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
-              --header 'Accept: application/json' \
-              --data-urlencode "folderId=${YC_FOLDER_ID}" \
-              --data-urlencode 'pageSize=1000' \
-              'https://audittrails.api.cloud.yandex.net/audit-trails/v1/trails' \
-              2>"$tmp/target-folder-audit-trails.err")"; then
-              case "$target_trail_list_http" in
-                2??)
-                  audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                    --audit-folder-trails "$target_trail_response" "$YC_CLOUD_ID" "$YC_FOLDER_ID" \
-                    "$RUN_FINISHED_AT" "$tmp/audit-log-group-id")" || \
-                    audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED'
-                  ;;
-                *)
-                  audit_trail_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                    --audit-trail-http-status "$target_trail_list_http")"
-                  ;;
-              esac
-            fi
-          fi
-          case "$audit_trail_evidence" in
-            AUDIT_TRAIL_METADATA_INVALID|AUDIT_TRAIL_LIST_INCOMPLETE|AUDIT_TRAIL_SOURCE_NOT_CONFIGURED|AUDIT_TRAIL_SOURCE_NOT_ACTIVE|AUDIT_TRAIL_SOURCE_AMBIGUOUS|AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT|AUDIT_TRAIL_OBJECT_STORAGE_SOURCE_PRESENT|AUDIT_TRAIL_SOURCE_UNSUPPORTED|AUDIT_TRAIL_SOURCE_CREATED_AFTER_TARGET|AUDIT_TRAIL_CONFIGURATION_CHANGED_AFTER_TARGET|AUDIT_TRAIL_SOURCE_OPEN_FAILED|AUDIT_TRAIL_LIST_READ_FAILED|AUDIT_TRAIL_AUTHENTICATION_REQUIRED|AUDIT_TRAIL_LIST_PERMISSION_DENIED|AUDIT_TRAIL_CLOUD_SCOPE_CONFIG_INVALID|AUDIT_TRAIL_FOLDER_LIST_READ_FAILED|AUDIT_TRAIL_FOLDER_LIST_PERMISSION_DENIED|AUDIT_TRAIL_FOLDER_LIST_INCOMPLETE|AUDIT_TRAIL_FOLDER_LIST_RESPONSE_INVALID|AUDIT_TRAIL_FOLDER_LIST_JSON_INVALID|AUDIT_TRAIL_FOLDER_LIST_INPUT_INVALID|AUDIT_TRAIL_FOLDER_ENTRY_INVALID|AUDIT_TRAIL_FOLDER_ID_INVALID|AUDIT_TRAIL_FOLDER_CLOUD_ID_MISSING|AUDIT_TRAIL_FOLDER_METADATA_INVALID|AUDIT_TRAIL_FOLDER_CLOUD_ID_MISMATCH|AUDIT_TRAIL_FOLDER_LIST_AMBIGUOUS|AUDIT_TRAIL_FOLDER_STATUS_MISSING|AUDIT_TRAIL_FOLDER_STATUS_UNSUPPORTED|AUDIT_TRAIL_TARGET_FOLDER_NOT_FOUND|AUDIT_TRAIL_TARGET_FOLDER_NOT_ACTIVE|AUDIT_TRAIL_SOURCE_NOT_COVERING_TARGET|AUDIT_TRAIL_COVERAGE_UNPROVEN|AUDIT_TRAIL_CLOUD_COVERAGE_INPUT_INVALID|AUDIT_TRAIL_TRAIL_LIST_RESPONSE_INVALID|AUDIT_TRAIL_TRAIL_LIST_ROOT_INVALID|AUDIT_TRAIL_TRAILS_FIELD_INVALID|AUDIT_TRAIL_TRAIL_PAGE_TOKEN_INVALID|AUDIT_TRAIL_TRAIL_LIST_COUNT_MISMATCH|AUDIT_TRAIL_TRAIL_JSON_INVALID|AUDIT_TRAIL_TRAIL_LIST_INPUT_INVALID|AUDIT_TRAIL_TRAIL_ENTRY_INVALID|AUDIT_TRAIL_TRAIL_FOLDER_ID_MISSING|AUDIT_TRAIL_TRAIL_FOLDER_MISMATCH|AUDIT_TRAIL_TRAIL_CLOUD_ID_MISSING|AUDIT_TRAIL_TRAIL_CLOUD_ID_MISMATCH|AUDIT_TRAIL_TRAIL_STATUS_MISSING|AUDIT_TRAIL_TRAIL_STATUS_UNSUPPORTED|AUDIT_TRAIL_TRAIL_TIMESTAMPS_INVALID|AUDIT_TRAIL_TRAIL_DESTINATION_INVALID|AUDIT_TRAIL_TRAIL_DESTINATION_UNPROVEN|AUDIT_TRAIL_CLOUD_CLASSIFIER_INTERNAL_ERROR|AUDIT_TRAIL_CLASSIFIER_FAILED) ;;
-            *) audit_trail_evidence='AUDIT_TRAIL_CLASSIFIER_FAILED' ;;
-          esac
-
-          audit_event_evidence='AUDIT_EVENT_READ_NOT_ATTEMPTED'
-          audit_source_decision="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-            --audit-source-decision "$audit_trail_evidence" "$audit_event_evidence")"
-          if [ "$audit_trail_evidence" = 'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT' ]; then
-            audit_log_group_id="$(cat "$tmp/audit-log-group-id")"
-            echo "::add-mask::${audit_log_group_id}"
-            audit_filter="json_payload.eventType = \"yandex.cloud.audit.serverless.functions.CreateFunctionVersion\" AND json_payload.details.functionId = \"${PRIHRASH_YC_FUNCTION_ID}\""
-            logging_reader_ready='true'
-            if [ "$AUDIT_SOURCE_TEMPORARY_READ" = '1' ] && ! ensure_exact_log_group_reader; then
-              logging_reader_ready='false'
-              audit_event_evidence='AUDIT_LOG_TEMPORARY_READER_SETUP_FAILED'
-            fi
-            if [ "$logging_reader_ready" != 'true' ]; then
-              :
-            elif ! yc logging read --group-id "$audit_log_group_id" \
-              --since "$RUN_STARTED_AT" --until "$RUN_FINISHED_AT" --limit 1000 \
-              --max-response-size 10485760 --filter "$audit_filter" \
-              --format json --retry 0 --no-user-output \
-              >"$tmp/audit-events.json" 2>"$tmp/audit-events.err"; then
-              if grep -Eqi 'PermissionDenied|permission denied|PERMISSION_DENIED|forbidden' "$tmp/audit-events.err"; then
-                audit_event_evidence='AUDIT_LOG_READ_PERMISSION_DENIED'
-              else
-                audit_event_evidence='AUDIT_LOG_READ_FAILED'
-              fi
-            else
-              audit_event_evidence="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-                --audit-events "$tmp/audit-events.json" "$tmp/versions.json" "$PRIHRASH_YC_FUNCTION_ID" \
-                "$OPERATION_CREATOR_SERVICE_ACCOUNT_ID" "$RUNTIME_SERVICE_ACCOUNT_ID" \
-                "$RUN_STARTED_AT" "$RUN_FINISHED_AT" "$expected_reuse_version_id")"
-            fi
-            audit_source_decision="$(node scripts/classify-yandex-initial-bootstrap-recovery-deploy.mjs \
-              --audit-source-decision "$audit_trail_evidence" "$audit_event_evidence")"
-          fi
-          case "$audit_event_evidence" in
-            AUDIT_EVENT_READ_NOT_ATTEMPTED|AUDIT_LOG_READ_FAILED|AUDIT_LOG_READ_PERMISSION_DENIED|AUDIT_LOG_LIST_INCOMPLETE|AUDIT_LOG_METADATA_INVALID|AUDIT_LOG_CLASSIFIER_FAILED|AUDIT_CREATE_EVENT_NOT_OBSERVED|AUDIT_CREATE_EVENT_AMBIGUOUS|AUDIT_CREATE_EVENT_WRITER_MISMATCH|AUDIT_CREATE_EVENT_IN_PROGRESS|AUDIT_CREATE_EVENT_CANCELLED|AUDIT_CREATE_EVENT_FAILED|AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED|AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN|EXACT_RECOVERY_VERSION_CREATED) ;;
-            *) audit_event_evidence='AUDIT_LOG_CLASSIFIER_FAILED' ;;
-          esac
-          case "$audit_source_decision" in
-            EXISTING_APPLICABLE_AUDIT_SOURCE|NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE|SOURCE_EVIDENCE_UNUSABLE|SOURCE_EVIDENCE_AMBIGUOUS) ;;
-            *) audit_source_decision='SOURCE_EVIDENCE_UNUSABLE' ;;
-          esac
-          if [ "$audit_source_decision" = 'EXISTING_APPLICABLE_AUDIT_SOURCE' ] \
-            && [ "$audit_event_evidence" = 'EXACT_RECOVERY_VERSION_CREATED' ] \
-            && jq -e --arg expected_id "$expected_reuse_version_id" \
-              --arg expected_runtime_sa "$RUNTIME_SERVICE_ACCOUNT_ID" '
-                .id == $expected_id and .status == "ACTIVE" and .runtime == "nodejs22"
-                and .entrypoint == "index.initialBootstrapRecoveryHandler"
-                and .serviceAccountId == $expected_runtime_sa
-              ' "$tmp/tagged-version.json" >/dev/null; then
-            reuse_status='EXACT_RECOVERY_VERSION_CREATED'
-            printf 'reuse_status=%s\n' "$reuse_status" >> "$GITHUB_OUTPUT"
-            exit 0
+            version_evidence="${reuse_evidence:-CREATED_VERSION_NOT_PROVEN}"
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_CLASSIFICATION_FAILED'
           fi
           reuse_status='RECOVERY_REUSE_VERSION_NOT_PROVEN'
           echo 'INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT'

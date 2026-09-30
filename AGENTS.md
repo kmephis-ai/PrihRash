@@ -219,6 +219,23 @@ invoke; exact совпадение разрешает ровно один сущ
 — новая causal модель/provenance resource, а не discriminator refinement; все response/phase outcomes
 покрыть synthetic fixtures и одним marker-bound Incident-M.
 
+Если и `OperationService.Get` не даёт exact version proof, больше не уточнять Operation response shape.
+Следующий materially different root model использует provider-independent source fact из GitHub Actions:
+accepted `Recovery-Version-Run-ID` уже обязан быть доказанным единственным create-only source, а внутри
+него ровно один step `Create exactly one read-only recovery Function version without invoking it` обязан
+завершиться `success`. Только timestamps этого exact step задают source window. Provider read-only path
+затем сверяет `version list`, полный immutable `GetVersionByTag` recovery config и `ListTagHistory`:
+один и тот же current `functionVersionId`, recovery tag, created/effectiveFrom внутри step window, без
+более позднего assignment; runtime/entrypoint/runtime service account, memory/timeout, recovery env,
+no-logging, metadata options и Lockbox secret mappings обязаны совпасть с create-only contract.
+
+Этот source-step/tag-history proof не читает Operation list/Get и не использует Audit Trails. Exact
+совпадение разрешает только уже-gated существующий write-free recovery invoke; любое расхождение остаётся
+fail-closed до invoke. Запрещены новая Function version, redeploy, IAM mutation, YDB/Google write, cleanup,
+same-SHA replay или inference по близкому времени без exact successful source-step evidence. Изменение
+делать одним Incident-M вместе с classifier/workflow fixtures, autocontinue regression test и canonical
+docs.
+
 Для этого stage-specific reuse marker три run identity различны и обязательны: `Recovery-Run-ID` —
 оригинальный failed recovery target, `Recovery-Version-Run-ID` — успешный create-only source именно для
 этого target, а `Recovery-Classification-Run-ID` — exact latest source-relative failed reuse-verification
