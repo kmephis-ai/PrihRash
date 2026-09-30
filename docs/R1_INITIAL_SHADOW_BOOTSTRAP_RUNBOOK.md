@@ -2857,3 +2857,42 @@ Regression-Test: tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.m
 Google remains authoritative. Async `202` is admission only; only post-window durable recovery can
 classify the YDB state, and first `COMMITTED` still requires independent reconciliation/catch-up.
 
+### Fresh full recovery before first async admission
+
+The second bounded synchronous transport attempt is still the last financial shadow write attempt:
+orchestrator `36773091950` on
+`14004f4119781a2cd02208cc0e6fe9aeb3ee802c` dispatched bootstrap child `36773555381`.
+That child passed all pre-invoke gates but returned only
+`FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED`. Its immediate post-invoke recovery returned
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT`, but that recovery completed before the Function's full
+600-second execution window could be treated as exhausted; it therefore cannot be used as current
+write authority.
+
+Owner-approved asynchronous invocation is now implemented only as a separate contract/plumbing
+capability. PR #902 established the repository-only admission contract. PR #903 merged provider
+plumbing into exact main `4a520247056e2b55d323110761c3eb014c8d1975`; canonical CI
+`36781760182` and Browser Quality `36781760087` passed. Ordinary and recovery autocontinue for
+that merge both stopped on invalid/non-provider markers, so no async readiness, orchestrator,
+Function deploy or admission occurred.
+
+Before the first async provider attempt, durable state must therefore be classified again on a
+distinct new SHA. This successor is read-only only:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+Recovery autocontinue may dispatch exactly one normal full
+`r1-initial-bootstrap-recovery.yml` run with `surface_only=false`. It may read Google/YDB through
+the existing recovery contract but cannot dispatch readiness/orchestrator/bootstrap, cannot retire or
+resume STAGING, cannot create the async Function version, and cannot invoke the async tag.
+
+Only the resulting fresh revision/digest/current-state evidence may decide whether the async
+one-shot successor can use `STAGING_STALE_RETIREABLE`, another recovery state, or must stop. Owner
+approval for the async delivery model does not convert unknown durable state into write authority.
+Google remains authoritative and `COMMITTED` is still unproven.
+
