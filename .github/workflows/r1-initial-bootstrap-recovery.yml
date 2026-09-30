@@ -311,8 +311,9 @@ jobs:
                 }
               if ! jq -e --argjson id "$newer_run_id" --argjson workflow_id "$source_workflow_id" \
                 --arg current_sha "$GITHUB_SHA" --arg source_sha "$source_failed_sha" '
-                .id == $id and .workflow_id == $workflow_id and .head_branch == "main"
-                and .event == "workflow_dispatch" and .status == "completed" and .conclusion == "failure"
+                .id == $id and .workflow_id == $workflow_id and .name == "R1 initial bootstrap recovery"
+                and .head_branch == "main" and .event == "workflow_dispatch"
+                and .status == "completed" and .conclusion == "failure"
                 and .head_sha != $current_sha and .head_sha != $source_sha
                 and (.head_sha | test("^[0-9a-f]{40}$"))
               ' <<<"$newer_run" >/dev/null; then
