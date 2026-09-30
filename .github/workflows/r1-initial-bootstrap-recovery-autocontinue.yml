@@ -258,18 +258,21 @@ jobs:
               --header "$auth_header" --header "$accept_header" \
               "$api/pulls/${source_pr_number}/files?per_page=100")" || {
                 echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_PR_FILES_READ_FAILED'; exit 0;
-              }
+            }
             if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e \
-              --arg test "$(jq -er '.regressionTest' <<<"$marker")" '
+              --arg test "$(jq -er '.regressionTest' <<<"$marker")" \
+              --argjson permission_probe "$(jq -r '.auditSourcePermissionProbe' <<<"$marker")" '
                     any(.[]; .filename == $test and .status != "removed")
                     and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery.yml" and .status != "removed")
-                    and any(.[]; .filename == "scripts/classify-r1-temporary-audit-source-binding.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
-                and any(.[]; .filename == "AGENTS.md" and .status != "removed")
-                and any(.[]; .filename == "docs/R1_COMPLETION_SPRINT.md" and .status != "removed")
+                    and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-workflow.test.mjs" and .status != "removed")
+                    and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
+                    and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+                    and any(.[]; .filename == "AGENTS.md" and .status != "removed")
+                    and any(.[]; .filename == "docs/R1_COMPLETION_SPRINT.md" and .status != "removed")
+                    and (($permission_probe | not) or (
+                      any(.[]; .filename == "scripts/classify-r1-temporary-audit-source-binding.mjs" and .status != "removed")
+                      and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs" and .status != "removed")
+                    ))
                 and all(.[]; .filename | IN(
                   ".github/workflows/r1-initial-bootstrap-recovery.yml",
                   ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml",
@@ -318,7 +321,13 @@ jobs:
             if ! jq -e --argjson workflow_id "$source_workflow_id" '[.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
               | ($jobs|length)==1
               and $jobs[0].conclusion=="failure"
-              and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1
+              and (
+                (([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")]|length)==1
+                  and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")]|length)==1)
+                or
+                (([$jobs[0].steps[]?|select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="skipped")]|length)==1
+                  and ([$jobs[0].steps[]?|select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")]|length)==1)
+              )
               and ([$jobs[0].steps[]?|select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")]|length)==1
             ' <<<"$source_failed_jobs" >/dev/null; then
               echo 'R1_RECOVERY_AUTOCONTINUE_REUSE_FAILED_PHASE_NOT_PROVEN'; exit 0
@@ -377,8 +386,13 @@ jobs:
                 }
               if ! jq -e '
                 [.jobs[] | select(.name=="initial-bootstrap-recovery" and .conclusion=="failure"
-                  and ([.steps[]? | select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")] | length)==1
-                  and ([.steps[]? | select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")] | length)==1
+                  and (
+                    (([.steps[]? | select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="failure")] | length)==1
+                      and ([.steps[]? | select(.name=="Deploy recovery-only Function version" and .conclusion=="skipped")] | length)==1)
+                    or
+                    (([.steps[]? | select(.name=="Verify exact accepted recovery Function version for reuse" and .conclusion=="skipped")] | length)==1
+                      and ([.steps[]? | select(.name=="Deploy recovery-only Function version" and .conclusion=="failure")] | length)==1)
+                  )
                   and ([.steps[]? | select(.name=="Invoke exact read-only recovery tag once" and .conclusion=="skipped")] | length)==1)]
                 | length==1
               ' <<<"$newer_jobs" >/dev/null; then

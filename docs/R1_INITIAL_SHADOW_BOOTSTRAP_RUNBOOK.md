@@ -2169,3 +2169,33 @@ The canonical recovery workflow accepts this `READY` marker only with the explic
 input and exact merged source PR. Recovery autocontinue validates the IDs/history/source changeset and
 dispatches only that workflow. Other R1 autocontinue paths do not accept this source-permission
 signature; duplicate/ambiguous marker lines fail closed.
+
+### Exact reuse preflight stopped before the temporary Audit-source permission path
+
+On exact main `0dac36920088f4c290fcda8e4d6260d20de105f0`, recovery run `36697361841` failed at
+`Verify exact accepted recovery Function version for reuse` with the safe signature
+`INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT`; deploy and invoke were `skipped`. The enum-only
+artifact was missing because the EXIT cleanup referenced an uninitialized temporary logging-reader flag.
+The exact checked-in control flow exits at version proof before temporary IAM setup, Audit Trails, Cloud
+Logging, Function deploy/invoke, or YDB recovery invoke. No cleanup or IAM mutation is inferred.
+
+One exact-run full read-only classification is allowed on a new SHA, bound to failed recovery run
+`36697361841` and the earlier accepted version source run `36611387299`:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Probe: READY
+Expected-Transition: READ_ONLY_EXACT_REVISION_CLASSIFICATION
+Recovery-State: STAGING_PRESENT_UNCLASSIFIED
+Recovery-Run-ID: 36697361841
+Recovery-Version-Run-ID: 36611387299
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs
+```
+
+The exact failed phase is accepted only when reuse verification failed and both deploy/invoke were
+skipped; the pre-existing deploy-failed/invoke-skipped phase remains separately supported. The probe
+does not add/remove IAM bindings or create a Function version. It classifies version provenance and
+continues only through the existing read-only Audit-source/recovery gates. Exact applicable source,
+`NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, and `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` have distinct terminal next steps; a
+still-unproven version stops before Audit-source/IAM access and changes the provenance root-cause
+hypothesis. Same-SHA/run-ID replay, cleanup, permission widening, create, and YDB replay remain forbidden.

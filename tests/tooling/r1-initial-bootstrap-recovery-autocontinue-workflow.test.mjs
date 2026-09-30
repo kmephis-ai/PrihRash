@@ -72,6 +72,25 @@ test('recovery autocontinue is a bounded exact-main read-only dispatch surface',
   assert.match(workflow, /cancel-in-progress:\s*false/);
 });
 
+test('Owner anti-S-unit rules and exact reuse-preflight recovery are synchronized', () => {
+  for (const source of [agents, completionSprint]) {
+    assert.match(source, /Owner anti-S-unit override/);
+    assert.match(source, /двух distinct-SHA read-only refinements/);
+    assert.match(source, /EXISTING_APPLICABLE_AUDIT_SOURCE/);
+    assert.match(source, /NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE/);
+    assert.match(source, /SOURCE_EVIDENCE_UNUSABLE\/AMBIGUOUS/);
+  }
+  const evidence = runbook.match(
+    /### Exact reuse preflight stopped before the temporary Audit-source permission path([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'the exact failed recovery phase must remain in the canonical runbook');
+  assert.match(evidence, /`36697361841`/);
+  assert.match(evidence, /`36611387299`/);
+  assert.match(evidence, /Provider-Attempt: NOT_AUTHORIZED/);
+  assert.match(evidence, /does not add\/remove IAM bindings/);
+  assert.match(evidence, /SOURCE_EVIDENCE_UNUSABLE\/AMBIGUOUS/);
+});
+
 test('reuse source run selection follows the exact workflow endpoint and dynamic run-name response shape', (t) => {
   const filter = workflow.match(/--argjson id "\$source_reuse_run_id" --arg expected[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$reuse_attempts"/)?.[1];
   assert.ok(filter, 'extract the live source-run selection filter');
@@ -108,7 +127,7 @@ test('reuse source run selection follows the exact workflow endpoint and dynamic
 
 test('reuse core changeset permits a complete recovery-source fix without touching its verified caller', () => {
   const reuseBlock = workflow.slice(workflow.indexOf('if [ "$(jq -r \'.recoveryVersionReuse\''));
-  const changesetFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  const changesetFilter = reuseBlock.match(/--arg test "\$\(jq -er '\.regressionTest' <<<"\$marker"\)"[\s\S]*?'\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
   assert.ok(changesetFilter, 'extract the bounded exact recovery-source changeset predicate');
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery\.yml"/);
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "scripts\/classify-r1-temporary-audit-source-binding\.mjs"/);
@@ -119,6 +138,37 @@ test('reuse core changeset permits a complete recovery-source fix without touchi
   assert.match(changesetFilter, /any\(\.\[]; \.filename == "docs\/R1_COMPLETION_SPRINT\.md"/);
   assert.doesNotMatch(changesetFilter, /any\(\.\[]; \.filename == "\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
   assert.match(changesetFilter, /"\.github\/workflows\/r1-initial-bootstrap-recovery-autocontinue\.yml"/);
+});
+
+test('read-only reuse changesets do not require temporary-IAM code while permission attempts still do', (t) => {
+  const filter = workflow.match(/--argjson permission_probe "\$\(jq -r '\.auditSourcePermissionProbe' <<<"\$marker"\)" '\n([\s\S]*?)\n\s*' <<<"\$source_files"/)?.[1];
+  assert.ok(filter, 'extract the live source-PR changeset gate');
+  const jq = spawnSync('jq', ['--version'], { encoding: 'utf8' });
+  if (jq.error?.code === 'ENOENT') {
+    t.skip('jq CLI is unavailable');
+    return;
+  }
+  const commonFiles = [
+    'tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs',
+    '.github/workflows/r1-initial-bootstrap-recovery.yml',
+    'tests/tooling/initial-bootstrap-recovery-workflow.test.mjs',
+    'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md',
+    'AGENTS.md',
+    'docs/R1_COMPLETION_SPRINT.md',
+  ];
+  const files = (names) => names.map((filename) => ({ filename, status: 'modified' }));
+  const permits = (names, permissionProbe) => spawnSync('jq', [
+    '-e', '--arg test', commonFiles[0], '--argjson permission_probe', String(permissionProbe), filter,
+  ], { input: JSON.stringify(files([...new Set([...commonFiles, ...names])])), encoding: 'utf8' }).status === 0;
+
+  assert.equal(permits([], false), true);
+  assert.equal(permits([], true), false);
+  assert.equal(permits([
+    'scripts/classify-r1-temporary-audit-source-binding.mjs',
+    'tests/tooling/initial-bootstrap-recovery-deploy-classifier.test.mjs',
+  ], true), true);
+  assert.equal(permits(['scripts/classify-r1-temporary-audit-source-binding.mjs'], true), false);
+  assert.match(workflow, /R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID/);
 });
 
 test('reuse history accepts only one exact failed version-proof attempt when deploy and invoke are skipped', (t) => {
@@ -140,6 +190,7 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     name: 'initial-bootstrap-recovery',
     conclusion: 'failure',
     steps: [
+      { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
       { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
       { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
     ],
@@ -149,9 +200,24 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     '-e', '--argjson', 'workflow_id', '370292276', sourceFailedFilter,
   ], { input: JSON.stringify(jobs), encoding: 'utf8' }).status === 0;
   assert.equal(provesSourceFailedPhase(failedSourceJobs()), true);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), true);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ conclusion: 'success' })), false);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
     { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
   ] })), false);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
@@ -164,8 +230,15 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     ...failedSourceJobs().jobs,
   ] }), false);
   assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
     { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
     { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(provesSourceFailedPhase(failedSourceJobs({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'skipped' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
   ] })), false);
 
@@ -216,6 +289,11 @@ test('reuse history accepts only one exact failed version-proof attempt when dep
     return result.status === 0 && result.stdout.trim() === 'true';
   };
   assert.equal(provesPreinvokeReuseStop(job()), true);
+  assert.equal(provesPreinvokeReuseStop(job({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), true);
   assert.equal(provesPreinvokeReuseStop(job({ conclusion: 'success' })), false);
   assert.equal(provesPreinvokeReuseStop(job({
     steps: [

@@ -367,6 +367,12 @@ test('Audit Trails source branch reaches a terminal decision instead of another 
   assert.equal(classifyAuditTrailSourceDecision(
     'AUDIT_TRAIL_CLOUD_LOGGING_SOURCE_PRESENT', 'AUDIT_CREATE_EVENT_NOT_OBSERVED',
   ), 'SOURCE_EVIDENCE_UNUSABLE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_LIST_PERMISSION_DENIED', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'SOURCE_EVIDENCE_UNUSABLE');
+  assert.equal(classifyAuditTrailSourceDecision(
+    'AUDIT_TRAIL_TRAILS_FIELD_INVALID', 'AUDIT_EVENT_READ_NOT_ATTEMPTED',
+  ), 'SOURCE_EVIDENCE_UNUSABLE');
 });
 
 test('omitted protobuf repeated fields reach the same terminal empty-source decision as explicit empty lists', () => {

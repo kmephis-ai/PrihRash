@@ -113,6 +113,14 @@ test('temporary audit permission probe is source-marker-bound and retires only p
   assert.match(workflow, /logging group add-access-binding --id "\$audit_log_group_id"/);
   assert.match(workflow, /remove-access-binding/);
   assert.match(workflow, /bindingRetirementEvidence/);
+  const initialization = workflow.slice(
+    workflow.indexOf("audit_viewer_binding_evidence='RECOVERY_REUSE_TEMP_AUDIT_VIEWER_NOT_REQUESTED'"),
+    workflow.indexOf('trap write_reuse_result EXIT'),
+  );
+  assert.ok(initialization.indexOf("temporary_logging_reader_added='false'") >= 0);
+  assert.ok(workflow.indexOf("temporary_logging_reader_added='false'") < workflow.indexOf('trap write_reuse_result EXIT'));
+  assert.match(initialization, /logging_reader_binding_evidence='RECOVERY_REUSE_TEMP_LOGGING_READER_NOT_REQUESTED'/);
+  assert.match(workflow, /if ! jq -cn[\s\S]*> "\$tmp\/classification\.json"; then[\s\S]*RECOVERY_REUSE_CLASSIFICATION_ARTIFACT_WRITE_FAILED/);
   assert.match(workflow, /trap write_reuse_result EXIT/);
 });
 
@@ -164,6 +172,7 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /name: Invoke exact read-only recovery tag once\s+if: inputs\.reuse_deploy_attempt_run_id == '' \|\| steps\.reuse-version\.outputs\.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'/);
   assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_FAILED_PHASE_NOT_PROVEN/);
+  assert.match(workflow, /RECOVERY_REUSE_CLASSIFICATION_ARTIFACT_WRITE_FAILED/);
   assert.match(workflow, /latest_history_decision/);
   assert.match(workflow, /--arg current_sha "\$GITHUB_SHA" --arg source_sha "\$source_failed_sha"/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_INTERVENING_RUN_NOT_EXACT/);
@@ -237,6 +246,11 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
     input: JSON.stringify(value), encoding: 'utf8',
   }).status === 0;
   assert.equal(exactPhases(job()), true);
+  assert.equal(exactPhases(job({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'skipped' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), true);
   assert.equal(exactPhases({ jobs: [...job().jobs, ...job().jobs] }), false);
   assert.equal(exactPhases(job({ conclusion: 'success' })), false);
   assert.equal(exactPhases(job({ steps: [] })), false);
@@ -247,6 +261,11 @@ test('recovery caller intervening-run predicates reject source/current SHA and a
   assert.equal(exactPhases(job({ steps: [
     { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
     { name: 'Deploy recovery-only Function version', conclusion: 'success' },
+    { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
+  ] })), false);
+  assert.equal(exactPhases(job({ steps: [
+    { name: 'Verify exact accepted recovery Function version for reuse', conclusion: 'failure' },
+    { name: 'Deploy recovery-only Function version', conclusion: 'failure' },
     { name: 'Invoke exact read-only recovery tag once', conclusion: 'skipped' },
   ] })), false);
   assert.equal(exactPhases(job({ steps: [
