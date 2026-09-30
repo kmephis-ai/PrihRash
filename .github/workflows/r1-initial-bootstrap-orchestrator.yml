@@ -8,6 +8,14 @@ on:
         required: false
         default: ''
         type: string
+      bootstrap_invocation_mode:
+        description: Select synchronous result contract or owner-approved async admission contract
+        required: true
+        default: sync
+        type: choice
+        options:
+          - sync
+          - async
       allow_staging_resume:
         description: Allow one guarded application-level resume of exact durable STAGING evidence
         required: true
@@ -596,11 +604,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs bootstrap)"
-          printf '%s\n' "$result" | jq -e '
+          mode="${{ inputs.bootstrap_invocation_mode }}"
+          result="$(node scripts/r1-bootstrap-orchestrator-child-workflow.mjs bootstrap "$mode")"
+          printf '%s\n' "$result" | jq -e --arg mode "$mode" '
             .status == "PASS"
             and .code == "R1_BOOTSTRAP_ORCHESTRATOR_CHILD_WORKFLOW_COMPLETED"
             and .workflow == "bootstrap"
+            and .invocationMode == $mode
             and (.runId | type == "number")
             and (.conclusion | type == "string")
             and (.invokeStepConclusion | type == "string")
@@ -615,6 +625,7 @@ jobs:
             printf 'run_id=%s\n' "$run_id"
             printf 'conclusion=%s\n' "$conclusion"
             printf 'invoke_step=%s\n' "$invoke_step"
+            printf 'invocation_mode=%s\n' "$mode"
           } >> "$GITHUB_OUTPUT"
 
           if [ "$conclusion" = 'success' ]; then
@@ -631,9 +642,69 @@ jobs:
           echo 'R1_BOOTSTRAP_ORCHESTRATOR_BOOTSTRAP_INVOKE_NON_SUCCESS'
           exit 1
 
+      - name: Download exact async bootstrap admission evidence
+        if: ${{ always() && inputs.bootstrap_invocation_mode == 'async' && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: r1-initial-bootstrap-evidence-${{ steps.bootstrap.outputs.run_id }}
+          path: ${{ runner.temp }}/r1-bootstrap-orchestrator-async-admission
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.bootstrap.outputs.run_id }}
+
+      - name: Verify exact async bootstrap admission evidence
+        id: async-admission
+        if: ${{ always() && inputs.bootstrap_invocation_mode == 'async' && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/r1-bootstrap-orchestrator-async-admission/classification.json"
+          test -f "$evidence" || {
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_EVIDENCE_MISSING'
+            exit 1
+          }
+          if ! classification="$(jq -c -e '
+            select(type == "object" and (.status | type == "string") and (.code | type == "string"))
+            | .status as $status
+            | .code as $code
+            | select(
+                ($status == "PASS" and $code == "INITIAL_BOOTSTRAP_ASYNC_ACCEPTED"
+                  and (keys | sort) == ["code","status"])
+                or ($status == "FAIL" and ($code | IN(
+                  "INITIAL_BOOTSTRAP_ASYNC_CONFIG_INVALID",
+                  "INITIAL_BOOTSTRAP_ASYNC_INVOKE_FAILED",
+                  "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_TIMEOUT"
+                )) and (keys | sort) == ["code","status"])
+                or ($status == "FAIL" and $code == "INITIAL_BOOTSTRAP_ASYNC_ACCEPTANCE_HTTP_FAILED"
+                  and (keys | sort) == ["code","httpStatus","status"]
+                  and (.httpStatus | IN(
+                    "HTTP_400","HTTP_401","HTTP_403","HTTP_404","HTTP_413","HTTP_429",
+                    "HTTP_500","HTTP_502","HTTP_503","HTTP_504",
+                    "HTTP_2XX_OTHER","HTTP_4XX_OTHER","HTTP_5XX_OTHER","HTTP_OTHER"
+                  )))
+              )
+          ' "$evidence")"; then
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_EVIDENCE_INVALID'
+            exit 1
+          fi
+          if jq -e '.status == "PASS" and .code == "INITIAL_BOOTSTRAP_ASYNC_ACCEPTED"' <<<"$classification" >/dev/null; then
+            printf 'accepted=true\n' >> "$GITHUB_OUTPUT"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_ACCEPTED'
+          else
+            printf 'accepted=false\n' >> "$GITHUB_OUTPUT"
+            echo 'R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_NON_SUCCESS'
+          fi
+
+      - name: Wait beyond async Function execution window before durable recovery
+        if: ${{ always() && inputs.bootstrap_invocation_mode == 'async' && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 630
+
       - name: Classify durable state read-only after non-successful bootstrap invoke
         id: post-recovery
-        if: ${{ always() && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.conclusion != 'success' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' }}
+        if: ${{ always() && steps.bootstrap.outputs.run_id != '' && steps.bootstrap.outputs.invoke_step != 'NOT_REACHED' && steps.bootstrap.outputs.invoke_step != 'skipped' && ((inputs.bootstrap_invocation_mode == 'sync' && steps.bootstrap.outputs.conclusion != 'success') || inputs.bootstrap_invocation_mode == 'async') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -679,6 +750,8 @@ jobs:
           BOOTSTRAP_INVOKE_STEP: ${{ steps.bootstrap.outputs.invoke_step }}
           POST_VERDICT: ${{ steps.post-recovery.outputs.verdict }}
           POST_REASON: ${{ steps.post-recovery.outputs.reason }}
+          BOOTSTRAP_INVOCATION_MODE: ${{ inputs.bootstrap_invocation_mode }}
+          ASYNC_ADMISSION_ACCEPTED: ${{ steps.async-admission.outputs.accepted }}
         run: |
           set -euo pipefail
           evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-orchestrator-evidence"
@@ -686,9 +759,12 @@ jobs:
 
           status='FAIL'
           code='R1_BOOTSTRAP_ORCHESTRATOR_FAILED'
-          if [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
+          if [ "$BOOTSTRAP_INVOCATION_MODE" = 'sync' ] && [ "$BOOTSTRAP_CONCLUSION" = 'success' ] && [ "$BOOTSTRAP_INVOKE_STEP" = 'success' ]; then
             status='PASS'
             code='R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED'
+          elif [ "$BOOTSTRAP_INVOCATION_MODE" = 'async' ] && [ -n "$POST_VERDICT" ] && [ -n "$POST_REASON" ]; then
+            status='STOP'
+            code='R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_RECOVERY_CLASSIFIED'
           elif [ -n "$POST_VERDICT" ] && [ -n "$POST_REASON" ]; then
             status='STOP'
             code='R1_BOOTSTRAP_ORCHESTRATOR_POST_INVOKE_RECOVERY_CLASSIFIED'
@@ -716,6 +792,8 @@ jobs:
             --arg bootstrapInvokeStep "$BOOTSTRAP_INVOKE_STEP" \
             --arg postRecoveryVerdict "$POST_VERDICT" \
             --arg postRecoveryReason "$POST_REASON" \
+            --arg bootstrapInvocationMode "$BOOTSTRAP_INVOCATION_MODE" \
+            --arg asyncAdmissionAccepted "$ASYNC_ADMISSION_ACCEPTED" \
             --arg stagingResumeAuthorized "${{ inputs.allow_staging_resume }}" \
             --arg staleStagingRetirementAuthorized "${{ inputs.allow_stale_staging_retirement }}" \
             '{
@@ -731,6 +809,8 @@ jobs:
               bootstrapInvokeStep: ($bootstrapInvokeStep | select(length > 0) // null),
               postRecoveryVerdict: ($postRecoveryVerdict | select(length > 0) // null),
               postRecoveryReason: ($postRecoveryReason | select(length > 0) // null),
+              bootstrapInvocationMode: $bootstrapInvocationMode,
+              asyncAdmissionAccepted: ($asyncAdmissionAccepted == "true"),
               stagingResumeAuthorized: ($stagingResumeAuthorized == "true"),
               staleStagingRetirementAuthorized: ($staleStagingRetirementAuthorized == "true")
             }' > "$evidence_dir/classification.json"
