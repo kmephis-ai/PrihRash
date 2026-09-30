@@ -3006,3 +3006,44 @@ wifRuntimeServiceAccountUser=PRESENT` may support a later distinct fix that chan
 deployment WIF to the already-authorized runtime SA. Any existing/ambiguous version or missing IAM
 boundary remains STOP and does not authorize replay.
 
+### Readable-surface correction after diagnostic `36785159882`
+
+Exact-main diagnostic `36785159882` on `30ac0e749f46841ef67335df51760e795dbe4d8b`
+proved its GitHub authority, OIDC exchange and initial provider reads, then stopped at:
+
+```text
+R1_ASYNC_DEPLOY_RECOVERY_RUNTIME_BINDINGS_READ_FAILED
+```
+
+No Function create/invoke, IAM mutation or financial data access occurred. The stop means the deployment
+WIF is not authorized to enumerate access bindings **on** the runtime service-account resource; it does
+not prove that `iam.serviceAccounts.user` is absent and must not be used to justify IAM widening.
+
+The recovery classifier therefore uses only currently readable and sufficient evidence:
+
+- exact failed deploy timestamps from child `36783942040`;
+- bounded dedicated Function version list to detect an async tag or a version created in that failed
+  deploy window;
+- current exact Function access bindings to verify runtime SA still has
+  `functions.functionInvoker`.
+
+PrihRash already has empirical attachment evidence from prior successful synchronous Function-version
+deployments using the same dedicated deployment identity and runtime SA. A later corrected async create
+will still fail closed before invocation if that attachment permission has since been revoked; no new
+IAM grant is authorized.
+
+The same read-only marker is reused on a **new SHA**:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Async-Deploy-Recovery: READY
+Failed-Async-Deploy-Run-ID: 36783942040
+Failed-Async-Deploy-SHA: c8c45e88e1e3c58f7b168c56ae4f1edc1d850c16
+Expected-Transition: READ_ONLY_ASYNC_DEPLOY_CLASSIFICATION
+Regression-Test: tests/tooling/r1-async-deploy-recovery-classifier.test.mjs
+```
+
+Only `SAFE_TO_CORRECT_CONFIG / previousWrite=NOT_APPLIED / runtimeInvoker=PRESENT` may support a
+later distinct fix that uses runtime SA as the async executor. Any existing/ambiguous failed-window
+version or missing current runtime invoker binding remains STOP.
+
