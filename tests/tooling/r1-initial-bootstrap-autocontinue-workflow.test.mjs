@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const WORKFLOW = resolve(ROOT, '.github/workflows/r1-initial-bootstrap-autocontinue.yml');
+const RUNBOOK = resolve(ROOT, 'docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md');
 
 async function workflowText() {
   return readFile(WORKFLOW, 'utf8');
@@ -89,6 +90,7 @@ test('R1 autocontinue requires explicit root-cause attempt evidence or one prove
   assert.match(workflow, /r1-initial-bootstrap-orchestrator\.yml\/dispatches/);
   assert.match(workflow, /allow_staging_resume/);
   assert.match(workflow, /allow_stale_staging_retirement/);
+  assert.match(workflow, /async_invocation/);
   assert.match(workflow, /--data "\$dispatch_payload"/);
   assert.doesNotMatch(workflow, /r1-yandex-readiness\.yml\/dispatches/);
   assert.doesNotMatch(workflow, /r1-initial-shadow-bootstrap\.yml\/dispatches/);
@@ -105,6 +107,52 @@ test('R1 autocontinue keeps resumable, stale-retireable, and retired recovery st
   assert.match(workflow, /allow_staging_resume='true'/);
   assert.match(workflow, /allow_stale_staging_retirement='true'/);
   assert.doesNotMatch(workflow, /\[ "\$recovery_state" = 'STALE_STAGING_RETIRED' \]/);
+});
+
+test('first async provider marker is recovery-bound, bypasses sync circuit, and dispatches only stale-retirement async mode', async () => {
+  const workflow = await workflowText();
+  const runbook = await readFile(RUNBOOK, 'utf8');
+  const asyncGate = workflow.match(
+    /if \[ "\$async_provider_attempt" = 'true' \]; then([\s\S]*?)elif \[ "\$orchestrator_preflight"/,
+  )?.[1];
+
+  assert.ok(asyncGate, 'async provider gate must remain separately bounded');
+  assert.match(workflow, /Async-Provider-Attempt: READY/);
+  assert.match(workflow, /Owner-Decision: R1_ASYNC_INVOCATION_CONTRACT_APPROVED/);
+  assert.match(workflow, /Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED\/RECOVERY_REQUIRED\/STAGING_RUN_PRESENT/);
+  assert.match(workflow, /Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED/);
+  assert.match(workflow, /Recovery-State: STAGING_STALE_RETIREABLE/);
+  assert.match(workflow, /Recovery-Run-ID: \[1-9\]\[0-9\]\*/);
+  assert.match(asyncGate, /R1_BOOTSTRAP_AUTOCONTINUE_ASYNC_CHANGESET_INVALID/);
+  assert.match(asyncGate, /r1-initial-bootstrap-recovery-evidence-\$async_recovery_run_id/);
+  assert.match(asyncGate, /Invoke exact read-only recovery tag once/);
+  assert.match(asyncGate, /Publish enum-only recovery evidence/);
+  assert.match(asyncGate, /INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/);
+  assert.match(asyncGate, /RECOVERY_REQUIRED/);
+  assert.match(asyncGate, /STAGING_RUN_PRESENT/);
+  assert.match(asyncGate, /allow_staging_resume='false'/);
+  assert.match(asyncGate, /allow_stale_staging_retirement='true'/);
+  assert.match(asyncGate, /async_invocation='true'/);
+  assert.doesNotMatch(asyncGate, /ROOT_CAUSE_FIX|prior_root_cause_attempts|BLOCKED_NEEDS_ROOT_CAUSE/);
+  assert.match(workflow, /async_provider_attempt" != 'true'/);
+  assert.match(workflow, /--arg async "\$async_invocation"/);
+  assert.match(workflow, /async_invocation:\$async/);
+
+  const evidence = runbook.match(
+    /### First async provider attempt after fresh full recovery `36782526425`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(evidence, 'fresh async attempt evidence must remain canonical');
+  assert.match(evidence, /`0c2c4f06a5da00eec5bf4d8654f03930fc69c546`/);
+  assert.match(evidence, /Full recovery `36782526425` then completed `SUCCESS`/);
+  assert.match(evidence, /AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH/);
+  assert.match(evidence, /COMPLETE_CURRENT_RUN_ONLY/);
+  assert.match(evidence, /STALE_STAGING_CURRENT_STATE_EMPTY/);
+  assert.match(evidence, /EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN/);
+  assert.match(evidence, /Async-Provider-Attempt: READY/);
+  assert.match(evidence, /allow_staging_resume=false/);
+  assert.match(evidence, /allow_stale_staging_retirement=true/);
+  assert.match(evidence, /async_invocation=true/);
+  assert.doesNotMatch(evidence, /(^|\n)Provider-Attempt: READY(?:\n|$)/);
 });
 
 test('source-drift preflight accepts only exact successful recovery and dispatches false/false orchestrator', async () => {
@@ -153,7 +201,7 @@ test('source-drift rebase requires exact pre-write evidence and arms stale retir
   assert.match(workflow, /and \$recovery == \["Recovery-State: STAGING_STALE_RETIREABLE"\]/);
   assert.match(workflow, /allow_staging_resume='false'/);
   assert.match(workflow, /allow_stale_staging_retirement='true'/);
-  assert.match(workflow, /\{ref:"main", inputs:\{ci_run_id:\$ci_run_id, allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale\}\}/);
+  assert.match(workflow, /\{ref:"main", inputs:\{ci_run_id:\$ci_run_id, allow_staging_resume:\$resume, allow_stale_staging_retirement:\$stale, async_invocation:\$async\}\}/);
 });
 
 test('R1 autocontinue binds Incident-M marker to sanitized evidence and breaks duplicate incident keys cross-run', async () => {
