@@ -99,55 +99,104 @@ jobs:
           source_is_r1="$(jq -r --arg prefix "$r1_title_prefix" '.title | startswith($prefix)' <<<"$source_pr")"
           allow_staging_resume='false'
           allow_stale_staging_retirement='false'
+          orchestrator_preflight='false'
+          preflight_recovery_run_id=''
 
           if [ "$source_is_r1" = 'true' ]; then
             source_pr_number="$(jq -er '.number' <<<"$source_pr")"
             source_pr_body="$(jq -r '.body // ""' <<<"$source_pr")"
-            marker="$(jq -Rn --arg body "$source_pr_body" '
+
+            preflight_marker="$(jq -Rn --arg body "$source_pr_body" '
               def exact_line($prefix):
                 ($body | split("\n") | map(select(startswith($prefix))));
               (exact_line("Provider-Attempt: ")) as $attempt
-              | (exact_line("Observed-Signature: ")) as $observed
+              | (exact_line("Orchestrator-Preflight: ")) as $preflight
+              | (exact_line("Observed-Recovery: ")) as $observed_recovery
+              | (exact_line("Observed-Signature: ")) as $observed_signature
               | (exact_line("Expected-Transition: ")) as $expected
               | (exact_line("Recovery-State: ")) as $recovery
+              | (exact_line("Recovery-Run-ID: ")) as $recovery_run
               | (exact_line("Circuit-Rearm: ")) as $rearm
               | (exact_line("Regression-Test: ")) as $test
               | {
                   valid: (
-                    $attempt == ["Provider-Attempt: READY"]
-                    and ($observed | length) == 1
-                    and ($observed[0] | test("^Observed-Signature: [A-Z0-9_]+(?:/[A-Z0-9_]+){1,3}$"))
-                    and ($expected | length) == 1
-                    and ($expected[0] | test("^Expected-Transition: [A-Z0-9_]+(?:/[A-Z0-9_]+){0,3}$"))
-                    and ($recovery | length) == 1
-                    and ($recovery[0] | IN(
-                      "Recovery-State: EMPTY_DURABLE_STATE",
-                      "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
-                      "Recovery-State: STAGING_RESUMABLE",
-                      "Recovery-State: STAGING_STALE_RETIREABLE",
-                      "Recovery-State: STALE_STAGING_RETIRED"
-                    ))
-                    and (
-                      $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
-                      or (
-                        $rearm == ["Circuit-Rearm: SOURCE_DRIFT_REBASE"]
-                        and $observed == ["Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
-                        and $recovery == ["Recovery-State: STAGING_STALE_RETIREABLE"]
-                        and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"]
-                      )
-                    )
-                    and ($test | length) == 1
-                    and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
+                    $attempt == ["Provider-Attempt: NOT_AUTHORIZED"]
+                    and $preflight == ["Orchestrator-Preflight: READY"]
+                    and $observed_recovery == ["Observed-Recovery: INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
+                    and ($observed_signature | length) == 0
+                    and $expected == ["Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
+                    and $recovery == ["Recovery-State: STAGING_PRESENT_UNCLASSIFIED"]
+                    and ($recovery_run | length) == 1
+                    and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
+                    and ($rearm | length) == 0
+                    and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"]
                   ),
-                  observedSignature: (if ($observed | length) == 1 then ($observed[0] | sub("^Observed-Signature: "; "")) else null end),
-                  recovery: (if ($recovery | length) == 1 then ($recovery[0] | sub("^Recovery-State: "; "")) else null end),
-                  rearm: (if ($rearm | length) == 1 then ($rearm[0] | sub("^Circuit-Rearm: "; "")) else null end),
-                  regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
+                  recoveryRunId: (
+                    if ($recovery_run | length) == 1
+                    then ($recovery_run[0] | sub("^Recovery-Run-ID: "; ""))
+                    else null
+                    end
+                  ),
+                  regressionTest: (
+                    if ($test | length) == 1
+                    then ($test[0] | sub("^Regression-Test: "; ""))
+                    else null
+                    end
+                  )
                 }
             ')"
-            if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
-              echo 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_MARKER_INVALID'
-              exit 0
+
+            if [ "$(jq -r '.valid' <<<"$preflight_marker")" = 'true' ]; then
+              orchestrator_preflight='true'
+              marker="$preflight_marker"
+              preflight_recovery_run_id="$(jq -er '.recoveryRunId' <<<"$marker")"
+            else
+              marker="$(jq -Rn --arg body "$source_pr_body" '
+                def exact_line($prefix):
+                  ($body | split("\n") | map(select(startswith($prefix))));
+                (exact_line("Provider-Attempt: ")) as $attempt
+                | (exact_line("Observed-Signature: ")) as $observed
+                | (exact_line("Expected-Transition: ")) as $expected
+                | (exact_line("Recovery-State: ")) as $recovery
+                | (exact_line("Circuit-Rearm: ")) as $rearm
+                | (exact_line("Regression-Test: ")) as $test
+                | {
+                    valid: (
+                      $attempt == ["Provider-Attempt: READY"]
+                      and ($observed | length) == 1
+                      and ($observed[0] | test("^Observed-Signature: [A-Z0-9_]+(?:/[A-Z0-9_]+){1,3}$"))
+                      and ($expected | length) == 1
+                      and ($expected[0] | test("^Expected-Transition: [A-Z0-9_]+(?:/[A-Z0-9_]+){0,3}$"))
+                      and ($recovery | length) == 1
+                      and ($recovery[0] | IN(
+                        "Recovery-State: EMPTY_DURABLE_STATE",
+                        "Recovery-State: RESIDUAL_REFERENCE_STATE_MATCHES_AUTHORITATIVE",
+                        "Recovery-State: STAGING_RESUMABLE",
+                        "Recovery-State: STAGING_STALE_RETIREABLE",
+                        "Recovery-State: STALE_STAGING_RETIRED"
+                      ))
+                      and (
+                        $rearm == ["Circuit-Rearm: ROOT_CAUSE_FIX"]
+                        or (
+                          $rearm == ["Circuit-Rearm: SOURCE_DRIFT_REBASE"]
+                          and $observed == ["Observed-Signature: R1_BOOTSTRAP_ORCHESTRATOR_RECOVERY_BLOCKED/RECOVERY_REQUIRED/STAGING_RUN_PRESENT"]
+                          and $recovery == ["Recovery-State: STAGING_STALE_RETIREABLE"]
+                          and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"]
+                        )
+                      )
+                      and ($test | length) == 1
+                      and ($test[0] | test("^Regression-Test: tests/[A-Za-z0-9_./-]+\\.test\\.mjs$"))
+                    ),
+                    observedSignature: (if ($observed | length) == 1 then ($observed[0] | sub("^Observed-Signature: "; "")) else null end),
+                    recovery: (if ($recovery | length) == 1 then ($recovery[0] | sub("^Recovery-State: "; "")) else null end),
+                    rearm: (if ($rearm | length) == 1 then ($rearm[0] | sub("^Circuit-Rearm: "; "")) else null end),
+                    regressionTest: (if ($test | length) == 1 then ($test[0] | sub("^Regression-Test: "; "")) else null end)
+                  }
+              ')"
+              if [ "$(jq -r '.valid' <<<"$marker")" != 'true' ]; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ATTEMPT_MARKER_INVALID'
+                exit 0
+              fi
             fi
 
             source_files="$(curl --fail --silent --show-error \
@@ -159,34 +208,140 @@ jobs:
               exit 0
             fi
             regression_test="$(jq -r '.regressionTest' <<<"$marker")"
-            rearm_mode="$(jq -r '.rearm' <<<"$marker")"
-            if [ "$rearm_mode" = 'SOURCE_DRIFT_REBASE' ]; then
+
+            if [ "$orchestrator_preflight" = 'true' ]; then
               if ! jq -e --arg test "$regression_test" '
                 $test == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"
-                and any(
-                  .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
-                  and .status != "removed"
-                )
+                and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-autocontinue.yml" and .status != "removed")
+                and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs" and .status != "removed")
+                and any(.[]; .filename == "AGENTS.md" and .status != "removed")
+                and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+                and all(.[]; .filename | IN(
+                  ".github/workflows/r1-initial-bootstrap-autocontinue.yml",
+                  "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs",
+                  "AGENTS.md",
+                  "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                ))
               ' <<<"$source_files" >/dev/null; then
-                echo 'R1_BOOTSTRAP_AUTOCONTINUE_SOURCE_DRIFT_EVIDENCE_MISSING'
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_CHANGESET_INVALID'
                 exit 0
               fi
-            elif ! jq -e --arg test "$regression_test" '
-              any(.filename == $test and .status != "removed")
-              and any(
-                (.filename | startswith("src/"))
-                or (.filename | startswith("scripts/"))
-                or (.filename | startswith(".github/workflows/r1-"))
-              )
-            ' <<<"$source_files" >/dev/null; then
-              echo 'R1_BOOTSTRAP_AUTOCONTINUE_ROOT_CAUSE_EVIDENCE_MISSING'
-              exit 0
-            fi
-            recovery_state="$(jq -r '.recovery' <<<"$marker")"
-            if [ "$recovery_state" = 'STAGING_RESUMABLE' ]; then
-              allow_staging_resume='true'
-            elif [ "$recovery_state" = 'STAGING_STALE_RETIREABLE' ]; then
-              allow_stale_staging_retirement='true'
+
+              preflight_recovery="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$preflight_recovery_run_id")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_READ_FAILED'; exit 0;
+                }
+              if ! jq -e --argjson run_id "$preflight_recovery_run_id" '
+                .id == $run_id
+                and .name == "R1 initial bootstrap recovery"
+                and .head_branch == "main"
+                and .event == "workflow_dispatch"
+                and .status == "completed"
+                and .conclusion == "success"
+                and (.head_sha | type) == "string"
+              ' <<<"$preflight_recovery" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_INVALID'
+                exit 0
+              fi
+              preflight_recovery_sha="$(jq -er '.head_sha' <<<"$preflight_recovery")"
+              if [ "$preflight_recovery_sha" = "$SOURCE_SHA" ]; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_SAME_SHA'
+                exit 0
+              fi
+              preflight_compare="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/compare/$preflight_recovery_sha...$SOURCE_SHA")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_LINEAGE_READ_FAILED'; exit 0;
+                }
+              if ! jq -e '.status == "ahead" and .behind_by == 0' <<<"$preflight_compare" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_LINEAGE_INVALID'
+                exit 0
+              fi
+
+              preflight_jobs="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$preflight_recovery_run_id/jobs?filter=latest&per_page=100")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_JOBS_READ_FAILED'; exit 0;
+                }
+              if ! jq -e '
+                [.jobs[] | select(.name == "initial-bootstrap-recovery" and .conclusion == "success")] as $jobs
+                | ($jobs | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Deploy recovery-only Function version" and .conclusion == "skipped"
+                )] | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Invoke exact read-only recovery tag once" and .conclusion == "success"
+                )] | length) == 1
+              ' <<<"$preflight_jobs" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_PHASE_INVALID'
+                exit 0
+              fi
+
+              preflight_artifacts="$(curl --fail --silent --show-error \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/$preflight_recovery_run_id/artifacts?per_page=100")" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_ARTIFACTS_READ_FAILED'; exit 0;
+                }
+              preflight_artifact_id="$(jq -r --arg name "r1-initial-bootstrap-recovery-evidence-$preflight_recovery_run_id" '
+                [.artifacts[] | select(.name == $name and .expired == false)]
+                | if length == 1 then .[0].id else empty end
+              ' <<<"$preflight_artifacts")"
+              if [ -z "$preflight_artifact_id" ]; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_ARTIFACT_NOT_EXACT'
+                exit 0
+              fi
+              preflight_zip="$RUNNER_TEMP/r1-autocontinue-preflight-recovery.zip"
+              curl --fail --silent --show-error --location \
+                --header "$auth_header" --header "$accept_header" \
+                "$api/actions/artifacts/$preflight_artifact_id/zip" \
+                --output "$preflight_zip" || {
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_ARTIFACT_DOWNLOAD_FAILED'; exit 0;
+                }
+              preflight_classification="$RUNNER_TEMP/r1-autocontinue-preflight-classification.json"
+              unzip -p "$preflight_zip" classification.json >"$preflight_classification" || {
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_CLASSIFICATION_MISSING'; exit 0;
+              }
+              if ! jq -e '
+                .status == "PASS"
+                and .code == "INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED"
+                and .verdict == "RECOVERY_REQUIRED"
+                and .reason == "STAGING_RUN_PRESENT"
+              ' "$preflight_classification" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_CLASSIFICATION_INVALID'
+                exit 0
+              fi
+              echo 'R1_BOOTSTRAP_AUTOCONTINUE_PREFLIGHT_RECOVERY_PROVEN'
+            else
+              rearm_mode="$(jq -r '.rearm' <<<"$marker")"
+              if [ "$rearm_mode" = 'SOURCE_DRIFT_REBASE' ]; then
+                if ! jq -e --arg test "$regression_test" '
+                  $test == "tests/tooling/r1-initial-bootstrap-autocontinue-workflow.test.mjs"
+                  and any(
+                    .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+                    and .status != "removed"
+                  )
+                ' <<<"$source_files" >/dev/null; then
+                  echo 'R1_BOOTSTRAP_AUTOCONTINUE_SOURCE_DRIFT_EVIDENCE_MISSING'
+                  exit 0
+                fi
+              elif ! jq -e --arg test "$regression_test" '
+                any(.filename == $test and .status != "removed")
+                and any(
+                  (.filename | startswith("src/"))
+                  or (.filename | startswith("scripts/"))
+                  or (.filename | startswith(".github/workflows/r1-"))
+                )
+              ' <<<"$source_files" >/dev/null; then
+                echo 'R1_BOOTSTRAP_AUTOCONTINUE_ROOT_CAUSE_EVIDENCE_MISSING'
+                exit 0
+              fi
+              recovery_state="$(jq -r '.recovery' <<<"$marker")"
+              if [ "$recovery_state" = 'STAGING_RESUMABLE' ]; then
+                allow_staging_resume='true'
+              elif [ "$recovery_state" = 'STAGING_STALE_RETIREABLE' ]; then
+                allow_stale_staging_retirement='true'
+              fi
             fi
           fi
 
@@ -248,7 +403,7 @@ jobs:
             unzip -p "$archive" classification.json > "$destination" || return 1
           }
 
-          if [ "$source_is_r1" = 'true' ]; then
+          if [ "$source_is_r1" = 'true' ] && [ "$orchestrator_preflight" != 'true' ]; then
             observed_signature="$(jq -er '.observedSignature' <<<"$marker")"
             if [ "$(jq -r '.total_count' <<<"$existing")" -gt 100 ]; then
               echo 'R1_BOOTSTRAP_AUTOCONTINUE_HISTORY_UNBOUNDED'
