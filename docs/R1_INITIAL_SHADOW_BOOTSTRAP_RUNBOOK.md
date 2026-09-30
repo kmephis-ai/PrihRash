@@ -2813,3 +2813,47 @@ Async-Contract: REPOSITORY_ONLY
 Expected-Transition: ASYNC_INVOCATION_CONTRACT_VERIFIED
 Regression-Test: tests/integration/yandex-initial-bootstrap-async-invoker.test.mjs
 
+### Async provider plumbing before any new attempt
+
+Exact main `24a402ed559d39474a6656573c05192bedbd60d0` contains the repository-only async admission
+contract from PR #902. Canonical CI `36778372911` and Browser Quality `36778372876` passed, and
+no async provider attempt was dispatched.
+
+The next implementation slice extends the **existing** bootstrap/orchestrator engine rather than
+creating a second migration engine:
+
+- `r1-initial-shadow-bootstrap.yml` gets explicit `sync|async` invocation mode;
+- async deploy uses tag `r1-initial-bootstrap-async`, `async-max-retries=0` and the already-existing
+  WIF service account as async invoker;
+- the workflow fails closed unless that exact service account already has
+  `functions.functionInvoker` on the exact Function;
+- no IAM binding is created by the async path;
+- no YMQ success/failure destination is configured;
+- post-deploy `GetVersionByTag` must read back active Node.js 22 / bootstrap handler / 1 GiB /
+  600-second runtime config plus async retries `0`, exact invoker service account and empty
+  success/failure targets;
+- async HTTPS admission accepts only `HTTP 202` and publishes only
+  `PASS / INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`;
+- existing sync mode remains unchanged and continues to parse the application result directly.
+
+The existing orchestrator receives a separate `async_invocation` input. For async mode, even a
+successful child workflow **cannot** produce `R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED`. After any
+reached async admission it waits 610 seconds, covering the configured 600-second Function execution
+window, then runs the existing read-only durable recovery. Its only async terminal evidence is
+`R1_BOOTSTRAP_ORCHESTRATOR_ASYNC_POST_WINDOW_RECOVERY_CLASSIFIED` or an unresolved stop.
+
+This plumbing PR intentionally contains **no** autocontinue provider marker and no new automatic
+dispatch rule. Merge therefore verifies capability only. A later distinct exact-main PR must provide
+the Owner-approved async provider marker, prove fresh stale-STAGING retirement/read-back and readiness,
+and authorize exactly one orchestrator run with `async_invocation=true`.
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Async-Provider-Plumbing: READY_FOR_CI
+Expected-Transition: ASYNC_PROVIDER_PLUMBING_VERIFIED
+Regression-Test: tests/tooling/r1-initial-bootstrap-orchestrator-workflow.test.mjs
+```
+
+Google remains authoritative. Async `202` is admission only; only post-window durable recovery can
+classify the YDB state, and first `COMMITTED` still requires independent reconciliation/catch-up.
+
