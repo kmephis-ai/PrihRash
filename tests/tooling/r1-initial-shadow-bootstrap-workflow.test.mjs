@@ -170,8 +170,12 @@ test('bootstrap invoker uses one private HTTPS raw invocation and exposes only b
   assert.match(invoker, /INITIAL_BOOTSTRAP_INVOKE_HTTP_FAILED/);
   assert.match(invoker, /HTTP_502/);
   assert.match(invoker, /x-function-error/);
-  assert.match(invoker, /if \(response\.status !== 200\)/);
-  assert.match(invoker, /response\.body\.cancel/);
+  assert.match(invoker, /request as httpsRequest.*node:https/);
+  assert.match(invoker, /response\.statusCode !== 200/);
+  assert.match(invoker, /response\.destroy\(\)/);
+  assert.match(invoker, /const INVOKE_TIMEOUT_MS = 630_000/);
+  assert.match(invoker, /request\.destroy\(createTransportTimeoutError\(\)\)/);
+  assert.doesNotMatch(invoker, /\bfetch\s*\(/);
   assert.match(invoker, /if \(result\.status !== 'PASS'\) process\.exitCode = 2/);
   assert.doesNotMatch(invoker, /serverless['"],\s*['"]function['"],\s*['"]invoke/);
   assert.doesNotMatch(invoker, /INITIAL_BOOTSTRAP_INVOKE_NONZERO_UNCLASSIFIED|transportClass|outputShape/);
