@@ -133,10 +133,15 @@ test('provider package inventory keeps the only full check in canonical CI and r
   assert.match(runbook, /one canonical `npm run check` per commit/);
 });
 
-test('restore action requires one successful canonical exact-main CI run for the exact current main SHA', async () => {
+test('restore action accepts an exact CI run handoff and keeps bounded list discovery only as fallback', async () => {
   const action = await readFile(new URL('../../.github/actions/restore-exact-source/action.yml', import.meta.url), 'utf8');
   assert.match(action, /test "\$GITHUB_SHA" = "\$SOURCE_SHA"/);
   assert.match(action, /test "\$GITHUB_REF" = 'refs\/heads\/main'/);
+  assert.match(action, /ci-run-id:/);
+  assert.match(action, /CI_RUN_ID: \$\{\{ inputs\.ci-run-id \}\}/);
+  assert.match(action, /actions\/runs\/\$CI_RUN_ID/);
+  assert.match(action, /scripts\/classify-github-ci-run\.mjs/);
+  assert.match(action, /CI_RUN_EXACT_SUCCESS/);
   assert.match(action, /actions\/workflows\/ci\.yml\/runs\?branch=main&per_page=100/);
   assert.match(action, /\.event == "push" or \.event == "workflow_dispatch"/);
   assert.match(action, /if length == 1 then \.\[0\]\.id else error\("exact CI run count mismatch"\) end/);
