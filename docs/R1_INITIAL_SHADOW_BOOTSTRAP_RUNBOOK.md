@@ -2683,3 +2683,75 @@ Autocontinue may dispatch only the full read-only recovery workflow. Any `APPLIE
 causal decision only; it does not itself authorize replay. Google remains authoritative and first
 verified `COMMITTED` shadow is still unproven.
 
+### Bootstrap HTTPS transport correction after full recovery `36770812477`
+
+Exact-main PR #900 established the required full read-only classification on
+`b7b221408d3e6e69c41e963f092e73b908e45b64`. Canonical CI `36770667208` and Browser Quality
+`36770666954` passed. Recovery autocontinue `36770773729` dispatched exactly one full
+`R1 initial bootstrap recovery`, run `36770812477`.
+
+That recovery passed exact-main/source/provider/private-trigger-free gates and its single read-only
+invoke. Privacy-safe output was:
+
+```text
+PASS / INITIAL_BOOTSTRAP_RECOVERY_CLASSIFIED
+RECOVERY_REQUIRED / STAGING_RUN_PRESENT
+R1_STAGING_REVISION_EVIDENCE=AUTHORITATIVE_SNAPSHOT_DIGEST_MISMATCH
+R1_STAGING_DURABLE_REVISION_EVIDENCE=COMPLETE_CURRENT_RUN_ONLY
+R1_STAGING_RETIREMENT_EVIDENCE=STALE_STAGING_CURRENT_STATE_EMPTY
+R1_STAGING_SOURCE_DECODE_EVIDENCE=NONE
+R1_STAGING_EXACT_REVISION_EVIDENCE=EXACT_CURRENT_RUN_SOURCE_NOT_PROVEN
+```
+
+No readiness, orchestrator, bootstrap, resume, retirement, cleanup, timer, cutover or authority switch
+was dispatched from this recovery. The surviving run is therefore not resumable from exact current
+source evidence; the only bounded write-capable recovery state is
+`STAGING_STALE_RETIREABLE`, which still requires a distinct new-SHA root-cause PR and fresh
+orchestrator recovery before any financial shadow write.
+
+The write-capable bootstrap that produced the current boundary was child `36768370208`. All pre-invoke
+gates passed and the dedicated Function version had `execution-timeout=600s`, while the HTTPS invoker
+used global Node `fetch()` with an outer `AbortSignal.timeout(630000)`. The call nevertheless ended
+after approximately 301 seconds with only:
+
+```text
+FAIL / INITIAL_BOOTSTRAP_INVOKE_FAILED
+```
+
+and no Function/application enum. Upstream Undici documents a default HTTP parser
+`headersTimeout=300e3`; Node `fetch()` does not expose that option directly and requires a custom
+dispatcher to change it. The observed ~301-second transport loss is therefore consistent with a
+client-side headers timeout that is shorter than the intended 630-second overall invocation envelope.
+
+The bounded successor changes only the bootstrap invocation transport:
+
+- global `fetch()` is replaced by built-in `node:https.request`;
+- one explicit 630-second overall request timer remains the only long-invoke client deadline;
+- exact private HTTPS origin/function tag, bearer authentication, 64 KiB response cap and exact
+  enum-only parser are preserved;
+- no automatic retry is added;
+- Function memory/execution timeout, YDB write set, migration cap, stale-retirement predicates,
+  reconciliation and financial semantics are unchanged.
+
+This is the second bounded root-cause attempt for the current
+`FAIL/INITIAL_BOOTSTRAP_INVOKE_FAILED + STAGING_STALE_RETIREABLE` circuit. If the same signature
+survives this attempt, the existing two-attempt circuit must stop with `BLOCKED_NEEDS_ROOT_CAUSE`
+instead of dispatching another bootstrap.
+
+The exact successor marker is:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: FAIL/INITIAL_BOOTSTRAP_INVOKE_FAILED
+Expected-Transition: R1_BOOTSTRAP_ORCHESTRATOR_COMMITTED
+Recovery-State: STAGING_STALE_RETIREABLE
+Circuit-Rearm: ROOT_CAUSE_FIX
+Regression-Test: tests/integration/yandex-initial-bootstrap-invoker.test.mjs
+```
+
+Only a new exact-main SHA may consume this marker. The orchestrator must first repeat fresh read-only
+recovery and stale-retirement guards, then fresh readiness, and may dispatch at most one bootstrap
+child. Any non-success/unknown result again requires its single post-invoke read-only recovery and
+stops without replay. Google remains authoritative until a separately proven `COMMITTED` baseline
+and required independent reconciliation/catch-up.
+
