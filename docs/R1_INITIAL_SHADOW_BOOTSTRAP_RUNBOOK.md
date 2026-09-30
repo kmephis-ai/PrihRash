@@ -1941,9 +1941,9 @@ passed. Recovery autocontinue run `36647818262` stopped at
 `R1_RECOVERY_AUTOCONTINUE_REUSE_CHANGESET_INVALID` before issuing another recovery dispatch. The stopped
 caller has a bounded interpretation: it was the exact PR-change-set gate, not provider or YDB activity.
 Because that source main contains the failed recovery version-proof run `36643931461`, the integrated
-successor proves that all intervening recovery runs after the original create failure are either the exact
-deployment-failed/invoke-skipped source or one bounded version-proof-failed/deploy-skipped/invoke-skipped
-read-only pre-invoke stop on a distinct SHA. Any other intervening outcome blocks the path.
+successor preserves the exact deployment-failed/invoke-skipped source and validates the latest recovery
+predecessor only. That predecessor is tolerated only when it is the exact distinct-SHA
+version-proof-failed/deploy-skipped/invoke-skipped read-only stop. Any other latest predecessor blocks.
 
 PR #878 merged as `8f8e3e8d0e6e5baff3999aa6777a2de405c7bf18`; exact-main CI `36651858133`, Browser
 Quality `36651858153` and CodeQL `36651858180` passed. Its post-merge read-only autocontinue
@@ -1954,6 +1954,16 @@ The successor stays in the same Incident-M boundary and pairs the exact run/job 
 caller and recovery workflows with synthetic fixtures, then carries protobuf repeated-field empty
 semantics through the terminal Audit Trails decision and synchronizes anti-drift process rules. It preserves the one-shot
 create as consumed; only an exact-main/CI-approved read-only reuse classification can dispatch once.
+
+After PR #879 merged as `86fd83e`, its exact-main recovery autocontinue `36656158010` stopped before
+dispatch with `R1_RECOVERY_AUTOCONTINUE_REUSE_RECOVERY_HISTORY_INCOMPLETE`. The endpoint's broad
+100-run response was already full; no recovery workflow/provider request started. The successor changes
+the root model: read the exact failed source run by ID, then select only the latest predecessor from an
+Actions server-side `created` window. Autocontinue uses a one-run page; the active recovery workflow
+proves `[current run, latest predecessor]` on a two-run page. A source-only predecessor or one exact
+distinct-SHA failed verification predecessor with deploy/invoke skipped proceeds; any other/missing/
+ambiguous candidate is a terminal pre-provider STOP. The bounded query does not paginate; an unresolved
+result closes this boundary rather than authorizing another history-detail refinement.
 
 The reuse path never executes `Function version create`. After the regular private/trigger-free/identity
 preflight, it reads the Function version list, operation list, exact recovery tag and bounded tag history;
@@ -1973,6 +1983,23 @@ Only exact proof from either the operation-correlated path or corroborated audit
 invocation of the existing write-free recovery handler. Missing, ambiguous, inactive, mismatched, untagged,
 or temporally uncorrelated metadata stops before invocation and does not re-arm deployment. Exact main is
 checked again immediately before invocation.
+
+After PR #879, merge `86fd83e`'s read-only autocontinue `36656158010` stopped pre-dispatch with
+`R1_RECOVERY_AUTOCONTINUE_REUSE_RECOVERY_HISTORY_INCOMPLETE`: broad completed-run history exceeded its
+fixed 100-record page. No recovery child, Yandex request, Function invoke/deploy, Google or YDB access
+occurred. The successor replaces the full scan with a different repository-side proof: `GET` the exact
+failed source run, then query the server-side `created` window sorted newest-first. Autocontinue selects
+one latest candidate; a running canonical recovery validates its own run as newest and selects exactly
+one latest predecessor. Source-only means no intervening recovery; otherwise exactly one exact
+distinct-SHA failed verification stop with deploy/invoke `skipped` is the sole tolerated predecessor.
+Malformed source/query, missing source, failed latest-run identity/phase proof or an unsupported history
+shape terminates before provider dispatch. The bounded query intentionally does not paginate; that terminal
+outcome requires a root-cause model change, not pagination-only diagnostic cycles.
+
+The repository-only API contract was verified read-only against the exact failed-run timestamp: the
+server-side `created=<source>..*`, descending, two-entry query returned only the recognized latest
+pre-invoke failure `36643931461` and exact source `36341844854` (`total_count=2`). This query does not read
+Yandex/Google/YDB state and cannot authorize version create or recovery invoke on its own.
 
 The bounded outcomes have different next steps:
 
