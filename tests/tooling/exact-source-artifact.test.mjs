@@ -137,9 +137,14 @@ test('restore action requires one successful canonical exact-main CI run for the
   const action = await readFile(new URL('../../.github/actions/restore-exact-source/action.yml', import.meta.url), 'utf8');
   assert.match(action, /test "\$GITHUB_SHA" = "\$SOURCE_SHA"/);
   assert.match(action, /test "\$GITHUB_REF" = 'refs\/heads\/main'/);
-  assert.match(action, /actions\/workflows\/ci\.yml\/runs\?branch=main&per_page=100/);
-  assert.match(action, /\.event == "push" or \.event == "workflow_dispatch"/);
-  assert.match(action, /if length == 1 then \.\[0\]\.id else error\("exact CI run count mismatch"\) end/);
+  assert.match(action, /actions\/runs\?head_sha=\\\$\{SOURCE_SHA\}&per_page=100/);
+  assert.match(action, /\.path == "\.github\/workflows\/ci\.yml"/);
+  assert.match(action, /candidates\("push"\)/);
+  assert.match(action, /candidates\("workflow_dispatch"\)/);
+  assert.match(action, /if \(\$push \| length\) == 1 then \$push\[0\]\.id/);
+  assert.match(action, /elif \(\$push \| length\) == 0 and \(\$manual \| length\) == 1 then \$manual\[0\]\.id/);
+  assert.match(action, /exact canonical CI run count mismatch/);
+  assert.doesNotMatch(action, /actions\/workflows\/ci\.yml\/runs\?branch=main&per_page=100/);
   assert.match(action, /actions\/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093/);
   assert.match(action, /scripts\/exact-source-artifact\.mjs verify/);
 });
