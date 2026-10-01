@@ -3066,3 +3066,44 @@ create still fails closed before invoke if `iam.serviceAccounts.user` was revoke
 authorized. These terminal cases, the shared caller predicates and the Owner anti-S-unit rule are
 covered in one Incident-M with synchronized `AGENTS.md` and `docs/R1_COMPLETION_SPRINT.md`.
 
+### Repository correction: async executor identity after unclassified create
+
+Read-only recovery `36817714728` on exact main
+`8328bb5e97bfc73a122e943e044f9d89b083e2b9` classified the first failed async create as:
+
+```text
+PASS / R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIED
+DEPLOYMENT_OUTCOME_UNCLASSIFIED / UNCLASSIFIED
+runtimeInvoker=PRESENT
+createFailureClass=NONE
+```
+
+The failed child `36783942040` reached no async invoke and accepted no `HTTP 202`. Its create outcome
+remains UNKNOWN; absence of an operation/version/tag candidate is not `NOT_APPLIED` and does not
+authorize redeploy.
+
+Independent request-contract review found a repository identity error that must be corrected regardless
+of that historical outcome. The failed async create used deployment WIF
+`prihrash-github-initial-bootstrap` as `--async-service-account-id`. Yandex async invocation requires
+that assigned service account to have permission to invoke the Function, and IAM requires a caller that
+assigns a service account to have permission to use that service account; a service account acting as
+caller also needs permission to use itself when it assigns itself.
+
+PrihRash's canonical least-privilege boundary grants deployment WIF `iam.serviceAccounts.user` only for
+the exact runtime SA `prihrash-initial-bootstrap`. That runtime SA already has exact-Function
+`functions.functionInvoker`. Therefore the corrected repository contract separates identities:
+
+- deployment WIF remains the Function-version creator and authenticated HTTPS admission caller;
+- runtime SA remains the Function runtime identity;
+- the same runtime SA is the async executor in `asyncInvocationConfig.serviceAccountId`;
+- preflight and postflight require exact-Function `functions.functionInvoker` for both WIF admission
+  and runtime-SA async execution;
+- no IAM binding, YMQ target, retry, paid resource, Google/YDB rule, cap, timer/cutover or authority is
+  added.
+
+This correction is repository/test-only. It deliberately carries no `Provider-Attempt: READY`,
+`Async-Provider-Attempt: READY` or invocation-only marker. Merge/CI cannot by itself replay the
+unclassified create. A later provider-capable action still requires a separate exact-main decision that
+resolves or explicitly governs the prior UNKNOWN create outcome; until then create/invoke remain
+`NOT_AUTHORIZED`.
+
