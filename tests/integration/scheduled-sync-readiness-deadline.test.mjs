@@ -20,6 +20,8 @@ const validMigrationRows = Object.freeze([
   Object.freeze({ version: 4n, checksum: 'checksum-004', applied_at: new Date('2026-09-04T00:00:00.000Z') }),
 ]);
 
+const STALLED_OPERATION_DEADLINE_MS = 100;
+
 function neverResolves() {
   return new Promise(() => {});
 }
@@ -90,7 +92,7 @@ test('readiness deadline is distinct from a Google source failure and still clos
     () => executeScheduledSyncReadinessProbe(
       syntheticConfig,
       runtime,
-      { deadlineMs: 10, closeTimeoutMs: 25 },
+      { deadlineMs: STALLED_OPERATION_DEADLINE_MS, closeTimeoutMs: 25 },
     ),
     expectReadinessCode('DEADLINE_EXCEEDED'),
   );
@@ -115,7 +117,7 @@ test('readiness deadline is distinct from a YDB health read failure and still cl
     () => executeScheduledSyncReadinessProbe(
       syntheticConfig,
       runtime,
-      { deadlineMs: 10, closeTimeoutMs: 25 },
+      { deadlineMs: STALLED_OPERATION_DEADLINE_MS, closeTimeoutMs: 25 },
     ),
     expectReadinessCode('DEADLINE_EXCEEDED'),
   );
@@ -140,7 +142,7 @@ test('readiness deadline at categories does not masquerade as categories schema 
     () => executeScheduledSyncReadinessProbe(
       syntheticConfig,
       runtime,
-      { deadlineMs: 10, closeTimeoutMs: 25 },
+      { deadlineMs: STALLED_OPERATION_DEADLINE_MS, closeTimeoutMs: 25 },
     ),
     expectReadinessCode('DEADLINE_EXCEEDED'),
   );
