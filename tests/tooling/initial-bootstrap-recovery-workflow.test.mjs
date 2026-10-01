@@ -36,6 +36,12 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /R1_STAGING_REVISION_CARDINALITY_EVIDENCE=/);
   assert.match(workflow, /recovery_mode_count=\$\(\(RECOVERY_SURFACE_ONLY \+ RECOVERY_CONTROLLED_PREPARATION_ONLY \+ RECOVERY_REVISION_CARDINALITY_ONLY\)\)/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MODE_CONFLICT/);
+  assert.match(workflow, /yc serverless function list --folder-id "\$YC_FOLDER_ID" --limit 1000/);
+  assert.match(workflow, /select\(\.name == \$name\)/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_NOT_FOUND/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_NOT_UNIQUE/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_LIST_METADATA_INVALID/);
+  assert.doesNotMatch(workflow, /yc serverless function get --name "\$FUNCTION_NAME"/);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);
