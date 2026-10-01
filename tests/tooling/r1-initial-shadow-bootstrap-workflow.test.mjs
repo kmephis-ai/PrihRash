@@ -58,8 +58,15 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /\.artifacts\/yandex-initial-bootstrap-function/);
   assert.match(workflow, /index\.initialBootstrapHandler/);
   assert.match(workflow, /tag='r1-initial-bootstrap'/);
-  assert.match(workflow, /tag='r1-initial-bootstrap-async'/);
+  assert.match(workflow, /r1-initial-bootstrap-async-\$\{GITHUB_SHA:0:12\}/);
   assert.match(workflow, /--tags "\$tag"/);
+  assert.match(workflow, /create_mode_args=\(\)/);
+  assert.match(workflow, /create_mode_args=\(--async\)/);
+  assert.match(workflow, /--description "prihrash-r1-async-\$\{GITHUB_RUN_ID\}"/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_ID_INVALID/);
+  assert.match(workflow, /Wait exact async Function version operation/);
+  assert.match(workflow, /yc operation wait "\$operation_id"/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_WAIT_FAILED/);
   assert.match(workflow, /--async-max-retries 0/);
   assert.match(workflow, /--async-service-account-id "\$PRIHRASH_YC_FUNCTION_SA_ID"/);
   assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
@@ -83,6 +90,7 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
     assert.match(workflow, new RegExp(`key=${key}`));
   }
   assert.match(workflow, /npm run initial-bootstrap:invoke/);
+  assert.match(workflow, /PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_TAG="r1-initial-bootstrap-async-\$\{GITHUB_SHA:0:12\}"/);
   assert.match(workflow, /npm run initial-bootstrap:invoke-async/);
   assert.match(workflow, /Verify exact async invocation configuration/);
   assert.match(workflow, /asyncInvocationConfig\.retriesCount/);

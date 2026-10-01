@@ -364,12 +364,18 @@ jobs:
           invocation_mode='${{ inputs.invocation_mode }}'
           tag='r1-initial-bootstrap'
           async_args=()
+          create_mode_args=()
+          description_args=()
+          create_output="$tmp/version.json"
           if [ "$invocation_mode" = 'async' ]; then
-            tag='r1-initial-bootstrap-async'
+            tag="r1-initial-bootstrap-async-${GITHUB_SHA:0:12}"
             async_args=(
               --async-max-retries 0
               --async-service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID"
             )
+            create_mode_args=(--async)
+            description_args=(--description "prihrash-r1-async-${GITHUB_RUN_ID}")
+            create_output="$tmp/operation.json"
           fi
           if ! yc serverless function version create \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
@@ -380,6 +386,8 @@ jobs:
             --source-path .artifacts/yandex-initial-bootstrap-function \
             --service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID" \
             --tags "$tag" \
+            "${create_mode_args[@]}" \
+            "${description_args[@]}" \
             "${async_args[@]}" \
             --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
             --no-logging \
@@ -388,8 +396,34 @@ jobs:
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${PRIHRASH_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
-            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+            --format json-rest --retry 0 --no-user-output >"$create_output" 2>"$tmp/version.err"; then
             echo 'INITIAL_BOOTSTRAP_DEPLOY_FAILED'
+            exit 1
+          fi
+          if [ "$invocation_mode" = 'async' ]; then
+            operation_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/operation.json")" || {
+              echo 'INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_ID_INVALID'
+              exit 1
+            }
+            echo "::add-mask::${operation_id}"
+            printf '%s\n' "$operation_id" >"$RUNNER_TEMP/r1-initial-bootstrap-async-operation-id"
+          fi
+
+      - name: Wait exact async Function version operation
+        if: ${{ inputs.invocation_mode == 'async' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          operation_file="$RUNNER_TEMP/r1-initial-bootstrap-async-operation-id"
+          test -f "$operation_file" || { echo 'INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_ID_MISSING'; exit 1; }
+          operation_id="$(cat "$operation_file")"
+          test -n "$operation_id" || { echo 'INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_ID_MISSING'; exit 1; }
+          echo "::add-mask::${operation_id}"
+          if ! yc operation wait "$operation_id" \
+            --format json-rest --retry 0 --timeout 10m --no-user-output \
+            >"$RUNNER_TEMP/r1-initial-bootstrap-async-operation-result.json" \
+            2>"$RUNNER_TEMP/r1-initial-bootstrap-async-operation-wait.err"; then
+            echo 'INITIAL_BOOTSTRAP_ASYNC_DEPLOY_OPERATION_WAIT_FAILED'
             exit 1
           fi
 
@@ -400,9 +434,10 @@ jobs:
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-async-config"
           mkdir -p "$tmp"
+          async_tag="r1-initial-bootstrap-async-${GITHUB_SHA:0:12}"
           if ! yc serverless function version get-by-tag \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
-            --tag r1-initial-bootstrap-async \
+            --tag "$async_tag" \
             --format json-rest --retry 0 --no-user-output \
             >"$tmp/version.json" 2>"$tmp/version.err"; then
             echo 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_READ_FAILED'
@@ -410,12 +445,13 @@ jobs:
           fi
           if ! jq -e \
             --arg runtime_sa "$PRIHRASH_YC_FUNCTION_SA_ID" \
-            --arg invoker_sa "$PRIHRASH_YC_FUNCTION_SA_ID" '
+            --arg invoker_sa "$PRIHRASH_YC_FUNCTION_SA_ID" \
+            --arg async_tag "$async_tag" '
               .status == "ACTIVE"
               and .runtime == "nodejs22"
               and .entrypoint == "index.initialBootstrapHandler"
               and .serviceAccountId == $runtime_sa
-              and (.tags | index("r1-initial-bootstrap-async") != null)
+              and (.tags | index($async_tag) != null)
               and (.executionTimeout == "600s")
               and ((.resources.memory | tostring) == "1073741824")
               and ((.asyncInvocationConfig.retriesCount | tostring) == "0")
@@ -502,6 +538,7 @@ jobs:
 
           set +e
           if [ '${{ inputs.invocation_mode }}' = 'async' ]; then
+            export PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_TAG="r1-initial-bootstrap-async-${GITHUB_SHA:0:12}"
             npm run initial-bootstrap:invoke-async | tee "$tmp"
           else
             npm run initial-bootstrap:invoke | tee "$tmp"

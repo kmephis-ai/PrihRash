@@ -18,19 +18,22 @@ async function runInvoker({
   status = 202,
   mode = 'response',
   includeFunctionId = true,
+  includeFunctionTag = true,
   includeIamToken = true,
+  functionTag = 'r1-initial-bootstrap-async-deadbeefcafe',
 } = {}) {
   const environment = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
     NODE_OPTIONS: `--import=${pathToFileURL(FETCH_MOCK).href}`,
     PRIHRASH_TEST_FUNCTION_ID: FUNCTION_ID,
-    PRIHRASH_TEST_FUNCTION_TAG: 'r1-initial-bootstrap-async',
+    PRIHRASH_TEST_FUNCTION_TAG: functionTag,
     PRIHRASH_TEST_FUNCTION_INTEGRATION: 'async',
     PRIHRASH_TEST_FETCH_BODY: body,
     PRIHRASH_TEST_FETCH_STATUS: String(status),
     PRIHRASH_TEST_FETCH_MODE: mode,
     ...(includeFunctionId ? { PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID: FUNCTION_ID } : {}),
+    ...(includeFunctionTag ? { PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_TAG: functionTag } : {}),
     ...(includeIamToken ? { YC_IAM_TOKEN: 'synthetic-short-lived-iam-token' } : {}),
   };
 
@@ -104,10 +107,24 @@ test('transport timeout and failure stay bounded and private', async () => {
   });
 });
 
-test('missing exact function id or IAM token stops before invocation', async () => {
+test('missing exact function id, exact tag or IAM token stops before invocation', async () => {
   const missingFunction = await runInvoker({ includeFunctionId: false });
   assert.equal(missingFunction.exitCode, 2);
   assertSafeOutput(missingFunction, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_INVALID',
+  });
+
+  const missingTag = await runInvoker({ includeFunctionTag: false });
+  assert.equal(missingTag.exitCode, 2);
+  assertSafeOutput(missingTag, {
+    status: 'FAIL',
+    code: 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_INVALID',
+  });
+
+  const invalidTag = await runInvoker({ functionTag: 'INVALID TAG' });
+  assert.equal(invalidTag.exitCode, 2);
+  assertSafeOutput(invalidTag, {
     status: 'FAIL',
     code: 'INITIAL_BOOTSTRAP_ASYNC_CONFIG_INVALID',
   });
@@ -125,8 +142,9 @@ test('async invoker contract is short-lived admission-only and contains no retry
 
   assert.match(source, /request as httpsRequest.*node:https/);
   assert.match(source, /const ACCEPT_TIMEOUT_MS = 30_000/);
-  assert.match(source, /const BOOTSTRAP_TAG = 'r1-initial-bootstrap-async'/);
-  assert.match(source, /url\.searchParams\.set\('tag', BOOTSTRAP_TAG\)/);
+  assert.match(source, /PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_TAG/);
+  assert.match(source, /BOOTSTRAP_TAG_PATTERN/);
+  assert.match(source, /url\.searchParams\.set\('tag', functionTag\)/);
   assert.match(source, /url\.searchParams\.set\('integration', 'async'\)/);
   assert.match(source, /statusCode === 202/);
   assert.match(source, /INITIAL_BOOTSTRAP_ASYNC_ACCEPTED/);
