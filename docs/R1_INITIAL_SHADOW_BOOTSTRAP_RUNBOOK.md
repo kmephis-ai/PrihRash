@@ -3177,3 +3177,24 @@ The same resolver is used only on the active `recovery -> orchestrator -> initia
 path so a successful recovery proof cannot later diverge at the same locator boundary. This is a
 read-only locator correction: it does not create a Function resource, classify or clean the historical
 UNKNOWN version, widen IAM, arm the async provider marker, or change retries/YMQ/financial semantics.
+
+### REST Function locator after recovery `36923482319`
+
+After #911/#912 merged as exact main `41a27cae5656d55833180d800376cbe59660c6a6`, fresh recovery
+`36923482319` proved the exact historical pre-invoke async child gate and WIF exchange, then stopped
+before recovery deploy/invoke at `INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_LIST_FAILED`. No Function version,
+async admission, Google/YDB write or historical-UNKNOWN cleanup was reached.
+
+The CLI `function list` command shape is valid, so the active R1 chain now uses the documented Cloud
+Functions REST `Function.List` endpoint for this locator. It sends only the short-lived WIF bearer token,
+exact folder ID and exact `name="prihrash-r1-initial-bootstrap"` filter, keeps the response and stderr
+runner-private, and still requires exactly one canonical nonblank Function ID with no continuation page.
+The same resolver is used by recovery, orchestrator and bootstrap so proof and mutation paths cannot drift.
+
+The public failure taxonomy distinguishes transport, authentication, authorization, not-found,
+unexpected HTTP status and malformed/ambiguous metadata. In particular,
+`*_FUNCTION_LIST_PERMISSION_DENIED` proves only that the current identity cannot perform this read; it
+must **not** be treated as permission to add/restore IAM automatically. The canonical folder-scoped
+`functions.auditor` lifecycle remains unchanged and any live IAM correction requires a separate explicit
+authority decision. This Incident-M changes no IAM, retries, YMQ, provider write authority, Google/YDB
+semantics, timer or cutover state.
