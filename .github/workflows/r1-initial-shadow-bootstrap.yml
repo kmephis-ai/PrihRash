@@ -286,6 +286,15 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_RUNTIME_SA_METADATA_INVALID'
             exit 1
           fi
+          if [ '${{ inputs.invocation_mode }}' = 'async' ]; then
+            if ! jq -e --arg id "$runtime_sa_id" '
+              [.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject]
+              | any(.type == "serviceAccount" and .id == $id)
+            ' "$tmp/bindings.json" >/dev/null; then
+              echo 'INITIAL_BOOTSTRAP_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
+              exit 1
+            fi
+          fi
 
           echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
           if ! secret_http="$(curl --silent --show-error \
@@ -359,7 +368,7 @@ jobs:
             tag='r1-initial-bootstrap-async'
             async_args=(
               --async-max-retries 0
-              --async-service-account-id "$YC_WIF_SERVICE_ACCOUNT_ID"
+              --async-service-account-id "$PRIHRASH_YC_FUNCTION_SA_ID"
             )
           fi
           if ! yc serverless function version create \
@@ -401,7 +410,7 @@ jobs:
           fi
           if ! jq -e \
             --arg runtime_sa "$PRIHRASH_YC_FUNCTION_SA_ID" \
-            --arg invoker_sa "$YC_WIF_SERVICE_ACCOUNT_ID" '
+            --arg invoker_sa "$PRIHRASH_YC_FUNCTION_SA_ID" '
               .status == "ACTIVE"
               and .runtime == "nodejs22"
               and .entrypoint == "index.initialBootstrapHandler"
@@ -443,6 +452,15 @@ jobs:
           ' "$tmp/bindings.json" >/dev/null; then
             echo 'INITIAL_BOOTSTRAP_POSTFLIGHT_WIF_INVOKER_BINDING_MISSING'
             exit 1
+          fi
+          if [ '${{ inputs.invocation_mode }}' = 'async' ]; then
+            if ! jq -e --arg id "$PRIHRASH_YC_FUNCTION_SA_ID" '
+              [.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject]
+              | any(.type == "serviceAccount" and .id == $id)
+            ' "$tmp/bindings.json" >/dev/null; then
+              echo 'INITIAL_BOOTSTRAP_POSTFLIGHT_ASYNC_RUNTIME_INVOKER_BINDING_MISSING'
+              exit 1
+            fi
           fi
 
           if ! yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
