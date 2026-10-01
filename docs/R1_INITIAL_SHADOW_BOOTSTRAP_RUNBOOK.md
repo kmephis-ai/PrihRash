@@ -3019,18 +3019,24 @@ No Function create/invoke, IAM mutation or financial data access occurred. The s
 WIF is not authorized to enumerate access bindings **on** the runtime service-account resource; it does
 not prove that `iam.serviceAccounts.user` is absent and must not be used to justify IAM widening.
 
-The recovery classifier therefore uses only currently readable and sufficient evidence:
+The first read-only recovery classifier reuses only currently readable Function/version evidence and
+does not infer that a missing list candidate means `NOT_APPLIED`:
 
 - exact failed deploy timestamps from child `36783942040`;
-- bounded dedicated Function version list to detect an async tag or a version created in that failed
-  deploy window;
+- bounded Function version list and exact-window `CreateFunctionVersion` operation history;
+- typed operation response/metadata version ID, when present;
+- exact `GetVersionByTag` configuration and `ListTagHistory` interval;
 - current exact Function access bindings to verify runtime SA still has
   `functions.functionInvoker`.
 
-PrihRash already has empirical attachment evidence from prior successful synchronous Function-version
-deployments using the same dedicated deployment identity and runtime SA. A later corrected async create
-will still fail closed before invocation if that attachment permission has since been revoked; no new
-IAM grant is authorized.
+Only exact version ID + actor/time-bound operation + complete async/runtime/entrypoint/Lockbox config +
+active tag interval can produce `INVOCATION_ONLY_READY`. Missing operation provenance or incomplete
+version/tag evidence remains `DEPLOYMENT_OUTCOME_UNCLASSIFIED` / `PREVIOUS_VERSION_UNPROVEN`; it never
+becomes `NOT_APPLIED` by absence. Exact terminal `INVALID_ARGUMENT`/`FAILED_PRECONDITION` operation
+evidence selects a repository request-contract fix. Exact `PERMISSION_DENIED` stops without IAM
+widening. The one-shot invocation allowance was not consumed because async invoke was skipped; only an
+invocation-only successor marker may reuse an exact proven immutable version, and it must repeat fresh
+recovery/readiness gates. No create or invoke is authorized by the read-only classifier.
 
 The same read-only marker is reused on a **new SHA**:
 
@@ -3043,7 +3049,20 @@ Expected-Transition: READ_ONLY_ASYNC_DEPLOY_CLASSIFICATION
 Regression-Test: tests/tooling/r1-async-deploy-recovery-classifier.test.mjs
 ```
 
-Only `SAFE_TO_CORRECT_CONFIG / previousWrite=NOT_APPLIED / runtimeInvoker=PRESENT` may support a
-later distinct fix that uses runtime SA as the async executor. Any existing/ambiguous failed-window
-version or missing current runtime invoker binding remains STOP.
+The bounded result has distinct engineering outcomes:
+
+- `INVOCATION_ONLY_READY / VERSION_PROVEN` → no second Function version create; a separate exact-main
+  marker may arm one async admission against the proven version after fresh recovery/readiness;
+- `REQUEST_CONTRACT_INVALID / CREATE_OPERATION_FAILED` → fix the exact async request/configuration and
+  preserve the Owner async boundary;
+- `CREATE_PERMISSION_DENIED` or `IAM_BOUNDARY_MISSING` → STOP without IAM widening;
+- `PREVIOUS_VERSION_UNPROVEN`, `PREVIOUS_WRITE_AMBIGUOUS`, `CREATE_OPERATION_IN_PROGRESS`, or
+  `DEPLOYMENT_OUTCOME_UNCLASSIFIED` → STOP; do not infer `NOT_APPLIED`, repeat the same query, create a
+  version, or invoke.
+
+Only current exact Function `functions.functionInvoker` evidence is read; runtime-SA resource bindings
+are not queried because this WIF surface is not authorized to enumerate them. A later corrected async
+create still fails closed before invoke if `iam.serviceAccounts.user` was revoked. No new IAM grant is
+authorized. These terminal cases, the shared caller predicates and the Owner anti-S-unit rule are
+covered in one Incident-M with synchronized `AGENTS.md` and `docs/R1_COMPLETION_SPRINT.md`.
 

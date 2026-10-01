@@ -492,6 +492,20 @@ exact-main provider marker contract work остаётся repository/test-only.
 canonical CI, fresh recovery/stale-retirement gates, fresh readiness, single-writer и one-shot
 async admission. Старый sync root-cause attempt counter не сбрасывать и не обходить.
 
+После safe signature `INITIAL_BOOTSTRAP_ASYNC_DEPLOY_FAILED` у первого bounded attempt, новый-SHA
+read-only classifier должен связывать точный failed step с единственным function-scoped
+`CreateFunctionVersion` operation, typed version ID,
+version list, active `r1-initial-bootstrap-async` tag-history interval и полным zero-retry/no-target/
+runtime/Lockbox contract. Отсутствие версии в list/tag без operation provenance не является
+`NOT_APPLIED` и не разрешает повтор create.
+
+Терминальные действия различаются: `INVOCATION_ONLY_READY / VERSION_PROVEN` разрешает только отдельный
+exact-main invocation-only marker после fresh recovery/readiness, без deploy; exact
+`REQUEST_CONTRACT_INVALID` ведёт к repository request-contract fix; `CREATE_PERMISSION_DENIED` ведёт к
+STOP без IAM widening; ambiguous/missing/in-progress/config-conflicting evidence остаётся UNKNOWN и
+STOP. Classifier не читает Google/YDB, не меняет IAM, не создаёт Function version и не вызывает Function.
+Все cases, fixtures и anti-S-unit sync с completion sprint/runbook входят в один Incident-M.
+
 ## 9. CI
 
 На старте GitHub Actions должны проверять минимум:

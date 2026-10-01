@@ -34,6 +34,7 @@ jobs:
       OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
 
     steps:
       - name: Checkout exact CI source
@@ -55,6 +56,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test -n "$YC_LOCKBOX_SECRET_ID"
 
           api="https://api.github.com/repos/$GITHUB_REPOSITORY"
           auth_header="Authorization: Bearer $GH_API_TOKEN"
@@ -112,12 +114,16 @@ jobs:
             and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs" and .status != "removed")
             and any(.[]; .filename == "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs" and .status != "removed")
             and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+            and any(.[]; .filename == "docs/R1_COMPLETION_SPRINT.md" and .status != "removed")
+            and any(.[]; .filename == "AGENTS.md" and .status != "removed")
             and all(.[]; .filename | IN(
               ".github/workflows/r1-initial-bootstrap-async-deploy-recovery.yml",
               "scripts/classify-r1-async-deploy-recovery.mjs",
               "tests/tooling/r1-async-deploy-recovery-classifier.test.mjs",
               "tests/tooling/r1-async-deploy-recovery-workflow.test.mjs",
-              "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md"
+              "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md",
+              "docs/R1_COMPLETION_SPRINT.md",
+              "AGENTS.md"
             ))
           ' <<<"$files" >/dev/null || { echo 'R1_ASYNC_DEPLOY_RECOVERY_CHANGESET_INVALID'; exit 1; }
 
@@ -240,11 +246,34 @@ jobs:
             --format json --retry 0 --no-user-output >"$tmp/versions.json" 2>"$tmp/versions.err" || {
               echo 'R1_ASYNC_DEPLOY_RECOVERY_VERSION_LIST_FAILED'; exit 1;
             }
+          yc serverless function list-operations --id "$function_id" --limit 1000 \
+            --format json --retry 0 --no-user-output >"$tmp/operations.json" 2>"$tmp/operations.err" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_OPERATION_LIST_FAILED'; exit 1;
+            }
+          if ! yc serverless function version get-by-tag --function-id "$function_id" --tag 'r1-initial-bootstrap-async' \
+            --format json-rest --retry 0 --no-user-output >"$tmp/tagged-version.json" 2>"$tmp/tagged-version.err"; then
+            printf '{}\n' >"$tmp/tagged-version.json"
+          fi
+          lockbox_secret_json="$(yc lockbox secret get --id "$YC_LOCKBOX_SECRET_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/lockbox.err")" || {
+              echo 'R1_ASYNC_DEPLOY_RECOVERY_LOCKBOX_READ_FAILED'; exit 1;
+            }
+          lockbox_version_id="$(jq -er '(.currentVersion.id // .current_version.id // .currentVersionId) | select(type == "string" and length > 0)' \
+            <<<"$lockbox_secret_json")" || { echo 'R1_ASYNC_DEPLOY_RECOVERY_LOCKBOX_VERSION_INVALID'; exit 1; }
+          echo "::add-mask::${lockbox_version_id}"
+          tag_history_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${function_id}:tagHistory"
+          curl --fail --silent --show-error --get --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' --data-urlencode 'tag=r1-initial-bootstrap-async' \
+            --data-urlencode 'pageSize=1000' "$tag_history_api" --output "$tmp/tag-history.json" \
+            2>"$tmp/tag-history.err" || { echo 'R1_ASYNC_DEPLOY_RECOVERY_TAG_HISTORY_READ_FAILED'; exit 1; }
+          observed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           result="$(node scripts/classify-r1-async-deploy-recovery.mjs \
-            "$tmp/versions.json" "$tmp/function-bindings.json" \
-            "$function_id" "$runtime_sa_id" \
-            "$FAILED_DEPLOY_STARTED_AT" "$FAILED_DEPLOY_FINISHED_AT")" || {
+            "$tmp/versions.json" "$tmp/operations.json" "$tmp/function-bindings.json" \
+            "$tmp/tagged-version.json" "$tmp/tag-history.json" \
+            "$function_id" "$runtime_sa_id" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            "$YC_LOCKBOX_SECRET_ID" "$lockbox_version_id" \
+            "$FAILED_DEPLOY_STARTED_AT" "$FAILED_DEPLOY_FINISHED_AT" "$observed_at")" || {
               echo 'R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIER_FAILED'; exit 1;
             }
           evidence_dir="$RUNNER_TEMP/r1-async-deploy-recovery-evidence"
@@ -255,18 +284,25 @@ jobs:
               and .status == "PASS"
               and .code == "R1_ASYNC_DEPLOY_RECOVERY_CLASSIFIED"
               and (.verdict | IN(
-                "SAFE_TO_CORRECT_CONFIG",
+                "INVOCATION_ONLY_READY",
+                "REQUEST_CONTRACT_INVALID",
+                "CREATE_PERMISSION_DENIED",
+                "CREATE_OPERATION_FAILED_UNCLASSIFIED",
+                "PREVIOUS_VERSION_UNPROVEN",
                 "PREVIOUS_WRITE_AMBIGUOUS",
-                "PREVIOUS_VERSION_PRESENT",
+                "CREATE_OPERATION_IN_PROGRESS",
+                "DEPLOYMENT_OUTCOME_UNCLASSIFIED",
                 "IAM_BOUNDARY_MISSING",
-                "BLOCKED"
+                "EVIDENCE_INVALID"
               ))
-              and (.previousWrite | IN("NOT_APPLIED", "VERSION_PRESENT", "AMBIGUOUS"))
+              and (.previousWrite | IN("VERSION_PROVEN", "CREATE_OPERATION_FAILED", "VERSION_CANDIDATE", "AMBIGUOUS", "UNCLASSIFIED"))
               and (.runtimeInvoker | IN("PRESENT", "ABSENT"))
+              and (.createFailureClass | IN("NONE", "INVALID_ARGUMENT", "NOT_FOUND", "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION", "INTERNAL", "UNAVAILABLE", "OTHER"))
               and (keys | sort) == [
-                "code",
-                "previousWrite",
-                "runtimeInvoker",
+              "code",
+              "createFailureClass",
+              "previousWrite",
+              "runtimeInvoker",
                 "status",
                 "verdict"
               ]

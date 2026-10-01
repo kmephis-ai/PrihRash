@@ -265,6 +265,18 @@ stale-retirement/read-back, readiness, exact async version config и единс�
 После admission workflow не ждёт application response по HTTPS и не делает retry; итог определяется
 только durable recovery. Google остаётся authoritative.
 
+Первый async attempt завершился privacy-safe сигнатурой
+`INITIAL_BOOTSTRAP_ASYNC_DEPLOY_FAILED` у child `36783942040` на step
+`Deploy initial-bootstrap-only Function version`, а
+invoke был `skipped`. Ошибка create не доказывает `NOT_APPLIED`. Один stage-specific read-only
+classification на новом exact SHA обязан связать exact orchestrator/child runs, exact operation actor/
+time, typed version ID, full zero-retry/no-target/runtime/Lockbox configuration и active async tag
+interval. Outcomes: `INVOCATION_ONLY_READY / VERSION_PROVEN` → только отдельный invocation-only marker
+после fresh recovery/readiness, без deploy; `REQUEST_CONTRACT_INVALID` → request fix; permission
+denial → STOP без IAM widening; missing/ambiguous/malformed → UNKNOWN без replay. Classifier не читает
+Google/YDB и не пишет provider state. Всё входит в один Incident-M вместе fixtures/runbook и sync
+этого anti-S-unit правила в `AGENTS.md`; отдельно дробить diagnostics запрещено.
+
 ## Постоянная делегация Owner до завершения R1
 
 Owner делегирует агенту автономно принимать и выполнять repository/process/provider решения,
