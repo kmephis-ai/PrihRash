@@ -44,6 +44,10 @@ test('orchestrator recovery boundary stays read-only and includes historical pro
   assert.match(workflow, /environment-variable=PRIHRASH_YDB_CONNECTION_STRING/);
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID/);
   assert.match(workflow, /PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
+  assert.match(workflow, /yc serverless function list --folder-id "\$YC_FOLDER_ID" --limit 1000/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_NOT_FOUND/);
+  assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_NOT_UNIQUE/);
+  assert.doesNotMatch(workflow, /yc serverless function get --name "\$FUNCTION_NAME"/);
   assert.doesNotMatch(workflow, /index\.initialBootstrapHandler/);
   assert.doesNotMatch(workflow, /npm run initial-bootstrap:invoke/);
 });

@@ -3158,3 +3158,22 @@ read-only durable-state classification needed before a separately marked disjoin
 not classify the historical Function-version create as applied/not-applied, does not replay or clean it
 up, and does not arm async provider write by itself.
 
+
+### Exact-name Function locator after recovery `36919270126`
+
+After #910 merged as `8267fd53276fa259000283ca6ef497e39b55e1e8`, exact-main CI, Browser Quality
+and CodeQL passed. Fresh recovery `36919270126` then passed the new exact historical-child gate,
+installed the Yandex CLI, exchanged OIDC for the dedicated WIF token, and stopped read-only at
+`INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_RESOLUTION_FAILED`. Recovery Function deploy and invoke were
+both skipped; no Google/YDB write or new Function version was reached.
+
+The active R1 path now resolves the existing dedicated Function by a folder-scoped list plus one exact
+name match instead of relying on name-based `function get`. The resolver is bounded to
+`prihrash-r1-initial-bootstrap` and fails closed on list failure, malformed list metadata, zero exact
+matches, multiple exact matches, or missing canonical ID. Provider IDs and the rest of the folder
+inventory remain runner-private.
+
+The same resolver is used only on the active `recovery -> orchestrator -> initial shadow bootstrap`
+path so a successful recovery proof cannot later diverge at the same locator boundary. This is a
+read-only locator correction: it does not create a Function resource, classify or clean the historical
+UNKNOWN version, widen IAM, arm the async provider marker, or change retries/YMQ/financial semantics.

@@ -48,6 +48,11 @@ test('initial shadow bootstrap workflow uses only dedicated WIF, Function, runti
   assert.match(workflow, /LOCKBOX_SECRET_NAME:\s*prihrash-r1-initial-bootstrap/);
   assert.match(workflow, /YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(workflow, /YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID/);
+  assert.match(workflow, /yc serverless function list --folder-id "\$YC_FOLDER_ID" --limit 1000/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_FUNCTION_NOT_FOUND/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_FUNCTION_NOT_UNIQUE/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_FUNCTION_LIST_METADATA_INVALID/);
+  assert.doesNotMatch(workflow, /yc serverless function get --name "\$FUNCTION_NAME"/);
   assert.doesNotMatch(workflow, /YC_R1_SCHEMA_UPGRADE_003_WIF_SERVICE_ACCOUNT_ID|YC_R1_SCHEMA_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID/);
   assert.match(workflow, /OIDC_SUBJECT:\s*repo:kmephis-ai@310519475\/PrihRash@1359286840:ref:refs\/heads\/main/);
 });
