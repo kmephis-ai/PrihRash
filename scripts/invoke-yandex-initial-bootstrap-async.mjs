@@ -1,6 +1,6 @@
 import { request as httpsRequest } from 'node:https';
 
-const BOOTSTRAP_TAG = 'r1-initial-bootstrap-async';
+const BOOTSTRAP_TAG_PATTERN = /^[a-z][-_0-9a-z]*$/;
 const FUNCTIONS_ORIGIN = 'https://functions.yandexcloud.net';
 const ACCEPT_TIMEOUT_MS = 30_000;
 
@@ -105,11 +105,15 @@ function invokeAsync(url, iamToken) {
 
 async function invokeInitialBootstrapAsync(environment = process.env) {
   const functionId = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_ID;
+  const functionTag = environment.PRIHRASH_YANDEX_INITIAL_BOOTSTRAP_FUNCTION_TAG;
   const iamToken = environment.YC_IAM_TOKEN;
-  if (!nonBlank(functionId) || !nonBlank(iamToken)) return SAFE_CONFIG_FAILURE;
+  if (!nonBlank(functionId)
+    || !nonBlank(functionTag)
+    || !BOOTSTRAP_TAG_PATTERN.test(functionTag)
+    || !nonBlank(iamToken)) return SAFE_CONFIG_FAILURE;
 
   const url = new URL(`${FUNCTIONS_ORIGIN}/${encodeURIComponent(functionId)}`);
-  url.searchParams.set('tag', BOOTSTRAP_TAG);
+  url.searchParams.set('tag', functionTag);
   url.searchParams.set('integration', 'async');
 
   return invokeAsync(url, iamToken);
