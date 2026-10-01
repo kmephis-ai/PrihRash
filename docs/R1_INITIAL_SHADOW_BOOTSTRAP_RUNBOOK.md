@@ -3106,3 +3106,33 @@ This correction is repository/test-only. It deliberately carries no `Provider-At
 unclassified create. A later provider-capable action still requires a separate exact-main decision that
 resolves or explicitly governs the prior UNKNOWN create outcome; until then create/invoke remain
 `NOT_AUTHORIZED`.
+
+### Async create operation provenance hardening
+
+Historical async create from bootstrap child `36783942040` remains
+`DEPLOYMENT_OUTCOME_UNCLASSIFIED / previousWrite=UNCLASSIFIED`. Recovery `36817714728` published only
+enum-safe evidence, not the raw provider snapshot, and its candidate search was bounded to the failed
+deploy window. Official Yandex Cloud documentation states that Cloud Functions resource actions are
+recorded as operations and that CLI `--async` returns an in-progress Operation ID immediately, but that
+contract cannot retroactively prove the old synchronous create outcome. Historical create/invoke replay
+therefore remains forbidden.
+
+Before any future separately authorized async create, the repository now preserves provenance by design:
+
+- async Function-version create uses `yc serverless function version create --async`;
+- the create step parses the returned Operation ID, masks it, and keeps it only in runner-local temporary
+  storage; the private ID is not published in GitHub evidence;
+- waiting for that exact Operation is a separate GitHub step. Therefore step-level evidence distinguishes
+  an unaccepted create request from an accepted request whose later operation wait fails;
+- each exact-main attempt uses deterministic public correlation:
+  `r1-initial-bootstrap-async-<first-12-of-main-sha>` as the version tag and
+  `prihrash-r1-async-<github-run-id>` as description;
+- async config read-back and the HTTPS async-admission invoker use the same SHA-derived tag;
+- synchronous bootstrap mode is unchanged;
+- retries remain zero, YMQ targets remain absent, runtime SA remains the async executor, and no IAM,
+  Google, YDB, timer, cutover or financial semantics are widened.
+
+This changeset is repository-only and intentionally carries no provider-ready marker. Merge/CI cannot
+authorize a new Function version, async admission, bootstrap replay, or cleanup. Historical UNKNOWN
+remains a hard boundary until a separately proven policy/evidence decision permits a new disjoint attempt.
+
