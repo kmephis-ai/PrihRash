@@ -26,6 +26,8 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /staging_revision_cardinality_only:/);
   assert.match(workflow, /RECOVERY_REVISION_CARDINALITY_ONLY: \$\{\{ inputs\.staging_revision_cardinality_only/);
   assert.match(workflow, /causal_bootstrap_run_id:/);
+  assert.match(workflow, /allow_preinvoke_async_deploy_failure:/);
+  assert.match(workflow, /RECOVERY_ALLOW_PREINVOKE_ASYNC_DEPLOY_FAILURE/);
   assert.match(workflow, /CAUSAL_BOOTSTRAP_RUN_ID.*!=.*selected_run_id/);
   assert.match(workflow, /export RECOVERY_CAUSAL_BOOTSTRAP_RUN_ID="\$CAUSAL_BOOTSTRAP_RUN_ID"/);
   assert.match(workflow, /\.run_started_at/);
@@ -47,6 +49,14 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /\.head_sha == \$expected_sha/);
   assert.match(workflow, /Invoke exact initial bootstrap tag once/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_RUN_NOT_EXACT/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_MODE_CONFLICT/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_FAILURE_NOT_PROVEN/);
+  assert.match(workflow, /CAUSAL_BOOTSTRAP_RUN_ID" != '36783942040'/);
+  assert.match(workflow, /Deploy initial-bootstrap-only Function version"[\s\S]*?\.conclusion == "failure"/);
+  assert.match(workflow, /Verify exact async invocation configuration"[\s\S]*?\.conclusion == "skipped"/);
+  assert.match(workflow, /Invoke exact initial bootstrap tag once"[\s\S]*?\.conclusion == "skipped"/);
+  assert.match(workflow, /Publish enum-only bootstrap evidence"[\s\S]*?\.conclusion == "skipped"/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FAILED_ATTEMPT_MISSING/);
   assert.match(workflow, /\.conclusion == "failure"/);
   assert.doesNotMatch(workflow, /r1-initial-bootstrap-recovery-diagnostic/);

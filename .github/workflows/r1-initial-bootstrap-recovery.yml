@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: ''
+      allow_preinvoke_async_deploy_failure:
+        description: Allow full read-only recovery only for the exact historical async child that failed during Function-version deploy before invoke
+        required: false
+        type: boolean
+        default: false
       reuse_deploy_attempt_run_id:
         description: Exact successful create-only recovery deployment to reuse without creating another Function version
         required: false
@@ -64,6 +69,7 @@ jobs:
       RECOVERY_CONTROLLED_PREPARATION_ONLY: ${{ inputs.controlled_preparation_only && '1' || '0' }}
       RECOVERY_REVISION_CARDINALITY_ONLY: ${{ inputs.staging_revision_cardinality_only && '1' || '0' }}
       CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
+      RECOVERY_ALLOW_PREINVOKE_ASYNC_DEPLOY_FAILURE: ${{ inputs.allow_preinvoke_async_deploy_failure && '1' || '0' }}
       REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
       REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
       REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
@@ -130,6 +136,16 @@ jobs:
               exit 1
             fi
           fi
+          if [ "$RECOVERY_ALLOW_PREINVOKE_ASYNC_DEPLOY_FAILURE" = '1' ]; then
+            if [ "$CAUSAL_BOOTSTRAP_RUN_ID" != '36783942040' ]; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_RUN_NOT_EXACT'
+              exit 1
+            fi
+            if [ "$recovery_mode_count" -ne 0 ] || [ "$reuse_field_count" -ne 0 ]; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_MODE_CONFLICT'
+              exit 1
+            fi
+          fi
 
       - name: Setup Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -155,6 +171,7 @@ jobs:
         env:
           GH_API_TOKEN: ${{ github.token }}
           CAUSAL_BOOTSTRAP_RUN_ID: ${{ inputs.causal_bootstrap_run_id }}
+          RECOVERY_ALLOW_PREINVOKE_ASYNC_DEPLOY_FAILURE: ${{ inputs.allow_preinvoke_async_deploy_failure && '1' || '0' }}
           REUSE_DEPLOY_ATTEMPT_RUN_ID: ${{ inputs.reuse_deploy_attempt_run_id }}
           REUSE_FAILED_RECOVERY_RUN_ID: ${{ inputs.reuse_failed_recovery_run_id }}
           REUSE_SOURCE_PR_NUMBER: ${{ inputs.reuse_source_pr_number }}
@@ -244,7 +261,39 @@ jobs:
               echo 'INITIAL_BOOTSTRAP_RECOVERY_BOOTSTRAP_RUN_READ_FAILED'
               exit 1
             }
-          if ! jq -e '
+          if [ "$RECOVERY_ALLOW_PREINVOKE_ASYNC_DEPLOY_FAILURE" = '1' ]; then
+            if ! jq -e '
+              [.jobs[] | select(.name == "initial-shadow-bootstrap")] as $jobs
+              | ($jobs | length) == 1
+              and ([
+                $jobs[0].steps[]? | select(
+                  .name == "Deploy initial-bootstrap-only Function version"
+                  and .conclusion == "failure"
+                )
+              ] | length) == 1
+              and ([
+                $jobs[0].steps[]? | select(
+                  .name == "Verify exact async invocation configuration"
+                  and .conclusion == "skipped"
+                )
+              ] | length) == 1
+              and ([
+                $jobs[0].steps[]? | select(
+                  .name == "Invoke exact initial bootstrap tag once"
+                  and .conclusion == "skipped"
+                )
+              ] | length) == 1
+              and ([
+                $jobs[0].steps[]? | select(
+                  .name == "Publish enum-only bootstrap evidence"
+                  and .conclusion == "skipped"
+                )
+              ] | length) == 1
+            ' "$tmp/bootstrap-jobs.json" >/dev/null 2>&1; then
+              echo 'INITIAL_BOOTSTRAP_RECOVERY_PREINVOKE_ASYNC_FAILURE_NOT_PROVEN'
+              exit 1
+            fi
+          elif ! jq -e '
             [.jobs[] | select(.name == "initial-shadow-bootstrap")] as $jobs
             | ($jobs | length) == 1
             and ([
