@@ -254,8 +254,10 @@ Owner 2026-10-01 разрешил отдельный bounded R1 item для asyn
 - `async-max-retries=0`;
 - no YMQ success/failure targets;
 - no new paid resources;
-- no IAM widening: async service account должен уже иметь exact Function
-  `functions.functionInvoker`;
+- no IAM widening: deployment WIF остаётся deploy/admission caller; async executor — exact runtime SA
+  `prihrash-initial-bootstrap`, для которого уже существуют `functions.functionInvoker` и WIF →
+  runtime-SA `iam.serviceAccounts.user`; не назначать WIF executor'ом без отдельно доказанного
+  self-use permission;
 - `HTTP 202` означает только admission, не `COMMITTED`;
 - durable classification только read-only recovery после full execution window;
 - any ambiguity/non-success stops without replay.

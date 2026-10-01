@@ -476,8 +476,11 @@ exact-main provider marker contract work остаётся repository/test-only.
 - `async-max-retries=0`; provider retries запрещены;
 - success/failure YMQ targets не создавать и не настраивать;
 - новые paid resources запрещены;
-- не добавлять IAM binding ради async path: использовать только уже существующий exact-Function
-  `functions.functionInvoker` service account после read-back; иначе STOP;
+- не добавлять IAM binding ради async path: async executor — exact runtime service account
+  `prihrash-initial-bootstrap`, который уже имеет exact-Function `functions.functionInvoker` и который
+  deployment WIF уже имеет право использовать через существующий `iam.serviceAccounts.user`;
+  deployment WIF остаётся deploy/admission caller и не должен назначаться async executor без отдельно
+  доказанного self-use permission; обе invocation bindings проверять read-back, иначе STOP;
 - async version должна иметь отдельный tag `r1-initial-bootstrap-async`;
 - HTTPS `integration=async` должен принимать только `HTTP 202`; это означает только
   `INITIAL_BOOTSTRAP_ASYNC_ACCEPTED`, не `COMMITTED`;

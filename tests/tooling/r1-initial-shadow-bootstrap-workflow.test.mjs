@@ -61,10 +61,13 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /tag='r1-initial-bootstrap-async'/);
   assert.match(workflow, /--tags "\$tag"/);
   assert.match(workflow, /--async-max-retries 0/);
-  assert.match(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.match(workflow, /--async-service-account-id "\$PRIHRASH_YC_FUNCTION_SA_ID"/);
+  assert.doesNotMatch(workflow, /--async-service-account-id "\$YC_WIF_SERVICE_ACCOUNT_ID"/);
   assert.doesNotMatch(workflow, /--async-(?:success|failure)-ymq-arn/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_WIF_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_POSTFLIGHT_WIF_INVOKER_BINDING_MISSING/);
+  assert.match(workflow, /INITIAL_BOOTSTRAP_POSTFLIGHT_ASYNC_RUNTIME_INVOKER_BINDING_MISSING/);
   assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--no-logging/);
@@ -83,7 +86,8 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /npm run initial-bootstrap:invoke-async/);
   assert.match(workflow, /Verify exact async invocation configuration/);
   assert.match(workflow, /asyncInvocationConfig\.retriesCount/);
-  assert.match(workflow, /asyncInvocationConfig\.serviceAccountId/);
+  assert.match(workflow, /--arg invoker_sa "\$PRIHRASH_YC_FUNCTION_SA_ID"/);
+  assert.match(workflow, /asyncInvocationConfig\.serviceAccountId == \$invoker_sa/);
   assert.match(workflow, /successTarget \| has\("emptyTarget"\)/);
   assert.match(workflow, /failureTarget \| has\("emptyTarget"\)/);
   assert.doesNotMatch(workflow, /npm run (?:readiness|schema-bootstrap|schema-upgrade-003):invoke/);
