@@ -3136,3 +3136,25 @@ This changeset is repository-only and intentionally carries no provider-ready ma
 authorize a new Function version, async admission, bootstrap replay, or cleanup. Historical UNKNOWN
 remains a hard boundary until a separately proven policy/evidence decision permits a new disjoint attempt.
 
+### Fresh recovery after #909: bounded pre-invoke async-deploy exception
+
+After Owner approved one new disjoint async create, fresh full recovery `36917315869` on exact
+`e07f8410ae44ca6fcf5039e7ca757b0d72db4e84` stopped before Yandex CLI/OIDC/provider access with
+`INITIAL_BOOTSTRAP_RECOVERY_INVOKE_FAILURE_NOT_PROVEN`. The recovery selector correctly chose latest
+failed bootstrap child `36783942040`, but the generic gate still required its invoke step to be
+`failure`. That child instead failed earlier at `Deploy initial-bootstrap-only Function version`;
+async config, Function invoke and enum bootstrap evidence were all `skipped`.
+
+The bounded successor does not reinterpret that historical create. It adds only
+`allow_preinvoke_async_deploy_failure=true`, and accepts it solely when:
+
+- `causal_bootstrap_run_id=36783942040` and that run is still the exact latest failed bootstrap child;
+- the deploy step is exactly `failure`;
+- async config verification, bootstrap invoke and bootstrap evidence publication are exactly `skipped`;
+- no surface/controlled/cardinality/reuse mode is combined with this exception.
+
+Default recovery keeps the existing failed-invoke requirement. The exception authorizes only the fresh
+read-only durable-state classification needed before a separately marked disjoint async create; it does
+not classify the historical Function-version create as applied/not-applied, does not replay or clean it
+up, and does not arm async provider write by itself.
+
