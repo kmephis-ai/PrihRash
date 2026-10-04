@@ -90,7 +90,11 @@ test('workflow deploys a private trigger-free bootstrap-only version with exact 
   assert.match(workflow, /--memory 1g/);
   assert.match(workflow, /--execution-timeout 600s/);
   assert.match(workflow, /--no-logging/);
-  assert.match(workflow, /serverless trigger list/);
+  assert.doesNotMatch(workflow, /yc serverless trigger list/);
+  assert.equal((workflow.match(/serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/g) ?? []).length, 2);
+  assert.equal((workflow.match(/classify-yandex-trigger-list\.mjs/g) ?? []).length, 2);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$function_id"/);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$PRIHRASH_YC_FUNCTION_ID"/);
   assert.doesNotMatch(workflow, /serverless trigger create/);
   for (const key of [
     'google_spreadsheet_id',

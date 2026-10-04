@@ -54,6 +54,11 @@ test('orchestrator recovery boundary stays read-only and includes historical pro
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_NOT_FOUND/);
   assert.match(workflow, /R1_BOOTSTRAP_ORCHESTRATOR_FUNCTION_NOT_UNIQUE/);
   assert.doesNotMatch(workflow, /yc serverless function (?:get --name|list --folder-id)/);
+  assert.doesNotMatch(workflow, /yc serverless trigger list/);
+  assert.equal((workflow.match(/serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/g) ?? []).length, 2);
+  assert.equal((workflow.match(/classify-yandex-trigger-list\.mjs/g) ?? []).length, 2);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$function_id"/);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$PRIHRASH_YC_FUNCTION_ID"/);
   assert.doesNotMatch(workflow, /index\.initialBootstrapHandler/);
   assert.doesNotMatch(workflow, /npm run initial-bootstrap:invoke/);
 });
