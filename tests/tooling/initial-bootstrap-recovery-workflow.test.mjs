@@ -50,6 +50,16 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_LIST_METADATA_INVALID/);
   assert.match(workflow, /\(\.nextPageToken \/\/ ""\) == ""/);
   assert.doesNotMatch(workflow, /yc serverless function (?:get --name|list --folder-id) "\$?(?:FUNCTION_NAME|YC_FOLDER_ID)"/);
+  assert.doesNotMatch(workflow, /yc serverless function list-access-bindings/);
+  assert.equal((workflow.match(/:listAccessBindings/g) ?? []).length, 2);
+  assert.equal((workflow.match(/classify-yandex-function-access-bindings\.mjs/g) ?? []).length, 2);
+  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 2);
+  const runtimeResolution = workflow.indexOf('runtime_sa_id=');
+  const firstBindingsClassification = workflow.indexOf('classify-yandex-function-access-bindings.mjs');
+  assert.ok(runtimeResolution >= 0 && runtimeResolution < firstBindingsClassification);
+  assert.match(workflow, /\$YC_WIF_SERVICE_ACCOUNT_ID" "\$runtime_sa_id"\)/);
+  assert.match(workflow, /\$YC_WIF_SERVICE_ACCOUNT_ID" "\$PRIHRASH_YC_FUNCTION_SA_ID"\)/);
+  assert.equal((workflow.match(/INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_INVOKER_BINDING_MISSING/g) ?? []).length, 2);
   assert.doesNotMatch(workflow, /\bschedule:/);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_MAIN_MOVED_BEFORE_INVOKE/);

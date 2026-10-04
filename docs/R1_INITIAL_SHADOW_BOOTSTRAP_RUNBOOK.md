@@ -3198,3 +3198,41 @@ must **not** be treated as permission to add/restore IAM automatically. The cano
 `functions.auditor` lifecycle remains unchanged and any live IAM correction requires a separate explicit
 authority decision. This Incident-M changes no IAM, retries, YMQ, provider write authority, Google/YDB
 semantics, timer or cutover state.
+
+
+### REST Function access bindings after recovery `36926376170`
+
+После merge #913 exact main `3c78350d5e1257b2a7f93c86a21908c75167368b` fresh read-only recovery
+`36926376170` успешно прошёл REST-resolve exact Function и остановился до recovery deploy/invoke на
+`INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_BINDINGS_READ_FAILED`. Provider write не выполнялся; historical
+async create остаётся `UNKNOWN_AND_UNTOUCHED`, а первый `COMMITTED` shadow baseline не доказан.
+
+Recovery preflight и postflight используют документированный Cloud Functions
+`Function.ListAccessBindings` REST для уже найденного exact Function вместо
+`yc serverless function list-access-bindings`. Запрос использует только short-lived WIF bearer token,
+`pageSize=1000`, bounded timeout/response size и runner-private response/stderr. Отдельный classifier
+публикует только enum-safe presence/status evidence и fail-closed различает transport, timeout,
+authentication, permission, not-found, malformed/ambiguous metadata и incomplete pagination.
+
+Обе границы обязаны доказать одновременно:
+
+- public invoker отсутствует;
+- deployment WIF имеет exact-Function `functions.functionInvoker`;
+- runtime SA имеет exact-Function `functions.functionInvoker`.
+
+Runtime SA identity разрешается до preflight classification; postflight использует exact runtime SA,
+сохранённый той же preflight boundary. Raw access bindings, Function ID и service-account IDs не
+публикуются. `PERMISSION_DENIED` или missing binding означает STOP и не разрешает IAM widening.
+
+Этот Incident-M остаётся repository-only:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Historical-Async-Create: UNKNOWN_AND_UNTOUCHED
+Google-Authority: PRESERVED
+Timer-Cutover: FORBIDDEN
+Production-Writer: FORBIDDEN
+```
+
+После merge разрешён только новый exact-main read-only recovery согласно текущему #630 gate; новый
+Function-version create, async admission, replay или cleanup этим изменением не вооружаются.
