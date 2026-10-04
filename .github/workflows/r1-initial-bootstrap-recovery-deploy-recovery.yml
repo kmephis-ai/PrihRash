@@ -177,31 +177,136 @@ jobs:
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-deploy-recovery-provider"
           evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-deploy-recovery-evidence"
           mkdir -p "$tmp" "$evidence_dir"
-          yc serverless function get --name "$FUNCTION_NAME" --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/function.json" 2>"$tmp/function.err" || {
-              echo 'RECOVERY_DEPLOY_FUNCTION_READ_FAILED'; exit 1;
-            }
-          function_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/function.json")"
+          functions_api='https://serverless-functions.api.cloud.yandex.net/functions/v1/functions'
+          function_filter="name=\"${FUNCTION_NAME}\""
+          set +e
+          function_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/functions.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=100' \
+            --data-urlencode "filter=${function_filter}" \
+            "$functions_api" 2>"$tmp/functions-rest.err")"
+          function_curl_exit=$?
+          set -e
+          if [ "$function_curl_exit" -ne 0 ]; then
+            case "$function_curl_exit" in
+              28) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_TIMEOUT' ;;
+              63) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_RESPONSE_TOO_LARGE' ;;
+              *) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_REST_TRANSPORT_FAILED' ;;
+            esac
+            exit 1
+          fi
+          case "$function_http" in
+            2??) ;;
+            401) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_REST_AUTH_FAILED'; exit 1 ;;
+            403) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_PERMISSION_DENIED'; exit 1 ;;
+            404) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_REST_NOT_FOUND'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_FUNCTION_LIST_REST_UNEXPECTED_STATUS'; exit 1 ;;
+          esac
+          function_match_count="$(jq -er --arg name "$FUNCTION_NAME" '
+            if type == "object"
+              and ((.functions // []) | type == "array")
+              and ((.nextPageToken // "") | type == "string")
+              and ((.nextPageToken // "") == "")
+            then [(.functions // [])[]? | select(.name == $name)] | length
+            else empty end
+          ' "$tmp/functions.json")" || { echo 'RECOVERY_DEPLOY_FUNCTION_LIST_METADATA_INVALID'; exit 1; }
+          case "$function_match_count" in
+            1) ;;
+            0) echo 'RECOVERY_DEPLOY_FUNCTION_NOT_FOUND'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_FUNCTION_NOT_UNIQUE'; exit 1 ;;
+          esac
+          function_id="$(jq -er --arg name "$FUNCTION_NAME" '
+            [(.functions // [])[]? | select(.name == $name and (.id | type == "string") and (.id | length > 0))]
+            | if length == 1 then .[0].id else empty end
+          ' "$tmp/functions.json")" || { echo 'RECOVERY_DEPLOY_FUNCTION_METADATA_INVALID'; exit 1; }
+          function_status="$(jq -er --arg name "$FUNCTION_NAME" '
+            [(.functions // [])[]? | select(.name == $name and (.status | type == "string"))]
+            | if length == 1 then .[0].status else empty end
+          ' "$tmp/functions.json")" || { echo 'RECOVERY_DEPLOY_FUNCTION_STATUS_INVALID'; exit 1; }
+          [ "$function_status" = 'ACTIVE' ] || { echo 'RECOVERY_DEPLOY_FUNCTION_NOT_ACTIVE'; exit 1; }
           echo "::add-mask::${function_id}"
-          jq -e '.status == "ACTIVE"' "$tmp/function.json" >/dev/null || { echo 'RECOVERY_DEPLOY_FUNCTION_NOT_ACTIVE'; exit 1; }
-          yc serverless function list-access-bindings --id "$function_id" --format json --retry 0 --no-user-output \
-            >"$tmp/bindings.json" 2>"$tmp/bindings.err" || { echo 'RECOVERY_DEPLOY_BINDINGS_READ_FAILED'; exit 1; }
-          jq -e --arg caller "$YC_WIF_SERVICE_ACCOUNT_ID" '
-            ([.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject.id]
-              | any(. == "allUsers" or . == "allAuthenticatedUsers")) | not
-          ' "$tmp/bindings.json" >/dev/null || { echo 'RECOVERY_DEPLOY_FUNCTION_PUBLIC'; exit 1; }
-          jq -e --arg caller "$YC_WIF_SERVICE_ACCOUNT_ID" '
-            [.[]? | select((.role_id // .roleId) == "functions.functionInvoker") | .subject]
-            | any(.type == "serviceAccount" and .id == $caller)
-          ' "$tmp/bindings.json" >/dev/null || { echo 'RECOVERY_DEPLOY_INVOKER_BINDING_MISSING'; exit 1; }
-          yc serverless trigger list --folder-id "$YC_FOLDER_ID" --format json --retry 0 --no-user-output \
-            >"$tmp/triggers.json" 2>"$tmp/triggers.err" || { echo 'RECOVERY_DEPLOY_TRIGGER_LIST_FAILED'; exit 1; }
-          if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+
+          runtime_sa="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err" | jq -er '.id | select(type == "string" and length > 0)')" || {
+              echo 'RECOVERY_DEPLOY_RUNTIME_SA_RESOLUTION_FAILED'; exit 1;
+            }
+          echo "::add-mask::${runtime_sa}"
+
+          encoded_function_id="$(jq -rn --arg id "$function_id" '$id | @uri')"
+          set +e
+          bindings_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/function-bindings.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode 'pageSize=1000' \
+            "https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}:listAccessBindings" \
+            2>"$tmp/function-bindings-rest.err")"
+          bindings_curl_exit=$?
+          set -e
+          set +e
+          bindings_result="$(node scripts/classify-yandex-function-access-bindings.mjs \
+            "$bindings_curl_exit" "$bindings_http" "$tmp/function-bindings.json" \
+            "$YC_WIF_SERVICE_ACCOUNT_ID" "$runtime_sa")"
+          bindings_classifier_exit=$?
+          set -e
+          if [ -z "$bindings_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^FUNCTION_BINDINGS_[A-Z0-9_]+$"))
+            and (.publicInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.runtimeInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.wifInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.wifEditor | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "publicInvoker", "runtimeInvoker", "status", "wifEditor", "wifInvoker"]
+          ' <<<"$bindings_result" >/dev/null; then
+            echo 'RECOVERY_DEPLOY_FUNCTION_BINDINGS_CLASSIFIER_INVALID'; exit 1
+          fi
+          if [ "$bindings_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$bindings_result")" != 'PASS' ]; then
+            jq -r '.code' <<<"$bindings_result"
+            exit 1
+          fi
+          [ "$(jq -r '.publicInvoker' <<<"$bindings_result")" = 'ABSENT' ] || {
+            echo 'RECOVERY_DEPLOY_FUNCTION_PUBLIC'; exit 1;
+          }
+          [ "$(jq -r '.wifInvoker' <<<"$bindings_result")" = 'PRESENT' ] || {
+            echo 'RECOVERY_DEPLOY_INVOKER_BINDING_MISSING'; exit 1;
+          }
+
+          set +e
+          triggers_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/triggers.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=1000' \
+            'https://serverless-triggers.api.cloud.yandex.net/triggers/v1/triggers' \
+            2>"$tmp/triggers-rest.err")"
+          triggers_curl_exit=$?
+          set -e
+          set +e
+          triggers_result="$(node scripts/classify-yandex-trigger-list.mjs \
+            "$triggers_curl_exit" "$triggers_http" "$tmp/triggers.json" "$function_id")"
+          triggers_classifier_exit=$?
+          set -e
+          if [ -z "$triggers_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^TRIGGER_LIST_[A-Z0-9_]+$"))
+            and (.targetFunction | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "status", "targetFunction"]
+          ' <<<"$triggers_result" >/dev/null; then
+            echo 'RECOVERY_DEPLOY_TRIGGER_LIST_CLASSIFIER_INVALID'; exit 1
+          fi
+          if [ "$triggers_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$triggers_result")" != 'PASS' ]; then
+            jq -r '.code' <<<"$triggers_result"
+            exit 1
+          fi
+          if [ "$(jq -r '.targetFunction' <<<"$triggers_result")" = 'PRESENT' ]; then
             echo 'RECOVERY_DEPLOY_FUNCTION_TRIGGER_PRESENT'; exit 1
           fi
-          runtime_sa="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err" | jq -er '.id | select(type == "string" and length > 0)')"
-          echo "::add-mask::${runtime_sa}"
           yc serverless function version list --function-id "$function_id" --limit 1000 --format json --retry 0 --no-user-output \
             >"$tmp/versions.json" 2>"$tmp/versions.err" || { echo 'RECOVERY_DEPLOY_VERSION_LIST_FAILED'; exit 1; }
           yc serverless function list-operations --id "$function_id" --limit 1000 --format json --retry 0 --no-user-output \

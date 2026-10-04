@@ -3283,3 +3283,46 @@ Blind-Replay: FORBIDDEN
 Timer-Cutover: FORBIDDEN
 Production-Writer: FORBIDDEN
 ```
+
+
+### REST provider boundary for recovery-deploy classification after run `37238416504`
+
+After #915 merged as exact main `1dca84fcb206479d36bc22d999dac58f908b5d8e`, canonical CI,
+Browser Quality and the main security workflow passed. One full recovery was started with the exact historical
+pre-invoke async inputs `causal_bootstrap_run_id=36783942040` and
+`allow_preinvoke_async_deploy_failure=true`.
+
+Recovery `37238416504` proved the REST Function locator, Function access-bindings and Trigger.List
+preflight. It then reached `Deploy recovery-only Function version` and stopped with:
+
+```text
+INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED
+```
+
+The subsequent postflight, recovery Function invoke and recovery evidence publication were skipped.
+The create outcome is therefore unknown until a separate read-only deployment classification proves it.
+Blind retry/redeploy is forbidden.
+
+The existing `r1-initial-bootstrap-recovery-deploy-recovery.yml` diagnostic remains read-only, but its
+provider preflight still used the same CLI metadata reads already replaced on the active bootstrap chain.
+For this exact recovery boundary it now uses the already-proven REST contracts for:
+
+- exact-name Function.List;
+- exact Function ListAccessBindings;
+- folder-scoped Trigger.List.
+
+The same privacy-safe classifiers are reused for access bindings and trigger references. Responses and
+provider identifiers remain runner-private; only bounded enum evidence may be published. Version,
+operation, tag-history and Audit Trails classification semantics are unchanged. This Incident-M adds no
+Function create/invoke, IAM mutation, Google/YDB write, retry, cleanup, timer, cutover or production Writer.
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Deploy-Classification: REPOSITORY_ONLY
+Failed-Recovery-Run-ID: 37238416504
+Unknown-Write-Replay: FORBIDDEN
+Google-Authority: PRESERVED
+IAM-Widening: FORBIDDEN
+Timer-Cutover: FORBIDDEN
+Production-Writer: FORBIDDEN
+```
