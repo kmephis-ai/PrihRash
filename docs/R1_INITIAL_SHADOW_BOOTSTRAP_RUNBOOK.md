@@ -3236,3 +3236,50 @@ Production-Writer: FORBIDDEN
 
 После merge разрешён только новый exact-main read-only recovery согласно текущему #630 gate; новый
 Function-version create, async admission, replay или cleanup этим изменением не вооружаются.
+
+
+### REST Trigger.List after recovery `37235069555`
+
+После merge #914 exact main `67829ccac6d4aca65fc44cdb25f1cb52454f8c0d` прошёл canonical
+CI и Browser Quality. Fresh full read-only recovery `37235069555` был запущен
+только с canonical historical inputs `causal_bootstrap_run_id=36783942040` и
+`allow_preinvoke_async_deploy_failure=true`.
+
+Recovery доказал, что REST Function locator и Function access-bindings boundary из #914 проходят.
+Следующий terminal blocker:
+
+```text
+INITIAL_BOOTSTRAP_RECOVERY_TRIGGER_LIST_FAILED
+```
+
+Failure произошёл внутри provider read boundary. Recovery Function deployment, postflight, invoke и
+financial evidence publication были skipped. Historical async create остаётся
+`UNKNOWN_AND_UNTOUCHED`; `COMMITTED` baseline не доказан.
+
+Active R1 bootstrap chain использует документированный Serverless Triggers `Trigger.List` REST
+вместо `yc serverless trigger list`:
+
+```text
+GET https://serverless-triggers.api.cloud.yandex.net/triggers/v1/triggers
+folderId=<exact target folder>
+pageSize=1000
+```
+
+Preflight и postflight recovery/orchestrator/bootstrap передают response только runner-private
+classifier. Наружу выходит только `PASS|STOP`, bounded `TRIGGER_LIST_*` code и
+`targetFunction=PRESENT|ABSENT|UNCLASSIFIED`. Non-empty pagination, malformed response,
+transport/auth/permission/status error или target Function referenced by any returned trigger
+fail-closed. Trigger payload, IDs/names и provider-private metadata не публикуются.
+
+Этот Incident-M остаётся repository-only до merge и exact-main verification:
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Historical-Async-Create: UNKNOWN_AND_UNTOUCHED
+Google-Authority: PRESERVED
+Trigger-Mutation: FORBIDDEN
+IAM-Widening: FORBIDDEN
+Blind-Replay: FORBIDDEN
+Timer-Cutover: FORBIDDEN
+Production-Writer: FORBIDDEN
+```

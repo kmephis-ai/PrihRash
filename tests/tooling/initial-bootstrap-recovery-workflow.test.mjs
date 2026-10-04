@@ -53,7 +53,12 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.doesNotMatch(workflow, /yc serverless function list-access-bindings/);
   assert.equal((workflow.match(/:listAccessBindings/g) ?? []).length, 2);
   assert.equal((workflow.match(/classify-yandex-function-access-bindings\.mjs/g) ?? []).length, 2);
-  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 2);
+  assert.doesNotMatch(workflow, /yc serverless trigger list/);
+  assert.equal((workflow.match(/serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/g) ?? []).length, 2);
+  assert.equal((workflow.match(/classify-yandex-trigger-list\.mjs/g) ?? []).length, 2);
+  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 4);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$function_id"/);
+  assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$PRIHRASH_YC_FUNCTION_ID"/);
   const runtimeResolution = workflow.indexOf('runtime_sa_id=');
   const firstBindingsClassification = workflow.indexOf('classify-yandex-function-access-bindings.mjs');
   assert.ok(runtimeResolution >= 0 && runtimeResolution < firstBindingsClassification);

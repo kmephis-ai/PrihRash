@@ -809,11 +809,36 @@ jobs:
             exit 1
           fi
 
-          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_TRIGGER_LIST_FAILED'; exit 1;
-            }
-          if jq -e --arg id "$function_id" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+          set +e
+          triggers_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/triggers.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=1000' \
+            'https://serverless-triggers.api.cloud.yandex.net/triggers/v1/triggers' \
+            2>"$tmp/triggers-rest.err")"
+          triggers_curl_exit=$?
+          set -e
+          set +e
+          triggers_result="$(node scripts/classify-yandex-trigger-list.mjs \
+            "$triggers_curl_exit" "$triggers_http" "$tmp/triggers.json" "$function_id")"
+          triggers_classifier_exit=$?
+          set -e
+          if [ -z "$triggers_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^TRIGGER_LIST_[A-Z0-9_]+$"))
+            and (.targetFunction | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "status", "targetFunction"]
+          ' <<<"$triggers_result" >/dev/null; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_TRIGGER_LIST_CLASSIFIER_INVALID'; exit 1
+          fi
+          if [ "$triggers_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$triggers_result")" != 'PASS' ]; then
+            jq -r '.code' <<<"$triggers_result"
+            exit 1
+          fi
+          if [ "$(jq -r '.targetFunction' <<<"$triggers_result")" = 'PRESENT' ]; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_TRIGGER_PRESENT'
             exit 1
           fi
@@ -1225,11 +1250,36 @@ jobs:
             echo 'INITIAL_BOOTSTRAP_RECOVERY_RUNTIME_INVOKER_BINDING_MISSING'
             exit 1
           fi
-          yc serverless trigger list --folder-id "$YC_FOLDER_ID" \
-            --format json --retry 0 --no-user-output >"$tmp/triggers.json" 2>"$tmp/triggers.err" || {
-              echo 'INITIAL_BOOTSTRAP_RECOVERY_TRIGGER_LIST_FAILED'; exit 1;
-            }
-          if jq -e --arg id "$PRIHRASH_YC_FUNCTION_ID" '.. | strings | select(. == $id)' "$tmp/triggers.json" >/dev/null; then
+          set +e
+          triggers_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/triggers.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=1000' \
+            'https://serverless-triggers.api.cloud.yandex.net/triggers/v1/triggers' \
+            2>"$tmp/triggers-rest.err")"
+          triggers_curl_exit=$?
+          set -e
+          set +e
+          triggers_result="$(node scripts/classify-yandex-trigger-list.mjs \
+            "$triggers_curl_exit" "$triggers_http" "$tmp/triggers.json" "$PRIHRASH_YC_FUNCTION_ID")"
+          triggers_classifier_exit=$?
+          set -e
+          if [ -z "$triggers_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^TRIGGER_LIST_[A-Z0-9_]+$"))
+            and (.targetFunction | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "status", "targetFunction"]
+          ' <<<"$triggers_result" >/dev/null; then
+            echo 'INITIAL_BOOTSTRAP_RECOVERY_POSTFLIGHT_TRIGGER_LIST_CLASSIFIER_INVALID'; exit 1
+          fi
+          if [ "$triggers_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$triggers_result")" != 'PASS' ]; then
+            jq -r '.code' <<<"$triggers_result"
+            exit 1
+          fi
+          if [ "$(jq -r '.targetFunction' <<<"$triggers_result")" = 'PRESENT' ]; then
             echo 'INITIAL_BOOTSTRAP_RECOVERY_FUNCTION_TRIGGER_PRESENT'
             exit 1
           fi
