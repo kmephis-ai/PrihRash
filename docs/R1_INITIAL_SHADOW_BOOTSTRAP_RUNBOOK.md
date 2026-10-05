@@ -3326,3 +3326,46 @@ IAM-Widening: FORBIDDEN
 Timer-Cutover: FORBIDDEN
 Production-Writer: FORBIDDEN
 ```
+
+
+### REST Function metadata for recovery-deploy classification after diagnostic `37262225169`
+
+После merge #916 exact main `52d9c5d3ae0f372e37cb8790c6636729b2a3c717` прошёл canonical CI
+`37262116898` и Browser Quality `37262116820`. Один manual read-only deploy-recovery diagnostic
+`37262225169` был запущен только для failed recovery run `37238416504` и дошёл до provider
+classification без Function create/invoke или другой provider mutation.
+
+Function.List, ListAccessBindings и Trigger.List preflight прошли. Следующий bounded blocker:
+
+```text
+RECOVERY_DEPLOY_VERSION_LIST_FAILED
+```
+
+Для одного deploy-outcome classifier оставшиеся Cloud Functions metadata reads переводятся на
+документированные REST методы без изменения outcome taxonomy:
+
+- `Function.ListVersions` → `GET /functions/v1/versions?functionId=<exact>&pageSize=1000`;
+- `Function.ListOperations` → `GET /functions/v1/functions/{functionId}/operations?pageSize=1000`;
+- `Function.GetVersionByTag` → `GET /functions/v1/versions:byTag?functionId=<exact>&tag=<exact>`;
+- `Function.ListTagHistory` уже остаётся REST.
+
+List responses проверяются как complete single-page envelopes и нормализуются в прежние
+`versions[]` / `operations[]` inputs существующего classifier. Для version-list metadata classifier
+принимает только доказанные Yandex field aliases: historical CLI snake_case и documented REST camelCase;
+одновременные конфликтующие aliases fail-closed. Provider payload, IDs и raw errors не публикуются.
+
+Этот Incident-M остаётся repository-only до merge и exact-main CI. Он не разрешает повтор failed create,
+новый recovery deploy, invoke, IAM mutation, cleanup, Google/YDB write, timer/cutover или production Writer.
+
+```text
+Provider-Attempt: NOT_AUTHORIZED
+Recovery-Deploy-Classification: REPOSITORY_ONLY
+Failed-Recovery-Run-ID: 37238416504
+Read-Only-Diagnostic: 37262225169
+Last-Safe-Signature: RECOVERY_DEPLOY_VERSION_LIST_FAILED
+Unknown-Write-Replay: FORBIDDEN
+Google-Authority: PRESERVED
+IAM-Widening: FORBIDDEN
+Timer-Cutover: FORBIDDEN
+Production-Writer: FORBIDDEN
+```

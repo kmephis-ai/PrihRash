@@ -635,6 +635,60 @@ test('recovery deploy classifier proves only a unique exact version correlated t
   );
 });
 
+test('recovery deploy classifier accepts REST camelCase version list fields and rejects conflicting aliases', () => {
+  const base = exactEvidence();
+  const restVersion = {
+    ...base.versions[0],
+    createdAt: base.versions[0].created_at,
+  };
+  delete restVersion.created_at;
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({ versions: [restVersion] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+
+  const untaggedRestVersion = {
+    id: 'synthetic-untagged-rest-version',
+    tags: [],
+    createdAt: '2026-09-27T18:46:34Z',
+    runtime: 'nodejs22',
+    entrypoint: 'index.initialBootstrapRecoveryHandler',
+    serviceAccountId: runtimeServiceAccount,
+    status: 'ACTIVE',
+  };
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      operations: [],
+      versions: [untaggedRestVersion],
+      taggedVersion: {},
+    })),
+    'RECOVERY_UNTAGGED_VERSION_CANDIDATE_PRESENT',
+  );
+
+  assert.equal(
+    classifyRecoveryFunctionDeployOutcome(exactEvidence({
+      versions: [{
+        ...base.versions[0],
+        createdAt: '2026-09-27T18:40:00Z',
+      }],
+    })),
+    'CREATED_VERSION_NOT_PROVEN',
+  );
+
+  const source = sourceStepEvidence();
+  const sourceRestVersion = {
+    ...source.versions[0],
+    functionId: source.versions[0].function_id,
+    createdAt: source.versions[0].created_at,
+  };
+  delete sourceRestVersion.function_id;
+  delete sourceRestVersion.created_at;
+  assert.equal(
+    classifyRecoveryVersionFromSuccessfulSourceStep(sourceStepEvidence({ versions: [sourceRestVersion] })),
+    'EXACT_RECOVERY_VERSION_CREATED',
+  );
+});
+
 test('recovery deploy classifier proves the exact created version from typed operation metadata when response omits its ID', () => {
   const expectedType = 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
   const operation = exactEvidence().operations[0];
