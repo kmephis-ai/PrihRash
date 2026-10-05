@@ -31,6 +31,16 @@ test('failed recovery Function deploy has an exact-main read-only metadata recov
 });
 
 test('recovery deploy classification reads provider metadata only and publishes an enum artifact', () => {
+  assert.doesNotMatch(workflow, /yc serverless function get --name/);
+  assert.doesNotMatch(workflow, /yc serverless function list-access-bindings/);
+  assert.doesNotMatch(workflow, /yc serverless trigger list/);
+  assert.match(workflow, /serverless-functions\.api\.cloud\.yandex\.net\/functions\/v1\/functions/);
+  assert.match(workflow, /--data-urlencode "filter=\$\{function_filter\}"/);
+  assert.match(workflow, /:listAccessBindings/);
+  assert.match(workflow, /classify-yandex-function-access-bindings\.mjs/);
+  assert.match(workflow, /serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/);
+  assert.match(workflow, /classify-yandex-trigger-list\.mjs/);
+  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 3);
   assert.match(workflow, /yc serverless function version list/);
   assert.match(workflow, /yc serverless function version list --function-id "\$function_id" --limit 1000/);
   assert.match(workflow, /yc serverless function list-operations --id "\$function_id" --limit 1000/);
