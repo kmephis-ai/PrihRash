@@ -118,6 +118,27 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function aliasedString(record, snakeKey, camelKey) {
+  if (!object(record)) return null;
+  const snake = record[snakeKey];
+  const camel = record[camelKey];
+  if (snake !== undefined && camel !== undefined && snake !== camel) return null;
+  const value = snake ?? camel;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function readVersionCreatedAt(version) {
+  return timestamp(aliasedString(version, 'created_at', 'createdAt'));
+}
+
+function versionFunctionId(version) {
+  return aliasedString(version, 'function_id', 'functionId');
+}
+
+function versionServiceAccountId(version) {
+  return aliasedString(version, 'service_account_id', 'serviceAccountId');
+}
+
 function createFunctionVersionMetadataId(metadata) {
   const expectedType = 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
   if (!object(metadata) || metadata['@type'] !== expectedType) return null;
@@ -297,9 +318,9 @@ export function classifyRecoveryVersionFromSuccessfulSourceStep({
     const upperBound = finish + 5_000;
     const candidates = versions.filter((version) => {
       if (!object(version) || !Array.isArray(version.tags)) return false;
-      const createdAt = timestamp(version.created_at);
+      const createdAt = readVersionCreatedAt(version);
       return version.id === taggedVersion.id
-        && version.function_id === functionId
+        && versionFunctionId(version) === functionId
         && version.tags.includes('r1-initial-bootstrap-recovery')
         && createdAt !== null
         && createdAt >= lowerBound
@@ -312,7 +333,7 @@ export function classifyRecoveryVersionFromSuccessfulSourceStep({
       taggedCreatedAt === null
       || taggedCreatedAt < lowerBound
       || taggedCreatedAt > upperBound
-      || timestamp(candidates[0].created_at) !== taggedCreatedAt
+      || readVersionCreatedAt(candidates[0]) !== taggedCreatedAt
     ) return 'CREATED_VERSION_NOT_PROVEN';
 
     const historyRecords = tagHistory.functionTagHistoryRecord === undefined
@@ -419,7 +440,7 @@ export function classifyRecoveryFunctionDeployOutcome({
           untaggedVersions.push(version);
           continue;
         }
-        const createdAt = timestamp(version.created_at);
+        const createdAt = readVersionCreatedAt(version);
         if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
         if (createdAt >= lowerBound && createdAt <= upperBound) taggedCandidates.push(version);
       }
@@ -457,20 +478,20 @@ export function classifyRecoveryFunctionDeployOutcome({
           const untaggedCandidates = [];
           const versionStatuses = new Set(['CREATING', 'ACTIVE', 'OBSOLETE', 'DELETING']);
           for (const version of untaggedVersions) {
-            const createdAt = timestamp(version.created_at);
+            const createdAt = readVersionCreatedAt(version);
             if (createdAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
             if (createdAt < lowerBound || createdAt > upperBound) continue;
             if (
               typeof version.runtime !== 'string'
               || typeof version.entrypoint !== 'string'
-              || typeof version.service_account_id !== 'string'
+              || versionServiceAccountId(version) === null
               || typeof version.status !== 'string'
               || !versionStatuses.has(version.status)
             ) return 'RECOVERY_UNTAGGED_VERSION_METADATA_UNPROVEN';
             if (
               version.runtime === 'nodejs22'
               && version.entrypoint === 'index.initialBootstrapRecoveryHandler'
-              && version.service_account_id === runtimeServiceAccountId
+              && versionServiceAccountId(version) === runtimeServiceAccountId
             ) untaggedCandidates.push(version);
           }
           if (untaggedCandidates.length > 1) return 'RECOVERY_UNTAGGED_VERSION_AMBIGUOUS';
@@ -483,7 +504,7 @@ export function classifyRecoveryFunctionDeployOutcome({
         const historyVersions = versions.filter((version) => object(version) && version.id === matchingVersionId);
         if (historyVersions.length === 0) return 'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED';
         if (historyVersions.length > 1) return 'RECOVERY_TAG_HISTORY_AMBIGUOUS';
-        const versionCreatedAt = timestamp(historyVersions[0].created_at);
+        const versionCreatedAt = readVersionCreatedAt(historyVersions[0]);
         if (versionCreatedAt === null) return 'RECOVERY_VERSION_TIMESTAMP_INVALID';
         if (versionCreatedAt < lowerBound || versionCreatedAt > upperBound) {
           return 'RECOVERY_TAG_HISTORY_VERSION_NOT_OBSERVED';
@@ -528,7 +549,7 @@ export function classifyRecoveryFunctionDeployOutcome({
     const operationVersionId = responseVersionId ?? metadataVersionId;
     const versionCandidates = versions.filter((version) => {
       if (!object(version) || !Array.isArray(version.tags)) return false;
-      const createdAt = timestamp(version.created_at);
+      const createdAt = readVersionCreatedAt(version);
       return version.tags.includes('r1-initial-bootstrap-recovery')
         && createdAt !== null
         && createdAt >= lowerBound
@@ -995,14 +1016,14 @@ export function classifyRecoveryAuditCreateEvents({
     if (matchingVersions.length === 0) return 'AUDIT_CREATE_EVENT_VERSION_NOT_OBSERVED';
     if (matchingVersions.length > 1) return 'AUDIT_CREATE_EVENT_AMBIGUOUS';
     const [version] = matchingVersions;
-    const versionCreatedAt = timestamp(version.created_at);
+    const versionCreatedAt = readVersionCreatedAt(version);
     if (
       versionCreatedAt === null
       || versionCreatedAt < lowerBound
       || versionCreatedAt > upperBound
       || version.runtime !== 'nodejs22'
       || version.entrypoint !== 'index.initialBootstrapRecoveryHandler'
-      || version.service_account_id !== runtimeServiceAccountId
+      || versionServiceAccountId(version) !== runtimeServiceAccountId
       || !['CREATING', 'ACTIVE', 'OBSOLETE', 'DELETING'].includes(version.status)
     ) return 'AUDIT_CREATE_EVENT_VERSION_METADATA_UNPROVEN';
     return 'EXACT_RECOVERY_VERSION_CREATED';
