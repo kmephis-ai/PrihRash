@@ -1748,6 +1748,41 @@ cutover, or authority change. Any one future read-only recovery remains exact-ma
 bound. Owner anti-S-unit rules are synchronized here, `AGENTS.md`, and `docs/R1_COMPLETION_SPRINT.md`
 in the same causal PR.
 
+### 2026-10-07 terminal Audit-source result and synchronous create-failure boundary
+
+For failed recovery run `37238416504`, exact-main read-only classification `37264062900` had reached
+`AUDIT_TRAIL_LIST_PERMISSION_DENIED / SOURCE_EVIDENCE_UNUSABLE`. Owner then authorized only one
+temporary `audit-trails.viewer` binding on the exact R1 folder. The binding was independently proven
+absent before add, added with exact read-back, used by read-only diagnostic `37655571983`, removed, and
+independently proven absent again. No `logging.reader`, Function deploy/invoke, Google/YDB mutation,
+timer or cutover was authorized or performed.
+
+Diagnostic `37655571983` returned
+`RECOVERY_TAGGED_VERSION_NOT_OBSERVED_IN_WINDOW / AUDIT_TRAIL_SOURCE_NOT_CONFIGURED /
+NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE / AUDIT_EVENT_READ_NOT_ATTEMPTED`. Audit Trails therefore has no
+applicable pre-existing provenance source for this target and this branch is terminal.
+
+Independent read-only root-cause checks then showed no Function operation of any actor in the failed
+create window or in an expanded ±60-second window. The exact recovery package is below the direct upload
+size boundary; the required WIF Function editor/invoker, runtime-SA attachment permission, runtime
+Lockbox payload-viewer permission, active secret version and expected non-secret payload-entry keys are
+present. Provider resource histories show successful Function-version creates before the failure and no
+intervening Function access-binding, runtime-SA or Lockbox mutation in the bounded interval. The surviving
+GitHub job log contains only `INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`; raw `yc` stderr stayed
+runner-temporary and no failure artifact survives. Current evidence therefore localizes the failure before
+observable Function Operation creation, but does not distinguish CLI/request validation, synchronous API
+rejection, or transport/provider failure and does not prove `NOT_APPLIED`.
+
+Ordinary recovery create failures must therefore preserve privacy-safe causal evidence at failure time.
+The create step records a bounded start/finish window and nonzero/unknown CLI exit class; on failure it
+performs one read-only Function-scoped `ListOperations` read-back and feeds raw stderr plus provider
+response only to the runner-local classifier. The published artifact contains allowlisted
+`failureClass`, `permissionBoundary`, `cliExit`, `createOperationEvidence`, and
+`failureBoundary` only. `CREATE_OPERATION_NOT_OBSERVED` with nonzero exit means
+`PRE_OPERATION_OR_SYNC_REJECTION`, not `NOT_APPLIED`; an observed operation means
+`ASYNC_OPERATION_OBSERVED` and blocks replay; read/pagination/schema/ambiguity failures remain
+`UNCLASSIFIED`. This instrumentation does not authorize a new CreateVersion attempt.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned

@@ -112,6 +112,16 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 прекратить Audit-source path и сменить causal model; unusable/ambiguous → STOP; version still unproven →
 отдельная причинная гипотеза provenance, без повторения этого probe/SHA.
 
+После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` Audit Trails path больше не повторяется.
+Для любого следующего ordinary recovery `CreateVersion` failure raw stderr остаётся runner-local, а
+тот же job обязан до выхода выполнить один Function-scoped `ListOperations` read-back в bounded
+create window. Публикуется только enum-only artifact: provider failure class, permission boundary,
+nonzero/unknown CLI exit class, create-operation evidence и causal boundary. Отсутствие matching
+operation классифицируется как `PRE_OPERATION_OR_SYNC_REJECTION`, но не как `NOT_APPLIED`;
+наблюдаемая operation переводит outcome в async/unknown recovery boundary. Read failure, pagination,
+malformed metadata или ambiguity остаются fail-closed. Этот instrumentation change не re-arm-ит provider
+attempt и не является разрешением на новую Function create.
+
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
 `CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation

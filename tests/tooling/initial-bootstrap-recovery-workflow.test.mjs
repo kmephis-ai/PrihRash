@@ -56,7 +56,7 @@ test('initial bootstrap recovery workflow stays manual-only and exact-main guard
   assert.doesNotMatch(workflow, /yc serverless trigger list/);
   assert.equal((workflow.match(/serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/g) ?? []).length, 2);
   assert.equal((workflow.match(/classify-yandex-trigger-list\.mjs/g) ?? []).length, 2);
-  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 4);
+  assert.equal((workflow.match(/--max-filesize 1048576/g) ?? []).length, 5);
   assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$function_id"/);
   assert.match(workflow, /"\$triggers_curl_exit" "\$triggers_http" "\$tmp\/triggers\.json" "\$PRIHRASH_YC_FUNCTION_ID"/);
   const runtimeResolution = workflow.indexOf('runtime_sa_id=');
@@ -123,6 +123,31 @@ test('initial bootstrap recovery deploy keeps the same single read-only provider
   assert.match(workflow, /environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY/);
   assert.match(workflow, /environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE/);
   assert.match(workflow, /npm run initial-bootstrap-recovery:invoke/);
+});
+
+test('failed recovery create publishes enum-only stderr, exit and operation read-back evidence', () => {
+  const deployStart = workflow.indexOf('      - name: Deploy recovery-only Function version');
+  const postflightStart = workflow.indexOf('      - name: Re-verify private trigger-free recovery boundary', deployStart);
+  assert.ok(deployStart >= 0 && postflightStart > deployStart);
+  const deployBlock = workflow.slice(deployStart, postflightStart);
+  assert.match(deployBlock, /id: deploy/);
+  assert.match(deployBlock, /create_started_at="\$\(node -e 'process\.stdout\.write\(new Date\(\)\.toISOString\(\)\)'\)"/);
+  assert.match(deployBlock, /create_exit=\$\?/);
+  assert.match(deployBlock, /functions\/v1\/functions\/\$\{encoded_function_id\}\/operations/);
+  assert.match(deployBlock, /--data-urlencode 'pageSize=1000'/);
+  assert.match(deployBlock, /--error-with-operation-evidence "\$tmp\/version\.err" "\$create_exit"/);
+  assert.match(deployBlock, /"\$operations_read_status" "\$tmp\/operations-rest\.json"/);
+  assert.match(deployBlock, /export RECOVERY_FUNCTION_ID="\$PRIHRASH_YC_FUNCTION_ID"/);
+  assert.match(deployBlock, /export RECOVERY_RUNTIME_SERVICE_ACCOUNT_ID="\$PRIHRASH_YC_FUNCTION_SA_ID"/);
+  assert.match(deployBlock, /export RECOVERY_WIF_SERVICE_ACCOUNT_ID="\$YC_WIF_SERVICE_ACCOUNT_ID"/);
+  assert.match(deployBlock, /export RECOVERY_LOCKBOX_SECRET_ID="\$YC_LOCKBOX_SECRET_ID"/);
+  assert.match(deployBlock, /r1-initial-bootstrap-recovery-create-failure-\$\{\{ github\.run_id \}\}/);
+  assert.match(deployBlock, /if: failure\(\) && steps\.deploy\.conclusion == 'failure'/);
+  assert.match(deployBlock, /create-failure\.json/);
+  assert.equal((deployBlock.match(/yc serverless function version create/g) ?? []).length, 1);
+  assert.match(deployBlock, /--retry 0 --no-user-output >"\$tmp\/version\.json" 2>"\$tmp\/version\.err"/);
+  assert.doesNotMatch(deployBlock, /yc serverless function invoke|yc ydb|add-access-binding|remove-access-binding/);
+  assert.doesNotMatch(deployBlock, /path:.*version\.err|path:.*operations-rest\.json/);
 });
 
 test('exact successful source create-step and immutable tag history bypass Operation provenance before invoke', () => {
@@ -214,7 +239,7 @@ test('read-only reuse requires exact accepted deploy history and version metadat
   assert.match(workflow, /tagHistoryEvidence/);
   assert.match(workflow, /INITIAL_BOOTSTRAP_RECOVERY_REUSE_VERSION_NOT_EXACT/);
   assert.match(recoveryDeployClassifier, /EXACT_RECOVERY_VERSION_CREATED/);
-  assert.match(workflow, /name: Deploy recovery-only Function version\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
+  assert.match(workflow, /name: Deploy recovery-only Function version\s+id: deploy\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
   assert.match(workflow, /name: Re-verify exact current main before recovery deployment\s+if: inputs\.reuse_deploy_attempt_run_id == ''/);
   assert.match(workflow, /name: Invoke exact read-only recovery tag once\s+if: inputs\.reuse_deploy_attempt_run_id == '' \|\| steps\.reuse-version\.outputs\.reuse_status == 'EXACT_RECOVERY_VERSION_CREATED'/);
   assert.equal((workflow.match(/name: Invoke exact read-only recovery tag once/g) ?? []).length, 1);
