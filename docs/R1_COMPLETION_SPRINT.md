@@ -123,6 +123,19 @@ operation классифицируется как `PRE_OPERATION_OR_SYNC_REJECTI
 malformed metadata или ambiguity остаются fail-closed. Этот instrumentation change не re-arm-ит provider
 attempt и не является разрешением на новую Function create.
 
+Owner 2026-10-07 дал отдельное разрешение на ровно один recovery-only `CreateVersion` для latest failed
+recovery `37238416504`. Оно вооружается только exact-main PR marker:
+`Provider-Attempt: READY`, `Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`,
+`Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED`,
+`Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED`,
+`Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY`,
+`Recovery-Run-ID: 37238416504`,
+`Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs`.
+Dedicated workflow обязан повторно доказать latest failed-run/deploy-failed/invoke-skipped, exact main/CI,
+active tracking Issue, single writer и private trigger-free/runtime-SA/Lockbox boundary. Function invoke,
+IAM/YDB/Google mutation, cleanup, timer/cutover не авторизованы. Reached create step consumes authority;
+same-SHA или cross-SHA replay после этого запрещён.
+
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
 `CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation
