@@ -113,10 +113,11 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 отдельная причинная гипотеза provenance, без повторения этого probe/SHA.
 
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` Audit Trails path больше не повторяется.
-Для любого следующего ordinary recovery `CreateVersion` failure raw stderr остаётся runner-local, а
-тот же job обязан до выхода выполнить один Function-scoped `ListOperations` read-back в bounded
-create window. Публикуется только enum-only artifact: provider failure class, permission boundary,
-nonzero/unknown CLI exit class, create-operation evidence и causal boundary. Отсутствие matching
+Для любого следующего ordinary recovery **или dedicated Owner-authorized deploy-only** `CreateVersion`
+failure raw stderr остаётся runner-local, а тот же job обязан до выхода выполнить один Function-scoped
+`ListOperations` read-back в bounded create window. Публикуется только enum-only artifact: provider
+failure class, permission boundary, nonzero/unknown CLI exit class, create-operation evidence и causal
+boundary. Отсутствие matching
 operation классифицируется как `PRE_OPERATION_OR_SYNC_REJECTION`, но не как `NOT_APPLIED`;
 наблюдаемая operation переводит outcome в async/unknown recovery boundary. Read failure, pagination,
 malformed metadata или ambiguity остаются fail-closed. Этот instrumentation change не re-arm-ит provider
