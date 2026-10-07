@@ -141,7 +141,7 @@ jobs:
                     and $expected == ["Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED"]
                     and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
                     and $rearm == ["Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY"]
-                    and $recovery_run == ["Recovery-Run-ID: 36341844854"]
+                    and $recovery_run == ["Recovery-Run-ID: 37238416504"]
                     and ($recovery_version_run | length) == 0
                     and ($recovery_classification_run | length) == 0
                   ))
@@ -194,7 +194,7 @@ jobs:
                   and $expected == ["Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED"]
                   and $recovery == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
                   and $rearm == ["Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY"]
-                  and $recovery_run == ["Recovery-Run-ID: 36341844854"]),
+                  and $recovery_run == ["Recovery-Run-ID: 37238416504"]),
                 recoveryRunId: (if ($recovery_run | length) == 1
                   and ($recovery_run[0] | test("^Recovery-Run-ID: [1-9][0-9]*$"))
                   then ($recovery_run[0] | sub("^Recovery-Run-ID: "; "")) else null end),
@@ -496,10 +496,8 @@ jobs:
             if [ "$(jq 'length' <<<"$source_files")" -ge 100 ] || ! jq -e '
               any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml" and .status != "removed")
               and any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-autocontinue.yml" and .status != "removed")
-              and any(.[]; .filename == "scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs" and .status != "removed")
               and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs" and .status != "removed")
-              and any(.[]; .filename == "tests/tooling/initial-bootstrap-recovery-deploy-attempt-classifier.test.mjs" and .status != "removed")
-                and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
+              and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-autocontinue-workflow.test.mjs" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
                 and any(.[]; .filename == "AGENTS.md" and .status != "removed")
                 and any(.[]; .filename == "docs/R1_COMPLETION_SPRINT.md" and .status != "removed")

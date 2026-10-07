@@ -239,6 +239,18 @@ operation означает `ASYNC_OPERATION_OBSERVED` и запрещает repl
 Unreadable/paginated/malformed/ambiguous operation evidence остаётся `UNCLASSIFIED`. Raw stderr,
 operation/version IDs и provider response не публикуются.
 
+Owner 2026-10-07 отдельно разрешил ровно один dedicated recovery-only `CreateVersion` для failed
+recovery run `37238416504`. Текущий machine marker: `Provider-Attempt: READY`,
+`Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED`,
+`Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED`,
+`Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED`,
+`Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY`,
+`Recovery-Run-ID: 37238416504`,
+`Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs`.
+Разрешение не включает Function invoke, IAM/YDB/Google mutation, cleanup, timer/cutover и не переиспользует
+историческую authority для `36341844854`. После входа в create step это разрешение consumed независимо
+от результата; повторный create/replay запрещён.
+
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
 model на независимый exact version proof по typed metadata уже существующей Yandex

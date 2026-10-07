@@ -138,11 +138,12 @@ jobs:
             "$api/pulls/${SOURCE_PR_NUMBER}" --output "$tmp/source-pr.json"
           jq -e --argjson number "$SOURCE_PR_NUMBER" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
             .number == $number and .base.ref == "main" and .head.repo.full_name == $repo
-            and .merged_at != null and .merge_commit_sha == $sha and (.title | startswith("R1 #453:"))
+            and .merged_at != null and .merge_commit_sha == $sha
           ' "$tmp/source-pr.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_SOURCE_PR_NOT_EXACT'; exit 1; }
-          issue_630_state="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
-            "$api/issues/630" | jq -er '.state')"
-          [ "$issue_630_state" = 'open' ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_TRACKING_ISSUE_INACTIVE'; exit 1; }
+          tracking_issue_number="$(jq -er '.title | capture("^R1 #(?<number>[1-9][0-9]*):").number' "$tmp/source-pr.json")"
+          tracking_issue_state="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/issues/${tracking_issue_number}" | jq -er '.state')"
+          [ "$tracking_issue_state" = 'open' ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_TRACKING_ISSUE_INACTIVE'; exit 1; }
           source_body="$(jq -r '.body // ""' "$tmp/source-pr.json")"
           jq -Rn --arg body "$source_body" '
             def exact_line($prefix): ($body | split("\n") | map(select(startswith($prefix))));
@@ -158,7 +159,7 @@ jobs:
               and $expected == ["Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED"]
               and $state == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
               and $rearm == ["Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY"]
-              and $run == ["Recovery-Run-ID: 36341844854"]
+              and $run == ["Recovery-Run-ID: 37238416504"]
               and $test == ["Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs"])
           ' <<<"$source_body" | jq -e . >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_OWNER_MARKER_INVALID'; exit 1; }
 

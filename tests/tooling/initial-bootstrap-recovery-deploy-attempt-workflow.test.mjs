@@ -37,14 +37,37 @@ test('Owner-authorized recovery deploy-only attempt is exact-main, exact-PR/run,
   assert.match(historyClassifier, /SAME_SHA_PREWRITE_STOP_FORBIDDEN/);
   assert.match(workflow, /jobsByRun/);
   assert.match(workflow, /while IFS= read -r prior_run_id/);
-  assert.match(workflow, /issue_630_state/);
-  assert.match(workflow, /\$issue_630_state/);
+  assert.match(workflow, /tracking_issue_number/);
+  assert.match(workflow, /capture\("\^R1 #\(\?<number>\[1-9\]\[0-9\]\*\):"\)\.number/);
+  assert.match(workflow, /issues\/\$\{tracking_issue_number\}/);
+  assert.match(workflow, /tracking_issue_state/);
   assert.match(workflow, /'open'/);
   assert.doesNotMatch(workflow, /\.state == "OPEN"/);
-  assert.doesNotMatch(workflow, /issues\/453/);
+  assert.doesNotMatch(workflow, /issues\/(?:453|630)/);
+  assert.doesNotMatch(workflow, /R1 #453:/);
+  assert.match(workflow, /Recovery-Run-ID: 37238416504/);
   assert.match(workflow, /classify-r1-recovery-deploy-attempt-history\.mjs/);
   assert.match(workflow, /PRIOR_PREWRITE_STOP_ONLY/);
   assert.match(workflow, /cancel-in-progress: false/);
+});
+
+test('current Owner authority is exact-bound to recovery 37238416504 and does not reuse the historical run', () => {
+  const current = runbook.match(
+    /### 2026-10-07 Owner-authorized one-shot recovery-only Function create for run `37238416504`([\s\S]*?)(?=\n### |\n## |$)/,
+  )?.[1];
+  assert.ok(current, 'the current one-shot authority must be documented separately from historical authority');
+  for (const line of [
+    'Provider-Attempt: READY',
+    'Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED',
+    'Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED',
+    'Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED',
+    'Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY',
+    'Recovery-Run-ID: 37238416504',
+    'Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
+  ]) assert.ok(current.includes(line), `current authority marker preserves exact line: ${line}`);
+  assert.match(current, /6045593970/);
+  assert.match(current, /Function invoke.*out of scope/i);
+  assert.doesNotMatch(current, /Recovery-Run-ID: 36341844854/);
 });
 
 test('the one-shot PR regression marker binds to this guard test and canonical exact-main CI fallback', () => {

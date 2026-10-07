@@ -693,7 +693,7 @@ test('Owner-authorized recovery Function create marker arms exactly one deploy-o
       'Expected-Transition': 'RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED',
       'Recovery-State': 'DEPLOYMENT_OUTCOME_UNCLASSIFIED',
       'Circuit-Rearm': 'OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY',
-      'Recovery-Run-ID': '36341844854',
+      'Recovery-Run-ID': '37238416504',
       'Regression-Test': 'tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
       ...overrides,
     };
@@ -710,15 +710,15 @@ test('Owner-authorized recovery Function create marker arms exactly one deploy-o
     recoveryFunctionDeployAttempt: true,
     recoveryVersionReuse: false,
     auditSourcePermissionProbe: false,
-    recoveryRunId: '36341844854',
+    recoveryRunId: '37238416504',
     recoveryVersionRunId: null,
     regressionTest: 'tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs',
   });
   assert.equal(parse({ 'Provider-Attempt': 'NOT_AUTHORIZED' }).valid, false);
-  assert.equal(parse({ 'Recovery-Run-ID': '36341844855' }).valid, false);
+  assert.equal(parse({ 'Recovery-Run-ID': '36341844854' }).valid, false);
   assert.equal(parse({ 'Circuit-Rearm': 'ROOT_CAUSE_FIX' }).valid, false);
   assert.equal(parse({ 'Recovery-Probe': 'READY' }).valid, false);
-  assert.equal(parse({ 'Recovery-Run-ID': '36341844854\nRecovery-Run-ID: 36341844854' }).valid, false);
+  assert.equal(parse({ 'Recovery-Run-ID': '37238416504\nRecovery-Run-ID: 37238416504' }).valid, false);
 });
 
 test('accepted-version recovery marker arms only reuse of its exact deploy run, not another create', (t) => {

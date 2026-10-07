@@ -1783,6 +1783,36 @@ response only to the runner-local classifier. The published artifact contains al
 `ASYNC_OPERATION_OBSERVED` and blocks replay; read/pagination/schema/ambiguity failures remain
 `UNCLASSIFIED`. This instrumentation does not authorize a new CreateVersion attempt.
 
+### 2026-10-07 Owner-authorized one-shot recovery-only Function create for run `37238416504`
+
+After PR #919 merged on exact main `2a8428ebb9ee3ce67931de2887f54c3ae9e46b7f`, Owner explicitly
+authorized exactly one new recovery-only Function-version create for latest failed recovery
+`37238416504`. The durable authorization is recorded on Issue #630 as comment `6045593970`.
+Function invoke remains explicitly out of scope. The authorization does not include IAM changes,
+YDB/Google mutation, cleanup, timer, scheduled sync, cutover, or authority switch, and it does not reuse
+the historical create allowance for run `36341844854`.
+
+The exact-main authority PR must carry this machine-readable block:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED
+Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_CLASSIFIED
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Circuit-Rearm: OWNER_AUTHORIZED_SINGLE_RECOVERY_DEPLOY
+Recovery-Run-ID: 37238416504
+Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflow.test.mjs
+```
+
+Autocontinue and the dedicated deploy-only workflow must both re-prove the exact current main/canonical
+CI, merged source PR, active tracking Issue parsed from its `R1 #<n>:` title, latest failed recovery,
+deploy-failed/invoke-skipped phase, prior-attempt history, single-writer exclusion, private trigger-free
+Function boundary, exact runtime service account and Lockbox metadata. The create uses `--retry 0`.
+On nonzero exit, one bounded Function-scoped `ListOperations` read-back plus runner-local stderr feeds the
+enum-only classifier. Reaching the create step consumes this authority regardless of success/failure;
+same-SHA or cross-SHA replay is forbidden. Success means only
+`RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`, not `COMMITTED`.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned
