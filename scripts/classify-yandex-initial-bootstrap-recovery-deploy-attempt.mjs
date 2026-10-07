@@ -26,6 +26,26 @@ const PERMISSION_BOUNDARIES = new Set([
   'NOT_APPLICABLE',
 ]);
 
+const CREATE_OPERATION_EVIDENCE = new Set([
+  'CREATE_OPERATION_NOT_OBSERVED',
+  'CREATE_OPERATION_IN_PROGRESS',
+  'CREATE_OPERATION_COMPLETED_SUCCESS',
+  'CREATE_OPERATION_COMPLETED_FAILED',
+  'CREATE_OPERATION_AMBIGUOUS',
+  'CREATE_OPERATION_READ_FAILED',
+  'CREATE_OPERATION_READ_INCOMPLETE',
+  'CREATE_OPERATION_EVIDENCE_INVALID',
+]);
+
+const FAILURE_BOUNDARIES = new Set([
+  'PRE_OPERATION_OR_SYNC_REJECTION',
+  'ASYNC_OPERATION_OBSERVED',
+  'UNCLASSIFIED',
+]);
+
+const CREATE_VERSION_METADATA_TYPE =
+  'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
+
 const PROVIDER_ERROR_PATTERNS = Object.freeze([
   ['PERMISSION_DENIED', /permission[ _-]?denied|PermissionDenied/i],
   ['PERMISSION_DENIED', /access policy.{0,40}denied|organization policy.{0,40}denied/i],
@@ -84,6 +104,114 @@ export function classifyRecoveryFunctionDeployAttempt(stderr, resourceIds = {}) 
   });
 }
 
+export function classifyRecoveryCreateOperationEvidence({
+  response,
+  createStartedAt,
+  createFinishedAt,
+  operationCreatorServiceAccountId,
+  readStatus = 'READY',
+}) {
+  if (readStatus !== 'READY') return 'CREATE_OPERATION_READ_FAILED';
+  const start = Date.parse(createStartedAt);
+  const finish = Date.parse(createFinishedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(finish) || finish < start
+    || typeof operationCreatorServiceAccountId !== 'string'
+    || operationCreatorServiceAccountId.length === 0
+    || !response || typeof response !== 'object' || Array.isArray(response)) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+
+  const operations = response.operations === undefined ? [] : response.operations;
+  if (!Array.isArray(operations)) return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  if (typeof response.nextPageToken !== 'undefined' && typeof response.nextPageToken !== 'string') {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  if ((response.nextPageToken ?? '').length > 0 || operations.length >= 1_000) {
+    return 'CREATE_OPERATION_READ_INCOMPLETE';
+  }
+
+  const lowerBound = start - 5_000;
+  const upperBound = finish + 5_000;
+  const matching = [];
+  for (const operation of operations) {
+    if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
+      return 'CREATE_OPERATION_EVIDENCE_INVALID';
+    }
+    const createdAtRaw = operation.createdAt ?? operation.created_at;
+    const createdBy = operation.createdBy ?? operation.created_by;
+    const createdAt = Date.parse(createdAtRaw);
+    if (!Number.isFinite(createdAt) || typeof createdBy !== 'string' || createdBy.length === 0) {
+      return 'CREATE_OPERATION_EVIDENCE_INVALID';
+    }
+    if (createdBy !== operationCreatorServiceAccountId
+      || createdAt < lowerBound || createdAt > upperBound) continue;
+
+    const metadata = operation.metadata;
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+      || typeof metadata['@type'] !== 'string' || metadata['@type'].length === 0) {
+      return 'CREATE_OPERATION_EVIDENCE_INVALID';
+    }
+    if (metadata['@type'] !== CREATE_VERSION_METADATA_TYPE) continue;
+    const versionId = metadata.functionVersionId ?? metadata.function_version_id;
+    if (typeof versionId !== 'string' || versionId.length === 0) {
+      return 'CREATE_OPERATION_EVIDENCE_INVALID';
+    }
+    matching.push(operation);
+  }
+
+  if (matching.length === 0) return 'CREATE_OPERATION_NOT_OBSERVED';
+  if (matching.length > 1) return 'CREATE_OPERATION_AMBIGUOUS';
+
+  const [operation] = matching;
+  if (operation.done === false) return 'CREATE_OPERATION_IN_PROGRESS';
+  if (operation.done !== true) return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  if (operation.error && typeof operation.error === 'object' && !Array.isArray(operation.error)) {
+    return 'CREATE_OPERATION_COMPLETED_FAILED';
+  }
+  if (!operation.response || typeof operation.response !== 'object' || Array.isArray(operation.response)) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  return 'CREATE_OPERATION_COMPLETED_SUCCESS';
+}
+
+export function classifyRecoveryFunctionDeployAttemptWithOperationEvidence({
+  stderr,
+  exitCode,
+  operationListResponse,
+  operationListReadStatus,
+  createStartedAt,
+  createFinishedAt,
+  operationCreatorServiceAccountId,
+  resourceIds = {},
+}) {
+  const base = classifyRecoveryFunctionDeployAttempt(stderr, resourceIds);
+  const cliExit = Number.isInteger(exitCode) && exitCode !== 0 ? 'NONZERO' : 'UNCLASSIFIED';
+  const createOperationEvidence = classifyRecoveryCreateOperationEvidence({
+    response: operationListResponse,
+    createStartedAt,
+    createFinishedAt,
+    operationCreatorServiceAccountId,
+    readStatus: operationListReadStatus,
+  });
+  let failureBoundary = 'UNCLASSIFIED';
+  if (cliExit === 'NONZERO' && createOperationEvidence === 'CREATE_OPERATION_NOT_OBSERVED') {
+    failureBoundary = 'PRE_OPERATION_OR_SYNC_REJECTION';
+  } else if ([
+    'CREATE_OPERATION_IN_PROGRESS',
+    'CREATE_OPERATION_COMPLETED_SUCCESS',
+    'CREATE_OPERATION_COMPLETED_FAILED',
+  ].includes(createOperationEvidence)) {
+    failureBoundary = 'ASYNC_OPERATION_OBSERVED';
+  }
+  return Object.freeze({
+    ...base,
+    cliExit,
+    createOperationEvidence: CREATE_OPERATION_EVIDENCE.has(createOperationEvidence)
+      ? createOperationEvidence : 'CREATE_OPERATION_EVIDENCE_INVALID',
+    failureBoundary: FAILURE_BOUNDARIES.has(failureBoundary) ? failureBoundary : 'UNCLASSIFIED',
+  });
+}
+
 export function classifyRecoveryFunctionDeployAttemptSuccess() {
   return Object.freeze({
     status: 'PASS',
@@ -98,6 +226,44 @@ async function main(args) {
   if (mode === '--success' && args.length === 1) {
     return classifyRecoveryFunctionDeployAttemptSuccess();
   }
+
+  const resourceIds = {
+    functionId: process.env.RECOVERY_FUNCTION_ID,
+    runtimeServiceAccountId: process.env.RECOVERY_RUNTIME_SERVICE_ACCOUNT_ID,
+    wifServiceAccountId: process.env.RECOVERY_WIF_SERVICE_ACCOUNT_ID,
+    lockboxSecretId: process.env.RECOVERY_LOCKBOX_SECRET_ID,
+  };
+
+  if (mode === '--error-with-operation-evidence' && args.length === 8) {
+    const [, stderrPath, exitCodeRaw, readStatus, operationsPath,
+      createStartedAt, createFinishedAt, operationCreatorServiceAccountId] = args;
+    let stderr = '';
+    let operationListResponse = {};
+    try {
+      stderr = await readFile(stderrPath, 'utf8');
+    } catch {
+      stderr = '';
+    }
+    if (readStatus === 'READY') {
+      try {
+        operationListResponse = JSON.parse(await readFile(operationsPath, 'utf8'));
+      } catch {
+        operationListResponse = null;
+      }
+    }
+    const parsedExitCode = /^-?[0-9]+$/.test(exitCodeRaw) ? Number(exitCodeRaw) : Number.NaN;
+    return classifyRecoveryFunctionDeployAttemptWithOperationEvidence({
+      stderr,
+      exitCode: Number.isSafeInteger(parsedExitCode) ? parsedExitCode : null,
+      operationListResponse,
+      operationListReadStatus: readStatus,
+      createStartedAt,
+      createFinishedAt,
+      operationCreatorServiceAccountId,
+      resourceIds,
+    });
+  }
+
   if (mode !== '--error' || !errorPath || args.length !== 2) {
     return classifyRecoveryFunctionDeployAttempt('');
   }
@@ -107,12 +273,7 @@ async function main(args) {
   } catch {
     return classifyRecoveryFunctionDeployAttempt('');
   }
-  return classifyRecoveryFunctionDeployAttempt(stderr, {
-    functionId: process.env.RECOVERY_FUNCTION_ID,
-    runtimeServiceAccountId: process.env.RECOVERY_RUNTIME_SERVICE_ACCOUNT_ID,
-    wifServiceAccountId: process.env.RECOVERY_WIF_SERVICE_ACCOUNT_ID,
-    lockboxSecretId: process.env.RECOVERY_LOCKBOX_SECRET_ID,
-  });
+  return classifyRecoveryFunctionDeployAttempt(stderr, resourceIds);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

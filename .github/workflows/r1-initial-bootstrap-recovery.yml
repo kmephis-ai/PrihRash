@@ -1155,6 +1155,7 @@ jobs:
           exit 1
 
       - name: Deploy recovery-only Function version
+        id: deploy
         if: inputs.reuse_deploy_attempt_run_id == ''
         shell: bash
         env:
@@ -1162,7 +1163,8 @@ jobs:
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP/r1-initial-bootstrap-recovery-deploy"
-          mkdir -p "$tmp"
+          evidence_dir="$RUNNER_TEMP/r1-initial-bootstrap-recovery-create-failure-evidence"
+          mkdir -p "$tmp" "$evidence_dir"
           recovery_execution_timeout='150s'
           if [ "$RECOVERY_CONTROLLED_PREPARATION_ONLY" = '1' ]; then
             recovery_execution_timeout='600s'
@@ -1177,7 +1179,10 @@ jobs:
               --environment "PRIHRASH_R1_RECOVERY_CAUSAL_BOOTSTRAP_STARTED_AT=${CAUSAL_BOOTSTRAP_STARTED_AT}"
             )
           fi
-          if ! yc serverless function version create \
+
+          create_started_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+          set +e
+          yc serverless function version create \
             --function-id "$PRIHRASH_YC_FUNCTION_ID" \
             --runtime nodejs22 \
             --entrypoint index.initialBootstrapRecoveryHandler \
@@ -1194,10 +1199,56 @@ jobs:
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=ydb_connection_string" \
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${PRIHRASH_LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
-            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"
+          create_exit=$?
+          set -e
+          create_finished_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+
+          if [ "$create_exit" -ne 0 ]; then
+            operations_read_status='READ_FAILED'
+            encoded_function_id="$(jq -rn --arg id "$PRIHRASH_YC_FUNCTION_ID" '$id | @uri')"
+            operations_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}/operations"
+            set +e
+            operations_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+              --output "$tmp/operations-rest.json" --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+              --header 'Accept: application/json' \
+              --data-urlencode 'pageSize=1000' \
+              "$operations_api" 2>"$tmp/operations-rest.err")"
+            operations_curl_exit=$?
+            set -e
+            if [ "$operations_curl_exit" -eq 0 ]; then
+              case "$operations_http" in
+                2??) operations_read_status='READY' ;;
+                *) ;;
+              esac
+            fi
+            if [ ! -f "$tmp/operations-rest.json" ]; then
+              printf '{}\n' >"$tmp/operations-rest.json"
+            fi
+            export RECOVERY_FUNCTION_ID="$PRIHRASH_YC_FUNCTION_ID"
+            export RECOVERY_RUNTIME_SERVICE_ACCOUNT_ID="$PRIHRASH_YC_FUNCTION_SA_ID"
+            export RECOVERY_WIF_SERVICE_ACCOUNT_ID="$YC_WIF_SERVICE_ACCOUNT_ID"
+            export RECOVERY_LOCKBOX_SECRET_ID="$YC_LOCKBOX_SECRET_ID"
+
+            node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs \
+              --error-with-operation-evidence "$tmp/version.err" "$create_exit" \
+              "$operations_read_status" "$tmp/operations-rest.json" \
+              "$create_started_at" "$create_finished_at" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+              >"$evidence_dir/create-failure.json"
+            cat "$evidence_dir/create-failure.json"
             echo 'INITIAL_BOOTSTRAP_RECOVERY_DEPLOY_FAILED'
             exit 1
           fi
+
+      - name: Publish enum-only recovery create failure evidence
+        if: failure() && steps.deploy.conclusion == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-recovery-create-failure-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-initial-bootstrap-recovery-create-failure-evidence/create-failure.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Re-verify private trigger-free recovery boundary
         shell: bash
