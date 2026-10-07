@@ -60,6 +60,12 @@ test('attempt creates only the recovery Function version, classifies stderr priv
   assert.match(workflow, /--execution-timeout 150s/);
   assert.match(workflow, /--retry 0/);
   assert.match(workflow, /2>"\$tmp\/version\.err"/);
+  assert.match(workflow, /create_started_at=.*toISOString/);
+  assert.match(workflow, /create_finished_at=.*toISOString/);
+  assert.match(workflow, /functions\/v1\/functions\/\$\{encoded_function_id\}\/operations/);
+  assert.match(workflow, /--data-urlencode 'pageSize=1000'/);
+  assert.match(workflow, /operations_read_status='READY'/);
+  assert.match(workflow, /--error-with-operation-evidence/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy-attempt\.mjs/);
   assert.match(workflow, /recovery-deploy-attempt\.json/);
   assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_CLASSIFIED_FAILED_NO_RETRY/);
@@ -67,6 +73,7 @@ test('attempt creates only the recovery Function version, classifies stderr priv
   assert.doesNotMatch(workflow, /yc ydb|migration_runs|source_records|source_snapshots/);
   assert.doesNotMatch(workflow, /yc iam .* (add-access-binding|set-access-bindings|remove-access-binding)/);
   assert.doesNotMatch(workflow, /cat "\$tmp\/version\.err"/);
+  assert.doesNotMatch(workflow, /cat "\$tmp\/operations-rest\.json"/);
 });
 
 test('the workflow publishes only the enum artifact and reasserts exact main after the attempt', () => {
@@ -86,6 +93,9 @@ test('the authorized single deploy-only result has a documented terminal decisio
   assert.match(evidence, /Owner authorized in chat exactly one new recovery-only/);
   assert.match(evidence, /Function invoke explicitly out of[\s\S]*?scope/);
   assert.match(evidence, /SOURCE_EVIDENCE_UNUSABLE/);
+  assert.match(evidence, /`ListOperations` read-back in the bounded create window/);
+  assert.match(evidence, /`PRE_OPERATION_OR_SYNC_REJECTION`/);
+  assert.match(evidence, /`ASYNC_OPERATION_OBSERVED`/);
   assert.match(evidence, /RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE/);
   assert.match(evidence, /Every possible result\s+consumes the one-shot authority/);
   assert.match(evidence, /Provider-Attempt: READY/);

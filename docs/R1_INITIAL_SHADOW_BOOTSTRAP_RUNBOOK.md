@@ -1811,11 +1811,15 @@ Regression-Test: tests/tooling/initial-bootstrap-recovery-deploy-attempt-workflo
 The workflow re-proves exact current main/CI, exact source PR and this latest failed run's deploy-failed
 / invoke-skipped phase, shared writer exclusion, private trigger-free Function boundary, exact runtime
 SA and Lockbox secret metadata. It executes one `yc serverless function version create --retry 0`, captures
-stderr only in runner-temporary storage, and publishes a synthetic-tested allowlisted result:
-`PERMISSION_DENIED` with a bounded resource boundary, another documented provider status class, or
-`OTHER/PROVIDER_ERROR_DETAIL_UNAVAILABLE`; successful CLI completion emits
-`RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`. The raw provider response, IDs and secret values
-are never published. It does **not** call the Function or access YDB/Google.
+stderr only in runner-temporary storage, and on nonzero exit performs one Function-scoped read-only
+`ListOperations` read-back in the bounded create window. The same synthetic-tested classifier publishes
+only allowlisted `failureClass`, `permissionBoundary`, `cliExit`, `createOperationEvidence`, and
+`failureBoundary`: `CREATE_OPERATION_NOT_OBSERVED` + nonzero exit becomes
+`PRE_OPERATION_OR_SYNC_REJECTION`; an observed create operation becomes `ASYNC_OPERATION_OBSERVED`;
+unreadable/paginated/malformed/ambiguous operation evidence remains `UNCLASSIFIED`. Successful CLI
+completion emits `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`. Raw stderr, provider response,
+operation/version IDs and secret values are never published. It does **not** call the Function or access
+YDB/Google.
 
 Every possible result consumes the one-shot authority for this exact failed run. A concrete
 `INVALID_ARGUMENT`-class result permits a repository request fix; a proven missing permission is a

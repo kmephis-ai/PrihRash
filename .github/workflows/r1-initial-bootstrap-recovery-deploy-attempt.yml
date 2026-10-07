@@ -377,7 +377,9 @@ jobs:
           echo "::add-mask::${FUNCTION_ID}"
           echo "::add-mask::${RUNTIME_SA_ID}"
           echo "::add-mask::${LOCKBOX_VERSION_ID}"
-          if yc serverless function version create \
+          create_started_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+          set +e
+          yc serverless function version create \
             --function-id "$FUNCTION_ID" \
             --runtime nodejs22 \
             --entrypoint index.initialBootstrapRecoveryHandler \
@@ -396,13 +398,42 @@ jobs:
             --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
             --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=ydb_connection_string" \
             --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
-            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"; then
+            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"
+          create_exit=$?
+          set -e
+          create_finished_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+
+          if [ "$create_exit" -eq 0 ]; then
             node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs --success \
               >"$evidence_dir/recovery-deploy-attempt.json"
             printf 'result=accepted\n' >> "$GITHUB_OUTPUT"
           else
+            operations_read_status='READ_FAILED'
+            encoded_function_id="$(jq -rn --arg id "$FUNCTION_ID" '$id | @uri')"
+            operations_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}/operations"
+            set +e
+            operations_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+              --output "$tmp/operations-rest.json" --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+              --header 'Accept: application/json' \
+              --data-urlencode 'pageSize=1000' \
+              "$operations_api" 2>"$tmp/operations-rest.err")"
+            operations_curl_exit=$?
+            set -e
+            if [ "$operations_curl_exit" -eq 0 ]; then
+              case "$operations_http" in
+                2??) operations_read_status='READY' ;;
+                *) ;;
+              esac
+            fi
+            if [ ! -f "$tmp/operations-rest.json" ]; then
+              printf '{}\n' >"$tmp/operations-rest.json"
+            fi
             node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs \
-              --error "$tmp/version.err" >"$evidence_dir/recovery-deploy-attempt.json"
+              --error-with-operation-evidence "$tmp/version.err" "$create_exit" \
+              "$operations_read_status" "$tmp/operations-rest.json" \
+              "$create_started_at" "$create_finished_at" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+              >"$evidence_dir/recovery-deploy-attempt.json"
             printf 'result=failed\n' >> "$GITHUB_OUTPUT"
           fi
           cat "$evidence_dir/recovery-deploy-attempt.json"

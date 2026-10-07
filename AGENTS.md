@@ -228,10 +228,11 @@ failed phase/source/version history, не добавляет IAM bindings и п�
 Audit-source ветку и требует смены causal model; `SOURCE_EVIDENCE_UNUSABLE/AMBIGUOUS` остаётся STOP.
 Не повторять workflow с теми же SHA/run IDs; никакого infer cleanup, IAM mutation, create или replay.
 
-Если ordinary `R1 initial bootstrap recovery` падает непосредственно на `CreateVersion`, raw provider
-stderr остаётся runner-local. Failure branch обязан до завершения сделать ровно один read-only
-Function-scoped `ListOperations` read-back в bounded create window и опубликовать только allowlisted
-`failureClass`, `permissionBoundary`, `cliExit`, `createOperationEvidence` и `failureBoundary`.
+Если ordinary `R1 initial bootstrap recovery` **или dedicated Owner-authorized recovery deploy-only attempt**
+падает непосредственно на `CreateVersion`, raw provider stderr остаётся runner-local. Failure branch обязан
+до завершения сделать ровно один read-only Function-scoped `ListOperations` read-back в bounded create
+window и опубликовать только allowlisted `failureClass`, `permissionBoundary`, `cliExit`,
+`createOperationEvidence` и `failureBoundary`.
 `CREATE_OPERATION_NOT_OBSERVED` + nonzero CLI exit локализует failure как
 `PRE_OPERATION_OR_SYNC_REJECTION`, но **не** доказывает `NOT_APPLIED`; observed/in-progress/completed
 operation означает `ASYNC_OPERATION_OBSERVED` и запрещает replay до отдельной classification.
