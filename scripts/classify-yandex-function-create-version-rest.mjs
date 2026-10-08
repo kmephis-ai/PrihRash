@@ -11,6 +11,7 @@ const RPC_CODES = new Map([
   [7, 'PERMISSION_DENIED'],
   [8, 'RESOURCE_EXHAUSTED'],
   [9, 'FAILED_PRECONDITION'],
+  [10, 'ABORTED'],
   [13, 'INTERNAL'],
   [14, 'UNAVAILABLE'],
   [16, 'UNAUTHENTICATED'],
@@ -56,6 +57,48 @@ function operationState(readStatus, body, responseOperationId) {
   if (body.error && typeof body.error === 'object' && !Array.isArray(body.error)) return 'OPERATION_FAILED';
   if (body.response && typeof body.response === 'object' && !Array.isArray(body.response)) return 'OPERATION_SUCCEEDED';
   return 'OPERATION_EVIDENCE_INVALID';
+}
+
+function operationFailureEvidence(readStatus, body, state) {
+  if (state !== 'OPERATION_FAILED') {
+    return Object.freeze({
+      operationFailureClass: 'NOT_APPLICABLE',
+      operationFailureDetailClass: 'NOT_APPLICABLE',
+    });
+  }
+  if (readStatus !== 'READY' || !body?.error || typeof body.error !== 'object' || Array.isArray(body.error)) {
+    return Object.freeze({
+      operationFailureClass: 'UNCLASSIFIED',
+      operationFailureDetailClass: 'UNCLASSIFIED',
+    });
+  }
+
+  const errorCode = body.error.code;
+  const operationFailureClass = Number.isInteger(errorCode) && RPC_CODES.has(errorCode)
+    ? RPC_CODES.get(errorCode)
+    : 'OTHER';
+
+  let operationFailureDetailClass = 'OTHER';
+  const message = typeof body.error.message === 'string' ? body.error.message : '';
+  const builderPrefix = 'Builder exited unexpectedly: ';
+  if (message.startsWith(builderPrefix)) {
+    try {
+      const inner = JSON.parse(message.slice(builderPrefix.length));
+      if (
+        inner?.errorCode === 503
+        && inner?.errorType === 'ServerError'
+        && inner?.errorMessage === 'Service Unavailable'
+      ) {
+        operationFailureDetailClass = 'PROVIDER_BUILDER_UNAVAILABLE';
+      } else {
+        operationFailureDetailClass = 'PROVIDER_BUILDER_FAILED';
+      }
+    } catch {
+      operationFailureDetailClass = 'PROVIDER_BUILDER_FAILED';
+    }
+  }
+
+  return Object.freeze({ operationFailureClass, operationFailureDetailClass });
 }
 
 export function classifyDirectRestCreateVersion({
@@ -104,6 +147,7 @@ export function classifyDirectRestCreateVersion({
   ].includes(createOperationEvidence);
 
   const opState = operationState(operationReadStatus, operationResponse, responseOperationId);
+  const operationFailure = operationFailureEvidence(operationReadStatus, operationResponse, opState);
 
   let status = 'UNCLASSIFIED';
   let code = 'RECOVERY_FUNCTION_VERSION_REST_CREATE_UNCLASSIFIED';
@@ -133,6 +177,8 @@ export function classifyDirectRestCreateVersion({
     createOperationEvidence,
     failureBoundary,
     operationState: opState,
+    operationFailureClass: operationFailure.operationFailureClass,
+    operationFailureDetailClass: operationFailure.operationFailureDetailClass,
   });
 }
 
@@ -182,6 +228,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
       createOperationEvidence: 'CREATE_OPERATION_EVIDENCE_INVALID',
       failureBoundary: 'UNCLASSIFIED',
       operationState: 'OPERATION_EVIDENCE_INVALID',
+      operationFailureClass: 'UNCLASSIFIED',
+      operationFailureDetailClass: 'UNCLASSIFIED',
     }) + '\n');
     process.exitCode = 1;
   });

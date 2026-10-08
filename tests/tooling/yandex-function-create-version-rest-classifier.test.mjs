@@ -54,6 +54,8 @@ test('direct REST 200 Operation response is accepted without leaking identifiers
     createOperationEvidence: 'CREATE_OPERATION_IN_PROGRESS',
     failureBoundary: 'ASYNC_OPERATION_OBSERVED',
     operationState: 'OPERATION_SUCCEEDED',
+    operationFailureClass: 'NOT_APPLICABLE',
+    operationFailureDetailClass: 'NOT_APPLICABLE',
   });
   assert.doesNotMatch(JSON.stringify(result), /op-1|synthetic-version-id|synthetic-service-account/);
 });
@@ -129,6 +131,31 @@ test('operation terminal failure is preserved after accepted REST create', () =>
   assert.equal(result.status, 'ACCEPTED');
   assert.equal(result.operationState, 'OPERATION_FAILED');
   assert.equal(result.failureBoundary, 'ASYNC_OPERATION_OBSERVED');
+});
+
+test('operation ABORTED builder 503 is reduced to privacy-safe provider-unavailable evidence', () => {
+  const result = classifyDirectRestCreateVersion({
+    curlExit: 0,
+    httpStatus: '200',
+    response: op(),
+    operationsReadStatus: 'READY',
+    operationsResponse: { operations: [listOp()] },
+    createStartedAt: started,
+    createFinishedAt: finished,
+    actorServiceAccountId: actor,
+    operationReadStatus: 'READY',
+    operationResponse: op('op-1', true, {
+      error: {
+        code: 10,
+        message: 'Builder exited unexpectedly: {"errorCode":503,"errorMessage":"Service Unavailable","errorType":"ServerError"}',
+      },
+    }),
+  });
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(result.operationState, 'OPERATION_FAILED');
+  assert.equal(result.operationFailureClass, 'ABORTED');
+  assert.equal(result.operationFailureDetailClass, 'PROVIDER_BUILDER_UNAVAILABLE');
+  assert.doesNotMatch(JSON.stringify(result), /Builder exited unexpectedly|Service Unavailable|op-1/);
 });
 
 test('operation polling timeout is accepted-but-pending and remains no-retry evidence', () => {

@@ -169,6 +169,17 @@ same-SHA, non-skipped или ambiguous predecessor блокирует continuati
 `ListOperations`. Function invoke/IAM/YDB/Google mutation/cleanup/timer/cutover остаются вне authority.
 POST consumes authority независимо от HTTP/provider outcome; повтор запрещён.
 
+Direct-REST run `37772771733` достиг единственного POST и consumed authority. Provider вернул
+`HTTP_2XX` и валидный Operation; Function `ListOperations` независимо подтвердил ровно одну
+`CreateFunctionVersion` operation в attempt window. После завершения read-only provider state показал:
+`done=true`, error code `10/ABORTED`, response отсутствует, новых Function versions в exact window = 0.
+Raw Operation error локализует failure как internal builder `503 Service Unavailable`; published
+classifier обязан оставлять только allowlisted
+`operationFailureClass=ABORTED` и
+`operationFailureDetailClass=PROVIDER_BUILDER_UNAVAILABLE`. Этот результат не разрешает retry:
+следующий `CreateVersion` требует нового явного Owner decision. Function invoke остаётся не
+авторизован.
+
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
 `CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation
