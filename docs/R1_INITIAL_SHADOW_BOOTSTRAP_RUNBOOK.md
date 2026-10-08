@@ -1813,6 +1813,32 @@ enum-only classifier. Reaching the create step consumes this authority regardles
 same-SHA or cross-SHA replay is forbidden. Success means only
 `RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE`, not `COMMITTED`.
 
+#### PR #920 first current one-shot continuation stopped before provider create
+
+PR #920 merged as exact main `c71ced6a73d93473de8b171d0f03b7ea828c7811`; canonical main CI
+`37680385236` and Browser Quality `37680385145` passed. Recovery autocontinue then dispatched exactly one
+dedicated deploy-only run `37680553048` for failed recovery `37238416504`.
+
+The run passed merged-authority/CI/history, exact-source restore, Yandex CLI install and OIDC exchange,
+then stopped at `Prove private exact Function and deployment references` with:
+
+```text
+RECOVERY_DEPLOY_ATTEMPT_FUNCTION_READ_FAILED
+```
+
+`Re-assert exact main before the one-shot recovery-only version create` was `skipped` and
+`Create exactly one read-only recovery Function version without invoking it` was `skipped`. Therefore no
+new Function version was requested and the Owner one-shot authority is **not consumed**. Same-SHA replay
+is still forbidden.
+
+Root cause is a stale dedicated preflight read path: it still used CLI `function get`,
+`list-access-bindings` and `trigger list`, while the active recovery chain had already replaced those
+same provider-read boundaries with REST after the proven CLI failures. The only permitted distinct-SHA
+successor reuses the canonical REST `Function.List`, exact Function `ListAccessBindings`, and
+folder-scoped `Trigger.List` contracts plus existing privacy-safe classifiers. Runtime-SA resolution and
+Lockbox REST metadata stay unchanged. This correction adds no IAM/YDB/Google mutation, Function invoke,
+cleanup, timer/cutover, or extra create authority.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned

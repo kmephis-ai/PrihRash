@@ -136,6 +136,13 @@ active tracking Issue, single writer и private trigger-free/runtime-SA/Lockbox 
 IAM/YDB/Google mutation, cleanup, timer/cutover не авторизованы. Reached create step consumes authority;
 same-SHA или cross-SHA replay после этого запрещён.
 
+Exact-main attempt `37680553048` прошёл repository/OIDC gates, но остановился в provider preflight на
+`RECOVERY_DEPLOY_ATTEMPT_FUNCTION_READ_FAILED`; reassert-before-create и create были `skipped`. Authority
+остаётся не consumed. Следующий distinct-SHA successor исправляет только stale read surface, заменяя
+dedicated CLI Function locator/access-bindings/trigger reads на уже доказанные REST contracts и те же
+privacy-safe classifiers. Если successor достигает create step, authority consumed независимо от
+результата; при новом pre-create ambiguity/rejection автоматический retry запрещён.
+
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
 `CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation
