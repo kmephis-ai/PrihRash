@@ -287,6 +287,15 @@ Operation и Function `ListOperations` читаются только read-only. 
 invoke, IAM/YDB/Google mutation, cleanup, timer/cutover не разрешены. Достижение REST POST consumes
 authority независимо от outcome; второй POST/replay запрещён.
 
+Direct-REST run `37772771733` дошёл до POST и consumed эту authority. REST вернул `HTTP_2XX` и
+валидный Operation; Function `ListOperations` независимо увидел `CreateFunctionVersion` operation.
+Позже read-only provider state доказал terminal `done=true`, error code `10/ABORTED`, без response и
+без новой Function version в exact attempt window. Raw provider error локализует failure как internal
+builder `503 Service Unavailable`; публикуемый classifier обязан сводить это только к
+`operationFailureClass=ABORTED` и
+`operationFailureDetailClass=PROVIDER_BUILDER_UNAVAILABLE`, без raw message/IDs. Новый
+`CreateVersion` после `37772771733` не авторизован и требует отдельного Owner decision.
+
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
 model на независимый exact version proof по typed metadata уже существующей Yandex

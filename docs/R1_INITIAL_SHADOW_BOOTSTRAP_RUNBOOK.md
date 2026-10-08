@@ -1902,6 +1902,39 @@ If the POST returns an Operation, only read-only
 timer/scheduled sync, cutover and any second REST/CLI create are not authorized. Reaching the single REST
 POST consumes this authority regardless of HTTP/Operation outcome.
 
+#### Direct REST attempt `37772771733`: accepted request, provider builder failure
+
+PR #922 merged as exact main `8d0bac76c18f5f47281680eb0b520fd164b37652`; post-merge CI
+`37760800923` and Browser Quality `37760800889` passed. Manual direct-REST run
+`37772771733` passed repository/history/exact-source/OIDC/provider-reference gates and reached the
+single authorized POST. The published artifact showed:
+
+```text
+status=ACCEPTED
+code=RECOVERY_FUNCTION_VERSION_REST_CREATE_ACCEPTED
+transportClass=CURL_OK
+httpClass=HTTP_2XX
+failureClass=NOT_APPLICABLE
+responseOperationEvidence=REST_OPERATION_ACCEPTED
+createOperationEvidence=CREATE_OPERATION_IN_PROGRESS
+failureBoundary=ASYNC_OPERATION_OBSERVED
+operationState=OPERATION_READ_FAILED
+```
+
+Independent Function `ListOperations` later found exactly one `CreateFunctionVersion` operation in the
+attempt window. It completed with `done=true`, error code `10/ABORTED`, no response. The raw provider
+message, kept out of published artifacts, identified an internal Function builder
+`503 Service Unavailable`. Independent version listing found **zero** versions created in the attempt
+window; the only recovery-tagged version remains the older `ACTIVE` version created
+`2026-09-30T22:07:08.228Z`.
+
+Therefore the direct REST request format/resource references were accepted, but the provider-side build
+failed asynchronously. The direct-REST authority is consumed. No Function invoke, IAM/YDB/Google
+mutation, timer/cutover or cleanup occurred, and no second create is authorized. The enum classifier must
+map the terminal Operation to `operationFailureClass=ABORTED` and
+`operationFailureDetailClass=PROVIDER_BUILDER_UNAVAILABLE` without publishing the raw message or IDs.
+Any further `CreateVersion` requires a new explicit Owner decision.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned
