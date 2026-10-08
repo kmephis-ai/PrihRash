@@ -296,6 +296,25 @@ builder `503 Service Unavailable`; публикуемый classifier обяза�
 `operationFailureDetailClass=PROVIDER_BUILDER_UNAVAILABLE`, без raw message/IDs. Новый
 `CreateVersion` после `37772771733` не авторизован и требует отдельного Owner decision.
 
+
+Provider incident hold (2026-10-08): официальный Yandex Cloud incident `2092` остаётся active; последнее
+доступное update от `2026-10-08T12:19:00Z` прямо предупреждает, что создание новых cloud resources
+может быть ограничено. Это согласуется с terminal
+`ABORTED / PROVIDER_BUILDER_UNAVAILABLE` direct-REST evidence и вводит отдельный fail-closed hold:
+
+```text
+Provider-Incident-Hold: ACTIVE
+Provider-Incident-ID: 2092
+Provider-Resource-Creation: LIMITED_BY_OFFICIAL_STATUS
+CreateVersion-Rearm: NOT_AUTHORIZED
+```
+
+Пока fresh official status не докажет `Resolved` либо явное снятие ограничения на создание новых
+ресурсов, новый R1 `CreateVersion` не вооружается. Само снятие hold **не** является write-authority:
+после него всё равно нужны fresh exact-main/CI/provider reconciliation и новое явное Owner decision для
+каждой следующей create-попытки. Если status source недоступен, устарел или двусмыслен, hold остаётся
+`ACTIVE`; HTML scraping/parsing status.yandex.cloud не становится runtime dependency R1.
+
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
 model на независимый exact version proof по typed metadata уже существующей Yandex
