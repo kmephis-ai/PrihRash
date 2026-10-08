@@ -1,0 +1,108 @@
+name: R1 direct YDB read-only probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: r1-direct-ydb-readonly
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Reject stale or rerun source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          test -n "$YC_FOLDER_ID"
+          test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$current" = "$GITHUB_SHA" || { echo R1_DIRECT_PROBE=MAIN_MOVED; exit 1; }
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies without scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Focused probe regression
+        run: node --test tests/tooling/r1-direct-runner-readonly.test.mjs
+      - name: Exchange scoped GitHub OIDC identity and probe existing YDB
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          encoded_audience="$(jq -rn --arg v "$OIDC_AUDIENCE" '$v | @uri')"
+          oidc_http="$(curl --silent --output "$tmp/oidc.json" --write-out '%{http_code}' \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" 2>/dev/null || true)"
+          test "$oidc_http" = '200' || { echo R1_DIRECT_PROBE=OIDC_UNAVAILABLE; exit 1; }
+          oidc="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
+          echo "::add-mask::${oidc}"
+          OIDC_TOKEN="$oidc" node -e '
+            const p=JSON.parse(Buffer.from(process.env.OIDC_TOKEN.split(".")[1],"base64url").toString("utf8"));
+            if(p.iss!==process.env.OIDC_ISSUER ||
+               p.sub!==process.env.OIDC_SUBJECT ||
+               !([p.aud].flat().length===1 && [p.aud].flat()[0]===process.env.OIDC_AUDIENCE)) process.exit(2);
+          ' || { echo R1_DIRECT_PROBE=OIDC_CLAIMS_INVALID; exit 1; }
+          iam_http="$(curl --silent --output "$tmp/iam.json" --write-out '%{http_code}' \
+            --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' 2>/dev/null || true)"
+          test "$iam_http" = '200' || { echo R1_DIRECT_PROBE=WIF_EXCHANGE_FAILED; exit 1; }
+          iam="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
+          echo "::add-mask::${iam}"
+          db_http="$(curl --silent --output "$tmp/db.json" --write-out '%{http_code}' \
+            --get --header "Authorization: Bearer ${iam}" \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            https://ydb.api.cloud.yandex.net/ydb/v1/databases 2>/dev/null || true)"
+          case "$db_http" in
+            200) ;;
+            401|403) echo R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED; exit 1 ;;
+            *) echo R1_DIRECT_PROBE=YDB_METADATA_UNAVAILABLE; exit 1 ;;
+          esac
+          jq -e --arg folder "$YC_FOLDER_ID" '
+            (.nextPageToken == null or .nextPageToken == "") and
+            ([.databases[] | select(.name == "prihrash-prod" and
+              .folderId == $folder and .status == "RUNNING")] | length == 1)
+          ' "$tmp/db.json" >/dev/null || { echo R1_DIRECT_PROBE=DB_NOT_EXACT; exit 1; }
+          endpoint="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .endpoint' "$tmp/db.json")"
+          db_id="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .id' "$tmp/db.json")"
+          location="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .locationId' "$tmp/db.json")"
+          [[ "$endpoint" == grpcs://* && -n "$db_id" && -n "$location" ]] ||
+            { echo R1_DIRECT_PROBE=DB_PATH_INVALID; exit 1; }
+          current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
+          test "$current" = "$GITHUB_SHA" || { echo R1_DIRECT_PROBE=MAIN_MOVED; exit 1; }
+          export PRIHRASH_YDB_CONNECTION_STRING="${endpoint}/${location}/${YC_FOLDER_ID}/${db_id}"
+          export PRIHRASH_R1_YDB_IAM_TOKEN="$iam"
+          echo "::add-mask::${PRIHRASH_YDB_CONNECTION_STRING}"
+          node scripts/r1-direct-runner-readonly.mjs
