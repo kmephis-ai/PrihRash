@@ -721,6 +721,17 @@ test('Owner-authorized recovery Function create marker arms exactly one deploy-o
   assert.equal(parse({ 'Recovery-Run-ID': '37238416504\nRecovery-Run-ID: 37238416504' }).valid, false);
 });
 
+test('recovery deploy-attempt successor accepts only a proven preflight stop with create skipped', () => {
+  const source = workflow;
+  assert.match(source, /Prove private exact Function and deployment references/);
+  assert.match(source, /Re-assert exact main before the one-shot recovery-only version create/);
+  assert.match(source, /Create exactly one read-only recovery Function version without invoking it/);
+  assert.match(source, /\.name == "Prove private exact Function and deployment references"[\s\S]*?\.conclusion == "failure"/);
+  assert.match(source, /\.name == "Re-assert exact main before the one-shot recovery-only version create"[\s\S]*?\.conclusion == "skipped"/);
+  assert.match(source, /\.name == "Create exactly one read-only recovery Function version without invoking it"[\s\S]*?\.conclusion == "skipped"/);
+  assert.match(source, /R1_RECOVERY_DEPLOY_ATTEMPT_ALREADY_CONSUMED_OR_UNCLASSIFIED/);
+});
+
 test('accepted-version recovery marker arms only reuse of its exact deploy run, not another create', (t) => {
   const filter = workflow.match(/marker="\$\(jq -Rn --arg body "\$source_pr_body" '\n([\s\S]*?)\n          '\)"/)?.[1];
   assert.ok(filter, 'extract the live jq marker filter from the workflow');

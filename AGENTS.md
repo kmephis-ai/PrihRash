@@ -251,6 +251,14 @@ recovery run `37238416504`. Текущий machine marker: `Provider-Attempt: RE
 историческую authority для `36341844854`. После входа в create step это разрешение consumed независимо
 от результата; повторный create/replay запрещён.
 
+Первый exact-main successor `37680553048` остановился **до** provider create на
+`RECOVERY_DEPLOY_ATTEMPT_FUNCTION_READ_FAILED`: provider-preflight step = `failure`,
+reassert-before-create = `skipped`, create step = `skipped`. Поэтому authority не consumed, но same-SHA
+replay запрещён. Допустим только distinct-SHA correction stale provider-read implementation: dedicated
+deploy-attempt обязан использовать уже канонические REST `Function.List`, `ListAccessBindings` и
+`Trigger.List` boundaries с существующими enum-only classifiers; Function invoke/IAM/YDB/Google scope
+не расширяется.
+
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
 model на независимый exact version proof по typed metadata уже существующей Yandex

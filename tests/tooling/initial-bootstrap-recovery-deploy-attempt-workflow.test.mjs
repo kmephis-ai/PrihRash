@@ -78,6 +78,23 @@ test('the one-shot PR regression marker binds to this guard test and canonical e
   assert.match(exactSourceRestore, /\.head_branch == "main"/);
 });
 
+test('provider preflight reuses canonical REST Function, binding and trigger reads before the one-shot create', () => {
+  assert.match(workflow, /serverless-functions\.api\.cloud\.yandex\.net\/functions\/v1\/functions/);
+  assert.match(workflow, /--data-urlencode "folderId=\$\{YC_FOLDER_ID\}"/);
+  assert.match(workflow, /--data-urlencode "filter=\$\{function_filter\}"/);
+  assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_REST_TRANSPORT_FAILED/);
+  assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_PERMISSION_DENIED/);
+  assert.match(workflow, /:listAccessBindings/);
+  assert.match(workflow, /classify-yandex-function-access-bindings\.mjs/);
+  assert.match(workflow, /serverless-triggers\.api\.cloud\.yandex\.net\/triggers\/v1\/triggers/);
+  assert.match(workflow, /classify-yandex-trigger-list\.mjs/);
+  assert.match(workflow, /--connect-timeout 5 --max-time 15 --max-filesize 1048576/);
+  assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_RUNTIME_SA_READ_FAILED/);
+  assert.doesNotMatch(workflow, /yc serverless function get --name/);
+  assert.doesNotMatch(workflow, /yc serverless function list-access-bindings/);
+  assert.doesNotMatch(workflow, /yc serverless trigger list/);
+});
+
 test('attempt creates only the recovery Function version, classifies stderr privately, and never invokes', () => {
   assert.match(workflow, /Create exactly one read-only recovery Function version without invoking it/);
   assert.match(workflow, /--execution-timeout 150s/);

@@ -480,6 +480,14 @@ jobs:
                 [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
                 | ($jobs | length) == 1
                 and ([$jobs[0].steps[]? | select(
+                  .name == "Prove private exact Function and deployment references"
+                  and .conclusion == "failure"
+                )] | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Re-assert exact main before the one-shot recovery-only version create"
+                  and .conclusion == "skipped"
+                )] | length) == 1
+                and ([$jobs[0].steps[]? | select(
                   .name == "Create exactly one read-only recovery Function version without invoking it"
                   and .conclusion == "skipped"
                 )] | length) == 1
