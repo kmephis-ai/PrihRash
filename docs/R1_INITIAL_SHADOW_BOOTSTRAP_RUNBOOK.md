@@ -1949,10 +1949,20 @@ CreateVersion-Rearm: NOT_AUTHORIZED
 ```
 
 Пока fresh official status не докажет `Resolved` либо явное снятие ограничения на создание новых
-ресурсов, новый R1 `CreateVersion` не вооружается. Само снятие hold **не** является write-authority:
-после него всё равно нужны fresh exact-main/CI/provider reconciliation и новое явное Owner decision для
-каждой следующей create-попытки. Если status source недоступен, устарел или двусмыслен, hold остаётся
-`ACTIVE`; HTML scraping/parsing status.yandex.cloud не становится runtime dependency R1.
+ресурсов, новый R1 `CreateVersion` не вооружается. Если status source недоступен, устарел или
+двусмыслен, hold остаётся `ACTIVE`; HTML scraping/parsing status.yandex.cloud не становится runtime
+dependency R1.
+
+Owner 2026-10-08 заранее выдал ровно одно следующее recovery-only `CreateVersion` разрешение после
+снятия provider hold; durable authority: Issue #630 comment `6064782861`. Пока hold активен, текущий
+`CreateVersion-Rearm: NOT_AUTHORIZED` остаётся неизменным и provider POST запрещён. После доказанного
+снятия hold повторно запрашивать Owner decision для этой одной попытки не требуется, но перед любым
+provider write обязательно заново доказать exact current main, canonical CI PASS, отсутствие active R1
+writer/conflict, current Function/runtime-SA/Lockbox/reference gates и отсутствие unknown prior write.
+Затем отдельный exact-main marker PR должен привязать эту pending authority к тогдашнему SHA и post-merge
+CI. Только после этих gates разрешена одна попытка; достижение create step consumed authority независимо
+от outcome. Function invoke, IAM widening/cleanup, YDB/Google mutation, timer/scheduled sync/cutover и
+вторая create-попытка не разрешены.
 
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 

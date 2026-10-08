@@ -19,9 +19,11 @@ test('R1 provider incident hold is canonical, fail-closed and separate from writ
     assert.match(source, /Provider-Incident-ID: 2092/);
     assert.match(source, /Provider-Resource-Creation: LIMITED_BY_OFFICIAL_STATUS/);
     assert.match(source, /CreateVersion-Rearm: NOT_AUTHORIZED/);
-    assert.match(source, /новое явное Owner decision/);
-    assert.match(source, /status source недоступен, устарел или двусмыслен, hold остаётся/);
-    assert.match(source, /HTML scraping\/parsing status\.yandex\.cloud не становится runtime dependency R1/);
+    assert.match(source, /Issue #630 comment `6064782861`/);
+    assert.match(source, /повторно запрашивать Owner decision для этой одной попытки не требуется/);
+    assert.match(source, /отдельный exact-main marker PR/);
+    assert.match(source, /status source недоступен, устарел или\s+двусмыслен, hold остаётся/);
+    assert.match(source, /HTML scraping\/parsing status\.yandex\.cloud не становится runtime\s+dependency R1/);
   }
 });
 
