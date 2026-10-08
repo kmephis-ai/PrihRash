@@ -1839,6 +1839,69 @@ folder-scoped `Trigger.List` contracts plus existing privacy-safe classifiers. R
 Lockbox REST metadata stay unchanged. This correction adds no IAM/YDB/Google mutation, Function invoke,
 cleanup, timer/cutover, or extra create authority.
 
+### 2026-10-08 Owner-authorized direct REST recovery CreateVersion
+
+PR #921 merged as exact main `ed73939096b8450dbddb4067897c16f89725176f`; canonical main CI
+`37727075735` and Browser Quality `37727075733` passed. Distinct-SHA deploy-only run
+`37727175095` then passed exact merged authority/CI/history, exact-source restore, OIDC exchange and
+REST provider preflight before reaching the authorized create step. The one-shot CLI authority was
+therefore consumed. Its published enum-only result was:
+
+```text
+status=FAIL
+code=RECOVERY_FUNCTION_VERSION_CREATE_FAILED
+failureClass=NOT_FOUND
+cliExit=NONZERO
+createOperationEvidence=CREATE_OPERATION_NOT_OBSERVED
+failureBoundary=PRE_OPERATION_OR_SYNC_REJECTION
+```
+
+The exact Function remained `ACTIVE`, independent Function `ListOperations` contained zero operations
+in the create window, the exact-source recovery package existed/non-empty and matched its manifest digest,
+and the runtime-SA/Lockbox secret/current-version/key references remained `ACTIVE` and unchanged.
+Therefore the prior `yc` request was synchronously rejected before an observable Operation, but the
+saved enum cannot identify which referenced provider resource produced `NOT_FOUND`. Raw provider stderr
+was intentionally runner-local. That CLI attempt must not be replayed.
+
+Owner then explicitly authorized exactly one additional recovery-only `CreateVersion` with a different
+client/mechanism. Durable authority is Issue #630 comment `6056859760`. The chosen bounded mechanism is
+a separate direct REST workflow using Yandex `Function.CreateVersion`:
+`POST https://serverless-functions.api.cloud.yandex.net/functions/v1/versions`. The exact verified
+recovery package is zipped locally on the runner and supplied inline as base64 `content`; the request
+uses explicit `functionId`, `serviceAccountId`, five Lockbox
+`id/versionId/key/environmentVariable` mappings, recovery tag, no logging and the existing metadata
+options. No Object Storage upload or other provider write is introduced.
+
+The exact merged source PR must carry:
+
+```text
+Provider-Attempt: READY
+Observed-Signature: RECOVERY_FUNCTION_VERSION_CREATE_FAILED/NOT_FOUND/CREATE_OPERATION_NOT_OBSERVED/PRE_OPERATION_OR_SYNC_REJECTION
+Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_REST_CLASSIFIED
+Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED
+Circuit-Rearm: OWNER_AUTHORIZED_DIRECT_REST_RECOVERY_DEPLOY
+Recovery-Run-ID: 37238416504
+Recovery-Consumed-Run-ID: 37727175095
+Authority-Comment-ID: 6056859760
+Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-direct-rest-attempt-workflow.test.mjs
+```
+
+The direct workflow is manual/exact-dispatch only. Before POST it re-proves exact merged PR/post-merge CI,
+active tracking Issue, the historical pre-write run `37680553048`, consumed run `37727175095`, and
+all previous direct-REST attempts. A distinct-SHA predecessor is acceptable only when its direct-REST
+create step is proven `skipped`; same-SHA, non-skipped or ambiguous predecessor evidence stops the flow.
+The workflow also proves single-writer exclusion, exact-source artifact, private trigger-free Function
+bindings, runtime service account and Lockbox metadata. The POST is issued exactly once.
+Raw request/response and operation IDs stay runner-local. The published artifact contains only allowlisted
+transport/HTTP/failure classes, response-operation evidence, Function `ListOperations` evidence,
+failure boundary and terminal Operation state.
+
+If the POST returns an Operation, only read-only
+`GET https://operation.api.cloud.yandex.net/operations/{operationId}` polling and Function
+`ListOperations` are allowed. Function invoke is **not authorized**. IAM/YDB/Google mutation, cleanup,
+timer/scheduled sync, cutover and any second REST/CLI create are not authorized. Reaching the single REST
+POST consumes this authority regardless of HTTP/Operation outcome.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned

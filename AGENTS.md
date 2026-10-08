@@ -259,6 +259,34 @@ deploy-attempt обязан использовать уже каноническ
 `Trigger.List` boundaries с существующими enum-only classifiers; Function invoke/IAM/YDB/Google scope
 не расширяется.
 
+PR #921 merged как `ed73939096b8450dbddb4067897c16f89725176f`; distinct-SHA attempt `37727175095`
+дошёл до create step и тем самым consumed authority. Enum-only result:
+`NOT_FOUND / CREATE_OPERATION_NOT_OBSERVED / PRE_OPERATION_OR_SYNC_REJECTION`; exact Function
+`ListOperations` в attempt window также содержит 0 operations. Exact-source package, Function,
+runtime SA и Lockbox version/key references доказаны существующими/ACTIVE, поэтому конкретный
+provider-side `NOT_FOUND` resource из сохранённого evidence не локализован; replay старого `yc`
+attempt запрещён.
+
+Owner 2026-10-08 отдельно разрешил ровно **один дополнительный** recovery-only `CreateVersion` с
+изменением client/mechanism. Durable authority: Issue #630 comment `6056859760`. Выбран direct REST
+`POST /functions/v1/versions` с exact verified recovery ZIP как inline `content`, explicit
+Function/runtime-SA/Lockbox references и отдельным one-shot workflow. Machine marker:
+`Provider-Attempt: READY`,
+`Observed-Signature: RECOVERY_FUNCTION_VERSION_CREATE_FAILED/NOT_FOUND/CREATE_OPERATION_NOT_OBSERVED/PRE_OPERATION_OR_SYNC_REJECTION`,
+`Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_REST_CLASSIFIED`,
+`Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED`,
+`Circuit-Rearm: OWNER_AUTHORIZED_DIRECT_REST_RECOVERY_DEPLOY`,
+`Recovery-Run-ID: 37238416504`,
+`Recovery-Consumed-Run-ID: 37727175095`,
+`Authority-Comment-ID: 6056859760`.
+Direct workflow обязан доказать exact merged marker PR/CI, active tracking Issue, оба prior phases,
+private trigger-free/provider references и историю previous direct-REST attempts. Distinct-SHA predecessor
+допустим только если его direct-REST create step доказанно `skipped`; same-SHA predecessor или любой
+non-skipped/ambiguous create step запрещает continuation. POST выполняется ровно один раз; returned
+Operation и Function `ListOperations` читаются только read-only. Function
+invoke, IAM/YDB/Google mutation, cleanup, timer/cutover не разрешены. Достижение REST POST consumes
+authority независимо от outcome; второй POST/replay запрещён.
+
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
 model на независимый exact version proof по typed metadata уже существующей Yandex

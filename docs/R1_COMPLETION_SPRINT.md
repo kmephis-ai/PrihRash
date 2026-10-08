@@ -143,6 +143,32 @@ dedicated CLI Function locator/access-bindings/trigger reads на уже док�
 privacy-safe classifiers. Если successor достигает create step, authority consumed независимо от
 результата; при новом pre-create ambiguity/rejection автоматический retry запрещён.
 
+PR #921 merged как `ed73939096b8450dbddb4067897c16f89725176f`; successor `37727175095` дошёл до
+create step и consumed первую текущую authority. Его enum-only result:
+`NOT_FOUND / CREATE_OPERATION_NOT_OBSERVED / PRE_OPERATION_OR_SYNC_REJECTION`; Function operation count
+в bounded attempt window = 0. Exact-source package и provider references остались доказанными, поэтому
+старый `yc` request не replay-ится.
+
+Owner 2026-10-08 дал новую отдельную authority на **один** дополнительный recovery-only `CreateVersion`
+с изменённым client/mechanism; durable marker — Issue #630 comment `6056859760`. Выбран отдельный
+direct-REST workflow, который отправляет exact verified recovery ZIP inline через `content` в
+`POST /functions/v1/versions`, сохраняет raw HTTP/Operation data только runner-local и публикует
+enum-only classification. Marker:
+`Provider-Attempt: READY`,
+`Observed-Signature: RECOVERY_FUNCTION_VERSION_CREATE_FAILED/NOT_FOUND/CREATE_OPERATION_NOT_OBSERVED/PRE_OPERATION_OR_SYNC_REJECTION`,
+`Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_REST_CLASSIFIED`,
+`Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED`,
+`Circuit-Rearm: OWNER_AUTHORIZED_DIRECT_REST_RECOVERY_DEPLOY`,
+`Recovery-Run-ID: 37238416504`,
+`Recovery-Consumed-Run-ID: 37727175095`,
+`Authority-Comment-ID: 6056859760`.
+Workflow обязан доказать exact post-merge CI/source PR, active Issue, consumed legacy attempt и историю
+prior direct-REST attempts. Distinct-SHA predecessor разрешён только при доказанном `skipped` create step;
+same-SHA, non-skipped или ambiguous predecessor блокирует continuation. После единственного POST read-only
+разрешены только returned `Operation.Get` и Function
+`ListOperations`. Function invoke/IAM/YDB/Google mutation/cleanup/timer/cutover остаются вне authority.
+POST consumes authority независимо от HTTP/provider outcome; повтор запрещён.
+
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет
 `CreateFunctionVersionMetadata.function_version_id`; metadata ID принимается только при exact operation

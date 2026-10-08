@@ -1,0 +1,725 @@
+name: R1 direct REST recovery CreateVersion attempt
+run-name: R1 direct REST recovery CreateVersion for failed run ${{ inputs.failed_run_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      failed_run_id:
+        description: Exact latest failed recovery run with deploy failed and invoke skipped
+        required: true
+        type: string
+      ci_run_id:
+        description: Exact successful push-CI run for this main SHA
+        required: true
+        type: string
+      source_pr_number:
+        description: Exact merged R1 PR carrying the direct-REST one-shot marker
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+  id-token: write
+
+concurrency:
+  group: r1-initial-bootstrap-writer
+  cancel-in-progress: false
+
+jobs:
+  deploy-only-attempt:
+    if: github.repository == 'kmephis-ai/PrihRash' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FUNCTION_NAME: prihrash-r1-initial-bootstrap
+      RUNTIME_SERVICE_ACCOUNT_NAME: prihrash-initial-bootstrap
+      LOCKBOX_SECRET_NAME: prihrash-r1-initial-bootstrap
+      TARGET_TAG: r1-initial-bootstrap-recovery
+      OIDC_AUDIENCE: https://github.com/kmephis-ai
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+      OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
+      YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_LOCKBOX_SECRET_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_LOCKBOX_SECRET_ID }}
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Prove exact merged authorization, CI and failed deploy boundary
+        id: authorization
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+          SOURCE_PR_NUMBER: ${{ inputs.source_pr_number }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_RUN_ATTEMPT" = '1'
+          [[ "$FAILED_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'RECOVERY_DEPLOY_ATTEMPT_RUN_ID_INVALID'; exit 1; }
+          [[ "$CI_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'RECOVERY_DEPLOY_ATTEMPT_CI_RUN_ID_INVALID'; exit 1; }
+          [[ "$SOURCE_PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo 'RECOVERY_DEPLOY_ATTEMPT_PR_NUMBER_INVALID'; exit 1; }
+          test -n "$YC_FOLDER_ID"; test -n "$YC_WIF_SERVICE_ACCOUNT_ID"; test -n "$YC_LOCKBOX_SECRET_ID"
+
+          tmp="$RUNNER_TEMP/r1-recovery-deploy-attempt-gates"
+          mkdir -p "$tmp"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          auth_header="Authorization: Bearer ${GH_API_TOKEN}"
+          accept_header='Accept: application/vnd.github+json'
+
+          direct_attempts="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery-direct-rest-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")" || {
+              echo 'RECOVERY_DIRECT_REST_ATTEMPT_HISTORY_READ_FAILED'; exit 1;
+            }
+          if [ "$(jq '.workflow_runs | length' <<<"$direct_attempts")" -ge 100 ]; then
+            echo 'RECOVERY_DIRECT_REST_ATTEMPT_HISTORY_INCOMPLETE'; exit 1
+          fi
+          prior_direct_runs="$(jq -c --arg expected "R1 direct REST recovery CreateVersion for failed run ${FAILED_RUN_ID}" \
+            --argjson self_id "$GITHUB_RUN_ID" '
+              [.workflow_runs[] | select(.id != $self_id and .display_title == $expected)]
+            ' <<<"$direct_attempts")"
+          prior_direct_count="$(jq 'length' <<<"$prior_direct_runs")"
+          if [ "$prior_direct_count" -gt 0 ]; then
+            prior_direct_ids="$(jq -er 'sort_by(.created_at,.id) | .[].id' <<<"$prior_direct_runs")"
+            while IFS= read -r prior_direct_id; do
+              [ -n "$prior_direct_id" ] || continue
+              prior_direct_sha="$(jq -er --argjson id "$prior_direct_id" '
+                [.[] | select(.id == $id)] | if length == 1 then .[0].head_sha else empty end
+              ' <<<"$prior_direct_runs")" || {
+                echo 'RECOVERY_DIRECT_REST_ATTEMPT_HISTORY_UNCLASSIFIED'; exit 1;
+              }
+              if [ "$prior_direct_sha" = "$GITHUB_SHA" ]; then
+                echo 'RECOVERY_DIRECT_REST_ATTEMPT_SAME_SHA_REPLAY_FORBIDDEN'; exit 1
+              fi
+              prior_direct_jobs="$tmp/direct-attempt-${prior_direct_id}-jobs.json"
+              curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+                "$api/actions/runs/${prior_direct_id}/jobs?filter=latest&per_page=100" --output "$prior_direct_jobs" || {
+                  echo 'RECOVERY_DIRECT_REST_ATTEMPT_HISTORY_READ_FAILED'; exit 1;
+                }
+              if ! jq -e '
+                [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
+                | ($jobs | length) == 1
+                and ([$jobs[0].steps[]? | select(
+                  .name == "Create exactly one recovery Function version via direct REST without invoking it"
+                  and .conclusion == "skipped"
+                )] | length) == 1
+              ' "$prior_direct_jobs" >/dev/null; then
+                echo 'RECOVERY_DIRECT_REST_ATTEMPT_ALREADY_CONSUMED_OR_UNCLASSIFIED'; exit 1
+              fi
+            done <<<"$prior_direct_ids"
+          fi
+
+          legacy_attempts="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery-deploy-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100")" || {
+              echo 'RECOVERY_DIRECT_REST_LEGACY_HISTORY_READ_FAILED'; exit 1;
+            }
+          jq -e '
+            [.workflow_runs[] | select(.id == 37680553048
+              and .display_title == "R1 recovery-only deploy attempt for failed run 37238416504"
+              and .head_sha == "c71ced6a73d93473de8b171d0f03b7ea828c7811"
+              and .status == "completed" and .conclusion == "failure")] | length == 1
+          ' <<<"$legacy_attempts" >/dev/null || { echo 'RECOVERY_DIRECT_REST_PREWRITE_HISTORY_NOT_PROVEN'; exit 1; }
+          jq -e '
+            [.workflow_runs[] | select(.id == 37727175095
+              and .display_title == "R1 recovery-only deploy attempt for failed run 37238416504"
+              and .head_sha == "ed73939096b8450dbddb4067897c16f89725176f"
+              and .status == "completed" and .conclusion == "failure")] | length == 1
+          ' <<<"$legacy_attempts" >/dev/null || { echo 'RECOVERY_DIRECT_REST_CONSUMED_HISTORY_NOT_PROVEN'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs/37680553048/jobs?filter=latest&per_page=100" --output "$tmp/prewrite-jobs.json"
+          jq -e '
+            [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
+            | ($jobs | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Prove private exact Function and deployment references" and .conclusion == "failure")] | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Create exactly one read-only recovery Function version without invoking it" and .conclusion == "skipped")] | length) == 1
+          ' "$tmp/prewrite-jobs.json" >/dev/null || { echo 'RECOVERY_DIRECT_REST_PREWRITE_PHASE_NOT_PROVEN'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs/37727175095/jobs?filter=latest&per_page=100" --output "$tmp/consumed-jobs.json"
+          jq -e '
+            [.jobs[] | select(.name == "deploy-only-attempt")] as $jobs
+            | ($jobs | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Prove private exact Function and deployment references" and .conclusion == "success")] | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Create exactly one read-only recovery Function version without invoking it" and .conclusion == "success")] | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Preserve failed create as the consumed terminal outcome" and .conclusion == "failure")] | length) == 1
+          ' "$tmp/consumed-jobs.json" >/dev/null || { echo 'RECOVERY_DIRECT_REST_CONSUMED_PHASE_NOT_PROVEN'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/branches/main" --output "$tmp/main.json"
+          jq -e --arg sha "$GITHUB_SHA" '.commit.sha == $sha and .protected == true' \
+            "$tmp/main.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_MAIN_GATE_NOT_READY'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs/${CI_RUN_ID}" --output "$tmp/ci-run.json"
+          ci_state="$(node scripts/classify-github-ci-run.mjs "$tmp/ci-run.json" "$CI_RUN_ID" "$GITHUB_SHA")"
+          [ "$ci_state" = 'CI_RUN_EXACT_SUCCESS' ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_EXACT_CI_NOT_PROVEN'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/pulls/${SOURCE_PR_NUMBER}" --output "$tmp/source-pr.json"
+          jq -e --argjson number "$SOURCE_PR_NUMBER" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .number == $number and .base.ref == "main" and .head.repo.full_name == $repo
+            and .merged_at != null and .merge_commit_sha == $sha
+          ' "$tmp/source-pr.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_SOURCE_PR_NOT_EXACT'; exit 1; }
+          tracking_issue_number="$(jq -er '.title | capture("^R1 #(?<number>[1-9][0-9]*):").number' "$tmp/source-pr.json")"
+          tracking_issue_state="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/issues/${tracking_issue_number}" | jq -er '.state')"
+          [ "$tracking_issue_state" = 'open' ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_TRACKING_ISSUE_INACTIVE'; exit 1; }
+          source_body="$(jq -r '.body // ""' "$tmp/source-pr.json")"
+          jq -Rn --arg body "$source_body" '
+            def exact_line($prefix): ($body | split("\n") | map(select(startswith($prefix))));
+            (exact_line("Provider-Attempt: ")) as $attempt
+            | (exact_line("Observed-Signature: ")) as $observed
+            | (exact_line("Expected-Transition: ")) as $expected
+            | (exact_line("Recovery-State: ")) as $state
+            | (exact_line("Circuit-Rearm: ")) as $rearm
+            | (exact_line("Recovery-Run-ID: ")) as $run
+            | (exact_line("Recovery-Consumed-Run-ID: ")) as $consumed
+            | (exact_line("Authority-Comment-ID: ")) as $authority
+            | (exact_line("Regression-Test: ")) as $test
+            | ($attempt == ["Provider-Attempt: READY"]
+              and $observed == ["Observed-Signature: RECOVERY_FUNCTION_VERSION_CREATE_FAILED/NOT_FOUND/CREATE_OPERATION_NOT_OBSERVED/PRE_OPERATION_OR_SYNC_REJECTION"]
+              and $expected == ["Expected-Transition: RECOVERY_ONLY_FUNCTION_VERSION_CREATE_REST_CLASSIFIED"]
+              and $state == ["Recovery-State: DEPLOYMENT_OUTCOME_UNCLASSIFIED"]
+              and $rearm == ["Circuit-Rearm: OWNER_AUTHORIZED_DIRECT_REST_RECOVERY_DEPLOY"]
+              and $run == ["Recovery-Run-ID: 37238416504"]
+              and $consumed == ["Recovery-Consumed-Run-ID: 37727175095"]
+              and $authority == ["Authority-Comment-ID: 6056859760"]
+              and $test == ["Regression-Test: tests/tooling/r1-initial-bootstrap-recovery-direct-rest-attempt-workflow.test.mjs"])
+          ' <<<"$source_body" | jq -e . >/dev/null || { echo 'RECOVERY_DIRECT_REST_ATTEMPT_OWNER_MARKER_INVALID'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/issues/comments/6056859760" --output "$tmp/authority-comment.json"
+          jq -e --arg issue "$tracking_issue_number" '
+            (.issue_url | endswith("/issues/" + $issue))
+            and (.body | contains("Exact main at decision: `ed73939096b8450dbddb4067897c16f89725176f`"))
+            and (.body | contains("Target failed recovery run: `37238416504`"))
+            and (.body | contains("Consumed prior one-shot: `37727175095`"))
+            and (.body | contains("Authority: `OWNER_AUTHORIZED_DIRECT_REST_RECOVERY_DEPLOY`"))
+          ' "$tmp/authority-comment.json" >/dev/null || { echo 'RECOVERY_DIRECT_REST_AUTHORITY_COMMENT_INVALID'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/pulls/${SOURCE_PR_NUMBER}/files?per_page=100" --output "$tmp/source-files.json"
+          if [ "$(jq 'length' "$tmp/source-files.json")" -ge 100 ] || ! jq -e '
+            any(.[]; .filename == ".github/workflows/r1-initial-bootstrap-recovery-direct-rest-attempt.yml" and .status != "removed")
+            and any(.[]; .filename == "scripts/classify-yandex-function-create-version-rest.mjs" and .status != "removed")
+            and any(.[]; .filename == "tests/tooling/r1-initial-bootstrap-recovery-direct-rest-attempt-workflow.test.mjs" and .status != "removed")
+            and any(.[]; .filename == "tests/tooling/yandex-function-create-version-rest-classifier.test.mjs" and .status != "removed")
+            and any(.[]; .filename == "docs/R1_INITIAL_SHADOW_BOOTSTRAP_RUNBOOK.md" and .status != "removed")
+            and any(.[]; .filename == "AGENTS.md" and .status != "removed")
+            and any(.[]; .filename == "docs/R1_COMPLETION_SPRINT.md" and .status != "removed")
+            and all(.[]; (.filename | startswith("src/")) | not)
+            and all(.[]; (.filename | IN(
+              "package.json", "package-lock.json", "tsconfig.json", "tsconfig.build.json",
+              "scripts/package-yandex-initial-bootstrap-recovery-function.mjs",
+              "scripts/verify-yandex-initial-bootstrap-recovery-package.mjs"
+            )) | not)
+          ' "$tmp/source-files.json" >/dev/null; then
+            echo 'RECOVERY_DIRECT_REST_ATTEMPT_CHANGESET_INVALID'; exit 1
+          fi
+
+          failed_runs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery.yml/runs?branch=main&event=workflow_dispatch&status=failure&per_page=100")"
+          latest_failed_id="$(jq -er '
+            [.workflow_runs[] | select(.name == "R1 initial bootstrap recovery" and .head_branch == "main"
+              and .event == "workflow_dispatch" and .conclusion == "failure" and (.id | type == "number"))]
+            | sort_by(.created_at,.id) | reverse | .[0].id // empty
+          ' <<<"$failed_runs")"
+          [ "$FAILED_RUN_ID" = "$latest_failed_id" ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_FAILED_RUN_NOT_LATEST'; exit 1; }
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs/${FAILED_RUN_ID}" --output "$tmp/failed-run.json"
+          jq -e --argjson id "$FAILED_RUN_ID" '
+            .id == $id and .name == "R1 initial bootstrap recovery" and .head_branch == "main"
+            and .event == "workflow_dispatch" and .status == "completed" and .conclusion == "failure"
+          ' "$tmp/failed-run.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_FAILED_RUN_NOT_EXACT'; exit 1; }
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs/${FAILED_RUN_ID}/jobs?filter=latest&per_page=100" --output "$tmp/failed-jobs.json"
+          jq -e '
+            [.jobs[] | select(.name == "initial-bootstrap-recovery")] as $jobs
+            | ($jobs | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Deploy recovery-only Function version" and .conclusion == "failure")] | length) == 1
+            and ([$jobs[0].steps[]? | select(.name == "Invoke exact read-only recovery tag once" and .conclusion == "skipped")] | length) == 1
+          ' "$tmp/failed-jobs.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_FAILURE_PHASE_NOT_PROVEN'; exit 1; }
+
+          curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/workflows/r1-initial-bootstrap-recovery-direct-rest-attempt.yml/runs?branch=main&event=workflow_dispatch&per_page=100" \
+            --output "$tmp/prior-attempts.json"
+          if jq -e --arg sha "$GITHUB_SHA" --argjson self_id "$GITHUB_RUN_ID" '
+            .workflow_runs | any(.id != $self_id and .head_sha == $sha)
+          ' \
+            "$tmp/prior-attempts.json" >/dev/null; then
+            echo 'RECOVERY_DIRECT_REST_ATTEMPT_ALREADY_USED_FOR_SHA'; exit 1
+          fi
+          active_runs="$(curl --fail --silent --show-error --header "$auth_header" --header "$accept_header" \
+            "$api/actions/runs?per_page=100")"
+          if jq -e --arg self "$GITHUB_RUN_ID" '
+            .workflow_runs | any(.id != ($self | tonumber) and (.status == "queued" or .status == "in_progress")
+              and (.name == "R1 initial bootstrap orchestrator" or .name == "R1 initial shadow bootstrap"
+                or .name == "R1 initial bootstrap recovery"
+                or .path == ".github/workflows/r1-initial-bootstrap-recovery-direct-rest-attempt.yml"))
+          ' <<<"$active_runs" >/dev/null; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_WRITER_CONFLICT'; exit 1
+          fi
+
+          printf 'failed_run_id=%s\nci_run_id=%s\n' "$FAILED_RUN_ID" "$CI_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install exact-source deployment dependencies
+        shell: bash
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Restore exact-main provider artifact
+        uses: ./.github/actions/restore-exact-source
+        with:
+          source-sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
+
+      - name: Install Yandex Cloud CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_dir="$RUNNER_TEMP/yc"
+          mkdir -p "$install_dir"
+          curl --fail --silent --show-error --location \
+            https://storage.yandexcloud.net/yandexcloud-yc/release/yc_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/yc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/yc.tar.gz" -C "$install_dir"
+          yc_bin="$(find "$install_dir" -type f -name yc -perm -u+x -print -quit)"
+          test -n "$yc_bin"
+          echo "$(dirname "$yc_bin")" >> "$GITHUB_PATH"
+          "$yc_bin" version >/dev/null
+
+      - name: Exchange exact GitHub OIDC identity for short-lived Yandex IAM token
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-recovery-deploy-attempt-auth"
+          mkdir -p "$tmp"
+          encoded_audience="$(jq -rn --arg value "$OIDC_AUDIENCE" '$value | @uri')"
+          curl --fail --silent --show-error \
+            --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${encoded_audience}" --output "$tmp/oidc.json"
+          oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' "$tmp/oidc.json")"
+          echo "::add-mask::${oidc_token}"
+          token_payload="${oidc_token#*.}"; token_payload="${token_payload%%.*}"
+          token_payload="${token_payload//-/+}"; token_payload="${token_payload//_/\/}"
+          case "$((${#token_payload} % 4))" in
+            0) ;;
+            2) token_payload="${token_payload}==" ;;
+            3) token_payload="${token_payload}=" ;;
+            *) echo 'RECOVERY_DEPLOY_ATTEMPT_OIDC_CLAIMS_INVALID'; exit 1 ;;
+          esac
+          printf '%s' "$token_payload" | base64 --decode >"$tmp/claims.json"
+          jq -e --arg issuer "$OIDC_ISSUER" --arg audience "$OIDC_AUDIENCE" --arg subject "$OIDC_SUBJECT" '
+            .iss == $issuer
+            and ((.aud == $audience) or ((.aud | type) == "array" and (.aud | length) == 1 and .aud[0] == $audience))
+            and .sub == $subject
+          ' "$tmp/claims.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_OIDC_CLAIMS_INVALID'; exit 1; }
+          curl --fail --silent --show-error --request POST https://auth.yandex.cloud/oauth/token \
+            --header 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
+            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
+            --data-urlencode "audience=${YC_WIF_SERVICE_ACCOUNT_ID}" \
+            --data-urlencode "subject_token=${oidc_token}" \
+            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
+            --output "$tmp/iam.json"
+          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
+          echo "::add-mask::${iam_token}"
+          printf 'YC_IAM_TOKEN=%s\n' "$iam_token" >> "$GITHUB_ENV"
+
+      - name: Prove private exact Function and deployment references
+        id: preflight
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-recovery-deploy-attempt-preflight"
+          mkdir -p "$tmp"
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || { echo 'RECOVERY_DEPLOY_ATTEMPT_MAIN_MOVED_BEFORE_PREFLIGHT'; exit 1; }
+
+          functions_api='https://serverless-functions.api.cloud.yandex.net/functions/v1/functions'
+          function_filter="name=\"${FUNCTION_NAME}\""
+          set +e
+          function_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/functions.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=100' \
+            --data-urlencode "filter=${function_filter}" \
+            "$functions_api" 2>"$tmp/functions-rest.err")"
+          function_curl_exit=$?
+          set -e
+          if [ "$function_curl_exit" -ne 0 ]; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_REST_TRANSPORT_FAILED'
+            exit 1
+          fi
+          case "$function_http" in
+            2??) ;;
+            401) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_REST_AUTH_FAILED'; exit 1 ;;
+            403) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_PERMISSION_DENIED'; exit 1 ;;
+            404) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_REST_NOT_FOUND'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_REST_UNEXPECTED_STATUS'; exit 1 ;;
+          esac
+          function_match_count="$(jq -er --arg name "$FUNCTION_NAME" '
+            if type == "object"
+              and ((.functions // []) | type == "array")
+              and ((.nextPageToken // "") | type == "string")
+              and ((.nextPageToken // "") == "")
+            then [(.functions // [])[]? | select(.name == $name)] | length
+            else empty end
+          ' "$tmp/functions.json")" || {
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_LIST_METADATA_INVALID'
+            exit 1
+          }
+          case "$function_match_count" in
+            1) ;;
+            0) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_NOT_FOUND'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_NOT_UNIQUE'; exit 1 ;;
+          esac
+          function_id="$(jq -er --arg name "$FUNCTION_NAME" '
+            [(.functions // [])[]? | select(.name == $name and (.id | type == "string") and (.id | length > 0))]
+            | if length == 1 then .[0].id else empty end
+          ' "$tmp/functions.json")" || {
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_METADATA_INVALID'
+            exit 1
+          }
+          function_status="$(jq -er --arg name "$FUNCTION_NAME" '
+            [(.functions // [])[]? | select(.name == $name and (.status | type == "string"))]
+            | if length == 1 then .[0].status else empty end
+          ' "$tmp/functions.json")" || {
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_METADATA_INVALID'
+            exit 1
+          }
+          echo "::add-mask::${function_id}"
+          [ "$function_status" = 'ACTIVE' ] || {
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_NOT_ACTIVE'
+            exit 1
+          }
+
+          runtime_sa_json="$(yc iam service-account get --name "$RUNTIME_SERVICE_ACCOUNT_NAME" --folder-id "$YC_FOLDER_ID" \
+            --format json --retry 0 --no-user-output 2>"$tmp/runtime-sa.err")" || {
+              echo 'RECOVERY_DEPLOY_ATTEMPT_RUNTIME_SA_READ_FAILED'; exit 1;
+            }
+          runtime_sa="$(jq -er '.id | select(type == "string" and length > 0)' <<<"$runtime_sa_json")" || {
+            echo 'RECOVERY_DEPLOY_ATTEMPT_RUNTIME_SA_METADATA_INVALID'; exit 1;
+          }
+          echo "::add-mask::${runtime_sa}"
+
+          encoded_function_id="$(jq -rn --arg id "$function_id" '$id | @uri')"
+          set +e
+          bindings_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/function-bindings.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode 'pageSize=1000' \
+            "https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}:listAccessBindings" \
+            2>"$tmp/function-bindings-rest.err")"
+          bindings_curl_exit=$?
+          set -e
+          set +e
+          bindings_result="$(node scripts/classify-yandex-function-access-bindings.mjs \
+            "$bindings_curl_exit" "$bindings_http" "$tmp/function-bindings.json" \
+            "$YC_WIF_SERVICE_ACCOUNT_ID" "$runtime_sa")"
+          bindings_classifier_exit=$?
+          set -e
+          if [ -z "$bindings_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^FUNCTION_BINDINGS_[A-Z0-9_]+$"))
+            and (.publicInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.runtimeInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.wifInvoker | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (.wifEditor | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "publicInvoker", "runtimeInvoker", "status", "wifEditor", "wifInvoker"]
+          ' <<<"$bindings_result" >/dev/null; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_BINDINGS_CLASSIFIER_INVALID'
+            exit 1
+          fi
+          if [ "$bindings_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$bindings_result")" != 'PASS' ]; then
+            printf 'RECOVERY_DEPLOY_ATTEMPT_%s\n' "$(jq -r '.code' <<<"$bindings_result")"
+            exit 1
+          fi
+          if [ "$(jq -r '.publicInvoker' <<<"$bindings_result")" = 'PRESENT' ]; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_FUNCTION_PUBLIC'
+            exit 1
+          fi
+          if [ "$(jq -r '.wifInvoker' <<<"$bindings_result")" != 'PRESENT' ]; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_INVOKER_BINDING_MISSING'
+            exit 1
+          fi
+          if [ "$(jq -r '.wifEditor' <<<"$bindings_result")" != 'PRESENT' ]; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_EDITOR_BINDING_MISSING'
+            exit 1
+          fi
+
+          set +e
+          triggers_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/triggers.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode "folderId=${YC_FOLDER_ID}" \
+            --data-urlencode 'pageSize=1000' \
+            'https://serverless-triggers.api.cloud.yandex.net/triggers/v1/triggers' \
+            2>"$tmp/triggers-rest.err")"
+          triggers_curl_exit=$?
+          set -e
+          set +e
+          triggers_result="$(node scripts/classify-yandex-trigger-list.mjs \
+            "$triggers_curl_exit" "$triggers_http" "$tmp/triggers.json" "$function_id")"
+          triggers_classifier_exit=$?
+          set -e
+          if [ -z "$triggers_result" ] || ! jq -e '
+            type == "object"
+            and (.status | IN("PASS", "STOP"))
+            and (.code | type == "string" and test("^TRIGGER_LIST_[A-Z0-9_]+$"))
+            and (.targetFunction | IN("PRESENT", "ABSENT", "UNCLASSIFIED"))
+            and (keys | sort) == ["code", "status", "targetFunction"]
+          ' <<<"$triggers_result" >/dev/null; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_TRIGGER_LIST_CLASSIFIER_INVALID'
+            exit 1
+          fi
+          if [ "$triggers_classifier_exit" -ne 0 ] || [ "$(jq -r '.status' <<<"$triggers_result")" != 'PASS' ]; then
+            printf 'RECOVERY_DEPLOY_ATTEMPT_%s\n' "$(jq -r '.code' <<<"$triggers_result")"
+            exit 1
+          fi
+          if [ "$(jq -r '.targetFunction' <<<"$triggers_result")" = 'PRESENT' ]; then
+            echo 'RECOVERY_DEPLOY_ATTEMPT_TRIGGER_PRESENT'
+            exit 1
+          fi
+
+          echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+          secret_status="$(curl --silent --show-error --output "$tmp/lockbox-secret.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            "https://lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${YC_LOCKBOX_SECRET_ID}" 2>"$tmp/lockbox-secret.err")" || {
+              echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_READ_FAILED'; exit 1;
+            }
+          case "$secret_status" in
+            2??) ;;
+            401) echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_AUTH_FAILED'; exit 1 ;;
+            403) echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_PERMISSION_DENIED'; exit 1 ;;
+            404) echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_NOT_FOUND'; exit 1 ;;
+            *) echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_UNEXPECTED_STATUS'; exit 1 ;;
+          esac
+          jq -e --arg id "$YC_LOCKBOX_SECRET_ID" --arg name "$LOCKBOX_SECRET_NAME" --arg folder "$YC_FOLDER_ID" '
+            .id == $id and .name == $name and .folderId == $folder and .status == "ACTIVE"
+            and (.currentVersion.id | type == "string" and length > 0)
+          ' "$tmp/lockbox-secret.json" >/dev/null || { echo 'RECOVERY_DEPLOY_ATTEMPT_LOCKBOX_METADATA_INVALID'; exit 1; }
+
+          secret_version_id="$(jq -er '.currentVersion.id' "$tmp/lockbox-secret.json")"
+          echo "::add-mask::${secret_version_id}"
+          printf 'function_id=%s\nruntime_sa=%s\nsecret_version_id=%s\n' \
+            "$function_id" "$runtime_sa" "$secret_version_id" >> "$GITHUB_OUTPUT"
+
+      - name: Re-assert exact main before the one-shot recovery-only version create
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || { echo 'RECOVERY_DEPLOY_ATTEMPT_MAIN_MOVED_BEFORE_CREATE'; exit 1; }
+
+      - name: Create exactly one recovery Function version via direct REST without invoking it
+        id: deploy
+        shell: bash
+        env:
+          FUNCTION_ID: ${{ steps.preflight.outputs.function_id }}
+          RUNTIME_SA_ID: ${{ steps.preflight.outputs.runtime_sa }}
+          LOCKBOX_VERSION_ID: ${{ steps.preflight.outputs.secret_version_id }}
+        run: |
+          set -euo pipefail
+          tmp="$RUNNER_TEMP/r1-direct-rest-create-result"
+          evidence_dir="$RUNNER_TEMP/r1-direct-rest-create-evidence"
+          mkdir -p "$tmp" "$evidence_dir"
+          echo "::add-mask::${FUNCTION_ID}"
+          echo "::add-mask::${RUNTIME_SA_ID}"
+          echo "::add-mask::${LOCKBOX_VERSION_ID}"
+          echo "::add-mask::${YC_LOCKBOX_SECRET_ID}"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+          import os
+          root = Path('.artifacts/yandex-initial-bootstrap-recovery-function')
+          out = Path(os.environ['RUNNER_TEMP']) / 'r1-direct-rest-create-result' / 'recovery-package.zip'
+          files = [p for p in sorted(root.rglob('*')) if p.is_file()]
+          if not files:
+              raise SystemExit('RECOVERY_DIRECT_REST_PACKAGE_EMPTY')
+          with ZipFile(out, 'w', compression=ZIP_DEFLATED) as archive:
+              for file in files:
+                  archive.write(file, file.relative_to(root).as_posix())
+          PY
+          package_bytes="$(stat -c '%s' "$tmp/recovery-package.zip")"
+          [ "$package_bytes" -gt 0 ] && [ "$package_bytes" -le 3670016 ] || {
+            echo 'RECOVERY_DIRECT_REST_PACKAGE_SIZE_INVALID'; exit 1;
+          }
+          base64 --wrap=0 "$tmp/recovery-package.zip" >"$tmp/recovery-package.b64"
+
+          jq -n \
+            --arg functionId "$FUNCTION_ID" \
+            --arg serviceAccountId "$RUNTIME_SA_ID" \
+            --arg secretId "$YC_LOCKBOX_SECRET_ID" \
+            --arg secretVersionId "$LOCKBOX_VERSION_ID" \
+            --arg tag "$TARGET_TAG" \
+            --rawfile content "$tmp/recovery-package.b64" '
+            {
+              functionId: $functionId,
+              runtime: "nodejs22",
+              entrypoint: "index.initialBootstrapRecoveryHandler",
+              resources: {memory: "1073741824"},
+              executionTimeout: "150s",
+              serviceAccountId: $serviceAccountId,
+              content: $content,
+              environment: {
+                PRIHRASH_R1_RECOVERY_SURFACE_ONLY: "0",
+                PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: "0",
+                PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY: "0"
+              },
+              tag: [$tag],
+              secrets: [
+                {id:$secretId,versionId:$secretVersionId,key:"google_spreadsheet_id",environmentVariable:"PRIHRASH_GOOGLE_SPREADSHEET_ID"},
+                {id:$secretId,versionId:$secretVersionId,key:"google_service_account_email",environmentVariable:"PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL"},
+                {id:$secretId,versionId:$secretVersionId,key:"google_service_account_private_key",environmentVariable:"PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"},
+                {id:$secretId,versionId:$secretVersionId,key:"ydb_connection_string",environmentVariable:"PRIHRASH_YDB_CONNECTION_STRING"},
+                {id:$secretId,versionId:$secretVersionId,key:"initial_bootstrap_private_historical_evidence",environmentVariable:"PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE"}
+              ],
+              logOptions: {disabled:true},
+              metadataOptions: {gceHttpEndpoint:"ENABLED",awsV1HttpEndpoint:"DISABLED"}
+            }
+          ' >"$tmp/create-request.json"
+
+          create_started_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+          set +e
+          create_http="$(curl --silent --show-error --request POST --connect-timeout 5 --max-time 60 --max-filesize 1048576 \
+            --output "$tmp/create-response.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$tmp/create-request.json" \
+            'https://serverless-functions.api.cloud.yandex.net/functions/v1/versions' \
+            2>"$tmp/create-rest.err")"
+          create_curl_exit=$?
+          set -e
+          create_finished_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
+          [ -f "$tmp/create-response.json" ] || printf '{}\n' >"$tmp/create-response.json"
+
+          operation_read_status='NOT_APPLICABLE'
+          printf '{}\n' >"$tmp/operation.json"
+          if [ "$create_curl_exit" -eq 0 ] && [[ "$create_http" =~ ^2[0-9][0-9]$ ]]; then
+            operation_id="$(jq -er '.id | select(type == "string" and length > 0)' "$tmp/create-response.json" 2>/dev/null || true)"
+            if [ -n "$operation_id" ]; then
+              echo "::add-mask::${operation_id}"
+              encoded_operation_id="$(jq -rn --arg id "$operation_id" '$id | @uri')"
+              operation_read_status='PENDING_TIMEOUT'
+              for _ in $(seq 1 36); do
+                set +e
+                operation_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+                  --output "$tmp/operation.json" --write-out '%{http_code}' \
+                  --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+                  --header 'Accept: application/json' \
+                  "https://operation.api.cloud.yandex.net/operations/${encoded_operation_id}" \
+                  2>"$tmp/operation-rest.err")"
+                operation_curl_exit=$?
+                set -e
+                if [ "$operation_curl_exit" -ne 0 ] || [[ ! "$operation_http" =~ ^2[0-9][0-9]$ ]]; then
+                  operation_read_status='READ_FAILED'
+                  break
+                fi
+                if [ "$(jq -r '.done // false' "$tmp/operation.json" 2>/dev/null)" = 'true' ]; then
+                  operation_read_status='READY'
+                  break
+                fi
+                sleep 5
+              done
+            fi
+          fi
+
+          operations_read_status='READ_FAILED'
+          encoded_function_id="$(jq -rn --arg id "$FUNCTION_ID" '$id | @uri')"
+          set +e
+          operations_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+            --output "$tmp/operations.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --data-urlencode 'pageSize=1000' \
+            "https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}/operations" \
+            2>"$tmp/operations-rest.err")"
+          operations_curl_exit=$?
+          set -e
+          if [ "$operations_curl_exit" -eq 0 ] && [[ "$operations_http" =~ ^2[0-9][0-9]$ ]]; then
+            operations_read_status='READY'
+          fi
+          [ -f "$tmp/operations.json" ] || printf '{}\n' >"$tmp/operations.json"
+
+          node scripts/classify-yandex-function-create-version-rest.mjs \
+            "$create_curl_exit" "$create_http" "$tmp/create-response.json" \
+            "$operations_read_status" "$tmp/operations.json" \
+            "$create_started_at" "$create_finished_at" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            "$operation_read_status" "$tmp/operation.json" \
+            >"$evidence_dir/direct-rest-create.json"
+          cat "$evidence_dir/direct-rest-create.json"
+          result="$(jq -er '.status' "$evidence_dir/direct-rest-create.json")"
+          operation_state="$(jq -er '.operationState' "$evidence_dir/direct-rest-create.json")"
+          printf 'result=%s\noperation_state=%s\n' "$result" "$operation_state" >>"$GITHUB_OUTPUT"
+
+      - name: Re-assert exact main after the one-shot deploy-only result
+        if: always()
+        shell: bash
+        env:
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_sha="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" --header 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/branches/main" | jq -er '.commit.sha')"
+          test "$current_sha" = "$GITHUB_SHA" || { echo 'RECOVERY_DEPLOY_ATTEMPT_MAIN_MOVED_AFTER_CREATE'; exit 1; }
+
+      - name: Publish enum-only direct REST create result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: r1-initial-bootstrap-recovery-direct-rest-attempt-${{ github.run_id }}
+          path: ${{ runner.temp }}/r1-direct-rest-create-evidence/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Preserve direct REST rejection as the consumed terminal outcome
+        if: steps.deploy.outputs.result != 'ACCEPTED'
+        shell: bash
+        run: |
+          echo 'RECOVERY_DIRECT_REST_CREATE_CLASSIFIED_NON_ACCEPTED_NO_RETRY'
+          exit 1
+
+      - name: Preserve non-successful accepted Operation as consumed terminal outcome
+        if: steps.deploy.outputs.result == 'ACCEPTED' && steps.deploy.outputs.operation_state != 'OPERATION_SUCCEEDED'
+        shell: bash
+        run: |
+          echo 'RECOVERY_DIRECT_REST_CREATE_OPERATION_NOT_SUCCESSFUL_NO_RETRY'
+          exit 1
