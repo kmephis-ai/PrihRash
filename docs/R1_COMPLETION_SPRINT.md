@@ -114,10 +114,11 @@ fixture-tested exact guards; cleanup/artifact trap обязан пережива
 
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` Audit Trails path больше не повторяется.
 Для любого следующего ordinary recovery **или dedicated Owner-authorized deploy-only** `CreateVersion`
-failure raw stderr остаётся runner-local, а тот же job обязан до выхода выполнить один Function-scoped
-`ListOperations` read-back в bounded create window. Публикуется только enum-only artifact: provider
-failure class, permission boundary, nonzero/unknown CLI exit class, create-operation evidence и causal
-boundary. Отсутствие matching
+failure raw provider detail остаётся runner-local, а тот же job обязан до выхода выполнить один
+Function-scoped `ListOperations` read-back в bounded create window. CLI path публикует bounded CLI exit;
+prepared REST-content path — `submissionMode=REST_CONTENT` и enum-only `submissionTransport`. Общая
+публичная evidence ограничена provider failure class, permission boundary, create-operation evidence и
+causal boundary. Отсутствие matching
 operation классифицируется как `PRE_OPERATION_OR_SYNC_REJECTION`, но не как `NOT_APPLIED`;
 наблюдаемая operation переводит outcome в async/unknown recovery boundary. Read failure, pagination,
 malformed metadata или ambiguity остаются fail-closed. Этот instrumentation change не re-arm-ит provider
@@ -138,10 +139,22 @@ same-SHA или cross-SHA replay после этого запрещён.
 
 Exact-main attempt `37680553048` прошёл repository/OIDC gates, но остановился в provider preflight на
 `RECOVERY_DEPLOY_ATTEMPT_FUNCTION_READ_FAILED`; reassert-before-create и create были `skipped`. Authority
-остаётся не consumed. Следующий distinct-SHA successor исправляет только stale read surface, заменяя
-dedicated CLI Function locator/access-bindings/trigger reads на уже доказанные REST contracts и те же
-privacy-safe classifiers. Если successor достигает create step, authority consumed независимо от
-результата; при новом pre-create ambiguity/rejection автоматический retry запрещён.
+оставалась не consumed. Distinct-SHA successor #921 заменил stale CLI Function
+locator/access-bindings/trigger reads на уже доказанные REST contracts.
+
+Exact-main attempt `37727175095` после #921 прошёл REST provider preflight и reassert-before-create,
+достиг create step и тем самым consumed Owner authority. Enum-only outcome:
+`failureClass=NOT_FOUND`, `submission/create exit=NONZERO`,
+`createOperationEvidence=CREATE_OPERATION_NOT_OBSERVED`,
+`failureBoundary=PRE_OPERATION_OR_SYNC_REJECTION`. Function invoke не выполнялся; повторный create
+без нового Owner decision запрещён.
+
+Materially different repository-only root model допускается без provider authority: заменить future
+dedicated submission implementation с `yc --source-path` на direct REST `Function.CreateVersion` с
+exact verified recovery ZIP как `content`. Это убирает opaque CLI source-upload layer и даёт typed
+HTTP/Operation boundary. Request/response и resource IDs остаются runner-local; наружу только enum-safe
+submission transport/error class/operation evidence. Такой PR обязан оставаться
+`Provider-Attempt: NOT_AUTHORIZED`; merge/CI не разрешают и не запускают новый create.
 
 После terminal `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE` допускается один root-model change к typed
 `CreateFunctionVersion` operation metadata, независимый от Audit Trails. API `CreateVersion` определяет

@@ -494,64 +494,105 @@ jobs:
           echo "::add-mask::${FUNCTION_ID}"
           echo "::add-mask::${RUNTIME_SA_ID}"
           echo "::add-mask::${LOCKBOX_VERSION_ID}"
+
+          archive="$tmp/recovery.zip"
+          (
+            cd .artifacts/yandex-initial-bootstrap-recovery-function
+            zip -q -r "$archive" .
+          )
+          test -s "$archive" || { echo 'RECOVERY_DEPLOY_ATTEMPT_PACKAGE_ARCHIVE_EMPTY'; exit 1; }
+          archive_size="$(stat -c '%s' "$archive")"
+          [[ "$archive_size" =~ ^[1-9][0-9]*$ ]] || { echo 'RECOVERY_DEPLOY_ATTEMPT_PACKAGE_SIZE_INVALID'; exit 1; }
+          [ "$archive_size" -le 3670016 ] || { echo 'RECOVERY_DEPLOY_ATTEMPT_PACKAGE_TOO_LARGE_FOR_REST_CONTENT'; exit 1; }
+          base64 -w0 "$archive" >"$tmp/content.b64"
+
+          jq -n \
+            --arg function_id "$FUNCTION_ID" \
+            --arg runtime_sa "$RUNTIME_SA_ID" \
+            --arg tag "$TARGET_TAG" \
+            --arg secret_id "$YC_LOCKBOX_SECRET_ID" \
+            --arg secret_version "$LOCKBOX_VERSION_ID" \
+            --rawfile content "$tmp/content.b64" '
+            {
+              functionId: $function_id,
+              runtime: "nodejs22",
+              entrypoint: "index.initialBootstrapRecoveryHandler",
+              resources: { memory: "1073741824" },
+              executionTimeout: "150s",
+              serviceAccountId: $runtime_sa,
+              content: $content,
+              environment: {
+                PRIHRASH_R1_RECOVERY_SURFACE_ONLY: "0",
+                PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY: "0",
+                PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY: "0"
+              },
+              tag: [$tag],
+              secrets: [
+                {id:$secret_id,versionId:$secret_version,key:"google_spreadsheet_id",environmentVariable:"PRIHRASH_GOOGLE_SPREADSHEET_ID"},
+                {id:$secret_id,versionId:$secret_version,key:"google_service_account_email",environmentVariable:"PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL"},
+                {id:$secret_id,versionId:$secret_version,key:"google_service_account_private_key",environmentVariable:"PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY"},
+                {id:$secret_id,versionId:$secret_version,key:"ydb_connection_string",environmentVariable:"PRIHRASH_YDB_CONNECTION_STRING"},
+                {id:$secret_id,versionId:$secret_version,key:"initial_bootstrap_private_historical_evidence",environmentVariable:"PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE"}
+              ],
+              logOptions: { disabled: true },
+              metadataOptions: { gceHttpEndpoint: "ENABLED", awsV1HttpEndpoint: "DISABLED" }
+            }
+          ' >"$tmp/create-request.json"
+
           create_started_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
           set +e
-          yc serverless function version create \
-            --function-id "$FUNCTION_ID" \
-            --runtime nodejs22 \
-            --entrypoint index.initialBootstrapRecoveryHandler \
-            --memory 1g \
-            --execution-timeout 150s \
-            --environment 'PRIHRASH_R1_RECOVERY_SURFACE_ONLY=0' \
-            --environment 'PRIHRASH_R1_RECOVERY_CONTROLLED_PREPARATION_ONLY=0' \
-            --environment 'PRIHRASH_R1_RECOVERY_REVISION_CARDINALITY_ONLY=0' \
-            --source-path .artifacts/yandex-initial-bootstrap-recovery-function \
-            --service-account-id "$RUNTIME_SA_ID" \
-            --tags "$TARGET_TAG" \
-            --metadata-options gce-http-endpoint=enabled,aws-v1-http-endpoint=disabled \
-            --no-logging \
-            --secret "environment-variable=PRIHRASH_GOOGLE_SPREADSHEET_ID,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=google_spreadsheet_id" \
-            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_EMAIL,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=google_service_account_email" \
-            --secret "environment-variable=PRIHRASH_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=google_service_account_private_key" \
-            --secret "environment-variable=PRIHRASH_YDB_CONNECTION_STRING,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=ydb_connection_string" \
-            --secret "environment-variable=PRIHRASH_INITIAL_BOOTSTRAP_PRIVATE_HISTORICAL_EVIDENCE,id=${YC_LOCKBOX_SECRET_ID},version-id=${LOCKBOX_VERSION_ID},key=initial_bootstrap_private_historical_evidence" \
-            --format json --retry 0 --no-user-output >"$tmp/version.json" 2>"$tmp/version.err"
-          create_exit=$?
+          create_http="$(curl --silent --show-error --request POST \
+            --connect-timeout 5 --max-time 30 --max-filesize 1048576 \
+            --output "$tmp/create-response.json" --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --data-binary @"$tmp/create-request.json" \
+            'https://serverless-functions.api.cloud.yandex.net/functions/v1/versions' \
+            2>"$tmp/create-rest.err")"
+          create_curl_exit=$?
           set -e
           create_finished_at="$(node -e 'process.stdout.write(new Date().toISOString())')"
 
-          if [ "$create_exit" -eq 0 ]; then
-            node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs --success \
-              >"$evidence_dir/recovery-deploy-attempt.json"
-            printf 'result=accepted\n' >> "$GITHUB_OUTPUT"
+          operations_read_status='NOT_ATTEMPTED'
+          printf '{}\n' >"$tmp/operations-rest.json"
+          case "$create_curl_exit:$create_http" in
+            0:2??) ;;
+            *)
+              operations_read_status='READ_FAILED'
+              encoded_function_id="$(jq -rn --arg id "$FUNCTION_ID" '$id | @uri')"
+              operations_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}/operations"
+              set +e
+              operations_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
+                --output "$tmp/operations-rest.json" --write-out '%{http_code}' \
+                --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
+                --header 'Accept: application/json' \
+                --data-urlencode 'pageSize=1000' \
+                "$operations_api" 2>"$tmp/operations-rest.err")"
+              operations_curl_exit=$?
+              set -e
+              if [ "$operations_curl_exit" -eq 0 ]; then
+                case "$operations_http" in
+                  2??) operations_read_status='READY' ;;
+                  *) ;;
+                esac
+              fi
+              if [ ! -f "$tmp/operations-rest.json" ]; then printf '{}\n' >"$tmp/operations-rest.json"; fi
+              ;;
+          esac
+
+          if [ ! -f "$tmp/create-response.json" ]; then printf '{}\n' >"$tmp/create-response.json"; fi
+          node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs \
+            --rest-create "$create_curl_exit" "$create_http" "$tmp/create-response.json" \
+            "$operations_read_status" "$tmp/operations-rest.json" \
+            "$create_started_at" "$create_finished_at" "$YC_WIF_SERVICE_ACCOUNT_ID" \
+            >"$evidence_dir/recovery-deploy-attempt.json"
+
+          result_status="$(jq -er '.status | select(. == "PASS" or . == "FAIL")' "$evidence_dir/recovery-deploy-attempt.json")"
+          if [ "$result_status" = 'PASS' ]; then
+            printf 'result=accepted\n' >>"$GITHUB_OUTPUT"
           else
-            operations_read_status='READ_FAILED'
-            encoded_function_id="$(jq -rn --arg id "$FUNCTION_ID" '$id | @uri')"
-            operations_api="https://serverless-functions.api.cloud.yandex.net/functions/v1/functions/${encoded_function_id}/operations"
-            set +e
-            operations_http="$(curl --silent --show-error --get --connect-timeout 5 --max-time 15 --max-filesize 1048576 \
-              --output "$tmp/operations-rest.json" --write-out '%{http_code}' \
-              --header "Authorization: Bearer ${YC_IAM_TOKEN}" \
-              --header 'Accept: application/json' \
-              --data-urlencode 'pageSize=1000' \
-              "$operations_api" 2>"$tmp/operations-rest.err")"
-            operations_curl_exit=$?
-            set -e
-            if [ "$operations_curl_exit" -eq 0 ]; then
-              case "$operations_http" in
-                2??) operations_read_status='READY' ;;
-                *) ;;
-              esac
-            fi
-            if [ ! -f "$tmp/operations-rest.json" ]; then
-              printf '{}\n' >"$tmp/operations-rest.json"
-            fi
-            node scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs \
-              --error-with-operation-evidence "$tmp/version.err" "$create_exit" \
-              "$operations_read_status" "$tmp/operations-rest.json" \
-              "$create_started_at" "$create_finished_at" "$YC_WIF_SERVICE_ACCOUNT_ID" \
-              >"$evidence_dir/recovery-deploy-attempt.json"
-            printf 'result=failed\n' >> "$GITHUB_OUTPUT"
+            printf 'result=failed\n' >>"$GITHUB_OUTPUT"
           fi
           cat "$evidence_dir/recovery-deploy-attempt.json"
 

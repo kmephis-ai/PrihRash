@@ -46,6 +46,28 @@ const FAILURE_BOUNDARIES = new Set([
 const CREATE_VERSION_METADATA_TYPE =
   'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata';
 
+const REST_SUBMISSION_TRANSPORT = new Set([
+  'HTTP_2XX',
+  'HTTP_4XX',
+  'HTTP_5XX',
+  'HTTP_OTHER',
+  'TRANSPORT_FAILED',
+]);
+
+const GRPC_ERROR_CLASS_BY_CODE = new Map([
+  [3, 'INVALID_ARGUMENT'],
+  [4, 'DEADLINE_EXCEEDED'],
+  [5, 'NOT_FOUND'],
+  [6, 'ALREADY_EXISTS'],
+  [7, 'PERMISSION_DENIED'],
+  [8, 'RESOURCE_EXHAUSTED'],
+  [9, 'FAILED_PRECONDITION'],
+  [13, 'INTERNAL'],
+  [14, 'UNAVAILABLE'],
+  [16, 'UNAUTHENTICATED'],
+]);
+
+
 const PROVIDER_ERROR_PATTERNS = Object.freeze([
   ['PERMISSION_DENIED', /permission[ _-]?denied|PermissionDenied/i],
   ['PERMISSION_DENIED', /access policy.{0,40}denied|organization policy.{0,40}denied/i],
@@ -212,6 +234,141 @@ export function classifyRecoveryFunctionDeployAttemptWithOperationEvidence({
   });
 }
 
+function classifyGrpcErrorClass(error) {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return 'PROVIDER_ERROR_DETAIL_UNAVAILABLE';
+  }
+  const rawCode = error.code;
+  const numericCode = typeof rawCode === 'number'
+    ? rawCode
+    : (typeof rawCode === 'string' && /^[0-9]+$/.test(rawCode) ? Number(rawCode) : Number.NaN);
+  if (Number.isInteger(numericCode) && GRPC_ERROR_CLASS_BY_CODE.has(numericCode)) {
+    return GRPC_ERROR_CLASS_BY_CODE.get(numericCode);
+  }
+  if (typeof rawCode === 'string' && ERROR_CLASSES.has(rawCode)) return rawCode;
+  return 'OTHER';
+}
+
+function classifyDirectCreateOperation(operation, operationCreatorServiceAccountId) {
+  if (!operation || typeof operation !== 'object' || Array.isArray(operation)
+    || typeof operation.id !== 'string' || operation.id.length === 0
+    || typeof operationCreatorServiceAccountId !== 'string'
+    || operationCreatorServiceAccountId.length === 0) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  const createdBy = operation.createdBy ?? operation.created_by;
+  if (createdBy !== operationCreatorServiceAccountId) return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  const metadata = operation.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+    || metadata['@type'] !== CREATE_VERSION_METADATA_TYPE) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  const versionId = metadata.functionVersionId ?? metadata.function_version_id;
+  if (typeof versionId !== 'string' || versionId.length === 0) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  if (operation.done === false) return 'CREATE_OPERATION_IN_PROGRESS';
+  if (operation.done !== true) return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  if (operation.error && typeof operation.error === 'object' && !Array.isArray(operation.error)) {
+    return 'CREATE_OPERATION_COMPLETED_FAILED';
+  }
+  if (!operation.response || typeof operation.response !== 'object' || Array.isArray(operation.response)) {
+    return 'CREATE_OPERATION_EVIDENCE_INVALID';
+  }
+  return 'CREATE_OPERATION_COMPLETED_SUCCESS';
+}
+
+export function classifyRecoveryRestCreateSubmission({
+  curlExit,
+  httpStatus,
+  response,
+  operationListResponse,
+  operationListReadStatus,
+  createStartedAt,
+  createFinishedAt,
+  operationCreatorServiceAccountId,
+}) {
+  const parsedHttpStatus = Number(httpStatus);
+  const transport = Number.isInteger(curlExit) && curlExit !== 0
+    ? 'TRANSPORT_FAILED'
+    : (parsedHttpStatus >= 200 && parsedHttpStatus <= 299
+      ? 'HTTP_2XX'
+      : (parsedHttpStatus >= 400 && parsedHttpStatus <= 499
+        ? 'HTTP_4XX'
+        : (parsedHttpStatus >= 500 && parsedHttpStatus <= 599 ? 'HTTP_5XX' : 'HTTP_OTHER')));
+
+  if (transport === 'HTTP_2XX') {
+    const createOperationEvidence = classifyDirectCreateOperation(
+      response,
+      operationCreatorServiceAccountId,
+    );
+    const failureBoundary = [
+      'CREATE_OPERATION_IN_PROGRESS',
+      'CREATE_OPERATION_COMPLETED_SUCCESS',
+      'CREATE_OPERATION_COMPLETED_FAILED',
+    ].includes(createOperationEvidence) ? 'ASYNC_OPERATION_OBSERVED' : 'UNCLASSIFIED';
+
+    if (createOperationEvidence === 'CREATE_OPERATION_IN_PROGRESS'
+      || createOperationEvidence === 'CREATE_OPERATION_COMPLETED_SUCCESS') {
+      return Object.freeze({
+        status: 'PASS',
+        code: 'RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE',
+        failureClass: 'NONE',
+        permissionBoundary: 'NOT_APPLICABLE',
+        submissionMode: 'REST_CONTENT',
+        submissionTransport: transport,
+        createOperationEvidence,
+        failureBoundary,
+      });
+    }
+
+    const failureClass = createOperationEvidence === 'CREATE_OPERATION_COMPLETED_FAILED'
+      ? classifyGrpcErrorClass(response.error)
+      : 'PROVIDER_ERROR_DETAIL_UNAVAILABLE';
+    return Object.freeze({
+      status: 'FAIL',
+      code: 'RECOVERY_FUNCTION_VERSION_CREATE_FAILED',
+      failureClass,
+      permissionBoundary: failureClass === 'PERMISSION_DENIED' ? 'UNRESOLVED' : 'NOT_APPLICABLE',
+      submissionMode: 'REST_CONTENT',
+      submissionTransport: transport,
+      createOperationEvidence,
+      failureBoundary,
+    });
+  }
+
+  const errorObject = response && typeof response === 'object' && !Array.isArray(response)
+    ? (response.error && typeof response.error === 'object' ? response.error : response)
+    : null;
+  const failureClass = transport === 'TRANSPORT_FAILED'
+    ? 'UNAVAILABLE'
+    : classifyGrpcErrorClass(errorObject);
+  const createOperationEvidence = classifyRecoveryCreateOperationEvidence({
+    response: operationListResponse,
+    createStartedAt,
+    createFinishedAt,
+    operationCreatorServiceAccountId,
+    readStatus: operationListReadStatus,
+  });
+  const failureBoundary = createOperationEvidence === 'CREATE_OPERATION_NOT_OBSERVED'
+    ? 'PRE_OPERATION_OR_SYNC_REJECTION'
+    : ([
+      'CREATE_OPERATION_IN_PROGRESS',
+      'CREATE_OPERATION_COMPLETED_SUCCESS',
+      'CREATE_OPERATION_COMPLETED_FAILED',
+    ].includes(createOperationEvidence) ? 'ASYNC_OPERATION_OBSERVED' : 'UNCLASSIFIED');
+  return Object.freeze({
+    status: 'FAIL',
+    code: 'RECOVERY_FUNCTION_VERSION_CREATE_FAILED',
+    failureClass,
+    permissionBoundary: failureClass === 'PERMISSION_DENIED' ? 'UNRESOLVED' : 'NOT_APPLICABLE',
+    submissionMode: 'REST_CONTENT',
+    submissionTransport: REST_SUBMISSION_TRANSPORT.has(transport) ? transport : 'HTTP_OTHER',
+    createOperationEvidence,
+    failureBoundary,
+  });
+}
+
 export function classifyRecoveryFunctionDeployAttemptSuccess() {
   return Object.freeze({
     status: 'PASS',
@@ -233,6 +390,36 @@ async function main(args) {
     wifServiceAccountId: process.env.RECOVERY_WIF_SERVICE_ACCOUNT_ID,
     lockboxSecretId: process.env.RECOVERY_LOCKBOX_SECRET_ID,
   };
+
+  if (mode === '--rest-create' && args.length === 9) {
+    const [, curlExitRaw, httpStatusRaw, responsePath, readStatus, operationsPath,
+      createStartedAt, createFinishedAt, operationCreatorServiceAccountId] = args;
+    let response = null;
+    let operationListResponse = {};
+    try {
+      response = JSON.parse(await readFile(responsePath, 'utf8'));
+    } catch {
+      response = null;
+    }
+    if (readStatus === 'READY') {
+      try {
+        operationListResponse = JSON.parse(await readFile(operationsPath, 'utf8'));
+      } catch {
+        operationListResponse = null;
+      }
+    }
+    const parsedCurlExit = /^-?[0-9]+$/.test(curlExitRaw) ? Number(curlExitRaw) : Number.NaN;
+    return classifyRecoveryRestCreateSubmission({
+      curlExit: Number.isSafeInteger(parsedCurlExit) ? parsedCurlExit : null,
+      httpStatus: httpStatusRaw,
+      response,
+      operationListResponse,
+      operationListReadStatus: readStatus,
+      createStartedAt,
+      createFinishedAt,
+      operationCreatorServiceAccountId,
+    });
+  }
 
   if (mode === '--error-with-operation-evidence' && args.length === 8) {
     const [, stderrPath, exitCodeRaw, readStatus, operationsPath,

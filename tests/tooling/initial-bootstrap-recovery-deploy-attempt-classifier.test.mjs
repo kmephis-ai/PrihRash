@@ -6,6 +6,7 @@ import {
   classifyRecoveryFunctionDeployAttempt,
   classifyRecoveryFunctionDeployAttemptSuccess,
   classifyRecoveryFunctionDeployAttemptWithOperationEvidence,
+  classifyRecoveryRestCreateSubmission,
 } from '../../scripts/classify-yandex-initial-bootstrap-recovery-deploy-attempt.mjs';
 
 const ids = Object.freeze({
@@ -189,4 +190,135 @@ test('generic recovery failure ignores unrelated actor/time operations but does 
   assert.equal(result.cliExit, 'UNCLASSIFIED');
   assert.equal(result.createOperationEvidence, 'CREATE_OPERATION_NOT_OBSERVED');
   assert.equal(result.failureBoundary, 'UNCLASSIFIED');
+});
+
+test('REST content CreateVersion accepts exact typed operation without exposing operation or version IDs', () => {
+  const response = {
+    id: 'synthetic-operation-id',
+    createdBy: ids.wifServiceAccountId,
+    done: false,
+    metadata: {
+      '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata',
+      functionVersionId: 'synthetic-version-id',
+    },
+  };
+  const result = classifyRecoveryRestCreateSubmission({
+    curlExit: 0,
+    httpStatus: '200',
+    response,
+    operationListResponse: {},
+    operationListReadStatus: 'NOT_ATTEMPTED',
+    createStartedAt: '2026-10-08T04:23:08Z',
+    createFinishedAt: '2026-10-08T04:23:09Z',
+    operationCreatorServiceAccountId: ids.wifServiceAccountId,
+  });
+  assert.deepEqual(result, {
+    status: 'PASS',
+    code: 'RECOVERY_FUNCTION_VERSION_CREATE_ACCEPTED_NO_INVOKE',
+    failureClass: 'NONE',
+    permissionBoundary: 'NOT_APPLICABLE',
+    submissionMode: 'REST_CONTENT',
+    submissionTransport: 'HTTP_2XX',
+    createOperationEvidence: 'CREATE_OPERATION_IN_PROGRESS',
+    failureBoundary: 'ASYNC_OPERATION_OBSERVED',
+  });
+  assert.doesNotMatch(JSON.stringify(result), /synthetic-operation-id|synthetic-version-id/);
+});
+
+test('REST content CreateVersion maps typed terminal operation error without publishing provider detail', () => {
+  const result = classifyRecoveryRestCreateSubmission({
+    curlExit: 0,
+    httpStatus: '200',
+    response: {
+      id: 'synthetic-operation-id',
+      createdBy: ids.wifServiceAccountId,
+      done: true,
+      metadata: {
+        '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata',
+        functionVersionId: 'synthetic-version-id',
+      },
+      error: { code: 5, message: 'private provider detail' },
+    },
+    operationListResponse: {},
+    operationListReadStatus: 'NOT_ATTEMPTED',
+    createStartedAt: '2026-10-08T04:23:08Z',
+    createFinishedAt: '2026-10-08T04:23:09Z',
+    operationCreatorServiceAccountId: ids.wifServiceAccountId,
+  });
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.failureClass, 'NOT_FOUND');
+  assert.equal(result.createOperationEvidence, 'CREATE_OPERATION_COMPLETED_FAILED');
+  assert.equal(result.failureBoundary, 'ASYNC_OPERATION_OBSERVED');
+  assert.doesNotMatch(JSON.stringify(result), /private provider detail|synthetic-operation-id|synthetic-version-id/);
+});
+
+test('REST content CreateVersion non-2xx combines safe provider class with bounded operation read-back', () => {
+  const result = classifyRecoveryRestCreateSubmission({
+    curlExit: 0,
+    httpStatus: '404',
+    response: { code: 5, message: 'private missing reference' },
+    operationListResponse: { operations: [] },
+    operationListReadStatus: 'READY',
+    createStartedAt: '2026-10-08T04:23:08Z',
+    createFinishedAt: '2026-10-08T04:23:09Z',
+    operationCreatorServiceAccountId: ids.wifServiceAccountId,
+  });
+  assert.deepEqual(result, {
+    status: 'FAIL',
+    code: 'RECOVERY_FUNCTION_VERSION_CREATE_FAILED',
+    failureClass: 'NOT_FOUND',
+    permissionBoundary: 'NOT_APPLICABLE',
+    submissionMode: 'REST_CONTENT',
+    submissionTransport: 'HTTP_4XX',
+    createOperationEvidence: 'CREATE_OPERATION_NOT_OBSERVED',
+    failureBoundary: 'PRE_OPERATION_OR_SYNC_REJECTION',
+  });
+  assert.doesNotMatch(JSON.stringify(result), /private missing reference/);
+});
+
+test('REST content CreateVersion transport failure remains fail-closed if operation read-back is unavailable', () => {
+  const result = classifyRecoveryRestCreateSubmission({
+    curlExit: 28,
+    httpStatus: '000',
+    response: null,
+    operationListResponse: {},
+    operationListReadStatus: 'READ_FAILED',
+    createStartedAt: '2026-10-08T04:23:08Z',
+    createFinishedAt: '2026-10-08T04:23:39Z',
+    operationCreatorServiceAccountId: ids.wifServiceAccountId,
+  });
+  assert.equal(result.status, 'FAIL');
+  assert.equal(result.failureClass, 'UNAVAILABLE');
+  assert.equal(result.submissionTransport, 'TRANSPORT_FAILED');
+  assert.equal(result.createOperationEvidence, 'CREATE_OPERATION_READ_FAILED');
+  assert.equal(result.failureBoundary, 'UNCLASSIFIED');
+});
+
+test('REST content CreateVersion rejects malformed or wrong-actor success response', () => {
+  for (const response of [
+    {},
+    {
+      id: 'op',
+      createdBy: 'wrong-actor',
+      done: false,
+      metadata: {
+        '@type': 'type.googleapis.com/yandex.cloud.serverless.functions.v1.CreateFunctionVersionMetadata',
+        functionVersionId: 'version',
+      },
+    },
+  ]) {
+    const result = classifyRecoveryRestCreateSubmission({
+      curlExit: 0,
+      httpStatus: '200',
+      response,
+      operationListResponse: {},
+      operationListReadStatus: 'NOT_ATTEMPTED',
+      createStartedAt: '2026-10-08T04:23:08Z',
+      createFinishedAt: '2026-10-08T04:23:09Z',
+      operationCreatorServiceAccountId: ids.wifServiceAccountId,
+    });
+    assert.equal(result.status, 'FAIL');
+    assert.equal(result.createOperationEvidence, 'CREATE_OPERATION_EVIDENCE_INVALID');
+    assert.equal(result.failureBoundary, 'UNCLASSIFIED');
+  }
 });

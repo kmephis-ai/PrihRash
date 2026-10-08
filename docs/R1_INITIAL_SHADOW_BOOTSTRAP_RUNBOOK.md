@@ -1839,6 +1839,56 @@ folder-scoped `Trigger.List` contracts plus existing privacy-safe classifiers. R
 Lockbox REST metadata stay unchanged. This correction adds no IAM/YDB/Google mutation, Function invoke,
 cleanup, timer/cutover, or extra create authority.
 
+#### PR #921 reached the authorized create and consumed the one-shot
+
+PR #921 merged as exact main `ed73939096b8450dbddb4067897c16f89725176f`; exact-main CI
+`37727075735` and Browser Quality `37727075733` passed. Autocontinue dispatched dedicated run
+`37727175095` for failed recovery `37238416504`.
+
+The run passed repository/CI/history, exact-source restore, OIDC, REST `Function.List`,
+`ListAccessBindings`, `Trigger.List`, runtime-SA/Lockbox preflight and exact-main reassertion, then
+**reached** `Create exactly one read-only recovery Function version without invoking it`. Therefore the
+Owner one-shot authority is consumed and no same-SHA or cross-SHA replay is authorized.
+
+The runner-published enum-only result was:
+
+```text
+status=FAIL
+code=RECOVERY_FUNCTION_VERSION_CREATE_FAILED
+failureClass=NOT_FOUND
+permissionBoundary=NOT_APPLICABLE
+cliExit=NONZERO
+createOperationEvidence=CREATE_OPERATION_NOT_OBSERVED
+failureBoundary=PRE_OPERATION_OR_SYNC_REJECTION
+```
+
+The terminal guard emitted `RECOVERY_DEPLOY_ATTEMPT_CLASSIFIED_FAILED_NO_RETRY`. Function invoke was not
+attempted. A fresh read-only provider check still finds the Function, runtime service account, Lockbox
+secret and its unique current version ACTIVE; that version contains exactly the five expected non-secret
+payload-entry keys and runtime SA has the expected `lockbox.payloadViewer` binding. Exact-source restore
+also verifies the recovery package directory and digest before create. These facts do not identify which
+historical synchronous reference produced `NOT_FOUND`, but they exclude blind replay or cleanup.
+
+#### Repository-only REST-content CreateVersion bypass
+
+The next root-model change is preparation only and carries no provider authority. The dedicated workflow
+may replace the opaque `yc serverless function version create --source-path` submission layer with
+direct REST `Function.CreateVersion` using the exact verified recovery ZIP as base64 `content`. The
+request body stays runner-local and preserves the same runtime, entrypoint, memory, timeout, runtime SA,
+recovery tag, environment, Lockbox references, disabled logging and metadata options.
+
+A direct 2xx response is accepted only when it is an exact typed
+`CreateFunctionVersionMetadata` operation created by the expected WIF actor; operation/version IDs are
+never published. HTTP/transport failure still performs exactly one bounded Function-scoped
+`ListOperations` read-back before classification. Public evidence is restricted to enum-safe
+`submissionMode=REST_CONTENT`, `submissionTransport`, `failureClass`,
+`createOperationEvidence` and `failureBoundary`. Raw request/response, provider error detail, IDs and
+secret values remain runner-local.
+
+This preparation PR must remain `Provider-Attempt: NOT_AUTHORIZED`. Merge/CI must not dispatch another
+create. Any future REST-content create requires a **new explicit Owner authorization** and a fresh exact-main
+authority marker; the consumed authorization for `37727175095` cannot be reused.
+
 ### Owner-authorized one-shot recovery-only Function deploy after PR #869
 
 Exact-main deploy classification `36554205552` reached its provider reads and returned

@@ -67,6 +67,10 @@ test('current Owner authority is exact-bound to recovery 37238416504 and does no
   ]) assert.ok(current.includes(line), `current authority marker preserves exact line: ${line}`);
   assert.match(current, /6045593970/);
   assert.match(current, /Function invoke.*out of scope/i);
+  assert.match(current, /37727175095/);
+  assert.match(current, /failureClass=NOT_FOUND/);
+  assert.match(current, /CREATE_OPERATION_NOT_OBSERVED/);
+  assert.match(current, /authority is consumed/i);
   assert.doesNotMatch(current, /Recovery-Run-ID: 36341844854/);
 });
 
@@ -95,24 +99,38 @@ test('provider preflight reuses canonical REST Function, binding and trigger rea
   assert.doesNotMatch(workflow, /yc serverless trigger list/);
 });
 
-test('attempt creates only the recovery Function version, classifies stderr privately, and never invokes', () => {
+test('attempt creates only the recovery Function version through REST content and never invokes', () => {
   assert.match(workflow, /Create exactly one read-only recovery Function version without invoking it/);
-  assert.match(workflow, /--execution-timeout 150s/);
-  assert.match(workflow, /--retry 0/);
-  assert.match(workflow, /2>"\$tmp\/version\.err"/);
+  assert.match(workflow, /zip -q -r "\$archive" \./);
+  assert.match(workflow, /\[ "\$archive_size" -le 3670016 \]/);
+  assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_PACKAGE_TOO_LARGE_FOR_REST_CONTENT/);
+  assert.match(workflow, /base64 -w0 "\$archive"/);
+  assert.match(workflow, /--rawfile content "\$tmp\/content\.b64"/);
+  assert.match(workflow, /functionId: \$function_id/);
+  assert.match(workflow, /runtime: "nodejs22"/);
+  assert.match(workflow, /entrypoint: "index\.initialBootstrapRecoveryHandler"/);
+  assert.match(workflow, /resources: \{ memory: "1073741824" \}/);
+  assert.match(workflow, /executionTimeout: "150s"/);
+  assert.match(workflow, /serviceAccountId: \$runtime_sa/);
+  assert.match(workflow, /content: \$content/);
+  assert.match(workflow, /tag: \[\$tag\]/);
+  assert.match(workflow, /metadataOptions: \{ gceHttpEndpoint: "ENABLED", awsV1HttpEndpoint: "DISABLED" \}/);
+  assert.match(workflow, /functions\/v1\/versions/);
+  assert.match(workflow, /--data-binary @"\$tmp\/create-request\.json"/);
   assert.match(workflow, /create_started_at=.*toISOString/);
   assert.match(workflow, /create_finished_at=.*toISOString/);
   assert.match(workflow, /functions\/v1\/functions\/\$\{encoded_function_id\}\/operations/);
-  assert.match(workflow, /--data-urlencode 'pageSize=1000'/);
   assert.match(workflow, /operations_read_status='READY'/);
-  assert.match(workflow, /--error-with-operation-evidence/);
+  assert.match(workflow, /--rest-create/);
   assert.match(workflow, /classify-yandex-initial-bootstrap-recovery-deploy-attempt\.mjs/);
   assert.match(workflow, /recovery-deploy-attempt\.json/);
   assert.match(workflow, /RECOVERY_DEPLOY_ATTEMPT_CLASSIFIED_FAILED_NO_RETRY/);
+  assert.doesNotMatch(workflow, /yc serverless function version create/);
+  assert.doesNotMatch(workflow, /--source-path/);
   assert.doesNotMatch(workflow, /yc serverless function invoke/);
   assert.doesNotMatch(workflow, /yc ydb|migration_runs|source_records|source_snapshots/);
   assert.doesNotMatch(workflow, /yc iam .* (add-access-binding|set-access-bindings|remove-access-binding)/);
-  assert.doesNotMatch(workflow, /cat "\$tmp\/version\.err"/);
+  assert.doesNotMatch(workflow, /cat "\$tmp\/create-(?:request|response)\.json"/);
   assert.doesNotMatch(workflow, /cat "\$tmp\/operations-rest\.json"/);
 });
 

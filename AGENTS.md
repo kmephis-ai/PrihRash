@@ -229,11 +229,12 @@ Audit-source ветку и требует смены causal model; `SOURCE_EVIDE
 Не повторять workflow с теми же SHA/run IDs; никакого infer cleanup, IAM mutation, create или replay.
 
 Если ordinary `R1 initial bootstrap recovery` **или dedicated Owner-authorized recovery deploy-only attempt**
-падает непосредственно на `CreateVersion`, raw provider stderr остаётся runner-local. Failure branch обязан
+падает непосредственно на `CreateVersion`, raw provider detail остаётся runner-local. Failure branch обязан
 до завершения сделать ровно один read-only Function-scoped `ListOperations` read-back в bounded create
-window и опубликовать только allowlisted `failureClass`, `permissionBoundary`, `cliExit`,
-`createOperationEvidence` и `failureBoundary`.
-`CREATE_OPERATION_NOT_OBSERVED` + nonzero CLI exit локализует failure как
+window. Legacy CLI path публикует allowlisted `cliExit`; prepared REST-content path публикует только
+`submissionMode=REST_CONTENT` и `submissionTransport`. Оба path публикуют только enum-safe
+`failureClass`, `permissionBoundary`, `createOperationEvidence` и `failureBoundary`.
+`CREATE_OPERATION_NOT_OBSERVED` + failed submission локализует failure как
 `PRE_OPERATION_OR_SYNC_REJECTION`, но **не** доказывает `NOT_APPLIED`; observed/in-progress/completed
 operation означает `ASYNC_OPERATION_OBSERVED` и запрещает replay до отдельной classification.
 Unreadable/paginated/malformed/ambiguous operation evidence остаётся `UNCLASSIFIED`. Raw stderr,
@@ -254,10 +255,20 @@ recovery run `37238416504`. Текущий machine marker: `Provider-Attempt: RE
 Первый exact-main successor `37680553048` остановился **до** provider create на
 `RECOVERY_DEPLOY_ATTEMPT_FUNCTION_READ_FAILED`: provider-preflight step = `failure`,
 reassert-before-create = `skipped`, create step = `skipped`. Поэтому authority не consumed, но same-SHA
-replay запрещён. Допустим только distinct-SHA correction stale provider-read implementation: dedicated
-deploy-attempt обязан использовать уже канонические REST `Function.List`, `ListAccessBindings` и
-`Trigger.List` boundaries с существующими enum-only classifiers; Function invoke/IAM/YDB/Google scope
-не расширяется.
+replay запрещён. Distinct-SHA correction #921 заменил stale provider reads на канонические REST
+`Function.List`, `ListAccessBindings` и `Trigger.List` boundaries.
+
+Следующий exact-main attempt `37727175095` прошёл REST preflight и exact-main reassertion и **достиг**
+единственного разрешённого create step, поэтому Owner authority теперь consumed. Его enum-only результат:
+`failureClass=NOT_FOUND`, `createOperationEvidence=CREATE_OPERATION_NOT_OBSERVED`,
+`failureBoundary=PRE_OPERATION_OR_SYNC_REJECTION`; Function invoke не выполнялся. Повторный
+`CreateVersion` без нового Owner decision запрещён.
+
+Следующий repository-only root model не является replay: dedicated workflow может подготовить direct REST
+`Function.CreateVersion` с exact verified package как `content`, исключив opaque `yc --source-path`
+submission layer. Request/response/IDs остаются runner-local; наружу разрешены только enum-only
+`submissionTransport`, provider failure class и create-operation evidence. Merge такого preparation PR
+не re-arm-ит provider write и не даёт нового разрешения.
 
 Если свежая read-only классификация для того же failed reuse-verification run доказала
 `NO_APPLICABLE_PREEXISTING_AUDIT_SOURCE`, Audit-source ветка терминальна. Допускается сменить causal
