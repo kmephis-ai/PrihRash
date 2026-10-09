@@ -85,27 +85,32 @@ token exchange прошли. Ни `Driver.ready()`, ни `SELECT 1` не дос�
 разрешением менять IAM. Evidence в GitHub сохранять только как counts/role names, без
 principal/database IDs, connection strings, токенов, значений Secret или financial rows.
 
-**Decision point — `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY`:** один scoped,
-временный grant `ydb.viewer` на конкретную `prihrash-prod` существующей
-`prihrash-github-initial-bootstrap` может разрешить `Database.List` и `SELECT 1`,
-но это **реальная возможность читать финансовые строки** через data-plane. Поэтому
-grant **не** входит в заранее разрешённый `CreateVersion`, не выдан Owner и не
-может быть добавлен даже «ради диагностики» без отдельного informed Owner decision.
-Пока decision нет, не запускать тот же failed probe заново, не создавать и не
-имперсонировать новый principal, не использовать Owner IAM token и не переносить
-connection string в GitHub event input/log/issue.
+**Исторический decision point — `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY`:**
+один scoped, временный grant `ydb.viewer` на конкретную `prihrash-prod` существующей
+`prihrash-github-initial-bootstrap` даёт **реальную возможность читать финансовые строки**
+через data-plane. Его нельзя выдавать без отдельного informed Owner decision: разрешение
+на `CreateVersion` не распространяется на IAM. Owner выдал **ровно одно** такое разрешение
+2026-10-09; попытка и обязательный retirement уже выполнены, см. terminal evidence ниже.
+Это разрешение **израсходовано**. До нового Owner decision нельзя повторять grant/probe,
+расширять IAM, имперсонировать нового principal, использовать Owner IAM token либо
+переносить connection string в GitHub event input/log/issue.
 
-Если Owner разрешит временный database-scoped `ydb.viewer`, следующий отдельный
-Incident-M обязан доказать до IAM mutation: exact current `main`, canonical CI PASS,
-active #630, отсутствие writer conflict, exact SA/DB IDs приватно, текущую ACL и
-отсутствие duplicate grant. Использовать только **добавление одной exact binding**
-(`add-access-binding`), не folder/cloud-wide role и не
-`set-access-bindings`, которая заменяет весь ACL. Предусмотреть проверяемое
-read-back и обратное удаление **только собственной** binding после пробы;
-неизвестный outcome = read-only recovery, не blind delete/regrant. Сам read-only
-probe остаётся manual/exact-main/one-shot, не запускает financial import и не
-публикует SQL-result rows. Сразу после диагностического evidence — retirement
-временного grant, подтверждённый повторным ACL read-back.
+Только после **нового отдельного** Owner-разрешения следующий bounded Incident-M
+обязан до IAM mutation доказать: exact current `main`, canonical CI PASS, active
+tracking Issue, отсутствие writer conflict, exact SA/DB IDs приватно, текущую ACL
+и отсутствие duplicate grant. Использовать только **добавление одной exact binding**
+(`add-access-binding`), не folder/cloud-wide role и не `set-access-bindings`,
+которая заменяет весь ACL. Сразу после verified grant не запускать probe: согласно
+официальной документации Yandex Cloud распространение IAM permissions может занимать
+**до минуты**; будущий authorized plan должен включать как минимум 60 секунд
+settling time после read-back до единственного read-only probe. Это снижает
+вероятность ложного denial, но **не доказывает** эффективные права; scope
+`Database.List(folderId)` может отличаться от exact database resource. Заранее
+проверить, можно ли использовать `Database.Get` по приватному exact DB ID вместо
+folder-wide enumeration, без широкого IAM и без публикации private locators.
+Unknown outcome = read-only recovery, не blind delete/regrant. Probe остаётся
+manual/exact-main/one-shot, не импортирует финансовые данные, не публикует SQL rows.
+После evidence — retirement **только собственной** binding и независимый ACL read-back.
 
 Переходы конечны:
 - `YDB_METADATA_PERMISSION_DENIED` даже после proven scoped grant → STOP,
@@ -119,3 +124,40 @@ probe остаётся manual/exact-main/one-shot, не запускает finan
 `Provider-Incident-Hold: ACTIVE` по incident 2092 по-прежнему блокирует
 `CreateVersion`, а уже выданный Owner one-shot CreateVersion остаётся
 `GRANTED/PENDING_HOLD_CLEARANCE`, не расходуется этим исследованием.
+
+## Terminal evidence: temporary database viewer trial (2026-10-09)
+
+Authority: #630 comment `6079632335`; postmortem evidence: #630 comment
+`6079713439`. Current one-shot `R1_TEMP_EXACT_DB_VIEWER_FOR_SINGLE_READONLY_PROBE`
+is **CONSUMED**, separate from the pending `CreateVersion` permission.
+
+1. Before grant: existing `prihrash-prod` RUNNING, WIF SA ACTIVE, exactly 2
+   database ACL bindings belonging to other accounts, target SA 0.
+2. One database-only `ydb.viewer` grant with `--retry 0` returned exit 0.
+   Independent ACL read-back: 3 bindings, exactly 1 target-SA viewer;
+   original 2 unchanged.
+3. One GitHub-hosted manual probe `37921856585`, exact
+   `main 12b1212405bca67d014627948c0990c24e4105ba`, completed FAILURE
+   with `R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED` at
+   `Database.List(folderId)`. No `Driver.ready()` or `SELECT 1` was
+   reached; no financial rows were accessed.
+4. One exact database-only `remove-access-binding` with `--retry 0`
+   returned exit 0; independent ACL read-back verified the original 2
+   bindings and **0 target bindings**. Later read-only read-back
+   independently confirmed original count and zero target bindings;
+   no temporary IAM grant remains in current provider ACL.
+
+**Root-cause boundary:** the denial does **not** prove database-scoped
+`ydb.viewer` ineffective. The action followed closely after the grant;
+Yandex IAM documents propagation delays of up to a minute. Independently,
+folder-wide `Database.List` versus exact DB-scoped `Database.Get` requires
+separate permission/scope validation. Neither explanation is proven by this
+run. Only a **new explicit Owner IAM authorization** can permit another
+grant/probe, after bounded causal redesign. Do not retry the same flow or
+broaden scope merely because its one-shot result was `PERMISSION_DENIED`.
+
+Official permission-propagation reference:
+https://yandex.cloud/en/docs/iam/concepts/access-control/
+
+`COMMITTED = NOT_PROVEN`; no Google/YDB financial write, Function invoke,
+`CreateVersion`, scheduled sync or cutover was performed in this trial.
