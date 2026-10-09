@@ -65,3 +65,57 @@ design a time-bounded database-scoped read authority. Do not widen identity impl
 
 После merge запускать вручную только при отсутствии другого active R1 writer.
 Этот маршрут не имеет provider write или финансового write authority.
+
+## Следующий bounded gate после `37829722475` — database-scoped read authority
+
+**Доказанный provider result:** manual GitHub-hosted read-only probe `37829722475` на exact
+`main ab08bf6e1257ef097d0baa1adcf31e22b9d49598` завершился
+`R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED` в шаге YDB `Database.List`.
+Exact-main preflight, Node 22, locked dependencies, synthetic-focused test и GitHub OIDC/WIF
+token exchange прошли. Ни `Driver.ready()`, ни `SELECT 1` не достигнуты; следовательно,
+ни YDB transport, ни permissions на сам data-plane SELECT этим run не классифицированы.
+
+**Независимая read-only IAM reconciliation** для того же provider identity:
+`prihrash-github-initial-bootstrap` = ACTIVE; `prihrash-prod` = RUNNING.
+У этой exact service account прямых database-scope bindings `0`, на folder scope
+единственная прямая роль `functions.auditor`, на cloud scope прямых назначений `0`.
+У БД существуют два bindings на **другие** service accounts (`ydb.viewer`,
+`ydb.editor`); они не дают WIF-деплойной identity прав на чтение YDB.
+Вывод касается проверенных прямых и наследуемых назначений этой identity; не является
+разрешением менять IAM. Evidence в GitHub сохранять только как counts/role names, без
+principal/database IDs, connection strings, токенов, значений Secret или financial rows.
+
+**Decision point — `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY`:** один scoped,
+временный grant `ydb.viewer` на конкретную `prihrash-prod` существующей
+`prihrash-github-initial-bootstrap` может разрешить `Database.List` и `SELECT 1`,
+но это **реальная возможность читать финансовые строки** через data-plane. Поэтому
+grant **не** входит в заранее разрешённый `CreateVersion`, не выдан Owner и не
+может быть добавлен даже «ради диагностики» без отдельного informed Owner decision.
+Пока decision нет, не запускать тот же failed probe заново, не создавать и не
+имперсонировать новый principal, не использовать Owner IAM token и не переносить
+connection string в GitHub event input/log/issue.
+
+Если Owner разрешит временный database-scoped `ydb.viewer`, следующий отдельный
+Incident-M обязан доказать до IAM mutation: exact current `main`, canonical CI PASS,
+active #630, отсутствие writer conflict, exact SA/DB IDs приватно, текущую ACL и
+отсутствие duplicate grant. Использовать только **добавление одной exact binding**
+(`add-access-binding`), не folder/cloud-wide role и не
+`set-access-bindings`, которая заменяет весь ACL. Предусмотреть проверяемое
+read-back и обратное удаление **только собственной** binding после пробы;
+неизвестный outcome = read-only recovery, не blind delete/regrant. Сам read-only
+probe остаётся manual/exact-main/one-shot, не запускает financial import и не
+публикует SQL-result rows. Сразу после диагностического evidence — retirement
+временного grant, подтверждённый повторным ACL read-back.
+
+Переходы конечны:
+- `YDB_METADATA_PERMISSION_DENIED` даже после proven scoped grant → STOP,
+  без расширения роли на folder/cloud;
+- `CONNECT_FAILED_*` / `QUERY_FAILED_*` → классифицировать конкретную
+  networking/auth/SDK boundary, без new provider write;
+- `READ_ONLY_SELECT_OK` → только reachability proof. Затем доказать
+  recovery состояния `STAGING` / source lineage и отдельно gated
+  initial-bootstrap writer; `COMMITTED` по `SELECT 1` не объявлять.
+
+`Provider-Incident-Hold: ACTIVE` по incident 2092 по-прежнему блокирует
+`CreateVersion`, а уже выданный Owner one-shot CreateVersion остаётся
+`GRANTED/PENDING_HOLD_CLEARANCE`, не расходуется этим исследованием.

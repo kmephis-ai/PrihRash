@@ -43,3 +43,27 @@ test('hosted proof is manual, exact-main, WIF-only and read-only', async () => {
   assert.doesNotMatch(workflow, /^\s+(push|pull_request|schedule):/m);
   assert.doesNotMatch(workflow, /function version create|serverless function invoke|iam.*(add|remove)-access-binding|table query execute/i);
 });
+
+test('R1 direct-YDB denial reaches a single database-scoped Owner authority decision, not IAM bypass', async () => {
+  const closure = await readFile(new URL('../../docs/R1_CLOSURE_PATH.md', import.meta.url), 'utf8');
+  const sprint = await readFile(new URL('../../docs/R1_COMPLETION_SPRINT.md', import.meta.url), 'utf8');
+  const workflow = await readFile(new URL('../../.github/workflows/r1-direct-ydb-readonly.yml', import.meta.url), 'utf8');
+
+  assert.match(closure, /37829722475/);
+  assert.match(closure, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
+  assert.match(closure, /ни `Driver\.ready\(\)`, ни `SELECT 1` не достигнуты/i);
+  assert.match(closure, /BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY/);
+  assert.match(closure, /временный grant `ydb\.viewer` на конкретную `prihrash-prod`/);
+  assert.match(closure, /реальная возможность читать финансовые строки/);
+  assert.match(closure, /не выдан Owner/);
+  assert.match(closure, /не folder\/cloud-wide role/);
+  assert.match(closure, /не\s+`set-access-bindings`/);
+  assert.match(closure, /retirement\s+временного grant/);
+  assert.match(closure, /CreateVersion.*GRANTED\/PENDING_HOLD_CLEARANCE/s);
+
+  assert.match(sprint, /BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY/);
+  assert.match(sprint, /CreateVersion one-shot authority does \*\*not\*\* cover this IAM change/);
+  assert.match(workflow, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
+  assert.doesNotMatch(workflow, /\bydb\.viewer\b|\badd-access-binding\b|\bset-access-bindings\b/);
+  assert.doesNotMatch(workflow, /\bselect\s+\*/i);
+});

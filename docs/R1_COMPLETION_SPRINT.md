@@ -410,6 +410,24 @@ Initial bootstrap фиксирует immutable observation `A`. Успех — p
 они догоняются canonical incremental `A -> B`.
 
 Нельзя бесконечно перезапускать bootstrap только потому, что Google остаётся живым.
+## R1 direct-YDB closure path — authority boundary after #926
+
+Read-only hosted probe `37829722475` reached GitHub OIDC/WIF but stopped at
+`R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED`, before `Driver.ready()` and
+`SELECT 1`. Read-only provider ACL reconciliation found no direct or inherited
+YDB read role for the exact existing GitHub WIF deploy identity; see
+`docs/R1_CLOSURE_PATH.md`. The direct route is **not** a bypass of IAM or
+permission authority.
+
+Next boundary = `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY`. A temporary
+database-scoped `ydb.viewer` grant can expose actual financial data to that
+identity. It requires separate informed Owner authorization plus exact database,
+service-account, ACL, read-back, and verified retirement gates. Existing
+CreateVersion one-shot authority does **not** cover this IAM change. Until a
+decision, do not replay `37829722475`, broaden IAM, attach a new identity,
+or declare `COMMITTED`. Provider incident hold for new Function versions remains
+independent and ACTIVE until proved otherwise.
+
 ## Completion target
 
 R1 completion sprint не заканчивается на успешном workflow или закрытии одного Issue.
