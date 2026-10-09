@@ -419,14 +419,26 @@ YDB read role for the exact existing GitHub WIF deploy identity; see
 `docs/R1_CLOSURE_PATH.md`. The direct route is **not** a bypass of IAM or
 permission authority.
 
-Next boundary = `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY`. A temporary
-database-scoped `ydb.viewer` grant can expose actual financial data to that
-identity. It requires separate informed Owner authorization plus exact database,
-service-account, ACL, read-back, and verified retirement gates. Existing
-CreateVersion one-shot authority does **not** cover this IAM change. Until a
-decision, do not replay `37829722475`, broaden IAM, attach a new identity,
-or declare `COMMITTED`. Provider incident hold for new Function versions remains
-independent and ACTIVE until proved otherwise.
+Historical boundary `BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY` was addressed
+by a **single explicit Owner-authorized** temporary exact-database
+`ydb.viewer` grant, manual probe `37921856585`, and independently verified
+role retirement. The probe returned the **same**
+`R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED` at `Database.List(folderId)`
+before `Driver.ready()` or `SELECT 1`. Original database ACL was restored:
+2 existing other-SA bindings, 0 target-SA grants. The grant was removed;
+the one-shot IAM authority is **CONSUMED**. See `docs/R1_CLOSURE_PATH.md`
+and #630 comment `6079713439`.
+
+This is **not** proof that database-scoped `ydb.viewer` fails: Yandex IAM
+documents up to one minute for role propagation, and the hosted workflow uses
+folder-wide `Database.List` rather than exact database `Database.Get`.
+Both are unproven causal explanations. Before considering another live
+attempt, design the exact-database metadata path without folder-wide IAM
+and require an IAM propagation-settling gate. A **new explicit Owner decision**
+is required for each future IAM grant/probe. Existing `CreateVersion` one-shot
+authority does **not** cover this IAM change and remains separate/pending
+provider incident hold. Do not replay the same flow, broaden IAM, attach a
+new identity, perform financial operations or declare `COMMITTED`.
 
 ## Completion target
 

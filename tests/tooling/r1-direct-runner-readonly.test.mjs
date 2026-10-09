@@ -54,16 +54,38 @@ test('R1 direct-YDB denial reaches a single database-scoped Owner authority deci
   assert.match(closure, /ни `Driver\.ready\(\)`, ни `SELECT 1` не достигнуты/i);
   assert.match(closure, /BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY/);
   assert.match(closure, /временный grant `ydb\.viewer` на конкретную `prihrash-prod`/);
-  assert.match(closure, /реальная возможность читать финансовые строки/);
-  assert.match(closure, /не выдан Owner/);
+  assert.match(closure, /возможность читать финансовые строки/);
+  assert.match(closure, /Это разрешение \*\*израсходовано\*\*/);
   assert.match(closure, /не folder\/cloud-wide role/);
-  assert.match(closure, /не\s+`set-access-bindings`/);
-  assert.match(closure, /retirement\s+временного grant/);
+  assert.match(closure, /не `set-access-bindings`/);
+  assert.match(closure, /retirement \*\*только собственной\*\* binding/);
   assert.match(closure, /CreateVersion.*GRANTED\/PENDING_HOLD_CLEARANCE/s);
 
   assert.match(sprint, /BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY/);
-  assert.match(sprint, /CreateVersion one-shot authority does \*\*not\*\* cover this IAM change/);
+  assert.match(sprint, /CreateVersion` one-shot\s+authority does \*\*not\*\* cover this IAM change/);
   assert.match(workflow, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
   assert.doesNotMatch(workflow, /\bydb\.viewer\b|\badd-access-binding\b|\bset-access-bindings\b/);
   assert.doesNotMatch(workflow, /\bselect\s+\*/i);
+});
+
+test('temporary exact-database viewer authority was consumed and retired without claiming YDB SELECT', async () => {
+  const closure = await readFile(new URL('../../docs/R1_CLOSURE_PATH.md', import.meta.url), 'utf8');
+  const sprint = await readFile(new URL('../../docs/R1_COMPLETION_SPRINT.md', import.meta.url), 'utf8');
+  assert.match(closure, /Authority: #630 comment `6079632335`/);
+  assert.match(closure, /postmortem evidence: #630 comment[\s\S]{0,30}`6079713439`/);
+  assert.match(closure, /`R1_TEMP_EXACT_DB_VIEWER_FOR_SINGLE_READONLY_PROBE`[\s\S]{0,30}CONSUMED/);
+  assert.match(closure, /manual probe `37921856585`/);
+  assert.match(closure, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
+  assert.match(closure, /exactly 1 target-SA viewer/);
+  assert.match(closure, /0 target bindings/);
+  assert.match(closure, /No `Driver\.ready\(\)` or `SELECT 1` was[\s\S]{0,20}reached/);
+  assert.match(closure, /at least 60 seconds|как минимум 60 секунд/);
+  assert.match(closure, /разрешение[\s\S]{0,20}израсходовано/);
+  assert.match(closure, /нового отдельного.*Owner-разрешения/s);
+  assert.match(closure, /`Database\.Get`/);
+  assert.match(sprint, /one-shot IAM authority is \*\*CONSUMED\*\*/);
+  assert.match(sprint, /Original database ACL was restored/);
+  assert.match(sprint, /up to one minute for role propagation/);
+  assert.match(sprint, /A \*\*new explicit Owner decision\*\*/);
+  assert.doesNotMatch(sprint, /READ_ONLY_SELECT_OK.*37921856585/);
 });
