@@ -2,6 +2,12 @@ name: R1 direct YDB read-only probe
 
 on:
   workflow_dispatch:
+    inputs:
+      lifecycle_only:
+        description: 'Read only migration run states; no financial rows or numeric counts'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -55,7 +61,7 @@ jobs:
       - name: Install locked dependencies without scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Focused probe regression
-        run: node --test tests/tooling/r1-direct-runner-readonly.test.mjs
+        run: node --test tests/tooling/r1-direct-runner-readonly.test.mjs tests/tooling/r1-migration-lifecycle-readonly.test.mjs
       - name: Exchange scoped GitHub OIDC identity and probe existing YDB
         shell: bash
         env:
@@ -119,4 +125,8 @@ jobs:
           export PRIHRASH_R1_EXPECTED_DATABASE_PATH="/${location}/${YC_CLOUD_ID}/${db_id}"
           export PRIHRASH_R1_YDB_IAM_TOKEN="$iam"
           echo "::add-mask::${PRIHRASH_YDB_CONNECTION_STRING}"
-          node scripts/r1-direct-runner-readonly.mjs
+          if [ '${{ inputs.lifecycle_only && '1' || '0' }}' = '1' ]; then
+            node scripts/r1-direct-migration-lifecycle-readonly.mjs
+          else
+            node scripts/r1-direct-runner-readonly.mjs
+          fi
