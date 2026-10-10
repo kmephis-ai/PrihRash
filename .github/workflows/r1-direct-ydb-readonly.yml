@@ -8,6 +8,11 @@ on:
         type: boolean
         required: true
         default: false
+      lineage_only:
+        description: 'Read only STAGING temporal lineage against proven bootstrap child'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -61,7 +66,9 @@ jobs:
       - name: Install locked dependencies without scripts
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Focused probe regression
-        run: node --test tests/tooling/r1-direct-runner-readonly.test.mjs tests/tooling/r1-migration-lifecycle-readonly.test.mjs
+        run: |
+          npm run build --silent
+          node --test tests/tooling/r1-direct-runner-readonly.test.mjs tests/tooling/r1-migration-lifecycle-readonly.test.mjs tests/tooling/r1-staging-lineage-readonly.test.mjs
       - name: Exchange scoped GitHub OIDC identity and probe existing YDB
         shell: bash
         env:
@@ -125,7 +132,36 @@ jobs:
           export PRIHRASH_R1_EXPECTED_DATABASE_PATH="/${location}/${YC_CLOUD_ID}/${db_id}"
           export PRIHRASH_R1_YDB_IAM_TOKEN="$iam"
           echo "::add-mask::${PRIHRASH_YDB_CONNECTION_STRING}"
-          if [ '${{ inputs.lifecycle_only && '1' || '0' }}' = '1' ]; then
+          if [ '${{ inputs.lineage_only && '1' || '0' }}' = '1' ]; then
+            test '${{ inputs.lifecycle_only && '1' || '0' }}' = '0' ||
+              { echo R1_LINEAGE=MODE_CONFLICT; exit 1; }
+            # Exact failed child reached one actual Function invocation (not just Deploy).
+            child="$(gh api 'repos/kmephis-ai/PrihRash/actions/runs/36327850242')" ||
+              { echo R1_LINEAGE=CAUSAL_RUN_READ_FAILED; exit 1; }
+            jq -e '
+              .id == 36327850242 and
+              .name == "R1 initial shadow bootstrap" and
+              .head_sha == "5d59d782a593cf6357bf0e9fee9e55782f7f126e" and
+              .event == "workflow_dispatch" and .run_attempt == 1 and
+              .status == "completed" and .conclusion == "failure" and
+              (.run_started_at | type == "string" and
+               test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+            ' <<<"$child" >/dev/null || { echo R1_LINEAGE=CAUSAL_RUN_INVALID; exit 1; }
+            jobs="$(gh api 'repos/kmephis-ai/PrihRash/actions/runs/36327850242/jobs?per_page=100')" ||
+              { echo R1_LINEAGE=CAUSAL_JOBS_READ_FAILED; exit 1; }
+            jq -e '
+              [.jobs[] | select(.name == "initial-shadow-bootstrap")] as $j |
+              ($j | length) == 1 and
+              $j[0].conclusion == "failure" and
+              ([ $j[0].steps[] | select(.name == "Deploy initial-bootstrap-only Function version" and
+                 .conclusion == "success") ] | length) == 1 and
+              ([ $j[0].steps[] | select(.name == "Invoke exact initial bootstrap tag once" and
+                 .conclusion == "failure") ] | length) == 1
+            ' <<<"$jobs" >/dev/null || { echo R1_LINEAGE=CAUSAL_INVOKE_NOT_PROVEN; exit 1; }
+            export PRIHRASH_R1_CAUSAL_BOOTSTRAP_STARTED_AT
+            PRIHRASH_R1_CAUSAL_BOOTSTRAP_STARTED_AT="$(jq -er '.run_started_at' <<<"$child")"
+            node scripts/r1-direct-staging-lineage-readonly.mjs
+          elif [ '${{ inputs.lifecycle_only && '1' || '0' }}' = '1' ]; then
             node scripts/r1-direct-migration-lifecycle-readonly.mjs
           else
             node scripts/r1-direct-runner-readonly.mjs

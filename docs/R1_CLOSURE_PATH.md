@@ -29,6 +29,30 @@ one dispatch, and mandatory independently verified IAM retirement.
 It must not invoke any Function, create versions, retire old staging,
 read financial rows, replay bootstrap, or enable scheduled sync.
 
+## Single-run STAGING temporal lineage discriminator
+
+After verified `STAGING_PRESENT_RECOVERY_REQUIRED` in run `38050533990`,
+the manual probe may use `lineage_only=true`, mutually exclusive with
+`lifecycle_only`. GitHub metadata must prove bootstrap child `36327850242`
+had successful deployment and exactly one failed invocation; child
+`36783942040` failed at deployment and never invoked the Function.
+The execution time is obtained directly from GitHub run metadata, never
+supplied by an unverified input. Local SQL queries only `started_at`
+from up to two `STAGING` rows in `snapshotReadOnly` mode and feeds
+that private timestamp into the **existing canonical**
+`classifyInitialBootstrapStagingRunLineage` with 5-second uncertainty.
+Only `R1_LINEAGE` enum leaves the runtime; no timestamp, row ID,
+source payload or reconciliation data may enter public evidence.
+
+`STAGING_PREDATES_BOOTSTRAP_CHILD` / `STAGING_STARTED_AFTER_BOOTSTRAP_CHILD`
+are **temporal evidence only**, not exact run identity or proof that staging
+is stale, current is empty, an operation finished or retirement is safe.
+Ambiguous/cardinality/read failure remains `RECOVERY_REQUIRED`.
+One-shot exact database viewer permission, mandatory >=60 seconds
+propagation and independently verified retirement are required before
+a live probe; no Function deployment/invocation, financial write or
+migration continuation is authorized.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092
