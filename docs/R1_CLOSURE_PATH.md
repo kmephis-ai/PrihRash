@@ -80,6 +80,41 @@ read would require separate explicit one-shot database-scoped read authority,
 exact current `main`, CI/writer/provider/ACL gates, IAM propagation and
 independent retirement. Unreadable/ambiguous state remains fail-closed.
 
+## Bounded durable STAGING revision discriminator (not source-authority proof)
+
+Optional **manual-only** `durable_only=true` in
+`.github/workflows/r1-direct-ydb-readonly.yml` calls canonical
+`diagnoseInitialBootstrapStagingDurableRevisionEvidence`, **not**
+`diagnoseInitialBootstrapStagingExactRevisionEvidence`, because the latter
+requires an independently verified current authoritative Google observation.
+The former reads the private durable STAGING identity manifest and revision
+metadata only and can distinguish `NO_REVISION_EVIDENCE`,
+`PARTIAL_CURRENT_RUN_ONLY`, `COMPLETE_CURRENT_RUN_ONLY`,
+`CROSS_RUN_PK_COLLISION`, malformed or mismatching durable evidence.
+
+It runs in a single `snapshotReadOnly` YDB SDK transaction. Four exact SQL
+shapes (cardinality, STAGING manifest, revision-by-run, revision-by-source-key)
+are allowlisted; statement parameters retain the canonical YDB typed mapper.
+The canonical cardinality preflight must return `LT_5000_RU`; every
+revision read is server-capped to at most 5001 rows and any response beyond
+5000 fails closed. This *does not guarantee actual billing* and must not be
+used as permission to increase quotas or read unbounded data. Unknown schema,
+new SQL shape, read failure or unknown verdict fails closed.
+
+Only the `R1_STAGING_DURABLE` allowlisted diagnostic enum is logged. Private
+manifest bindings, UUIDs, row hints/digests, exact counts, YDB query results,
+provider errors and source payloads are never logged, exported or uploaded.
+Even `COMPLETE_CURRENT_RUN_ONLY` proves neither the actual authoritative
+Google snapshot/source lineage, nor staging-run ownership, current promotion,
+safe retirement, `COMMITTED(A)`, nor permission to run bootstrap.
+
+A live invocation **requires a new, separately approved** one-shot
+database-scoped viewer grant, fresh exact-main/CI/writer/provider/ACL gates,
+cost/quota evidence, IAM propagation, single dispatch and independently
+verified ACL retirement. The workflow itself does not grant or revoke roles.
+No Function deploy/invoke, staging mutation, cleanup, scheduled sync or
+cutover is authorized by this code path.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092
