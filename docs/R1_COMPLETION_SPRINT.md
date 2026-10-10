@@ -430,15 +430,23 @@ the one-shot IAM authority is **CONSUMED**. See `docs/R1_CLOSURE_PATH.md`
 and #630 comment `6079713439`.
 
 This is **not** proof that database-scoped `ydb.viewer` fails: Yandex IAM
-documents up to one minute for role propagation, and the hosted workflow uses
-folder-wide `Database.List` rather than exact database `Database.Get`.
-Both are unproven causal explanations. Before considering another live
-attempt, design the exact-database metadata path without folder-wide IAM
-and require an IAM propagation-settling gate. A **new explicit Owner decision**
-is required for each future IAM grant/probe. Existing `CreateVersion` one-shot
-authority does **not** cover this IAM change and remains separate/pending
-provider incident hold. Do not replay the same flow, broaden IAM, attach a
-new identity, perform financial operations or declare `COMMITTED`.
+documents up to one minute for role propagation, and the historical
+hosted probe used folder-wide `Database.List` rather than exact
+database `Database.Get`.
+Both are unproven causal explanations. The updated manual-only probe now
+uses exact `Database.Get(databaseId)` rather than folder-wide `Database.List`,
+with strict response identity validation and a separate private locator
+secret `YC_R1_DIRECT_YDB_DATABASE_ID`. That secret is **not configured**;
+the workflow must fail closed before WIF if it is absent or invalid.
+No endpoint or identity has been verified by a new live probe.
+
+A **new explicit Owner decision** is required for secure private locator
+provisioning and for each future scoped IAM grant/probe, with at least
+60 seconds for IAM propagation following an independently verified grant.
+Existing `CreateVersion` one-shot authority does **not** cover these
+changes and remains separate/pending provider incident hold. Do not
+dispatch the rewritten workflow, broaden IAM, attach a new identity,
+perform financial operations or declare `COMMITTED` without those gates.
 
 ## Completion target
 
