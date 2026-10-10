@@ -11,6 +11,24 @@
 - Next bounded step: a newly authorized, demonstrably side-effect-free read-only **durable-state** discriminator against the existing DB, emitting only safe lifecycle enums for `STAGING/VALIDATED/COMMITTED` and exact lineage/current-state classification. It must not log private financial rows/IDs/totals, create Function versions, invoke a potentially write-capable Function, grant IAM implicitly, retire staging, or launch bootstrap. Unknown state remains a recovery stop.
 - `COMMITTED(A)=NOT_PROVEN`; Google stays authoritative. On later proven recovery and separate writer gate, follow the canonical immutable cutoff A / independent promotion reconciliation / Google catch-up contract.
 
+## Next bounded read-only state discriminator
+
+Manual `r1-direct-ydb-readonly.yml` with `lifecycle_only=true` runs a
+separate hardcoded `SELECT state, COUNT(*) AS row_count FROM migration_runs
+GROUP BY state` under SDK `snapshotReadOnly`, through the existing exact-main
+OIDC/WIF and exact `Database.Get` route. It never returns row IDs, amounts,
+dates, reconciliation counts, or raw SQL responses in its public output.
+The `R1_LIFECYCLE` marker is an **enum-only preliminary state observation**:
+even `COMMITTED_MARKER_UNVERIFIED` does not establish a verified financial
+baseline. Any `STAGING/VALIDATED` or unknown response remains recovery-gated.
+
+This optional manual mode is not authority by itself. It requires a fresh
+exact-main/CI/provider/IAM/writer gate, a separately approved one-shot
+database-scoped read permission when necessary, propagation wait, at most
+one dispatch, and mandatory independently verified IAM retirement.
+It must not invoke any Function, create versions, retire old staging,
+read financial rows, replay bootstrap, or enable scheduled sync.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092
