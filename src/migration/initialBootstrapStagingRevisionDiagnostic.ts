@@ -778,3 +778,67 @@ export async function diagnoseInitialValidatedSourceEvidence(
     default: return 'VALIDATED_SOURCE_DIAGNOSTIC_FAILED';
   }
 }
+/**
+ * R1 read-only causal path: inspect expected revision-1 primary keys in small
+ * bounded lookup-join batches, then compare against the synchronous run-index
+ * cardinality to fail closed if any unexpected run-owned row exists. One
+ * snapshotReadOnly transaction is required for all reads by the caller.
+ *
+ * No authoritative Google source matching or financial writes occur here.
+ */
+export const INITIAL_STAGING_INDEXED_KEY_READ_LIMIT = 9000;
+export const INITIAL_STAGING_INDEXED_KEY_BATCH_SIZE = 128;
+
+function indexedRunRevisionCountStatement(migrationRunId: string) {
+  return readStatement(
+    'SELECT COUNT(*) AS run_revision_count '
+      + 'FROM source_record_revisions VIEW idx_source_record_revisions_run_revision '
+      + 'WHERE revision = $revision AND migration_run_id = $migration_run_id',
+    {
+      revision: uint64Parameter(1),
+      migration_run_id: uuidParameter(migrationRunId),
+    },
+  );
+}
+
+export async function diagnoseInitialBootstrapStagingDurableRevisionEvidenceByKeys(
+  reader: YdbReadScope,
+): Promise<InitialBootstrapStagingDurableRevisionDiagnostic | 'READ_BUDGET_NOT_PROVEN'> {
+  const manifestResult = await reader.read<StagingManifestEvidenceRow>(stagingManifestStatement());
+  const parsed = parseStagingManifest(manifestResult.rows);
+  if (!parsed.ok) return parsed.diagnostic;
+  const { migrationRunId, bindings } = parsed.manifest;
+  if (bindings.length > INITIAL_STAGING_INDEXED_KEY_READ_LIMIT) return 'READ_BUDGET_NOT_PROVEN';
+
+  const countResult = await reader.read<Readonly<{ run_revision_count?: unknown }>>(
+    indexedRunRevisionCountStatement(migrationRunId),
+  );
+  if (countResult.rows.length !== 1) return 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+  const count = safeInteger(countResult.rows[0]?.run_revision_count, 0);
+  if (count === null) return 'REVISION_EVIDENCE_DIAGNOSTIC_FAILED';
+  if (count > INITIAL_STAGING_INDEXED_KEY_READ_LIMIT) return 'READ_BUDGET_NOT_PROVEN';
+
+  const expected = new Map(bindings.map((binding) => [binding.sourceRecordId, binding]));
+  const seen = new Set<string>();
+  for (let offset = 0; offset < bindings.length; offset += INITIAL_STAGING_INDEXED_KEY_BATCH_SIZE) {
+    const batch = bindings.slice(offset, offset + INITIAL_STAGING_INDEXED_KEY_BATCH_SIZE);
+    const lookup = await reader.read<ExistingRevisionEvidenceRow>(
+      sourceKeyRevisionEvidenceStatement(batch),
+    );
+    // Unique manifest keys + revision-1 PK imply at most one row per requested key.
+    if (lookup.rows.length > batch.length) return 'REVISION_ROW_DUPLICATE';
+    const mismatch = inspectRevisionRows(lookup.rows, migrationRunId, expected, seen);
+    if (mismatch !== null) return mismatch;
+  }
+
+  // A run-index count not accounted for by exact primary-key lookups means
+  // extra/contradictory durable rows; it is never safe to infer completeness.
+  if (count !== seen.size) return 'REVISION_ROW_UNEXPECTED_SOURCE';
+  if (seen.size === 0) return 'NO_REVISION_EVIDENCE';
+  if (seen.size === bindings.length) return 'COMPLETE_CURRENT_RUN_ONLY';
+
+  const firstMissing = bindings.findIndex((binding) => !seen.has(binding.sourceRecordId));
+  if (firstMissing < 0) return 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH';
+  const afterGap = bindings.slice(firstMissing + 1).some((binding) => seen.has(binding.sourceRecordId));
+  return afterGap ? 'REVISION_CURRENT_RUN_EVIDENCE_MISMATCH' : 'PARTIAL_CURRENT_RUN_ONLY';
+}

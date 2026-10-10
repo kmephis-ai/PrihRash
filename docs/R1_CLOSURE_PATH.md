@@ -146,6 +146,72 @@ All branches remain `COMMITTED(A)=NOT_PROVEN` until an independently verified
 financial migration baseline. The current PR only fixes the local code defect;
 it **does not** re-arm IAM, SQL, Function, bootstrap, cleanup, timer or cutover.
 
+## Incident-M: indexed primary-key evidence instead of unbounded run scan
+
+После однократного read-only запуска `38070190638` на `main=7d78e9a` опубликован только
+`R1_STAGING_DURABLE=READ_BUDGET_NOT_PROVEN`. Этот outcome не раскрывает, был ли
+порог `LT_5000_RU` превышен или structural preflight вернул
+`DIAGNOSTIC_FAILED`. Не объявлять реальную сумму, точное число записей,
+целостность revisions или entitlement на recovery доказанными.
+
+### Новая причинная модель (без второго financial engine)
+
+В canonical `initialBootstrapStagingRevisionDiagnostic.ts` добавлен альтернативный
+read-only путь, который использует существующие `parseStagingManifest`,
+`inspectRevisionRows` и точный `sourceKeyRevisionEvidenceStatement`.
+Вместо полного `ORDER BY source_record_id` run-скана:
+
+1. прочитать и проверить durable `STAGING` run/manifest/source_snapshot;
+2. остановиться, если private manifest превышает **9000** bindings;
+3. получить private `COUNT(*)` только по синхронному индексу
+   `idx_source_record_revisions_run_revision`, exact `migration_run_id`
+   и `revision=1`; malformed/bigger count = STOP;
+4. проверить все manifest keys батчами максимум по **128** по PK
+   `(source_record_id, revision)`, в одном `snapshotReadOnly`;
+5. для каждого найденного revision использовать уже существующий canonical
+   comparator `source_record_id/revision/migration_run_id/row_hint/row_digest`;
+6. сравнить число точно совпавших run-rows с независимым индексным count:
+   любое расхождение — fail-closed unexpected/contradictory evidence, а не
+   `COMPLETE`;
+7. проверить contiguous prefix; пропуск suffix, дырка, коллизия чужого run,
+   дубликат, неверный digest и неучтённая запись имеют разные terminal outcomes.
+
+Ограничители: exact SQL allowlist `MANIFEST/COUNT/BY_KEY`,
+не более **73** SQL reads за один snapshot, до 9000 ожидаемых keys,
+ограничение response на 128 для key lookups, query timeout, накопительный
+суммарный **SDK-estimated RU <=11000**, без вывода приватных RU/count/IDs/
+digest/query rows/errors в GitHub. Оценка `StatsMode.FULL` обязательна и
+отсутствие валидной stats-информации приводит к бюджетному STOP.
+Workflow runtime максимум 30 минут. **Это не гарантия счёта** и не
+поднимает существующие provider quotas, IAM или YDB throughput caps.
+Если индексный `COUNT` по YDB оказывается слишком дорогим/медленным,
+оставить `READ_FAILED/READ_BUDGET_NOT_PROVEN` и сменить causal model.
+Не запускать увеличенные чтения вслепую.
+
+По документации YDB `AS_TABLE(List<Struct>)` и Index Lookup Join
+предназначены для small-key lookup вместо common join/full scan; реальный
+query plan/стоимость в текущей базе пока не измерялись и не доказаны.
+Каждый provider attempt остаётся отдельным exact-main/CI/Owner permission
+gate с обязательным отзывом временной DB-role.
+
+### Decision point
+
+- `COMPLETE_CURRENT_RUN_ONLY`: durable consistency run-scoped доказана,
+  **не** доказаны current Google source identity, `COMMITTED(A)` и retirement.
+- `NO_REVISION_EVIDENCE`: подтверждено отсутствие run-owned revision-1
+  и отсутствуют ожидаемые foreign PK collisions, но нет разрешения удалить STAGING.
+- `PARTIAL_CURRENT_RUN_ONLY`: допустима только отдельная доказательная
+  recovery-проверка prefix/suffix, не blind replay.
+- `CROSS_RUN_PK_COLLISION`, `REVISION_ROW_UNEXPECTED_SOURCE`,
+  `REVISION_CURRENT_RUN_EVIDENCE_MISMATCH` или malformed:
+  integrity STOP без migration mutation.
+- `READ_BUDGET_NOT_PROVEN`, `READ_FAILED` или unknown:
+  STOP без повторного same-SHA provider attempt.
+
+Тесты должны охватывать 6200 synthetic rows (за прежним порогом 5000),
+пустой набор, suffix gap, interleaved gap, foreign run, digest corruption,
+unexpected indexed count, duplicate, oversized manifest и malformed count.
+Весь код — один causal `Incident-M`, не новый enum-only PR.
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092
