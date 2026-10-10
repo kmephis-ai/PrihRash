@@ -18,6 +18,7 @@ jobs:
     env:
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
+      YC_TARGET_DB_ID: ${{ secrets.YC_R1_DIRECT_YDB_DATABASE_ID }}
       OIDC_AUDIENCE: https://github.com/kmephis-ai
       OIDC_ISSUER: https://token.actions.githubusercontent.com
       OIDC_SUBJECT: repo:kmephis-ai@310519475/PrihRash@1359286840:ref:refs/heads/main
@@ -37,6 +38,10 @@ jobs:
           test "$GITHUB_RUN_ATTEMPT" = '1'
           test -n "$YC_FOLDER_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
+          # No folder-wide Database.List fallback or private database ID in workflow inputs/logs.
+          test -n "$YC_TARGET_DB_ID" || { echo R1_DIRECT_PROBE=EXACT_DB_ID_SECRET_MISSING; exit 1; }
+          [[ "$YC_TARGET_DB_ID" =~ ^[a-z0-9-]{1,50}$ ]] ||
+            { echo R1_DIRECT_PROBE=EXACT_DB_ID_INVALID; exit 1; }
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
           test "$current" = "$GITHUB_SHA" || { echo R1_DIRECT_PROBE=MAIN_MOVED; exit 1; }
@@ -81,24 +86,28 @@ jobs:
           test "$iam_http" = '200' || { echo R1_DIRECT_PROBE=WIF_EXCHANGE_FAILED; exit 1; }
           iam="$(jq -er '.access_token | select(type == "string" and length > 0)' "$tmp/iam.json")"
           echo "::add-mask::${iam}"
+          # Exact database-scoped resource read; do not use folder-wide enumeration.
           db_http="$(curl --silent --output "$tmp/db.json" --write-out '%{http_code}' \
-            --get --header "Authorization: Bearer ${iam}" \
-            --data-urlencode "folderId=${YC_FOLDER_ID}" \
-            https://ydb.api.cloud.yandex.net/ydb/v1/databases 2>/dev/null || true)"
+            --request GET --header "Authorization: Bearer ${iam}" \
+            "https://ydb.api.cloud.yandex.net/ydb/v1/databases/${YC_TARGET_DB_ID}" 2>/dev/null || true)"
           case "$db_http" in
             200) ;;
             401|403) echo R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED; exit 1 ;;
+            404) echo R1_DIRECT_PROBE=DB_NOT_FOUND; exit 1 ;;
             *) echo R1_DIRECT_PROBE=YDB_METADATA_UNAVAILABLE; exit 1 ;;
           esac
-          jq -e --arg folder "$YC_FOLDER_ID" '
-            (.nextPageToken == null or .nextPageToken == "") and
-            ([.databases[] | select(.name == "prihrash-prod" and
-              .folderId == $folder and .status == "RUNNING")] | length == 1)
+          jq -e --arg folder "$YC_FOLDER_ID" --arg db "$YC_TARGET_DB_ID" '
+            .id == $db and .name == "prihrash-prod" and
+            .folderId == $folder and .status == "RUNNING" and
+            (.endpoint | type == "string") and
+            (.endpoint | startswith("grpcs://")) and
+            (.locationId | type == "string") and
+            (.locationId | length > 0)
           ' "$tmp/db.json" >/dev/null || { echo R1_DIRECT_PROBE=DB_NOT_EXACT; exit 1; }
-          endpoint="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .endpoint' "$tmp/db.json")"
-          db_id="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .id' "$tmp/db.json")"
-          location="$(jq -er '.databases[] | select(.name == "prihrash-prod") | .locationId' "$tmp/db.json")"
-          [[ "$endpoint" == grpcs://* && -n "$db_id" && -n "$location" ]] ||
+          endpoint="$(jq -er '.endpoint' "$tmp/db.json")"
+          db_id="$(jq -er '.id' "$tmp/db.json")"
+          location="$(jq -er '.locationId' "$tmp/db.json")"
+          [[ "$endpoint" == grpcs://* && "$db_id" == "$YC_TARGET_DB_ID" && -n "$location" ]] ||
             { echo R1_DIRECT_PROBE=DB_PATH_INVALID; exit 1; }
           current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
           test "$current" = "$GITHUB_SHA" || { echo R1_DIRECT_PROBE=MAIN_MOVED; exit 1; }

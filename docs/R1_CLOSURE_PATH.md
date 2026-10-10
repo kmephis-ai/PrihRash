@@ -56,15 +56,34 @@ design a time-bounded database-scoped read authority. Do not widen identity impl
 
 ## GitHub-hosted альтернативный сетевой маршрут
 
-Добавлен manual-only workflow `.github/workflows/r1-direct-ydb-readonly.yml`.
-Он использует уже существующую GitHub OIDC → Yandex WIF identity,
-запрашивает только metadata существующей базы `prihrash-prod` через
-`Database.List` и выполняет `SELECT 1`. Если текущему WIF недостаточно
-прав для Database.List/SELECT, workflow завершится `PERMISSION_DENIED`;
-никакого автоматического добавления IAM роли нет.
+Manual-only workflow `.github/workflows/r1-direct-ydb-readonly.yml` использует
+существующую GitHub OIDC → Yandex WIF identity. Первые два historical
+запуска (`37829722475`, `37921856585`) использовали `Database.List(folderId)`
+и завершились `YDB_METADATA_PERMISSION_DENIED` до `Driver.ready()` / `SELECT 1`.
 
-После merge запускать вручную только при отсутствии другого active R1 writer.
-Этот маршрут не имеет provider write или финансового write authority.
+Следующий versioned workflow (после incident postmortem) **не перечисляет
+базы каталога**, а использует Yandex REST `Database.Get(databaseId)` по
+отдельному приватному exact-ID locator из GitHub Actions secret
+`YC_R1_DIRECT_YDB_DATABASE_ID`. Этот secret **отсутствует** в GitHub на
+момент подготовки изменения и **не создаётся автоматически**. При отсутствии
+или невалидном ID workflow завершается до OIDC:
+`R1_DIRECT_PROBE=EXACT_DB_ID_SECRET_MISSING` либо `EXACT_DB_ID_INVALID`.
+Успешный `Database.Get` обязан отдельно подтвердить exact ID, folder ID,
+имя `prihrash-prod`, `RUNNING`, endpoint и locationId. Ответ API, IDs,
+строки подключения и токены не печатать в логи. `401/403` остаётся
+`YDB_METADATA_PERMISSION_DENIED`, `404` — `DB_NOT_FOUND`; без
+неявного fallback на `Database.List` и без расширения IAM.
+
+Выполнение новой версии **не разрешено** текущим consumed IAM decision:
+нужны отдельно согласованные secure provisioning private locator,
+новая Owner-authorized scoped IAM permission при необходимости,
+интервал распространения IAM не менее 60 секунд после ACL read-back,
+exact-current-main/CI/single-writer/provider preflight и затем ровно
+один manual read-only probe. Никаких финансовых данных и provider write.
+Даже `READ_ONLY_SELECT_OK` не доказывает `COMMITTED`.
+
+Документация точечного GET:
+https://yandex.cloud/ru/docs/ydb/api-ref/Database/get
 
 ## Следующий bounded gate после `37829722475` — database-scoped read authority
 

@@ -62,7 +62,7 @@ test('R1 direct-YDB denial reaches a single database-scoped Owner authority deci
   assert.match(closure, /CreateVersion.*GRANTED\/PENDING_HOLD_CLEARANCE/s);
 
   assert.match(sprint, /BLOCKED_NEEDS_EXPLICIT_DATABASE_READ_AUTHORITY/);
-  assert.match(sprint, /CreateVersion` one-shot\s+authority does \*\*not\*\* cover this IAM change/);
+  assert.match(sprint, /CreateVersion` one-shot authority does \*\*not\*\* cover these\s+changes/);
   assert.match(workflow, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
   assert.doesNotMatch(workflow, /\bydb\.viewer\b|\badd-access-binding\b|\bset-access-bindings\b/);
   assert.doesNotMatch(workflow, /\bselect\s+\*/i);
@@ -88,4 +88,67 @@ test('temporary exact-database viewer authority was consumed and retired without
   assert.match(sprint, /up to one minute for role propagation/);
   assert.match(sprint, /A \*\*new explicit Owner decision\*\*/);
   assert.doesNotMatch(sprint, /READ_ONLY_SELECT_OK.*37921856585/);
+});
+
+test('next manual probe reads exact YDB resource by private ID and never lists folder databases', async () => {
+  const workflow = await readFile(
+    new URL('../../.github/workflows/r1-direct-ydb-readonly.yml', import.meta.url), 'utf8',
+  );
+  assert.match(workflow, /YC_TARGET_DB_ID: \$\{\{ secrets\.YC_R1_DIRECT_YDB_DATABASE_ID \}\}/);
+  assert.match(workflow, /R1_DIRECT_PROBE=EXACT_DB_ID_SECRET_MISSING/);
+  assert.match(workflow, /R1_DIRECT_PROBE=EXACT_DB_ID_INVALID/);
+  assert.match(workflow, /\^\[a-z0-9-\]\{1,50\}\$/);
+  assert.match(workflow, /--request GET --header "Authorization: Bearer \$\{iam\}"/);
+  assert.match(workflow, /ydb\/v1\/databases\/\$\{YC_TARGET_DB_ID\}/);
+  assert.match(workflow, /\.id == \$db and \.name == "prihrash-prod"/);
+  assert.match(workflow, /\.folderId == \$folder and \.status == "RUNNING"/);
+  assert.match(workflow, /R1_DIRECT_PROBE=DB_NOT_FOUND/);
+  assert.match(workflow, /R1_DIRECT_PROBE=DB_NOT_EXACT/);
+  assert.match(workflow, /R1_DIRECT_PROBE=YDB_METADATA_PERMISSION_DENIED/);
+  assert.doesNotMatch(workflow, /--data-urlencode "folderId=|\.databases\[\]|\.nextPageToken/);
+  assert.doesNotMatch(workflow, /gh secret set|add-access-binding|set-access-bindings|function version create/i);
+  assert.doesNotMatch(workflow, /^\s+(push|schedule):/m);
+});
+
+test('exact Database.Get identity gate accepts only an exact synthetic DB response', {
+  skip: spawnSync('jq', ['--version'], { encoding: 'utf8' }).status !== 0,
+}, async () => {
+  const workflow = await readFile(
+    new URL('../../.github/workflows/r1-direct-ydb-readonly.yml', import.meta.url), 'utf8',
+  );
+  const match = workflow.match(
+    /jq -e --arg folder "\$YC_FOLDER_ID" --arg db "\$YC_TARGET_DB_ID" '\s*([\s\S]*?)\s*' "\$tmp\/db\.json"/,
+  );
+  assert.ok(match, 'exact-database jq response gate not found');
+  const filter = match[1];
+  const valid = {
+    id: 'synthetic-db-id',
+    folderId: 'synthetic-folder',
+    name: 'prihrash-prod',
+    status: 'RUNNING',
+    endpoint: 'grpcs://synthetic.example.test:2135',
+    locationId: 'synthetic-location',
+  };
+  const check = (payload) => spawnSync('jq', [
+    '-e', '--arg', 'folder', valid.folderId, '--arg', 'db', valid.id, filter,
+  ], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  const success = check(valid);
+  assert.equal(success.status, 0, success.stderr);
+  for (const mismatch of [
+    { id: 'other-db-id' },
+    { folderId: 'other-folder' },
+    { name: 'unrelated-db' },
+    { status: 'STOPPED' },
+    { endpoint: 'http://synthetic.example.test' },
+    { endpoint: null },
+    { locationId: '' },
+    { locationId: null },
+  ]) {
+    const result = check({ ...valid, ...mismatch });
+    assert.notEqual(result.status, 0, JSON.stringify(mismatch));
+  }
 });
