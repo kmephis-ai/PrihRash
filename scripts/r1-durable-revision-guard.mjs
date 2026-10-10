@@ -49,6 +49,32 @@ export function classifyDurableRead(statement) {
   }
   return null;
 }
+/** Canonical SQL + dummy-only typed parameters for compile-only R1 plan proof. */
+export async function createDurableSyntheticExplainStatements() {
+  const { uuidParameter, uint64Parameter, listStructParameter } =
+    await import('../dist/integration/ydb/parameters.js');
+  const dummyId = i => '00000000-0000-0000-0000-'+String(100+i).padStart(12,'0');
+  const base = { kind: 'READ' };
+  const count = {
+    ...base, text: allowed.COUNT.sql,
+    parameters: {
+      revision: uint64Parameter(1),
+      migration_run_id: uuidParameter(dummyId(0)),
+    },
+  };
+  const byKey = {
+    ...base, text: allowed.BY_KEY.sql,
+    parameters: {
+      revision: uint64Parameter(1),
+      source_keys: listStructParameter([{name:'source_record_id',type:'Uuid',nullable:false}],
+        Array.from({length:128},(_,i)=>({source_record_id:uuidParameter(dummyId(i))}))),
+    },
+  };
+  if(classifyDurableRead(count)?.kind!=='COUNT' || classifyDurableRead(byKey)?.kind!=='BY_KEY')
+    throw new Error('EXPLAIN_CANONICAL_SHAPE_UNPROVEN');
+  return Object.freeze([count,byKey]);
+}
+
 export function classifyDurableOutcome(value) {
   const allowedOutcomes = new Set([
     'READ_BUDGET_NOT_PROVEN',
