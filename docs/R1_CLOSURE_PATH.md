@@ -53,6 +53,33 @@ propagation and independently verified retirement are required before
 a live probe; no Function deployment/invocation, financial write or
 migration continuation is authorized.
 
+## Next bounded current-state and manifest-cardinality observation
+
+After successful live lifecycle `STAGING_PRESENT_RECOVERY_REQUIRED` and temporal
+`STAGING_PREDATES_BOOTSTRAP_CHILD`, a manual `current_only=true` mode can
+collect **new** enum-only evidence from the existing current-state and
+manifest-cardinality canonical readers:
+
+- `readInitialBootstrapStaleStagingRetirementCurrentState`: aggregate counts
+  of canonical `source_records` and `transactions` only;
+- `diagnoseInitialBootstrapStagingRevisionCardinality`: internal structural
+  consistency of the single STAGING run, snapshot and manifest row counts.
+
+Both readers execute in a single `snapshotReadOnly` YDB transaction, with an
+allowlisted fixed set of query shapes. No financial rows, source payloads,
+private IDs, exact totals, timestamps or diagnostic RU buckets enter logs.
+Output is `R1_STAGING_CURRENT=...` and
+`R1_STAGING_MANIFEST=STRUCTURAL_COUNTS_CONSISTENT_UNVERIFIED|NOT_PROVEN`.
+Consistent *counts* are **not** exact source lineage, revision equality,
+source authority, empty staging or safe retirement. Likewise even
+`STALE_STAGING_CURRENT_STATE_EMPTY` is only one necessary precondition and
+cannot authorize write/cleanup/rebuild, `COMMITTED(A)` or cutover.
+
+This mode is manual and no role grant is created by its workflow. A later live
+read would require separate explicit one-shot database-scoped read authority,
+exact current `main`, CI/writer/provider/ACL gates, IAM propagation and
+independent retirement. Unreadable/ambiguous state remains fail-closed.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092
