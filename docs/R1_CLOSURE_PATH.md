@@ -1,5 +1,16 @@
 # R1 Closure Path — внешний read-only probe
 
+## Current verified checkpoint — 2026-10-10 (supersedes historical probe statuses below)
+
+- Protected `main=05a6176b4a0710ebeafaf3225ebd8e2a5b4cb8e4`; post-merge CI `38047386232`, Browser Quality `38047386236`, Push `38047386022`: PASS.
+- Exactly one Owner-authorized hosted read-only probe `38048326549` emitted the actual runtime marker `R1_DIRECT_PROBE=READ_ONLY_SELECT_OK`. Exact GitHub OIDC/WIF, `Database.Get`, provider DSN validation, YDB SDK and literal `SELECT 1` succeeded. No financial rows were queried. This is **data-plane reachability only**, not a financial baseline.
+- A one-time exact-database `ydb.viewer` grant was retired (CLI exit 0). Independent provider ACL read-back: original two bindings preserved, GitHub WIF target **zero** bindings. The single-use grant/probe authority is **CONSUMED**; another grant cannot be inferred from a general continuation request.
+- Durable `migration_runs` state is **not freshly classified** by `SELECT 1`. Historical full recovery `36770812477` reported `RECOVERY_REQUIRED / STAGING_RUN_PRESENT` with `STALE_STAGING_CURRENT_STATE_EMPTY`; this is not proof of the current state, retirement eligibility or a `COMMITTED` baseline.
+- The existing `r1-initial-bootstrap-recovery.yml` invokes `yc serverless function version create` when `reuse_deploy_attempt_run_id` is empty, **including** `surface_only`. A nonempty reuse field has separate exact-version gates; presence of an old recovery Function version alone does not satisfy them. Do not dispatch either route as an assumed read-only YDB state query.
+- Provider incident 2092 still restricts resource creation at the latest verified 2026-10-10 09:00 MSK notice. Previously granted recovery-only `CreateVersion` authority remains unconsumed but **HELD** until official release plus exact source/provider/recovery gates.
+- Next bounded step: a newly authorized, demonstrably side-effect-free read-only **durable-state** discriminator against the existing DB, emitting only safe lifecycle enums for `STAGING/VALIDATED/COMMITTED` and exact lineage/current-state classification. It must not log private financial rows/IDs/totals, create Function versions, invoke a potentially write-capable Function, grant IAM implicitly, retire staging, or launch bootstrap. Unknown state remains a recovery stop.
+- `COMMITTED(A)=NOT_PROVEN`; Google stays authoritative. On later proven recovery and separate writer gate, follow the canonical immutable cutoff A / independent promotion reconciliation / Google catch-up contract.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092

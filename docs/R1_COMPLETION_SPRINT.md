@@ -436,9 +436,11 @@ database `Database.Get`.
 Both are unproven causal explanations. The updated manual-only probe now
 uses exact `Database.Get(databaseId)` rather than folder-wide `Database.List`,
 with strict response identity validation and a separate private locator
-secret `YC_R1_DIRECT_YDB_DATABASE_ID`. That secret is **not configured**;
-the workflow must fail closed before WIF if it is absent or invalid.
-No endpoint or identity has been verified by a new live probe.
+secret `YC_R1_DIRECT_YDB_DATABASE_ID`. **At that historical checkpoint** the
+secret was not configured; the workflow must fail closed before WIF if it is
+absent or invalid. This paragraph documents the former blocker, not current
+live readiness. Subsequent private provisioning and read-only proof are
+recorded in the current checkpoint below.
 
 A **new explicit Owner decision** is required for secure private locator
 provisioning and for each future scoped IAM grant/probe, with at least
@@ -447,6 +449,30 @@ Existing `CreateVersion` one-shot authority does **not** cover these
 changes and remains separate/pending provider incident hold. Do not
 dispatch the rewritten workflow, broaden IAM, attach a new identity,
 perform financial operations or declare `COMMITTED` without those gates.
+
+## R1 post-SELECT recovery boundary — current checkpoint 2026-10-10
+
+The later **actual** manual probe `38048326549` on exact
+`main=05a6176b4a0710ebeafaf3225ebd8e2a5b4cb8e4` succeeded with
+`R1_DIRECT_PROBE=READ_ONLY_SELECT_OK`. Existing GitHub WIF was given
+one exact-database viewer binding for that single Owner-authorized probe;
+independent provider ACL read-back after its removal proved the two original
+bindings intact and **zero** remaining WIF bindings. Full terminal evidence:
+Issue #630 comment `6097030208` and `docs/R1_CLOSURE_PATH.md`.
+No financial rows were read, no financial provider write was made, and this
+does **not** establish `COMMITTED(A)`.
+
+Last historically proven durable recovery (run `36770812477`) was
+`RECOVERY_REQUIRED / STAGING_RUN_PRESENT` with
+`STALE_STAGING_CURRENT_STATE_EMPTY`. It is **not** a fresh read of current
+`migration_runs` and does not authorize stale-run retirement or bootstrap
+replay. Fresh exact-run and current-state evidence is mandatory before any
+lifecycle transition. The existing recovery workflow normally creates a
+Function version even with `surface_only`; reuse is conditional on strict
+historical exact-version evidence. Do not treat either path as automatically
+safe read-only diagnosis. Provider incident 2092 remains a separate
+`CreateVersion` hold. Only independently gated read-only recovery
+classification is in scope next; unknown state remains fail-closed.
 
 ## Completion target
 
