@@ -60,3 +60,26 @@ export function classifyDurableOutcome(value) {
   ]);
   return allowedOutcomes.has(value) ? value : 'EVIDENCE_INVALID';
 }
+
+/**
+ * Build the existing canonical typed-parameter mapper from the actual YDB v6
+ * submodule constructors. The package root exports conversion helpers, not
+ * Optional/Uuid/Uint64 constructors; importing the root fails before a read.
+ */
+export async function createDurableTypedParameterMapper() {
+  const [{ createYdbJsV6ParameterMapper }, primitive, optional, list, struct] = await Promise.all([
+    import('../dist/integration/ydb/ydbJsV6DataTransport.js'),
+    import('@ydbjs/value/primitive'),
+    import('@ydbjs/value/optional'),
+    import('@ydbjs/value/list'),
+    import('@ydbjs/value/struct'),
+  ]);
+  return createYdbJsV6ParameterMapper(Object.freeze({
+    ...primitive,
+    Optional: optional.Optional,
+    OptionalType: optional.OptionalType,
+    List: list.List,
+    Struct: struct.Struct,
+    StructType: struct.StructType,
+  }));
+}
