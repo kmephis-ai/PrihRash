@@ -13,6 +13,11 @@ on:
         type: boolean
         required: true
         default: false
+      current_only:
+        description: 'Read only current and manifest metadata'
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -48,6 +53,11 @@ jobs:
           test "$GITHUB_REPOSITORY" = 'kmephis-ai/PrihRash'
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$GITHUB_RUN_ATTEMPT" = '1'
+          selected_modes=0
+          for mode in '${{ inputs.lifecycle_only && '1' || '0' }}' '${{ inputs.lineage_only && '1' || '0' }}' '${{ inputs.current_only && '1' || '0' }}'; do
+            if [ "$mode" = '1' ]; then selected_modes=$((selected_modes + 1)); fi
+          done
+          test "$selected_modes" -le 1 || { echo R1_DIRECT_PROBE=MODE_CONFLICT; exit 1; }
           test -n "$YC_FOLDER_ID"
           test -n "$YC_CLOUD_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
@@ -68,7 +78,7 @@ jobs:
       - name: Focused probe regression
         run: |
           npm run build --silent
-          node --test tests/tooling/r1-direct-runner-readonly.test.mjs tests/tooling/r1-migration-lifecycle-readonly.test.mjs tests/tooling/r1-staging-lineage-readonly.test.mjs
+          node --test tests/tooling/r1-direct-runner-readonly.test.mjs tests/tooling/r1-migration-lifecycle-readonly.test.mjs tests/tooling/r1-staging-lineage-readonly.test.mjs tests/tooling/r1-staging-current-readonly.test.mjs
       - name: Exchange scoped GitHub OIDC identity and probe existing YDB
         shell: bash
         env:
@@ -132,7 +142,9 @@ jobs:
           export PRIHRASH_R1_EXPECTED_DATABASE_PATH="/${location}/${YC_CLOUD_ID}/${db_id}"
           export PRIHRASH_R1_YDB_IAM_TOKEN="$iam"
           echo "::add-mask::${PRIHRASH_YDB_CONNECTION_STRING}"
-          if [ '${{ inputs.lineage_only && '1' || '0' }}' = '1' ]; then
+          if [ '${{ inputs.current_only && '1' || '0' }}' = '1' ]; then
+            node scripts/r1-direct-staging-current-readonly.mjs
+          elif [ '${{ inputs.lineage_only && '1' || '0' }}' = '1' ]; then
             test '${{ inputs.lifecycle_only && '1' || '0' }}' = '0' ||
               { echo R1_LINEAGE=MODE_CONFLICT; exit 1; }
             # Exact failed child reached one actual Function invocation (not just Deploy).
