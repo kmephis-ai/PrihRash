@@ -115,6 +115,37 @@ verified ACL retirement. The workflow itself does not grant or revoke roles.
 No Function deploy/invoke, staging mutation, cleanup, scheduled sync or
 cutover is authorized by this code path.
 
+## Incident-M: durable reader typed SDK constructor mismatch
+
+One hosted read-only `durable_only=true` attempt `38063539911` on
+`ca45f3d6` failed with the **actual** allowlisted marker
+`R1_STAGING_DURABLE=READ_FAILED`. Repository/OIDC metadata gates and focused
+regression succeeded, but the exception was swallowed into the generic marker;
+the provider SQL outcome therefore remains **not proven**. The separate
+one-shot database viewer authority was consumed, the temporary role removed,
+and independent ACL evidence showed the exact original two roles/WIF zero.
+
+The root constructor-shape error is reproducible without YDB: importing the
+root `@ydbjs/value` exports `fromJs`, `fromYdb`, `toJs`, `TypeKind` but
+not typed parameter constructors (`Optional`, `Uuid`, `Uint64`).
+The durable script erroneously passed this namespace into
+`createYdbJsV6ParameterMapper`, which requires `Optional` immediately.
+This Incident-M fix reuses the same supported SDK submodule assembly already
+used in `createDataClientWithCredentials` and tests actual locked YDB v6
+UUID/Uint64/ListStruct mapper instances with no network access.
+
+**Causal decision after any future separately authorized read:**
+`NO_REVISION_EVIDENCE` → evidence of no materialized revisions, but not
+permission to retire STAGING;
+`PARTIAL_CURRENT_RUN_ONLY` → partial evidence recovery boundary;
+`COMPLETE_CURRENT_RUN_ONLY` → durable linkage only, still requires exact
+authoritative Google snapshot/source lineage proof;
+`CROSS_RUN_PK_COLLISION` / malformed / unexpected → integrity STOP;
+`READ_FAILED` / invalid / budget failure → STOP with no same-SHA retry.
+All branches remain `COMMITTED(A)=NOT_PROVEN` until an independently verified
+financial migration baseline. The current PR only fixes the local code defect;
+it **does not** re-arm IAM, SQL, Function, bootstrap, cleanup, timer or cutover.
+
 ## Контекст
 
 R1 #630 не получил первый доказанный COMMITTED. Во время Yandex Cloud incident 2092

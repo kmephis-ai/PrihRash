@@ -72,3 +72,30 @@ test('manual SDK mode stays bounded, read-only, enum-only',()=>{
   assert.doesNotMatch(script,/\b(?:INSERT|UPSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s+(?:INTO|TABLE|FROM|migration_runs)/i);
   assert.doesNotMatch(script,/console\.log|JSON\.stringify|\.message/);
 });
+
+test('real locked YDB v6 submodules supply canonical typed parameter constructors', async () => {
+  const [
+    { createDurableTypedParameterMapper },
+    { uuidParameter, uint64Parameter, listStructParameter },
+    root,
+  ] = await Promise.all([
+    import('../../scripts/r1-durable-revision-guard.mjs'),
+    import('../../dist/integration/ydb/parameters.js'),
+    import('@ydbjs/value'),
+  ]);
+  // Regression: the package root is NOT an SDK constructor namespace.
+  assert.equal(root.Optional, undefined);
+  const map = await createDurableTypedParameterMapper();
+  const id = '00000000-0000-0000-0000-000000000011';
+  assert.ok(map(uuidParameter(id)));
+  assert.ok(map(uint64Parameter(1n)));
+  assert.ok(map(listStructParameter([
+    { name: 'source_record_id', type: 'Uuid', nullable: false },
+  ], [{ source_record_id: uuidParameter(id) }])));
+});
+
+test('runner uses tested SDK mapper, not constructor-less @ydbjs/value root', () => {
+  const source = readFileSync('scripts/r1-direct-staging-durable-readonly.mjs', 'utf8');
+  assert.match(source, /await createDurableTypedParameterMapper\(\)/);
+  assert.doesNotMatch(source, /import\(['"]@ydbjs\/value['"]\)/);
+});

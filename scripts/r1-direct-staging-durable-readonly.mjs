@@ -1,12 +1,11 @@
 // R1 manual-only readback of durable STAGING revision identity evidence.
 // NEVER output source IDs, financial records, precise counts, digests, raw SDK errors or SQL results.
 import { isExactYdbEndpoint } from './r1-direct-ydb-endpoint.mjs';
-import { classifyDurableRead, classifyDurableOutcome } from './r1-durable-revision-guard.mjs';
+import { classifyDurableRead, classifyDurableOutcome, createDurableTypedParameterMapper } from './r1-durable-revision-guard.mjs';
 import {
   diagnoseInitialBootstrapStagingRevisionCardinality,
   diagnoseInitialBootstrapStagingDurableRevisionEvidence,
 } from '../dist/migration/initialBootstrapStagingRevisionDiagnostic.js';
-import { createYdbJsV6ParameterMapper } from '../dist/integration/ydb/ydbJsV6DataTransport.js';
 
 const uri=process.env.PRIHRASH_YDB_CONNECTION_STRING;
 const token=process.env.PRIHRASH_R1_YDB_IAM_TOKEN;
@@ -18,13 +17,12 @@ if (!uri || !token || !path || !isExactYdbEndpoint(uri,path)) {
 
 let driver;
 try {
-  const [{ Driver }, { AccessTokenCredentialsProvider }, { query }, sdk] = await Promise.all([
+  const [{ Driver }, { AccessTokenCredentialsProvider }, { query }] = await Promise.all([
     import('@ydbjs/core'),
     import('@ydbjs/auth/access-token'),
     import('@ydbjs/query'),
-    import('@ydbjs/value'),
   ]);
-  const mapParameter=createYdbJsV6ParameterMapper(sdk);
+  const mapParameter=await createDurableTypedParameterMapper();
   driver=new Driver(uri,{credentialsProvider:new AccessTokenCredentialsProvider({token})});
   await driver.ready(AbortSignal.timeout(12000));
   const sql=query(driver,{poolOptions:{maxSize:1}});
