@@ -1,8 +1,15 @@
 // R1 Closure Path: read-only YDB reachability proof outside Cloud Functions.
+import { isExactYdbEndpoint } from './r1-direct-ydb-endpoint.mjs';
+
 const conn = process.env.PRIHRASH_YDB_CONNECTION_STRING;
 const token = process.env.PRIHRASH_R1_YDB_IAM_TOKEN;
-if (!conn || !/^grpcs:\/\//.test(conn) || !token) {
+const databasePath = process.env.PRIHRASH_R1_EXPECTED_DATABASE_PATH;
+if (!conn || !token || !databasePath) {
   process.stdout.write('R1_DIRECT_PROBE=CONFIG_MISSING_OR_INVALID\n');
+  process.exit(2);
+}
+if (!isExactYdbEndpoint(conn, databasePath)) {
+  process.stdout.write('R1_DIRECT_PROBE=DB_PATH_INVALID\n');
   process.exit(2);
 }
 

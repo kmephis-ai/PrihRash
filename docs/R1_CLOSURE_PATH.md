@@ -180,3 +180,29 @@ https://yandex.cloud/en/docs/iam/concepts/access-control/
 
 `COMMITTED = NOT_PROVEN`; no Google/YDB financial write, Function invoke,
 `CreateVersion`, scheduled sync or cutover was performed in this trial.
+
+## 2026-10-10 — Database.Get пройден, обнаружен дефект YDB DSN
+
+Owner разрешил один новый временный exact-database `ydb.viewer` для существующего
+GitHub WIF SA. После подтверждённого grant выдержано >60 секунд. Один manual
+probe `38044273127` на `e3c0ae7dae74132aff54d5948b7e4e5722917186`
+прошёл exact `Database.Get`, но остановился на `Driver.ready()`:
+`R1_DIRECT_PROBE=CONNECT_FAILED_TRANSPORT`. `SELECT 1` не выполнялся.
+Временная роль сразу отозвана; независимый provider ACL read-back подтвердил
+две исходные роли без назначения целевому WIF. `COMMITTED` не доказан.
+
+Read-only проверка exact `prihrash-prod` provider metadata показала
+причинную ошибку входных данных драйвера: `Database.Get.endpoint` уже содержит
+полный `grpcs://…:2135?database=/location/cloud/database` DSN. Предыдущий
+workflow дописывал `/location/folder/database` к **уже полному** URI, притом
+использовал folder вместо cloud. Формировалась неверная строка подключения.
+
+Исправление использует возвращённый provider endpoint без изменений и
+отдельно fail-closed проверяет его exact database path
+`/location/cloud/database` по метаданным GET и приватному cloud ID.
+Несовпадение останавливает probe до SDK как `DB_PATH_INVALID`. Никакой
+подмены authority, новых секретов, второго импортёра или финансовых запросов.
+
+Этот code-only fix **не** разрешает повторять provider probe или выдавать IAM:
+только новое явное Owner-разрешение после PR/CI и свежих provider gates.
+`CreateVersion` hold инцидента 2092 остаётся отдельным.

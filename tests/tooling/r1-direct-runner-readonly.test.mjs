@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { isExactYdbEndpoint } from '../../scripts/r1-direct-ydb-endpoint.mjs';
 
 const url = new URL('../../scripts/r1-direct-runner-readonly.mjs', import.meta.url);
 
@@ -151,4 +152,54 @@ test('exact Database.Get identity gate accepts only an exact synthetic DB respon
     const result = check({ ...valid, ...mismatch });
     assert.notEqual(result.status, 0, JSON.stringify(mismatch));
   }
+});
+
+test('exact provider YDB DSN is reused only when database path matches location/cloud/database', () => {
+  const expected = '/ru-central1/synthetic-cloud/synthetic-db';
+  const endpoint = 'grpcs://synthetic-ydb.example.test:2135?database=' + expected;
+  assert.equal(isExactYdbEndpoint(endpoint, expected), true);
+  for (const invalid of [
+    endpoint + '/ru-central1/synthetic-folder/synthetic-db',
+    'grpcs://synthetic-ydb.example.test:2135/ru-central1/synthetic-cloud/synthetic-db',
+    'grpcs://synthetic-ydb.example.test:2135?database=/ru-central1/synthetic-folder/synthetic-db',
+    'grpc://synthetic-ydb.example.test:2135?database=' + expected,
+    'grpcs://user:password@synthetic-ydb.example.test:2135?database=' + expected,
+    endpoint + '&other=value',
+    endpoint + '#extra',
+    endpoint.replace(':2135', ':2136'),
+    'not-a-url',
+  ]) {
+    assert.equal(isExactYdbEndpoint(invalid, expected), false, invalid);
+  }
+  assert.equal(isExactYdbEndpoint(endpoint, '/ru-central1/synthetic-folder/synthetic-db'), false);
+  assert.equal(isExactYdbEndpoint(endpoint, 'invalid'), false);
+});
+
+test('malformed provider DSN fails before SDK networking or credential use', () => {
+  const result = spawnSync(process.execPath, [fileURLToPath(url)], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      SystemRoot: process.env.SystemRoot,
+      TEMP: process.env.TEMP,
+      PRIHRASH_YDB_CONNECTION_STRING: 'grpcs://synthetic-ydb.example.test:2135?database=/ru-central1/folder/db',
+      PRIHRASH_R1_YDB_IAM_TOKEN: 'synthetic-unused-token',
+      PRIHRASH_R1_EXPECTED_DATABASE_PATH: '/ru-central1/cloud/db',
+    },
+    timeout: 6000,
+  });
+  assert.equal(result.status, 2, result.stderr);
+  assert.equal(result.stdout, 'R1_DIRECT_PROBE=DB_PATH_INVALID\n');
+});
+
+test('hosted exact resource probe preserves full DSN and verifies provider database identity', async () => {
+  const workflow = await readFile(
+    new URL('../../.github/workflows/r1-direct-ydb-readonly.yml', import.meta.url), 'utf8',
+  );
+  assert.match(workflow, /YC_CLOUD_ID: \$\{\{ secrets\.YC_R1_CLOUD_ID \}\}/);
+  assert.match(workflow, /test -n "\$YC_CLOUD_ID"/);
+  assert.match(workflow, /export PRIHRASH_YDB_CONNECTION_STRING="\$endpoint"/);
+  assert.match(workflow, /export PRIHRASH_R1_EXPECTED_DATABASE_PATH="\/\$\{location\}\/\$\{YC_CLOUD_ID\}\/\$\{db_id\}"/);
+  assert.doesNotMatch(workflow, /\$\{endpoint\}\/\$\{location\}/);
+  assert.doesNotMatch(workflow, /\$\{location\}\/\$\{YC_FOLDER_ID\}\/\$\{db_id\}/);
 });
