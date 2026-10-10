@@ -56,7 +56,7 @@ try {
         await diagnoseInitialBootstrapStagingDurableRevisionEvidence(readScope));
     });
   process.stdout.write(`R1_STAGING_DURABLE=${verdict}\n`);
-  if (verdict==='EVIDENCE_INVALID'||verdict==='READ_BUDGET_NOT_PROVEN') process.exitCode=1;
+  if (verdict==='EVIDENCE_INVALID'||verdict==='READ_BUDGET_NOT_PROVEN'||verdict==='REVISION_EVIDENCE_DIAGNOSTIC_FAILED') process.exitCode=1;
 } catch {
   process.stdout.write('R1_STAGING_DURABLE=READ_FAILED\n');
   process.exitCode=1;
