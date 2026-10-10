@@ -206,3 +206,22 @@ workflow дописывал `/location/folder/database` к **уже полном
 Этот code-only fix **не** разрешает повторять provider probe или выдавать IAM:
 только новое явное Owner-разрешение после PR/CI и свежих provider gates.
 `CreateVersion` hold инцидента 2092 остаётся отдельным.
+
+## 2026-10-10 — root-slash DSN guard correction after #930
+
+Одна Owner-authorized manual read-only проба `38046837347` на exact
+`9c5dc71313c109ba3edbc8261ed94f87ff918d41` прошла OIDC/WIF и
+`Database.Get`, но вернула `R1_DIRECT_PROBE=DB_PATH_INVALID` до SDK
+`Driver.ready()` и `SELECT 1`. Временный database-scoped viewer был
+отозван (CLI exit 0); независимое provider ACL read-back в этой сессии
+заблокировано tool-security, поэтому его PASS не заявляется.
+
+Причинная гипотеза подтверждена предыдущими read-only metadata shape
+наблюдениями и synthetic URL parser check: provider URI имеет
+`grpcs://host:2135/?database=/location/cloud/database` (root slash,
+но без непустых path segments). Guard PR #930 принимал только
+`url.pathname === ''` и поэтому отвергал допустимое `'/'`.
+Следующая repo-only коррекция разрешает только эти два root-варианта;
+non-root pathname, неверный query/path/id, TLS/port и лишние параметры
+по-прежнему fail-closed. Новый provider probe/IAM grant требует отдельной
+Owner-authorized boundary, `COMMITTED` не доказан.

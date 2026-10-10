@@ -7,7 +7,7 @@ export function isExactYdbEndpoint(dsn, databasePath) {
     return url.protocol === 'grpcs:'
       && url.hostname.length > 0
       && url.port === '2135'
-      && url.pathname === ''
+      && (url.pathname === '' || url.pathname === '/')
       && url.username === ''
       && url.password === ''
       && url.hash === ''

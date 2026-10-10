@@ -158,7 +158,11 @@ test('exact provider YDB DSN is reused only when database path matches location/
   const expected = '/ru-central1/synthetic-cloud/synthetic-db';
   const endpoint = 'grpcs://synthetic-ydb.example.test:2135?database=' + expected;
   assert.equal(isExactYdbEndpoint(endpoint, expected), true);
+  // YDB Database.Get can supply a root slash immediately before ?database.
+  const rootSlashEndpoint = endpoint.replace(':2135?', ':2135/?');
+  assert.equal(isExactYdbEndpoint(rootSlashEndpoint, expected), true);
   for (const invalid of [
+    rootSlashEndpoint.replace('/?database=', '/wrong/?database='),
     endpoint + '/ru-central1/synthetic-folder/synthetic-db',
     'grpcs://synthetic-ydb.example.test:2135/ru-central1/synthetic-cloud/synthetic-db',
     'grpcs://synthetic-ydb.example.test:2135?database=/ru-central1/synthetic-folder/synthetic-db',
