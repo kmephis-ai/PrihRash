@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 7
     env:
       YC_FOLDER_ID: ${{ secrets.YC_R1_FOLDER_ID }}
+      YC_CLOUD_ID: ${{ secrets.YC_R1_CLOUD_ID }}
       YC_WIF_SERVICE_ACCOUNT_ID: ${{ secrets.YC_R1_INITIAL_BOOTSTRAP_WIF_SERVICE_ACCOUNT_ID }}
       YC_TARGET_DB_ID: ${{ secrets.YC_R1_DIRECT_YDB_DATABASE_ID }}
       OIDC_AUDIENCE: https://github.com/kmephis-ai
@@ -37,6 +38,7 @@ jobs:
           test "$GITHUB_REF" = 'refs/heads/main'
           test "$GITHUB_RUN_ATTEMPT" = '1'
           test -n "$YC_FOLDER_ID"
+          test -n "$YC_CLOUD_ID"
           test -n "$YC_WIF_SERVICE_ACCOUNT_ID"
           # No folder-wide Database.List fallback or private database ID in workflow inputs/logs.
           test -n "$YC_TARGET_DB_ID" || { echo R1_DIRECT_PROBE=EXACT_DB_ID_SECRET_MISSING; exit 1; }
@@ -111,7 +113,10 @@ jobs:
             { echo R1_DIRECT_PROBE=DB_PATH_INVALID; exit 1; }
           current="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')"
           test "$current" = "$GITHUB_SHA" || { echo R1_DIRECT_PROBE=MAIN_MOVED; exit 1; }
-          export PRIHRASH_YDB_CONNECTION_STRING="${endpoint}/${location}/${YC_FOLDER_ID}/${db_id}"
+          # Database.Get already returns a complete grpcs DSN with ?database=/location/cloud/db.
+          # Validate its exact identity in the Node runner; never append a second path.
+          export PRIHRASH_YDB_CONNECTION_STRING="$endpoint"
+          export PRIHRASH_R1_EXPECTED_DATABASE_PATH="/${location}/${YC_CLOUD_ID}/${db_id}"
           export PRIHRASH_R1_YDB_IAM_TOKEN="$iam"
           echo "::add-mask::${PRIHRASH_YDB_CONNECTION_STRING}"
           node scripts/r1-direct-runner-readonly.mjs
