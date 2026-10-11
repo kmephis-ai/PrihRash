@@ -63,7 +63,10 @@ test('locked SDK typed COUNT and 128-key BY_KEY requests serialize without EXECU
     const wire=toBinary(ExecuteQueryRequestSchema,create(ExecuteQueryRequestSchema,req));
     const decoded=fromBinary(ExecuteQueryRequestSchema,wire);
     assert.equal(decoded.execMode,ExecMode.EXPLAIN);
-    assert.equal(decoded.query.value.text,stmt.text);
+    const declarePrefix=kind==='COUNT'
+      ? 'DECLARE $migration_run_id AS Uuid;\nDECLARE $revision AS Uint64;\n'
+      : 'DECLARE $source_keys AS List<Struct<source_record_id:Uuid>>;\nDECLARE $revision AS Uint64;\n';
+    assert.equal(decoded.query.value.text,declarePrefix+stmt.text);
     assert.deepEqual(Object.keys(decoded.parameters).sort(),Object.keys(stmt.parameters).map(x=>'$'+x).sort());
   }
 });

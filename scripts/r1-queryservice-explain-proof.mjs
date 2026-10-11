@@ -4,6 +4,7 @@ import { create } from '@bufbuild/protobuf';
 import { ExecMode, StatsMode, Syntax } from '@ydbjs/api/query';
 import { StatusIds_StatusCode } from '@ydbjs/api/operation';
 import { TypedValueSchema } from '@ydbjs/api/value';
+import { typeToString } from '@ydbjs/value/print';
 import { classifyDurableRead } from './r1-durable-revision-guard.mjs';
 
 export class ExplainProofError extends Error {
@@ -18,9 +19,12 @@ export function makeExplainOnlyRequest(statement, mapParameter, sessionId) {
   if (!shape || !ALLOWED_KINDS.has(shape.kind) || typeof sessionId!=='string'
       || !sessionId || typeof mapParameter!=='function') stop('INVALID_EXPLAIN_REQUEST');
   const parameters={};
+  let queryText=shape.sql;
   try {
     for(const [key,parameter] of Object.entries(statement.parameters)){
       const value=mapParameter(parameter);
+      // The direct QueryService path must mirror the locked SDK Query.text.
+      queryText='DECLARE $'+key+' AS '+typeToString(value.type)+';\n'+queryText;
       parameters['$'+key]=create(TypedValueSchema,{
         type:value.type.encode(), value:value.encode(),
       });
@@ -28,7 +32,7 @@ export function makeExplainOnlyRequest(statement, mapParameter, sessionId) {
   } catch { stop('INVALID_TYPED_PARAMETERS'); }
   return Object.freeze({
     sessionId, execMode:ExecMode.EXPLAIN,
-    query:{case:'queryContent',value:{syntax:Syntax.YQL_V1,text:shape.sql}},
+    query:{case:'queryContent',value:{syntax:Syntax.YQL_V1,text:queryText}},
     parameters, statsMode:StatsMode.FULL,
     // Critical: no txControl, no commit, no EXECUTE/ANALYZE fallback.
   });

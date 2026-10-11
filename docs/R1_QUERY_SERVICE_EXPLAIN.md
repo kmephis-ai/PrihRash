@@ -30,6 +30,27 @@
 - Никаких GitHub Actions dispatch, таймеров, scheduled sync, cutover,
   database writes, schema migrations или Function operations.
 
+## Типизированные параметры — контракт DECLARE
+
+Установленный `@ydbjs/query` формирует `Query.text` добавлением
+`DECLARE $param AS <type>;` на каждый переданный типизированный параметр
+(тип выводит `@ydbjs/value/print.typeToString`). Прямой
+`QueryService.ExecuteQuery` принимает готовый YQL и не выполняет это
+преобразование автоматически на клиенте.
+
+Первый live `ExecMode.EXPLAIN` получил `EXPLAIN_REJECTED` при отсутствии
+`DECLARE` в переданном SQL. Это доказанный дефект контракта локального
+формирования запроса и существенная причина для исправления; серверный
+`IssueMessage` тогда не сохранялся, поэтому его **точная связь с отказом
+остаётся гипотезой**, а не доказанным кодом ошибки YDB.
+
+В `makeExplainOnlyRequest` объявления генерируются из уже прошедшего
+строгий SQL allowlist typed parameter mapper, в том же порядке, что
+`@ydbjs/query.Query.text`. Исходный SQL и SQL allowlist не расширяются,
+не появляется `EXECUTE`, автоматический повтор или транзакция записи.
+Синтетический тест проверяет точный YQL текст и wire `ExecMode.EXPLAIN`.
+Любая будущая live проверка — отдельный Owner/provider gate, без replay.
+
 ## Interpret results, fail closed
 
 | Outcome | Что означает | Следующее действие |
