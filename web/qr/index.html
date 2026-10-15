@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#173f54">
+<title>ПрихРасх — Чек по QR</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+*{box-sizing:border-box}body{margin:0;background:#edf2f6;color:#183142}
+main{max-width:650px;margin:0 auto;padding:20px 16px 50px}
+h1{margin:4px 0}h2{margin-top:0}.muted{color:#596d7c;font-size:.92rem;line-height:1.5}
+.panel{background:white;border:1px solid #d9e3eb;border-radius:18px;padding:18px;margin:16px 0}
+.modes,.buttons{display:flex;gap:10px;flex-wrap:wrap}.modes>a,.modes>span,.buttons>*{flex:1 1 160px}
+.modes>a,.modes>span{padding:14px;text-align:center;border-radius:12px;text-decoration:none;font-weight:700;border:1px solid #b9ceda;color:#164f6c;background:white}
+.modes>.on{color:#fff;background:#136181;border-color:#136181}
+button,.button{font:inherit;font-weight:650;border:0;border-radius:11px;min-height:45px;padding:12px 13px;cursor:pointer}
+.primary{background:#176d90;color:#fff}.secondary{background:#e6f1f6;color:#14516a}
+button:disabled{opacity:.5;cursor:default}
+.button{display:flex;justify-content:center;align-items:center;text-decoration:none}
+label{display:block;margin:16px 0 6px;font-weight:650}
+textarea{display:block;width:100%;min-height:85px;border:1px solid #9db6c5;border-radius:11px;padding:12px;font:inherit;resize:vertical}
+input[type=file]{width:100%}
+video{margin:12px 0;width:100%;max-height:330px;border-radius:13px;background:#172b36;object-fit:cover}
+[hidden]{display:none!important}
+#status{margin-top:12px;background:#e9f4f9;padding:12px;border-radius:10px;white-space:pre-wrap}
+#status.error{background:#ffeded;color:#892b2b}
+.amount{font-size:2rem;font-weight:750;margin:8px 0 18px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:7px 10px}
+dt{color:#5a7080}dd{text-align:right;margin:0;overflow-wrap:anywhere}
+.note{background:#fff3d6;color:#6b4d19;padding:12px;border-radius:10px}
+@media(prefers-color-scheme:dark){
+:root{color-scheme:dark}body{background:#0b202d;color:#e6eef2}
+.panel,.modes>a{background:#153545;border-color:#335366}
+.modes>a,.muted{color:#bbcbd6}
+textarea{background:#0c2634;color:white;border-color:#496778}
+#status{background:#1b4256}#status.error{background:#4e2525;color:#ffd2d2}
+.note{background:#4b3a1d;color:#ffe9b6}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>ПрихРасх</h1>
+<p class="muted">Способ добавления семейного расхода</p>
+<nav class="modes" aria-label="Способ ввода">
+<a href="#" data-form-link target="_blank" rel="noopener noreferrer">Ручной ввод</a>
+<span class="on" aria-current="page">Чек по QR</span>
+</nav>
+</header>
+<section class="panel">
+<h2>Сканирование чека</h2>
+<p class="muted">Камера и фотографии обрабатываются на устройстве. Данные чека пока никуда не отправляются.</p>
+<div class="buttons">
+<button class="primary" id="start" type="button">Включить камеру</button>
+<button class="secondary" id="stop" disabled type="button">Остановить</button>
+</div>
+<video id="video" autoplay muted playsinline hidden></video>
+<label for="photo">Выбрать фото с QR-кодом</label>
+<input id="photo" type="file" accept="image/*">
+<label for="qr">Или вставить текст QR-кода</label>
+<textarea id="qr" spellcheck="false" autocomplete="off" placeholder="t=20261015T1840&s=125.50&fn=...&i=...&fp=...&n=1"></textarea>
+<div class="buttons"><button class="secondary" id="parse" type="button">Прочитать QR</button></div>
+<div id="status" role="status" aria-live="polite">Готово к сканированию.</div>
+</section>
+<section class="panel" id="result" hidden>
+<h2>Распознанный чек</h2>
+<p class="amount" id="amount"></p>
+<dl>
+<dt>Дата</dt><dd id="date"></dd>
+<dt>Время</dt><dd id="time"></dd>
+<dt>Признак расчёта</dt><dd id="operation"></dd>
+<dt>ФН / ФД / ФП</dt><dd id="fiscal"></dd>
+</dl>
+<p class="note">Это пилот: из QR получены только фискальные реквизиты. Список товаров, автокатегории, предзаполнение формы и сохранение в таблицу пока не подключены.</p>
+<div class="buttons">
+<button class="secondary" id="copy" type="button">Скопировать данные</button>
+<a class="button primary" target="_blank" rel="noopener noreferrer" href="#" data-form-link>Открыть обычную форму</a>
+</div>
+</section>
+<p class="muted">Для камеры необходим HTTPS и поддерживаемый браузер. Если камера недоступна, считайте текст QR через Google Lens и вставьте его в поле выше.</p>
+</main>
+<script type="module">
+import { parseFiscalQr } from "./fiscal-qr.mjs";
+const el = (id) => document.getElementById(id);
+const formLinks = [...document.querySelectorAll("[data-form-link]")];
+const storageKey = "prihrash_legacy_form_url";
+function safeFormUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" &&
+      parsed.hostname === "docs.google.com" &&
+      parsed.pathname.startsWith("/forms/") ? parsed.toString() : "";
+  } catch { return ""; }
+}
+function rememberedForm() {
+  try { return safeFormUrl(localStorage.getItem(storageKey) || ""); }
+  catch { return ""; }
+}
+function wireFormLinks(value) {
+  for (const anchor of formLinks) anchor.href = value || "#";
+}
+wireFormLinks(rememberedForm());
+for (const anchor of formLinks) {
+  anchor.addEventListener("click", (event) => {
+    const link = rememberedForm();
+    if (link) return;
+    event.preventDefault();
+    const entered = window.prompt("Вставьте ссылку на действующую Google-форму (один раз):", "");
+    if (entered === null) return;
+    const safe = safeFormUrl(entered.trim());
+    if (!safe) {
+      window.alert("Допустима только ссылка вида https://docs.google.com/forms/...");
+      return;
+    }
+    try { localStorage.setItem(storageKey, safe); } catch { /* private mode */ }
+    wireFormLinks(safe);
+    window.location.assign(safe);
+  });
+}
+const video = el("video");
+const start = el("start");
+const stop = el("stop");
+const status = el("status");
+let detector;
+let stream;
+let scanning = false;
+let current;
+function message(text, error=false) {
+  status.textContent=text;
+  status.classList.toggle("error",error);
+}
+function stopScan() {
+  scanning=false;
+  if(stream)stream.getTracks().forEach((track)=>track.stop());
+  stream=null; video.srcObject=null; video.hidden=true;
+  start.disabled=false; stop.disabled=true;
+}
+async function qrDetector() {
+  if(!("BarcodeDetector" in window))throw new Error("В этом браузере нет встроенного QR-сканера. Вставьте текст QR через поле ниже.");
+  const formats=await BarcodeDetector.getSupportedFormats();
+  if(!formats.includes("qr_code"))throw new Error("Распознавание QR не поддерживается. Вставьте текст QR вручную.");
+  detector ||= new BarcodeDetector({formats:["qr_code"]});
+  return detector;
+}
+function accept(text) {
+  try {
+    current=parseFiscalQr(text);
+    el("amount").textContent=new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB"}).format(current.amountMinor/100);
+    el("date").textContent=current.occurredOn;
+    el("time").textContent=current.receiptLocalTime;
+    el("operation").textContent=current.operationLabel;
+    el("fiscal").textContent=[current.fiscalDriveNumber,current.fiscalDocumentNumber,current.fiscalSign].join(" / ");
+    el("result").hidden=false;
+    stopScan();
+    message("QR прочитан. Проверьте сумму по бумажному чеку. Никаких расходов не записано.");
+    el("result").scrollIntoView({behavior:"smooth",block:"nearest"});
+  } catch(error) {
+    current=null;el("result").hidden=true;message(error.message||"Ошибка QR",true);
+  }
+}
+async function frame() {
+  if(!scanning)return;
+  try {
+    if(video.readyState>=HTMLMediaElement.HAVE_CURRENT_DATA) {
+      const codes=await detector.detect(video);
+      const found=codes.find((item)=>item.rawValue);
+      if(found){el("qr").value=found.rawValue;accept(found.rawValue);return;}
+    }
+  } catch(error) {stopScan();message(error.message||"Ошибка сканирования",true);return;}
+  if(scanning)window.setTimeout(frame,250);
+}
+start.addEventListener("click",async()=>{
+  try{
+    await qrDetector();
+    if(!navigator.mediaDevices?.getUserMedia)throw new Error("Камере требуется HTTPS и разрешение браузера.");
+    stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:"environment"}}});
+    video.srcObject=stream;video.hidden=false;
+    await video.play();scanning=true;start.disabled=true;stop.disabled=false;
+    message("Наведите камеру на QR-код.");
+    frame();
+  }catch(error){stopScan();message(error.message||"Ошибка камеры",true);}
+});
+stop.addEventListener("click",stopScan);
+el("parse").addEventListener("click",()=>accept(el("qr").value));
+el("photo").addEventListener("change",async(event)=>{
+  const file=event.target.files?.[0];
+  if(!file)return;
+  if(!file.type.startsWith("image/")||file.size>15*1024*1024){
+    message("Выберите изображение размером до 15 МБ.",true);return;
+  }
+  let bitmap;
+  try {
+    const reader=await qrDetector();
+    bitmap=await createImageBitmap(file);
+    const codes=await reader.detect(bitmap);
+    const found=codes.find((item)=>item.rawValue);
+    if(!found)throw new Error("QR-код на изображении не найден.");
+    el("qr").value=found.rawValue;accept(found.rawValue);
+  }catch(error){message(error.message||"Ошибка изображения",true);}
+  finally{bitmap?.close();}
+});
+el("copy").addEventListener("click",async()=>{
+  if(!current)return;
+  const text=["Дата: "+current.occurredOn,"Время: "+current.receiptLocalTime,"Сумма: "+current.amountRub+" ₽","Операция: "+current.operationLabel,"QR: "+current.rawQr].join("\n");
+  try{await navigator.clipboard.writeText(text);message("Данные скопированы.");}
+  catch{el("qr").focus();el("qr").select();message("Выделен текст QR: скопируйте его вручную.",true);}
+});
+window.addEventListener("pagehide",stopScan);
+</script>
+</body>
+</html>
